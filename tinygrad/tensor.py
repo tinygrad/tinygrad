@@ -5,7 +5,7 @@ from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, T
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars, contiguous_mops_to_view, is_store_after
@@ -177,6 +177,7 @@ class Tensor(RandMixin):
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
+    if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
     # weakness ends where storage begins
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
@@ -205,11 +206,11 @@ class Tensor(RandMixin):
           u = buf.after(buf.store(src))
       if u is not x: tensor_map[x] = u
 
-    # TODO: this should be one _apply_map_to_tensors
-    _apply_map_to_tensors(tensor_map, name="bufferize")
-    sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    sink = tensor_map.get(sink, sink)
     becomes_map = get_becomes_map(sink)
-    _apply_map_to_tensors(becomes_map, name="becomes")
+    # Compose replacements before updating tensors: map values must already reference final storage.
+    tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
+    _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
 
     return create_linear_with_vars(sink)
 
