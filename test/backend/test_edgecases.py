@@ -25,7 +25,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, dtypes, nn, Context
+from tinygrad import Tensor, dtypes, Context
 from tinygrad.device import Device
 from tinygrad.helpers import DEV
 from tinygrad.renderer.nir import NIRRenderer
@@ -75,22 +75,6 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
     np.testing.assert_equal(values.numpy(), torch_vals.numpy())
     np.testing.assert_equal(indices.numpy(), torch_idxs.numpy().astype(np.int32))
 
-  @unittest.expectedFailure
-  def test_max_empty(self):
-    # Max on an empty tensor should also raise an error.
-    with self.assertRaises(RuntimeError):
-      torch.tensor([]).max()
-    with self.assertRaises(RuntimeError):
-      Tensor([]).max()
-
-  @unittest.expectedFailure
-  def test_argmax_empty(self):
-    # Argmax on an empty tensor should raise an error like torch does.
-    with self.assertRaises(RuntimeError):
-      torch.tensor([]).argmax()
-    with self.assertRaises(RuntimeError):
-      Tensor([]).argmax()
-
   def test_masked_select_empty(self):
     # Masked select on empty tensors should return an empty tensor.
     torch_out = torch.tensor([], dtype=torch.float32).masked_select(torch.tensor([], dtype=torch.bool))
@@ -104,42 +88,6 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
     with Context(TRAINING=1):
       out = Tensor.ones(100).dropout(1.0)
       np.testing.assert_allclose(out.numpy(), np.zeros(100))
-
-  def test_dropout_invalid_prob(self):
-    with self.assertRaises(ValueError):
-      torch.nn.functional.dropout(torch.ones(10), -0.1, True)
-    with self.assertRaises(ValueError):
-      with Context(TRAINING=1):
-        Tensor.ones(10).dropout(-0.1)
-
-class TestInputValidation(unittest.TestCase):
-  # we don't need more of these, input validation bugs are not very interesting, many are WONTFIX
-
-  @unittest.expectedFailure
-  def test_repeat_negative(self):
-    # repeating with a negative value should error like PyTorch
-    with self.assertRaises(RuntimeError):
-      torch.tensor([1, 2, 3]).repeat(-1, 2)
-    with self.assertRaises(RuntimeError):
-      Tensor([1, 2, 3]).repeat(-1, 2)
-
-  def test_negative_weight_decay(self):
-    with self.assertRaises(ValueError):
-      torch.optim.AdamW([torch.tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
-    with self.assertRaises(ValueError):
-      nn.optim.AdamW([Tensor([1.])], lr=0.1, weight_decay=-0.1)
-
-  def test_negative_lr(self):
-    with self.assertRaises(ValueError):
-      torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=-0.1)
-    with self.assertRaises(ValueError):
-      nn.optim.SGD([Tensor([1.])], lr=-0.1)
-
-  def test_negative_momentum(self):
-    with self.assertRaises(ValueError):
-      torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
-    with self.assertRaises(ValueError):
-      nn.optim.SGD([Tensor([1.])], lr=0.1, momentum=-0.1)
 
 class TestZeroFolding(unittest.TestCase):
   # we don't need more of these

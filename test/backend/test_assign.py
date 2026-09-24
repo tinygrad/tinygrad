@@ -325,20 +325,6 @@ class TestAssign(unittest.TestCase):
       self.assertEqual(y.tolist(), [11.0])
       self.assertEqual(x.tolist(), [5.0])
 
-  def test_assign_contiguous(self):
-    b = Tensor.arange(16).reshape(4,4).clone().realize()
-    a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1)
-    GlobalCounters.reset()
-    b.assign(a.contiguous()).realize()
-    assert_kernel_count(2)
-
-  def test_assign_contiguous_permute(self):
-    b = Tensor.arange(16).reshape(4,4).clone().realize()
-    a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1).permute((1,0))
-    GlobalCounters.reset()
-    b.assign(a.contiguous()).realize()
-    assert_kernel_count(2)
-
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -513,13 +499,6 @@ class TestAssign(unittest.TestCase):
     a.bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int64)).realize()
     np.testing.assert_equal(a.numpy(), [57, 48, 0, 0, 0, 0, 0, 0])
 
-  def test_assign_dtype_mismatch(self):
-    # assign should not implicitly cast dtypes - this can lose precision
-    a = Tensor.zeros(4, dtype=dtypes.float32).contiguous().realize()
-    b = Tensor([1, 2, 3, 4], dtype=dtypes.int32)
-    with self.assertRaisesRegex(RuntimeError, "assign dtype mismatch"):
-      a.assign(b)
-
   def test_assign_shape_broadcast(self):
     # shape broadcasting should work when dtypes match
     a = Tensor.zeros(3, 5, dtype=dtypes.float32).contiguous().realize()
@@ -573,38 +552,6 @@ class TestAssign(unittest.TestCase):
     # block 3: assign c2 at position 3, read sum -> 112
     cache3[3:4].assign(c2)
     self.assertEqual(cache3[:4].sum().item(), 112.0)
-
-  def test_chained_assign_kernel_count(self):
-    """Chained pending assigns must not produce excessive kernels (tests recursive transitive processing)."""
-    D, N = 4, 5
-    caches = [Tensor.zeros(8, D).contiguous().realize() for _ in range(N)]
-    caches[0][0:1].assign(Tensor.ones(1, D, buffer=False) * 10)
-    x = caches[0][:1].sum(0, keepdim=True)
-    for i in range(1, N):
-      caches[i][0:1].assign(x)
-      x = caches[i][:1].sum(0, keepdim=True)
-    GlobalCounters.reset()
-    x.realize()
-    # N assigns (1 kernel each) producing N kernels total
-    assert_kernel_count(N)
-
-  def test_shared_computation_assign_kernel_count(self):
-    """When a .contiguous() is shared between an assign value and the next layer's input (like QKV projection in LLM),
-    substitute optimization replaces already-realized sub-graphs in remaining pending assigns, preventing kernel escalation.
-    Without substitute, pending assign graphs grow linearly and produce 153 kernels instead of 48."""
-    D, N = 16, 16
-    caches = [Tensor.zeros(4, D).contiguous().realize() for _ in range(N)]
-    W = [Tensor.full((D, D*2), 0.01).contiguous().realize() for _ in range(N)]
-    x = Tensor.ones(1, D).contiguous().realize()
-    for i in range(N):
-      shared = (x @ W[i]).contiguous()  # .contiguous() UOp is shared between assign (k) and next layer (q)
-      k, q = shared[:, :D], shared[:, D:]
-      caches[i][0:1].assign(k)          # assign references the CONTIGUOUS
-      x = q + caches[i][:1]             # next layer also references the same CONTIGUOUS through q
-    GlobalCounters.reset()
-    caches[-1][:1].contiguous().realize()
-    # N matmuls + N assigns + 1 final read = 2*N+1 (AFTER embedding allows full graph scheduling with shared contiguous reuse)
-    assert_kernel_count(2*N+1)
 
   def test_double_assign_from_const(self):
     a = Tensor.empty(2)

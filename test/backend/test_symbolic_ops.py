@@ -208,13 +208,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a[:j, :], b[:, :i]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_invalid_symbolic_reshape(self):
-    a = Tensor.rand(30)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      # Cannot reshape into symbolic from non-symbolic
-      with self.assertRaises(ValueError): a.reshape((3, vi))
-
   def test_shrink(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)

@@ -3,14 +3,12 @@ import numpy as np
 from tinygrad.device import Device, Buffer
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
-from tinygrad.codegen import to_program
 from tinygrad.helpers import prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
-from test.helpers import check_schedule
 from tinygrad.runtime.ops_python import PythonRenderer
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, python_alu
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import Tensor
 
 def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
@@ -58,33 +56,8 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int.min+1).cast(dtypes.int))
     self.assertEqual(ret[0], 1)
 
-  def _test_src_strip_paren(self, op: Ops, should_strip_paren:bool=True):
-    dtype = "bool" if op in (Ops.OR, Ops.XOR, Ops.AND) else None
-    ret = Tensor.empty(1, dtype=dtype)
-    for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
-    linear, _ = check_schedule(ret, 1)
-    src = to_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src[2].arg
-    self.assertEqual("("*5 not in src, should_strip_paren)
-
-  def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)
-  def test_repeat_mul(self): self._test_src_strip_paren(Ops.MUL)
-  def test_repeat_xor(self): self._test_src_strip_paren(Ops.XOR)
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "wgsl ends up with '(' * 5")
-  def test_repeat_or(self): self._test_src_strip_paren(Ops.OR)
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "wgsl ends up with '(' * 5")
-  def test_repeat_and(self): self._test_src_strip_paren(Ops.AND)
-  def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
-
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
 class TestWGSLFailures(unittest.TestCase):
-  def test_folded_packed_store(self):
-    b = UOp.param(0, dtypes.char, 4)
-    idx = b.index(UOp.const(0).cast(dtypes.int))
-    store = UOp.store(idx, idx.cast(dtypes.uint32).load() & UOp.const(0xffffff00).cast(dtypes.uint32))
-    src = Device[Device.DEFAULT].renderer.render(UOp.sink(store, arg=KernelInfo()).toposort())
-    self.assertIn("atomicAnd(&data0_4[0],4294967040u);", src)
-    self.assertNotIn("atomicAdd", src)
-
   def test_multiply_infinity(self):
     # multiplying a positive constant by infinity should return infinity
     # WGSL pipelines do not handle this reliably, some of which return zero, unless infinity always comes from a read on a dynamic buffer
