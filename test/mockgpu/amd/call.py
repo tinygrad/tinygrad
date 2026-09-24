@@ -5,6 +5,7 @@ from tinygrad.codegen import pm_add_loads, to_program
 from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.renderer.amd import InstDecodeError, decode_inst
+from tinygrad.renderer.amd.dsl import Reg
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops, UOp, UPat, PatternMatcher, graph_rewrite
 from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _op_name, _wave_size, get_pcode, _get_pcode_dict
@@ -96,6 +97,11 @@ class _CallGraph:
     cond = graph_rewrite(cond, pm_register_operands, ctx=self)
     return cond.substitute({p:p.after(*self.deps) for p in self.operands}, walk=True)
 
+  def effect(self, effect:UOp):
+    self.calls.append(effect)
+    self.deps = (effect,)
+    for p in self.operands: self.values[p], self.readers[p] = p.after(effect), []
+
   def operand(self, bank:UOp, reg:int=0) -> UOp:
     if (key:=(bank, reg)) not in self.buffers:
       name, width = self.banks.get(bank, (bank.arg.name, bank.arg.size))
@@ -130,7 +136,7 @@ class _CallGraph:
     if idx.src[0].op is Ops.AFTER: buf = buf.after(*idx.src[0].src[1:])
     return buf.index(offset.simplify().valid(valid))
 
-  def append(self, body:UOp, name:str, immediates:dict[UOp, UOp]|None=None):
+  def append(self, body:UOp, name:str, immediates:dict[UOp, UOp]|None=None, operands:tuple[Reg, ...]=()):
     immediates = immediates or {}
     body = graph_rewrite(body, pm_add_loads, name="explicit instruction loads")
     body = graph_rewrite(body, pm_register_operands, ctx=self, name="bind instruction registers")
@@ -187,7 +193,7 @@ class _CallGraph:
       val = self.values[actual].after(*self.readers[actual]) if actual in writes else self.values[actual]
       args.append(val.after(*self.deps))
     body = body.substitute(formal, walk=True).simplify(tracked=True)
-    # Adjacent registers with the same operand role form one STACK argument.
+    # STACKs represent multi-register operands, not merely adjacent hardware registers.
     groups:list[list[int]] = []
     remaining = set(range(len(params)))
     for i, p in enumerate(params):
@@ -196,10 +202,12 @@ class _CallGraph:
       actual = aliases.get(p, p)
       if actual in self.registers:
         bank, reg = self.registers[actual]
+        width = max((r.sz for r in operands if r.offset == reg+(256 if bank in ("v", "a") else 0)), default=1)
+        end = reg+width
         if bank != "s" or reg < 106:
           candidates = {self.registers[a][1]:j for j,q in enumerate(params) if j in remaining and
                         (a:=aliases.get(q, q)) in self.registers and self.registers[a][0] == bank and (q in writes) == (p in writes)}
-          while reg+1 in candidates and (bank != "s" or reg+1 < 106):
+          while reg+1 < end and reg+1 in candidates and (bank != "s" or reg+1 < 106):
             reg += 1
             group.append(candidates[reg])
       remaining.difference_update(group)
@@ -244,6 +252,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
                                              addrspace=AddrSpace.REG, tag=name) for name, size in sizes.items()})
   instructions:dict[int, tuple[int, str, UOp, int|None, UOp]] = {}
   immediates:dict[int, dict[UOp, UOp]] = {}
+  operands:dict[int, tuple[Reg, ...]] = {}
   loops:dict[int, int] = {}
   barriers:list[int] = []
   while offset < lib_sz:
@@ -265,6 +274,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     ctx.lift_immediates = not branch
     body = handler(inst, ctx).simplify(tracked=True)
     immediates[offset] = ctx.immediates
+    operands[offset] = tuple(r for field,_ in inst._fields if isinstance(r:=getattr(inst, field), Reg))
     target, cond = None, UOp.const(False)
     if branch:
       assert ctx.targets, f"missing branch semantics: {name}"
@@ -298,6 +308,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   instructions = {positions[p]:(size, name, body, positions[target] if target is not None else None, cond)
                   for p in order for size,name,body,target,cond in [instructions[p]]}
   immediates = {positions[p]:immediates[p] for p in order}
+  operands = {positions[p]:operands[p] for p in order}
   offset = end
   barriers = [p+size for p,(size,name,_,_,_) in instructions.items() if "BARRIER" in name]
   loops = {}
@@ -309,11 +320,37 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     nonlocal axis
     positions = [p for p in instructions if start <= p < end]
     branches = [p for p in positions if instructions[p][3] is not None]
+    # Nested backward branches form loops directly. Keep the prologue and epilogue outside them.
+    intervals = [(h, p) for p in branches if (h:=instructions[p][3]) is not None]
+    if branches and all(start <= h <= p for h,p in intervals) and \
+        all(not (h < h1 <= p < p1 or h == h1 and p != p1) for h,p in intervals for h1,p1 in intervals) and \
+        not any(instructions[q][1] == "S_ENDPGM" for h,p in intervals for q in positions if h <= q < p):
+      def straight_loop(lo:int, hi:int):
+        nonlocal axis
+        p = lo
+        while p < hi:
+          latch = next((l for h,l in intervals if h == p and l < hi), None)
+          if latch is not None:
+            loop = UOp.loop(axis)
+            axis += 1
+            graph.deps += (loop,)
+            straight_loop(p, latch)
+            graph.effect(UOp.group(*graph.deps).backedge(loop, graph.condition(instructions[latch][4])))
+            p = latch+instructions[latch][0]
+          else:
+            size, name, body, _, _ = instructions[p]
+            if name == "S_ENDPGM": return True
+            graph.append(body, name=name.lower(), immediates=immediates[p], operands=operands[p])
+            p += size
+        return False
+      terminated = straight_loop(start, end)
+      if not terminated and end == offset and decode_error is not None: raise decode_error
+      return terminated
     if not branches:
       for p in positions:
         _, name, body, _, _ = instructions[p]
         if name == "S_ENDPGM": return True
-        graph.append(body, name=name.lower(), immediates=immediates[p])
+        graph.append(body, name=name.lower(), immediates=immediates[p], operands=operands[p])
       if end == offset and decode_error is not None: raise decode_error
       return False
 
@@ -342,14 +379,17 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
       flag = flags[head]
       graph.guards.append(flag)
       outgoing = [(stop, UOp.const(True))]
+      branch_name = None
       for p in positions:
         if not head <= p < stop: continue
         size, name, body, target, cond = instructions[p]
-        if target is not None: outgoing = [(target, cond), (p+size, cond.logical_not())]
+        if target is not None:
+          outgoing = [(target, cond), (p+size, cond.logical_not())]
+          branch_name = name.lower()
         elif name == "S_ENDPGM":
           outgoing, terminated = [], True
           break
-        else: graph.append(body, name=name.lower(), immediates=immediates[p])
+        else: graph.append(body, name=name.lower(), immediates=immediates[p], operands=operands[p])
       graph.guards.pop()
       active = flag.index(0).load()
       edges:dict[int, UOp] = {}
@@ -358,14 +398,13 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
       stores = [flags[dest].index(0).store(flags[dest].index(0).load() | cond) for dest,cond in edges.items() if dest != head]
       # Consume this block only after its outgoing edges have read the old predicate.
       stores.append(flag.after(*stores).index(0).store(edges.get(head, UOp.const(False))))
-      graph.append(UOp.sink(*stores), "branch")
+      if branch_name is not None: graph.append(UOp.sink(*stores), branch_name)
+      else: graph.effect(graph.condition(UOp.group(*stores)))
     if loop is not None:
       cond = UOp.const(False)
       for flag in flags.values(): cond = cond | flag.index(0).load()
       effect = UOp.group(*graph.deps).backedge(loop, graph.condition(cond))
-      graph.calls.append(effect)
-      graph.deps = (effect,)
-      for operand in graph.operands: graph.values[operand], graph.readers[operand] = operand.after(effect), []
+      graph.effect(effect)
     if not terminated and end == offset and decode_error is not None: raise decode_error
     return terminated
 
