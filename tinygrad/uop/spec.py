@@ -171,7 +171,12 @@ spec_tensor = PatternMatcher([
    and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat(),)), lambda copy: is_device(copy.arg) and not is_disk_device(copy.arg)),
+  # COPY carries the DEVICE range as src[1] when the target is multi-device
+  (UPat(Ops.COPY, name="copy", src=(UPat(),), allow_any_len=True), lambda copy:
+   is_device(copy.arg) and not is_disk_device(copy.arg)
+   and (len(copy.src) == 1 if not isinstance(copy.arg, tuple) else
+        len(copy.src) == 2 and copy.src[1].op is Ops.RANGE and copy.src[1].axis_type is AxisType.DEVICE
+        and int(copy.src[1].vmax)+1 == len(copy.arg))),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat(),)),
    lambda red: isinstance(red.arg, tuple) and len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
