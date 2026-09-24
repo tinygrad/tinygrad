@@ -4,6 +4,7 @@ from tinygrad.llm.model import Transformer
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", required=True, help="path to gguf model")
+  parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   parser.add_argument("--max-context", type=int, default=8192, help="max context length (default: %(default)s)")
   parser.add_argument("--prompt-tokens", type=int, default=1024, help="number of prompt tokens (default: %(default)s)")
   parser.add_argument("--decode-tokens", type=int, default=16, help="number of tokens to decode (default: %(default)s)")
@@ -11,7 +12,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   st = time.perf_counter()
-  model, _ = Transformer.from_gguf(args.model, args.max_context)
+  model, _ = Transformer.from_gguf(args.model, args.max_context, shard=args.shard)
   print(f"load {time.perf_counter()-st:.3f}s", flush=True)
 
   st = time.perf_counter()
