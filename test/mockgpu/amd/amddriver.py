@@ -53,8 +53,6 @@ class AMDDriver(VirtDriver):
     self.doorbells = {}
     self.next_doorbell = collections.defaultdict(int)
     self.mmu_event_ids = []
-    self.hw_event_ids = []
-    self.faulted_gpus: set[int] = set()
     self._executing = False  # re-entrancy guard for _emulate_execute
 
     for i in range(gpus): self._prepare_gpu(i+1)
@@ -150,7 +148,6 @@ class AMDDriver(VirtDriver):
       struct.event_id = struct.event_slot_index
 
       if struct.event_type == kfd.KFD_IOC_EVENT_MEMORY: self.mmu_event_ids.append(struct.event_id)
-      if struct.event_type == kfd.KFD_IOC_EVENT_HW_EXCEPTION: self.hw_event_ids.append(struct.event_id)
     elif nr == _ioctl_nr(kfd.AMDKFD_IOC_CREATE_QUEUE):
       gpu = self.gpus[struct.gpu_id]
       if struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
@@ -165,10 +162,6 @@ class AMDDriver(VirtDriver):
     elif nr == _ioctl_nr(kfd.AMDKFD_IOC_WAIT_EVENTS):
       evs = (kfd.struct_kfd_event_data * struct.num_events).from_address(struct.events_ptr)
       for ev in evs:
-        if ev.event_id in self.hw_event_ids and self.faulted_gpus:
-          ev.hw_exception_data.gpu_id = min(self.faulted_gpus)
-          ev.hw_exception_data.reset_type = kfd.KFD_HW_EXCEPTION_WHOLE_GPU_RESET
-          ev.hw_exception_data.reset_cause = kfd.KFD_HW_EXCEPTION_GPU_HANG
         if ev.event_id in self.mmu_event_ids and "MOCKGPU_EMU_FAULTADDR" in os.environ:
           ev.memory_exception_data.gpu_id = 1
           ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
@@ -184,13 +177,8 @@ class AMDDriver(VirtDriver):
       any_progress = True
       while any_progress:
         any_progress = False
-        for gpu_id, gpu in self.gpus.items():
-          if gpu_id in self.faulted_gpus: continue
+        for gpu in self.gpus.values():
           for q in gpu.queues:
-            if q.executing:
-              try: any_progress |= q.execute() > 0
-              except Exception:
-                self.faulted_gpus.add(gpu_id)
-                raise
+            if q.executing: any_progress |= q.execute() > 0
     finally:
       self._executing = False
