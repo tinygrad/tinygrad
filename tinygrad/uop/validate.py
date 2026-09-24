@@ -27,8 +27,30 @@ def z3_and(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   raise RuntimeError(f"z3 int AND only supports 2**k-1 and -2**k masks, got {a=} {b=}")
 z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: z3_cdiv, Ops.FLOORDIV: z3_floordiv,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
-  Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),
   Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
+
+def z3_shift(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
+  a, b = (ctx[1][s] for s in x.src)
+  if (dt:=x.src[1].dtype) != dtypes.weakint: b = z3.simplify((b - dt.min) % (1 << dt.bitsize) + dt.min)
+  bits = x.dtype.bitsize
+  if x.dtype == dtypes.weakint:
+    # Weak integers do not wrap: choose enough bits for every possible input and left-shift result.
+    if isinstance(b, z3.IntNumRef) and b.as_long() >= 0:
+      return a / (1 << b.as_long()) if x.op is Ops.SHR else a * (1 << b.as_long())
+    bits = max(abs(int(x.src[0].vmin)), abs(int(x.src[0].vmax))).bit_length() + 1
+    if x.op is Ops.SHL: bits += max(0, int(x.src[1].vmax))
+  if x.dtype != dtypes.weakint: a = (a - x.dtype.min) % (1 << bits) + x.dtype.min
+  result = a
+  # Integer barrel shifter: each stage shifts by 1, 2, 4, ... bits. All divisors/multipliers are constants.
+  # This stays in linear integer arithmetic instead of mixing Int2BV/BV2Int with index arithmetic.
+  for i in range((bits-1).bit_length()):
+    step = 1 << i
+    shifted = result / (1 << step) if x.op is Ops.SHR else result * (1 << step)
+    result = z3.If((b / step) % 2 == 1, shifted, result)
+  result = z3.If(b >= bits, z3.If(a < 0, -1, 0) if x.op is Ops.SHR else 0, result)
+  if x.dtype != dtypes.weakint and x.op is Ops.SHL: result = (result - x.dtype.min) % (1 << bits) + x.dtype.min
+  # Leave undefined negative counts unconstrained rather than masking them into valid counts.
+  return z3.simplify(z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=ctx[0].ctx), result))
 
 def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
@@ -57,6 +79,7 @@ z3_renderer = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: z3.Int("Invalid", ctx=ctx[0].ctx)),
   (UPat(Ops.CONST, name="x"), lambda x,ctx: z3.BoolVal(x.val, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else z3.IntVal(x.val, ctx=ctx[0].ctx)),
   (UPat(Ops.CAST, src=(UPat.var("x"),), name="c"), lambda c,x,ctx: z3_cast(c, ctx[1][x])),
+  (UPat((Ops.SHL, Ops.SHR), name="x"), z3_shift),
   (UPat(GroupOp.ALU, name="x"), lambda x,ctx: z3_alu[x.op](*(ctx[1][s] for s in x.src))),
 ])
 

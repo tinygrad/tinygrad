@@ -1,8 +1,10 @@
 import unittest
+import z3
 from tinygrad import dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops, UOp, AxisType
+from tinygrad.uop.ops import Ops, UOp, AxisType, exec_alu
+from tinygrad.uop.validate import uops_to_z3, validate_index_with_z3
 from test.helpers import to_uops_list
 
 def Variable(name, nmin, nmax): return UOp.variable(name, nmin, nmax, param=True)
@@ -200,6 +202,74 @@ class TestValidateOOB(unittest.TestCase):
         to_uops_list([gbuf.index(gidx.valid(gidx < 400)).store(sbuf.after(store).index(lidx).load())])  # lidx 0..9 into 8
       with self.assertRaises(RuntimeError):
         to_uops_list([gbuf.index(gidx).store(load)])  # gidx 0..415 into 400
+
+class TestZ3Shifts(unittest.TestCase):
+  def test_integer_shifts(self):
+    for dtype in dtypes.ints:
+      a = UOp.variable("a", dtype.min, dtype.max, dtype, param=True)
+      b = Variable("b", 0, 2**dtype.bitsize)
+      values = {dtype.min, dtype.min+1, 0, 1, 3, dtype.max-1, dtype.max}
+      if dtype in dtypes.sints: values.update((-3, -1))
+      for op in (Ops.SHL, Ops.SHR):
+        solver = z3.Solver(ctx=z3.Context())
+        result, za, zb = uops_to_z3(solver, a.alu(op, b), a, b)
+        for count in (0, 1, dtype.bitsize-1, dtype.bitsize, dtype.bitsize+1, 2**dtype.bitsize):
+          constant, = uops_to_z3(solver, a.alu(op, UOp.const(count)))
+          for value in values:
+            with self.subTest(dtype=str(dtype), op=op.name, value=str(value), count=str(count)):
+              expected = (-1 if op is Ops.SHR and value < 0 else 0) if count >= dtype.bitsize else exec_alu(op, dtype, [value, count])
+              actual = z3.simplify(z3.substitute(result, (za, z3.IntVal(value, ctx=solver.ctx)), (zb, z3.IntVal(count, ctx=solver.ctx))))
+              self.assertEqual(actual.as_long(), expected)
+              self.assertEqual(z3.simplify(z3.substitute(constant, (za, z3.IntVal(value, ctx=solver.ctx)))).as_long(), expected)
+
+  def test_shift_count_dtype(self):
+    for dtype in dtypes.ints:
+      for count in (1, 1 + (1 << dtype.bitsize), -1):
+        with self.subTest(dtype=str(dtype), count=str(count)):
+          solver = z3.Solver(ctx=z3.Context())
+          result, = uops_to_z3(solver, UOp.const(1, dtype).alu(Ops.SHL, UOp.const(count, dtype)))
+          if count != -1: self.assertEqual(z3.simplify(result).as_long(), 2)
+          elif dtypes.is_unsigned(dtype): self.assertEqual(z3.simplify(result).as_long(), 0)
+          else:
+            self.assertEqual(solver.check(result < 0), z3.sat)
+            self.assertEqual(solver.check(result > 0), z3.sat)
+
+  def test_weak_shifts_do_not_truncate(self):
+    a = Variable("a", -(2**1200), 2**1200+7)
+    b = Variable("b", 0, 1024)
+    for op in (Ops.SHL, Ops.SHR):
+      solver = z3.Solver(ctx=z3.Context())
+      result, za, zb = uops_to_z3(solver, a.alu(op, b), a, b)
+      for value in (-2**1200, -1, 0, 7, 2**1200+7):
+        for count in (0, 1, 63, 64, 65, 129, 1024):
+          with self.subTest(op=op.name, value=str(value), count=str(count)):
+            actual = z3.simplify(z3.substitute(result, (za, z3.IntVal(value, ctx=solver.ctx)), (zb, z3.IntVal(count, ctx=solver.ctx))))
+            self.assertEqual(actual.as_long(), exec_alu(op, dtypes.weakint, [value, count]))
+
+  def test_symbolic_shift_bounds(self):
+    n = Variable("n", 0, 3)
+    for shift in (n, n.eq(0).where(0, n.eq(1).where(1, n.eq(2).where(2, 3)))):
+      with self.subTest(shift=shift.render()):
+        for dtype in (*dtypes.ints, dtypes.weakint):
+          right = UOp.const(127, dtype) >> shift
+          self.assertTrue(validate_index_with_z3(128, right, UOp.const(True)))
+          self.assertFalse(validate_index_with_z3(127, right, UOp.const(True)))
+          left = UOp.const(1, dtype) << shift
+          self.assertTrue(validate_index_with_z3(9, left, UOp.const(True)))
+          self.assertFalse(validate_index_with_z3(8, left, UOp.const(True)))
+
+  def test_loaded_shift(self):
+    shift = UOp.param(0, dtypes.uint32, 1).index(0).load() & 31
+    idx = UOp.const(256, dtypes.uint32) >> shift
+    self.assertTrue(validate_index_with_z3(257, idx, UOp.const(True)))
+    self.assertFalse(validate_index_with_z3(256, idx, UOp.const(True)))
+
+  def test_negative_shift_is_not_assumed_safe(self):
+    n = Variable("n", -1, 3)
+    for op in (Ops.SHL, Ops.SHR):
+      idx = UOp.const(1, dtypes.int32).alu(op, n)
+      self.assertFalse(validate_index_with_z3(9, idx, UOp.const(True)))
+      self.assertTrue(validate_index_with_z3(9, idx, n >= 0))
 
 if __name__ == "__main__":
   unittest.main()
