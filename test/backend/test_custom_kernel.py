@@ -361,6 +361,34 @@ class TestCustomKernel(unittest.TestCase):
     v.assign(Tensor.invalids(4, 4, dtype=dtypes.float))
     self.assertEqual(v.contiguous().tolist(), [[10., 11., 12., 13.]]*4)
 
+  @unittest.expectedFailure
+  def test_gated_store_2d(self):
+    # TODO: broken now, the valid is dropped. the valid on one index of the 2d C gates the whole store, only j == 0 writes C[i, 0]
+    def kernel(C:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.REDUCE)
+      return C[i.valid(j.eq(0)), 0].store((j+1).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), fxn=kernel)[0][:, 0].tolist(), [1.]*4)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL buffer needs shared memory")
+  @unittest.expectedFailure
+  def test_gated_local_store_2d(self):
+    # TODO: broken now, the valid is dropped. the valid on one index of the 2d LOCAL tmp gates the whole store, only j == 0 writes tmp[i, 0]
+    def kernel(C:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.REDUCE)
+      tmp = UOp.placeholder((4, 4), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[i.valid(j.eq(0)), 0].store((j+1).cast(dtypes.float)).end(j)
+      return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), fxn=kernel)[0].tolist(), [1.]*4)
+
+  @unittest.expectedFailure
+  def test_gated_load_2d(self):
+    # TODO: broken now, the valid is dropped. the valid on one index of the 2d A gates the whole load, it is 0 where j != 0
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(4, 1)
+      return C[i, j].store(A[i.valid(j.eq(0)), 0]).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(16).reshape(4, 4).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), a, fxn=kernel)[0].tolist(), a[:, :1].pad(((0, 0), (0, 3))).tolist())
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
     a = Tensor.full((4, 4), 3.).contiguous()
