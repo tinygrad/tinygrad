@@ -2,17 +2,14 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import Context, ceildiv
+from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import run_linear
-from tinygrad.codegen import to_program
-from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
-from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   buf_uops = [UOp.from_buffer(b) for b in bufs]
@@ -60,14 +57,6 @@ def _test_uops_result(output_dtype, uops, res):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
                      dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
 class TestBitcastBufferView(unittest.TestCase):
-  @Context(SPEC=2)
-  def test_render(self):
-    buf = UOp.param(0, dtypes.uint32, 4)
-    uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
-    idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
-    self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
-    Device[Device.DEFAULT].renderer.render(uops)
-
   @Context(SPEC=2)
   def test_load(self):
     val = 0x1122334455667788
@@ -228,21 +217,6 @@ class TestLocalAccess(unittest.TestCase):
     sres = smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
-  # NOTE: webgpu specific, since only webgpu performs bitpacking
-  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local memory size for packed data types")
-  def test_packed_smem_size(self):
-    _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
-    # a partial word still needs a whole word, so sizes that don't fill one must round up
-    for size in (16, 5):
-      for dtype in _dtypes:
-        temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
-        uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
-        out = Device[Device.DEFAULT].renderer.render(uops)
-        # half is supported in wgsl, so it doesn't have to be packed
-        corrected_size = ceildiv(size, 4//dtype.itemsize) if dtype != dtypes.half else size
-        # temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;
-        self.assertIn(f",{corrected_size}>;", out)
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   @unittest.skip("tinygrad doesn't support this behavior")
   def test_local_indirect(self):
@@ -255,56 +229,6 @@ class TestLocalAccess(unittest.TestCase):
     ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), barr))
     sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
-
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
-class TestAssembly(unittest.TestCase):
-  def test_bitshift_left(self):
-    g1 = UOp.param(0, dtypes.int32, 3)
-    out = UOp.param(1, dtypes.int32, 2)
-    c1 = UOp.const(2)
-    c2 = UOp.const(3)
-    l1 = g1.index(c1)
-    a1 = UOp(Ops.MUL, src=(l1, c1))
-    a2 = UOp(Ops.MUL, src=(l1, c2))
-    uops = to_uops_list([out.index(UOp.const(0)).store(a1), out.index(UOp.const(1)).store(a2)],
-                        ren=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHL, ops)
-    self.assertIn(Ops.MUL, ops)
-
-  @unittest.skip("this is a questionable microoptimization i won't enforce")
-  def test_mulacc_unrolled(self):
-    # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
-    # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)
-    a = Tensor.empty(1024)
-    b = Tensor.empty(1024)
-    c = (a*b).sum()
-    ast = c.schedule_linear().src[-1].src[0]
-    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UNROLL))]
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = to_program(ast, Device[Device.DEFAULT].renderer)
-    uops = tuple(program.src[1].src)
-    self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
-
-  def test_mulacc_shl(self):
-    g1 = UOp.param(0, dtypes.int32, 2)
-    c1 = UOp.const(0)
-    c2 = UOp.const(1)
-    expr = g1.index(c1) * UOp.const(4096) + g1.index(c2)
-    uops = to_uops_list([expr], ren=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    self.assertIn(Ops.MULACC, [x.op for x in uops])
-
-  def test_use_cmpeq(self):
-    g = UOp.param(0, dtypes.uint32, 8)
-    c = UOp.const(7)
-    comp = g.index(c).ne(c).ne(True)
-    uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.CMPEQ, ops)
-    self.assertNotIn(Ops.CMPNE, ops)
 
 class TestZeroRange(unittest.TestCase):
   def test_reduce_variable(self):

@@ -58,8 +58,8 @@ const layoutUOp = (g, { graph, change }, opts) => {
     const callNode = op === "CALL", programNode = op === "PROGRAM";
     const collapsePorts = callNode ? [0] : programNode ? [0, 1] : null;
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, collapsePorts, exclude, addrspace,
-      className:label.startsWith("REWRITE_ERROR") ? "err" : null});
+    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, callNode, collapsePorts, exclude, addrspace,
+      className:label.startsWith("REWRITE_ERROR") ? "err" : null, tag:tag?.length > 8 ? tag.substring(0, 8) : tag});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;

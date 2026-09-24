@@ -1,6 +1,6 @@
 import unittest
 from dataclasses import replace
-from tinygrad import Device
+from tinygrad.helpers import Target
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType
 from tinygrad.renderer.isa import Register
@@ -12,11 +12,10 @@ def reg(r:Register, size:int) -> Register: return replace(r, size=size)
 # the element size of a memory operand comes from the dtype of its base
 def ptr(r:Register, dt:DType) -> UOp: return UOp(Ops.INS, arg=(X86Ops.DEFINE, dt), tag=(r,))
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only on x86")
 class TestEncodingsX86(unittest.TestCase):
   # NOTE: x86 supports a single displacement as memory address and index without base memory address
   # these have no use cases so they aren't supported
-  def encode(self, u:UOp): return Device[Device.DEFAULT].renderer.render([u])
+  def encode(self, u:UOp): return X86Renderer(Target(device="CPU", arch="x86_64")).render([u])
 
   # displacement of 0 isn't emitted
   def test_base_address(self):

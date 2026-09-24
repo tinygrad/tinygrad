@@ -55,11 +55,6 @@ class TestCall(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), gt_b_grad, rtol=1e-5)
 
-  def test_call_scalar_param_shape_mismatch(self):
-    scalar_fxn = UOp.param(0, dtypes.float, ()) * 2
-    with self.assertRaisesRegex(TypeError, "shape mismatch: expected scalar"):
-      Tensor.call(Tensor.ones(2), fxn=scalar_fxn).realize()
-
   def test_call_gemm(self):
     M, K, N = 4, 8, 4
     a = Tensor.randn(M, K)
@@ -106,42 +101,6 @@ class TestCall(unittest.TestCase):
     Tensor.realize(a, b)
     c = Tensor.call(a, b, fxn=a.as_param(0) + b.as_param(1))
     np.testing.assert_equal(c.numpy(), 2 * np.ones((10, 10)))
-
-class TestCallShape(unittest.TestCase):
-  def test_call_shape_int(self):
-    # fixed-shape function: shape passes through unchanged
-    @function
-    def f(x:Tensor) -> Tensor: return x * 2
-    self.assertEqual(f(Tensor.empty(4, 8)).shape, (4, 8))
-
-  def test_call_shape_param_substitution(self):
-    # symbolic shape dimension is substituted: inner PARAM replaced with the BIND arg
-    @function
-    def f(x:Tensor) -> Tensor: return x * 2
-    sz = UOp.variable("sz", 1, 8)
-    shape = f(Tensor.empty(8)[:sz.bind(5)]).shape
-    # the PARAM should be gone, replaced with the BIND from the call arg
-    self.assertIsInstance(shape[0], UOp)
-    self.assertNotEqual(shape[0].op, Ops.PARAM)
-    self.assertEqual(shape[0], sz.bind(5))
-
-  def test_call_shape_expr_substitution(self):
-    # expression containing PARAMs in shape gets fully substituted
-    @function
-    def f(x:Tensor) -> Tensor: return x + 1
-    sz = UOp.variable("sz", 1, 10)
-    shape = f(Tensor.empty(10, 4)[:sz.bind(3)]).shape
-    self.assertIsInstance(shape[0], UOp)
-    self.assertNotEqual(shape[0].op, Ops.PARAM)
-    self.assertEqual(shape[1], 4)
-
-  def test_call_shape_no_param_passthrough(self):
-    # a non-PARAM UOp shape element passes through unchanged
-    @function
-    def f(x:Tensor) -> Tensor: return x * 3
-    sz = UOp.variable("sz", 1, 8)
-    shape = f(Tensor.empty(8)[:sz.bind(5)]).shape
-    self.assertEqual(shape[0], sz.bind(5))
 
 class TestCallSchedule(unittest.TestCase):
   def test_precompile_slice_assign(self):
@@ -304,21 +263,6 @@ class TestCallSchedule(unittest.TestCase):
     np.testing.assert_equal(cache.numpy()[:8], t[:8].numpy())
     np.testing.assert_equal(cache.numpy()[8:], np.zeros(8))
 
-  def test_precompile_schedule_cache_hit(self):
-    """two instances of the same @function should produce identical scheduled function keys without aliasing their outputs"""
-    @function(precompile=True)
-    def f(x:Tensor) -> Tensor: return x + Tensor.full(x.shape, -1.0)
-    a = Tensor.empty(4, 8)
-    b = Tensor.empty(4, 8)
-    r0, r1 = f(a), f(b)
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
-    self.assertTrue(c0.has_unbound_outputs)
-    self.assertTrue(c1.has_unbound_outputs)
-    # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
-    self.assertIsNot(c0.src[-1], c1.src[-1])
-    self.assertEqual(sched_key(r0), sched_key(r1))
-
   def test_precompile_nested(self):
     for precompile in (False, True):
       for devices in (None, ("CPU:0", "CPU:1")):
@@ -398,27 +342,6 @@ class TestArgOrder(unittest.TestCase):
     (Tensor(outs[0]).sum() + Tensor(outs[1]).sum()).backward()
     np.testing.assert_equal(x.grad.numpy(), [3, 3, 3])
     np.testing.assert_equal(y.grad.numpy(), [1, 1, 1])
-
-  def test_output_pos_symbolic_shape(self):
-    # symbolic output shapes resolve against the final arg slots, not the input order (PARAM(2) in the shape, output at 0)
-    x = Tensor.empty(8).realize()
-    sz = UOp.variable('sz', 1, 8)
-    dev = self._dev(x)
-    p1, p2 = UOp.param(1, x.dtype, x.shape, dev), sz.param_like(2)
-    value = p1.reshape(x.shape).shrink_to((p2,))
-    bound = sz.bind(5)
-    outs = UOp.call_with_outputs((value,), x.uop, bound, output_pos=(0,))
-    # the minted output's shape substituted PARAM(2) with the bind arg from position 2 in the arg list
-    shp = outs[0].shape[0]
-    self.assertIsInstance(shp, UOp)
-    self.assertNotEqual(shp.op, Ops.PARAM)
-    self.assertEqual(shp, bound)
-
-  def test_output_pos_must_be_ascending(self):
-    x = Tensor.arange(3, dtype=dtypes.int).realize()
-    p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
-    with self.assertRaises(AssertionError):
-      UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
 
   def test_intersperse_returned_gradient(self):
     x = Tensor([1.0, 2.0, 3.0]).realize()

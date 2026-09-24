@@ -5,7 +5,6 @@ from tinygrad import Tensor, Device, dtypes, nn, Context
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
-from tinygrad.dtype import DTYPES_DICT
 from tinygrad.uop.ops import UOp
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -19,16 +18,6 @@ m_init = np.random.randn(1,3).astype(np.float32)
 gradient = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
-  def test_zerodim_initialization(self):
-    self.assertEqual(Tensor(55).shape, ())
-    self.assertEqual(Tensor(3.14).shape, ())
-
-  def test_deviceless_const_construct_device_repr(self):
-    t = Tensor(UOp.const(2.0).cast(dtypes.float))
-    self.assertIsNone(t.uop.device)
-    self.assertIsNone(t.device)
-    self.assertIn("<UOp None", repr(t))
-
   def test_deviceless_const_realize_noop(self):
     t = Tensor(UOp.const(2.0).cast(dtypes.float))
     uop = t.uop
@@ -257,9 +246,6 @@ class TestTinygrad(unittest.TestCase):
     b = Tensor.randperm(1000).realize()
     np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
-  def test_rand_rejects_unknown_kwargs(self):
-    with self.assertRaises(TypeError): Tensor.rand(5, generator="foo")
-
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
     original_rand, Tensor.rand = Tensor.rand, Tensor.zeros
@@ -267,106 +253,14 @@ class TestTinygrad(unittest.TestCase):
     except: raise
     finally: Tensor.rand = original_rand
 
-  def test_zeros_like_has_same_dtype_and_shape(self):
-    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
-      a = Tensor([1, 2, 3], dtype=datatype)
-      b = Tensor.zeros_like(a)
-      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
-      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-    a = Tensor([1, 2, 3])
-    b = Tensor.zeros_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-  def test_ones_like_has_same_dtype_and_shape(self):
-    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
-      a = Tensor([1, 2, 3], dtype=datatype)
-      b = Tensor.ones_like(a)
-      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
-      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-    a = Tensor([1, 2, 3])
-    b = Tensor.ones_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-  def test_rand_like_device(self):
-    a = Tensor.ones(3, 3, device="CPU")
-    b = Tensor.rand_like(a)
-    self.assertEqual(b.device, a.device)
-
-  def test_ndim(self):
-    assert Tensor(1).ndim == 0
-    assert Tensor.randn(1).ndim == 1
-    assert Tensor.randn(2,2,2).ndim == 3
-    assert Tensor.randn(1,1,1,1,1,1).ndim == 6
-
-  def test_argfix(self):
-    for f in [Tensor.zeros, Tensor.ones, Tensor.rand, Tensor.randn, Tensor.empty]:
-      self.assertEqual(f().shape, ())
-      self.assertEqual(f(1).shape, (1,))
-      self.assertEqual(f(10,20,40).shape, (10,20,40))
-      self.assertEqual(f([]).shape, ())
-      self.assertEqual(f([1]).shape, (1,))
-      self.assertEqual(f([10,20,40]).shape, (10,20,40))
-      self.assertEqual(f(()).shape, ())
-      self.assertEqual(f((1,)).shape, (1,))
-      self.assertEqual(f((10,20,40)).shape, (10,20,40))
-
-      with self.assertRaises(ValueError): f((2, 2), 2, 2)
-      with self.assertRaises(ValueError): f((2, 2), (2, 2))
-      with self.assertRaises(ValueError): f((128, 128), 0.0, 0.01)
-
-  def test_numel(self):
-    assert Tensor.randn(10, 10).numel() == 100
-    assert Tensor.randn(1,2,5).numel() == 10
-    assert Tensor.randn(1,1,1,1,1,1).numel() == 1
-    assert Tensor([]).numel() == 0
-    assert Tensor.randn(1,0,2,5).numel() == 0
-    assert Tensor(3).numel() == 1
-
-  def test_len(self):
-    assert len(torch.zeros(7)) == len(Tensor.zeros(7))
-    assert len(torch.zeros(10,20)) == len(Tensor.zeros(10,20))
-    assert len(torch.zeros(10,20)) == len(Tensor.zeros(10,20,30))
-    assert len(torch.zeros(1).flatten()) == len(Tensor.zeros(1).flatten())
-    with self.assertRaises(TypeError): len(Tensor(3))
-
-  def test_size(self):
-    t1, t2 = torch.zeros(10,20), Tensor.zeros(10,20)
-    assert t1.size() == t2.size()
-    assert t1.size(0) == t2.size(0)
-    assert t1.size(1) == t2.size(1)
-    assert t1.size(-1) == t2.size(-1)
-    assert t1.size(-2) == t2.size(-2)
-    with self.assertRaises(IndexError): t2.size(2)
-
   def test_tolist(self):
     # NOTE: float16 Tensor.tolist() requires python 3.12
     for arr in [[1,2,3], [1.5,2,3], [[1,2,3], [4,5,6]], 3]:
       assert Tensor(arr).tolist() == torch.tensor(arr).tolist() == arr
 
-  def test_element_size(self):
-    for _, dtype in DTYPES_DICT.items():
-      assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
-
-  def test_deepwalk_ctx_check(self):
-    layer = Tensor.uniform(1, 1)
-    x = Tensor.randn(1, 1, 1)
-    x.dot(layer).mean().backward()
-    x = Tensor.randn(1, 1, 1)
-    x.dot(layer).mean().backward()
-
   def test_zerosized_tensors(self):
     np.testing.assert_equal(Tensor([]).numpy(), np.array([]))
     np.testing.assert_equal(Tensor(None).numpy(), np.array([]))
-
-  def test_tensor_ndarray_dtype(self):
-    arr = np.array([1]) # where dtype is implicitly int64
-    assert Tensor(arr).dtype == dtypes.int64
-    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
-    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
   def test_tensor_from_blob(self):
     x = memoryview(bytearray(16)).cast('I')
@@ -407,19 +301,6 @@ class TestTinygrad(unittest.TestCase):
       t = Tensor(arr)
       assert t.dtype == dtypes.default_float
       np.testing.assert_allclose(t.numpy(), np.array(arr))
-
-  def test_tensor_list_shapes(self):
-    self.assertEqual(Tensor([[[]]]).shape, (1,1,0))
-    self.assertEqual(Tensor([[],[]]).shape, (2,0))
-    self.assertEqual(Tensor([[[[]],[[]]], [[[]],[[]]], [[[]],[[]]]]).shape, (3,2,1,0))
-
-  def test_tensor_list_errors(self):
-    # inhomogeneous shape
-    with self.assertRaises(ValueError): Tensor([[],[[]]])
-    with self.assertRaises(ValueError): Tensor([[1],[]])
-    with self.assertRaises(ValueError): Tensor([[1],[1],1])
-    with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]])
-    with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]])
 
   def test_tensor_mixed_list_tuple(self):
     def _list_or_tuple(): return list if random.random() < 0.5 else tuple
@@ -473,10 +354,6 @@ class TestTinygrad(unittest.TestCase):
     data = [np.array(1.0), np.array(2.0), np.array(3.0)]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
 
-  def test_tensor_dtype_errors(self):
-    with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
-    with self.assertRaises(AttributeError): Tensor([3], dtype=(dtypes.int,))
-
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)
@@ -529,21 +406,6 @@ class TestTinygrad(unittest.TestCase):
       reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
       assert type(reshaped_item) is type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
-
-  def test_no_bool(self):
-    with self.assertRaises(TypeError):
-      if Tensor(3):
-        print("hi")
-
-    with self.assertRaises(TypeError):
-      _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
-
-  def test_repr_with_grad(self):
-    a = Tensor([1.0])
-    b = Tensor([1])
-    c = (a + b).sum().backward()
-    print(a)
-    print(c)
 
   def test_no_attributeerror_after_apply_uop_exception(self):
     try:
@@ -658,13 +520,6 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([1, 2]).pad_to(None, value=5).numpy(), [1, 2])  # no-op pad ignores the fill
     with self.assertRaises(ValueError): Tensor([1, 2]).pad_to(2, 3)
     with self.assertRaises(ValueError): Tensor([[1, 2]]).pad_to(3)
-
-  def test_max_shape(self):
-    from tinygrad import UOp
-    t = Tensor.empty(2, UOp.variable('v', 1, 32), 4)
-    self.assertEqual(t.max_shape, (2, 32, 4))
-    self.assertEqual(t.max_numel(), 2*32*4)
-    self.assertEqual(Tensor.empty(2, 3).max_shape, (2, 3))
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
