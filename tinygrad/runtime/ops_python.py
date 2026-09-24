@@ -144,7 +144,7 @@ class PythonProgram(Program['PythonDevice']):
           cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values[1:]))
           values[u] = []
           for (fptr,*args),gate in zip(zip(*src_values), exec_masks[-1]):
-            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes[1:])]
             values[u].append(cfunc(fptr)(*call_args) if gate else None)
         elif u.op is Ops.WMMA: values[u] = wmma(self.tensor_cores, u.arg, src_values, warp_size)
         elif u.op in GroupOp.ALU:
