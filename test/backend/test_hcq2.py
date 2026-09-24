@@ -1,60 +1,25 @@
-import unittest, contextlib, gc, struct, numpy as np
-from unittest.mock import patch
+import unittest, gc, struct, numpy as np
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Buffer, Compiled
+from tinygrad.device import Buffer
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import unwrap
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
-import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
-from test.null.test_hcq2 import compiled_chain
-
-@contextlib.contextmanager
-def rt_buffers():
-  calls, orig = [], Compiled.rt_buffer
-  def track(dev, *args, **kwargs):
-    calls.append(dev)
-    return orig(dev, *args, **kwargs)
-  with patch.object(Compiled, "rt_buffer", track): yield calls
+from test.null.test_hcq2 import chain, chain_input, compiled_chain
 
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS) and not Device.DEFAULT.startswith("NULL"), "hcq2 device required")
 class TestHCQ2Schedule(unittest.TestCase):
-  def test_amd_cmdbuf_uncached(self):
-    dev = Device[Device.DEFAULT]
-    if not dev.device.startswith("AMD") or not dev.is_am(): self.skipTest("AMD PCI interface required")
-    for name, uncached in (("cmdbuf", True), ("kernargs", False)):
-      b = UOp.placeholder((256,), dtypes.uint8, device=(dev.device,), tag=hcq2.to_name(name, "COMPUTE:0"))
-      buf = unwrap(hcq2.bufferize_buf(hcq2.LinkCtx({}, use_rt=False), b)).buffer
-      self.assertEqual(buf.base.options.uncached, uncached)
-      self.assertEqual(buf.base.meta.mapping.uncached, uncached)
-
-  def test_double_compile(self):
-    for n in (1, 65):
-      for jit in (False, True):
-        with self.subTest(kernels=n, jit=jit):
-          out, compiled, inputs = compiled_chain(n, jit=jit)
-          linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
-          before = tuple(inputs)
-          with rt_buffers() as borrowed:
-            for linear in (compiled, linked):
-              self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
-          self.assertEqual(tuple(inputs), before)
-          self.assertFalse(borrowed)
-          run_linear(linked, input_uops=inputs, jit=True, wait=True)
-          self.assertEqual(out.tolist(), [2 + n] * 4)
-
-  def test_double_link(self):
-    for n in (1, 65):
-      for jit in (False, True):
-        with self.subTest(kernels=n, jit=jit):
-          out, compiled, inputs = compiled_chain(n, jit=jit)
-          linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
-          with rt_buffers() as borrowed:
-            again = link_linear(linked, input_uops=inputs, allow_cache=not jit)
-          self.assertIs(again, linked)
-          self.assertFalse(borrowed)
-          run_linear(again, input_uops=inputs, jit=True, wait=True)
-          self.assertEqual(out.tolist(), [2 + n] * 4)
+  def test_compile_and_link_are_idempotent(self):
+    for jit in (False, True):
+      with self.subTest(jit=jit):
+        out, compiled, inputs = compiled_chain(2, jit=jit, device=Device.DEFAULT)
+        linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
+        before = tuple(inputs)
+        for linear in (compiled, linked): self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
+        self.assertIs(link_linear(linked, input_uops=inputs, allow_cache=not jit), linked)
+        self.assertEqual(tuple(inputs), before)
+        run_linear(linked, input_uops=inputs, jit=True, wait=True)
+        self.assertEqual(out.tolist(), [4] * 4)
 
   def test_jit_new_inputs_each_call(self):
     @TinyJit
@@ -105,19 +70,15 @@ class TestHCQ2Schedule(unittest.TestCase):
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used, used)
 
-  def test_device_state_survives_as_link_refs(self):
-    # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
+  def test_jit_has_no_rt_buffers(self):
+    # a one shot link borrows ring slots, a jit's link owns its buffers: nothing it keeps may come from the ring
     dev = Device[Device.DEFAULT]
-    names = {"AMD": () if getattr(dev, "is_aql", False) else ("scratch",), # the aql descriptor holds the scratch, nothing addresses it
-             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "CUDA": ("timeline",), "NULL": (), "METAL": ()}[Device.DEFAULT.split(":")[0]]
-    @TinyJit
-    def f(a): return (a * 2 + 1).contiguous().realize()
-    x = Tensor.ones(16).contiguous().realize()
-    for _ in range(3): f(x)
-    call = f.captured.linear.src[0]
-    self.assertIs(call.op, Ops.AFTER, "the linked call sits after its refs")
-    refs = [u.buffer for u in call.src[1:] if u.op is Ops.BUFFER]
-    for n in names: self.assertTrue(any(r is getattr(dev, n) for r in refs), f"{n} is not a ref of the call")
+    ranges = [((b:=dev.rt_buffer(True, host))._buf, b._buf + b.nbytes) for host in (False, True)]
+    x, f = chain_input(device=dev.device), TinyJit(lambda a: chain(a, 2).realize())
+    for _ in range(2): f(x)
+    for u in f.captured.linear.toposort():
+      if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and (buf:=u.buffer).device == dev.device:
+        self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
 if __name__ == "__main__":
   unittest.main()

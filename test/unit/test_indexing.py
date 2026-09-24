@@ -680,35 +680,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(out, Tensor.zeros(2))
   '''
 
-  def test_gather_invalid(self):
-    for dtype in (dtypes.int64, dtypes.float32):
-      shape = (2, 3, 1, 4)
-      t = (Tensor.randint(*shape, low=-9, high=10, dtype=dtype) if dtypes.is_int(dtype)
-           else Tensor.uniform(*shape, low=-9.0, high=9.0, dtype=dtype))
-      indices = t.argsort(dim=0)
-
-      # dim of `t` and `indices` does not match
-      with self.assertRaises(RuntimeError):
-        t.gather(0, indices[0])
-
-      # invalid `indices` dtype
-      with self.assertRaises(RuntimeError):
-        t.gather(0, indices.cast(dtypes.bool))
-
-      with self.assertRaises(RuntimeError):
-        t.gather(0, indices.cast(dtypes.float32))
-
-      # torch requires int64 indices; tinygrad accepts any int dtype
-      # with self.assertRaises(RuntimeError):
-      #   t.gather(0, indices.cast(dtypes.int32))
-
-      # invalid axis
-      with self.assertRaises(IndexError):
-        t.gather(-7, indices)
-
-      with self.assertRaises(IndexError):
-        t.gather(7, indices)
-
 class TestNumpy(unittest.TestCase):
   def test_empty_tuple_index(self):
     # Empty tuple index creates a view

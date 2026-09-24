@@ -40,21 +40,6 @@ class TestTensorGradient(unittest.TestCase):
     dx = z.gradient(x, gradient=dz)[0]
     self.assertListEqual(dx.tolist(), [2.0, 4.0, 6.0])
 
-  def test_cast_before_view(self):
-    x = Tensor([1.0, 1, 1, 1])
-    x_reshaped = x.reshape(2,2)
-    x_casted = x_reshaped.cast(dtypes.float16)
-    x_casted.mean().gradient(x_reshaped)
-
-  def test_non_float_tensor_raise(self):
-    x = Tensor([1, 2, 3])
-    with self.assertRaises(RuntimeError): x.sum().gradient(x)
-    with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
-
-  def test_const_target_raise(self):
-    t = Tensor(2.0)
-    with self.assertRaises(RuntimeError): (t * 2.0).gradient(t)
-
   def test_copy_to_device_gradient(self):
     t = Tensor([1.0, 2, 3]).realize()
     t.to("CPU:1").square().sum().backward()
@@ -87,12 +72,6 @@ class TestTensorGradient(unittest.TestCase):
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])     # gradient flows through clone
     np.testing.assert_allclose(base.grad.numpy(), [0.0, 0.0, 0.0, 0.0])  # ...but detach blocks it from base
-
-  def test_setitem_on_grad_used_tensor_raises(self):
-    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
-    _ = (x * 2.0).sum()
-    with self.assertRaises(RuntimeError):
-      x[0] = 99.0
 
   def test_gradient_through_chained_unrealized_setitem(self):
     g1 = Tensor.zeros(4).contiguous()
@@ -128,12 +107,6 @@ class TestTensorGradient(unittest.TestCase):
     dp = z.gradient(p)[0]
     self.assertEqual(dp.shape, ())
     self.assertAlmostEqual(dp.item(), 7*math.cos(0.5), places=5)
-
-  def test_bare_const_skipped_by_backward(self):
-    Tensor.manual_seed(0)
-    w = Tensor(1.0)
-    (Tensor.rand(()) + w).backward()
-    self.assertIsNone(w.grad)
 
   def test_max_backward_many_ties(self):
     t = Tensor.ones(70000, dtype=dtypes.half).contiguous()

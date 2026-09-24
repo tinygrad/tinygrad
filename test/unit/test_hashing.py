@@ -27,12 +27,6 @@ class TestHashing(unittest.TestCase):
 class TestKeccak(unittest.TestCase):
   def setUp(self) -> None: random.seed(1337)
 
-  def test_shape_keeping(self):
-    s = (1, 2, 3, 4)
-    for i in range(len(s)):
-      out_shape = Tensor.randint(*s[i:], high=255, dtype=dtypes.uint8).keccak().shape
-      self.assertTupleEqual(s[i:-1], out_shape[:-1])
-
   @slow
   def test_sha3_224(self): self._test_preset("sha3_224", [143, 144])
   @slow

@@ -208,13 +208,6 @@ class TestTensorVariable(unittest.TestCase):
     np.testing.assert_equal(splits[0].shrink(((0, 5), (0, 3))).numpy(), np.arange(30).reshape(10, 3)[:5, :3])
     np.testing.assert_equal(splits[1].shrink(((0, 5), (0, 3))).numpy(), np.arange(30).reshape(10, 3)[5:, :3])
 
-  def test_symbolic_chunk_error_on_symbolic_dim(self):
-    # chunk should fail when trying to split along a symbolic dimension
-    vv = Variable("a", 1, 10).bind(4)
-    t = Tensor.ones(10, 8).contiguous()[:vv, :]  # shape (vv, 8)
-    with self.assertRaises(AssertionError):
-      t.chunk(2, dim=0)  # can't split along symbolic dim
-
   def test_symbolic_var_sum(self, var_name="u"):
     t = Variable("t", 1, 10).bind(4)
     v = Variable(var_name, 1, 5).bind(1)

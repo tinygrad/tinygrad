@@ -123,6 +123,10 @@ def _gscatter_bwd(gradient:UOp, kernel:UOp) -> tuple:
   dev = src_u.device
   G, T_l, D = src_u.shape
   k = idx_u.shape[1] // T_l
+  if getenv("GGATHER_SUM_HIP", 0):
+    from extra.gptoss_kernels.gather_sum import gather_sum
+    assert k == 4
+    return None, gather_sum(Tensor(gradient), Tensor(idx_u)).uop, None
   sel = grouped_gather_rows(Tensor(gradient, device=dev), Tensor(idx_u, device=dev), G)
   return (None, sel.reshape(G, T_l, k, D).sum(2).cast(src_u.dtype).uop, None)
 

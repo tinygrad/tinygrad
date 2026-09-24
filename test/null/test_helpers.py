@@ -1,9 +1,9 @@
-import ctypes, gzip, unittest, timeit, pickle
+import unittest, gc, ctypes, gzip, timeit, pickle
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, mv_address, count, all_same
 from tinygrad.tensor import is_numpy_ndarray
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
-from tinygrad.helpers import ceildiv, ansistrip, get_shape
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, time_to_str, cdiv, cmod, getbits
+from tinygrad.helpers import ceildiv, ansistrip, get_shape, polyN, disable_gc
 from tinygrad.tensor import Tensor
 import numpy as np
 
@@ -415,6 +415,20 @@ class TestIsNumpyNdarray(unittest.TestCase):
   def test_tensor(self):
     self.assertFalse(is_numpy_ndarray(Tensor([1, 2, 3])))
     self.assertFalse(is_numpy_ndarray(Tensor(np.array([1, 2, 3]))))
+
+class TestDisableGC(unittest.TestCase):
+  def test_recursive_decorator(self):
+    was_enabled = gc.isenabled()
+    @disable_gc()
+    def recurse(depth:int):
+      self.assertFalse(gc.isenabled())
+      if depth: recurse(depth-1)
+      self.assertFalse(gc.isenabled())
+    try:
+      recurse(2)
+      self.assertEqual(gc.isenabled(), was_enabled)
+    finally:
+      (gc.enable if was_enabled else gc.disable)()
 
 if __name__ == '__main__':
   unittest.main()
