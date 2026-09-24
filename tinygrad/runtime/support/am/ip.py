@@ -210,9 +210,6 @@ class AM_SMU(AM_IP):
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    # The SMU acks the message before starting the reset. The ack is the barrier that proves the reset was
-    # taken: config space does NOT drop during a mode1 reset, so a config check alone passes before the
-    # reset starts and the boot races the reset (which can wedge the gpu until power cycled).
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) or self.adev.ip_ver[am.MP0_HWIP] in {(13,0,0), (13,0,7), (13,0,10)}:
       self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
     elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12), (13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
