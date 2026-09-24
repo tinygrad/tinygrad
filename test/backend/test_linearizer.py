@@ -120,36 +120,6 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
 
-  # NOTE: can reenable, it does work. it just makes BEAM slow
-  @unittest.expectedFailure
-  @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
-  def test_upcast_with_locals_cpu(self):
-    out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL))]),
-                      renderer=Device[Device.DEFAULT].renderer)
-    self.assertEqual(len(prg.src[2].arg.split("for")), 5)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
-  def test_upcast_with_locals(self):
-    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
-    r = (x@y).relu()
-    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
-                     Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
-    program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
-
-    stores = [u for u in tuple(program.src[1].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]
-
-    # the first store is to lds and can be upcasted
-    assert stores[0].src[1].max_numel() == 4
-    assert any(x.addrspace is AddrSpace.LOCAL for x in stores[0].toposort())
-    # the second store is to gds with no upcasts
-    assert stores[1].src[1].max_numel() == 1
-    assert stores[1].src[1].dtype == dtypes.float
-    assert any(x.op is Ops.PARAM for x in stores[1].toposort())
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)

@@ -6,6 +6,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.isa import ISARenderer
+from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from tinygrad.helpers import Target
 from test.helpers import replace_opts
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
@@ -96,6 +99,33 @@ class TestLinearizer(unittest.TestCase):
     # sum_collapse is a full collapse now
     assert len(sched) == 1
     assert not any(u.op is Ops.REDUCE and u.arg[1] > 0 for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
+
+class TestLinearizerRenderers(unittest.TestCase):
+  # NOTE: can reenable, it does work. it just makes BEAM slow
+  @unittest.expectedFailure
+  def test_upcast_with_locals_cpu(self):
+    out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
+    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL))]),
+                      renderer=ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
+    self.assertEqual(len(prg.src[2].arg.split("for")), 5)
+
+  def test_upcast_with_locals(self):
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
+                     Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
+    program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply),
+                         renderer=AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
+
+    stores = [u for u in tuple(program.src[1].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]
+
+    # the first store is to lds and can be upcasted
+    assert stores[0].src[1].max_numel() == 4
+    assert any(x.addrspace is AddrSpace.LOCAL for x in stores[0].toposort())
+    # the second store is to gds with no upcasts
+    assert stores[1].src[1].max_numel() == 1
+    assert stores[1].src[1].dtype == dtypes.float
+    assert any(x.op is Ops.PARAM for x in stores[1].toposort())
 
 if __name__ == '__main__':
   unittest.main()

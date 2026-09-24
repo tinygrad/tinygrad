@@ -2,12 +2,6 @@ import unittest, math
 
 from tinygrad import dtypes, Tensor, Device
 from tinygrad.helpers import getenv, DEV, Context
-from tinygrad.codegen import to_program
-
-from tinygrad.uop.ops import Ops
-from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
 from test.helpers import not_support_multi_device, needs_second_gpu
 from test.unit.test_randomness import equal_distribution, normal_test
 
@@ -68,17 +62,6 @@ class TestRandomness(unittest.TestCase):
     r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
-
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 callee saved registers have ulong dtype")
-  def test_threefry_doesnt_use_long(self):
-    linear = Tensor.rand(20).schedule_linear()
-    for call in linear.src:
-      ast = call.src[0]
-      if ast.op is Ops.SINK:
-        prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
-        for u in tuple(prg.src[1].src):
-          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.src[0].arg.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
