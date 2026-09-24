@@ -113,7 +113,7 @@ class TestJit(unittest.TestCase):
     for _ in range(5):
       a = Tensor.randn(10, 1000, device=d0).realize()
       xc = jf(a)
-      np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=5e-5)
+      np.testing.assert_allclose(a.numpy().sum(axis=(1,)) + 5, xc.numpy().view(np.float32), atol=1e-4, rtol=5e-5)
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
