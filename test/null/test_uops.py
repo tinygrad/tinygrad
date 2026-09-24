@@ -11,6 +11,7 @@ from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import ParamArg, PatternMatcher, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.codegen.late.coalesce import memory_coalescing
@@ -614,6 +615,15 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.CMPEQ, ops)
     self.assertNotIn(Ops.CMPNE, ops)
+
+class TestProgramMetadata(unittest.TestCase):
+  def test_signature_x86_stack_buffers(self):
+    params = tuple(UOp.param(2*i, dtypes.int32, i+1, name=f"in{i}" if i else "out") for i in range(7))
+    value = sum(p[0].load() for p in params[1:])
+    ast = params[0][0].store(value).sink(arg=KernelInfo(name="buffer_signature", opts_to_apply=()))
+    prg = to_program(ast, X86Renderer(Target("CPU", arch="x86_64")))
+    expected = tuple((p.arg.name, i, p.dtype, p._shape) for i, p in enumerate(params))
+    self.assertEqual(prg.to_elf().signature, expected)
 
 if __name__ == '__main__':
   unittest.main()

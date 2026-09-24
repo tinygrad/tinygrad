@@ -9,7 +9,7 @@ from tinygrad.dtype import PyConst, InvalidType, bitcast
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, is_disk_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
-from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
+from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple, TUPLE_ORDER
 from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape, strides_for_shape
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
@@ -1301,12 +1301,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    params = tuple(u for u in self.src[1].src if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU)
     # sig slots are compact: buffers in globals order (runtimes launch buffers in that order), then vars. raw call-arg
     # positions skip buffers for kernels using a sparse subset of the call's buffers (CL binds bufs[slot])
-    gmap = {s:j for j, s in enumerate(self.arg.globals)}
-    sig = tuple((u.arg.name, gmap[u.arg.slot], u.dtype, u._shape) for u in params) + \
-          tuple((v.arg.name, len(self.arg.globals)+j, v.dtype, v._shape) for j, v in enumerate(self.arg.vars))
+    smap = {slot: i for i, slot in enumerate(self.arg.globals + tuple(v.arg.slot for v in self.arg.vars))}
+    sig = tuple((u.arg.name, smap[u.arg.slot], u.dtype, u._shape) for u in sorted(self.arg.bufs + self.arg.vars, key=lambda u: u.arg.slot))
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
@@ -1324,10 +1322,14 @@ class ProgramInfo:
   global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...] = (1, 1, 1)
   vars: tuple[UOp, ...] = ()
-  globals: tuple[int, ...] = ()
+  bufs: tuple[UOp, ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
+
+  @functools.cached_property
+  def globals(self) -> tuple[int, ...]:
+    return tuple(dedup(u.arg.slot for u in self.bufs))
 
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
     global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
@@ -1341,22 +1343,22 @@ class ProgramInfo:
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
     _vars: list[UOp] = []
-    _globals: list[int] = []
+    _bufs: list[UOp] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
-      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
+      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _bufs.append(u)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-    if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
-    return ProgramInfo(tuple(global_size), tuple(local_size),
-                       tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
-                       tuple(sorted(dedup(ins))), target)
+    if not outs and not ins: outs = ins = [u.arg.slot for u in _bufs] # if neither is inferred, default to all buffers
+    return ProgramInfo(tuple(global_size), tuple(local_size), tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
+                       tuple(sorted(dedup(_bufs), key=lambda u: (u.arg.slot, u.tuplize if TUPLE_ORDER else ()))),
+                       tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
 OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
