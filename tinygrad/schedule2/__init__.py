@@ -1,7 +1,8 @@
 import itertools
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, rewrite_group, Ops, PatternMatcher, ParamArg, UPat, graph_rewrite, GroupOp, _broadcast_shape, AxisType
-from tinygrad.helpers import pluralize, prod, all_same, panic, all_int, VIZ
+from tinygrad.uop.ops import remove_all_tags
+from tinygrad.helpers import pluralize, prod, all_same, panic, all_int, VIZ, Context
 from tinygrad.schedule.indexing import apply_movement_op
 
 # ************************** PREPARE **************************
@@ -121,9 +122,38 @@ pm_range_migration = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
 ])
 
+debug_tag_factor = PatternMatcher([
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x.rtag(ctx[0][x] if x not in ctx[1] else 'REAL') if x.tag is None else None),
+])
+
 @rewrite_group(lambda _,ret: f"Schedule2 {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
+
+  # add safe STAGEs to never duplicate compute
+  # we compute the number of times a buffer is consumed. if > 1, we realize
+  realize = {}
+  consumes = {sink:0}
+  for u in reversed(sink.toposort()):
+    assert u in consumes, f"{u.op} not in consumes"
+    if (u.op in GroupOp.ALU or u.op is Ops.REDUCE) and consumes[u] > 1 and u.device is not None:
+      # TODO: rename to stage
+      realize[u] = u.rtag(1).bufferize()
+      consumes[u] = 1
+    if u.op is Ops.STORE: consumes[u] = 1
+    if u.op is Ops.EXPAND: consumes[u] *= u.max_numel() // u.src[0].max_numel()
+    for i,s in enumerate(u.src):
+      if s not in consumes: consumes[s] = 0
+      if u.op is not Ops.STORE or i > 0:
+        consumes[s] += consumes[u]
+
+  if VIZ:
+    with Context(TRACK_MATCH_STATS=0): ctags = graph_rewrite(sink, debug_tag_factor, ctx=(consumes, realize), bottom_up=True)
+    graph_rewrite(ctags, PatternMatcher([]), name="View Consumes")
+
+  # add stages
+  sink = graph_rewrite(sink.substitute(realize), remove_all_tags, name="untag")
+
   sink = graph_rewrite(sink, pm_prepare, name="prepare")
 
   # simple rangeify
