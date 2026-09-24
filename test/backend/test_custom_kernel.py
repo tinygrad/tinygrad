@@ -632,6 +632,22 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
+  def test_call_in_kernel(self):
+    def kernel(C:UOp, A:UOp) -> UOp:
+      dst = UOp.param(0, dtypes.float, (4,))
+      src = UOp.param(1, dtypes.float, (4,))
+      i = UOp.range(4, 0)
+      add_1 = dst[i].store(src[i] + 1).end(i).sink()
+      mul_2 = dst[i].store(src[i] * 2).end(i).sink()
+      tmp = UOp.placeholder((4,), dtypes.float, addrspace=AddrSpace.REG)
+      added = add_1.call(tmp, A, name="add_1")
+      multiplied = mul_2.call(C, tmp.after(added), name="mul_2")
+      return multiplied.sink(arg=KernelInfo(name="add_then_mul", opts_to_apply=()))
+    a = Tensor([1., -2., 3., 0.]).realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
+    ast = out.schedule_linear().src[-1].src[0]
+    to_program(ast, Device[Device.DEFAULT].renderer)
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
