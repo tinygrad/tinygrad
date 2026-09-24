@@ -411,6 +411,11 @@ class AM_GFX(AM_IP):
       else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
     time.sleep(0.05)  # Wait for MEC to be ready
 
+  def halt_engines(self):
+    for xcc in range(self.xccs):
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_halt=1, inst=xcc)
+      else: self.adev.regCP_MEC_CNTL.update(mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
+
   def _config_mec(self):
     def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0, xcc=0):
       for pipe in range(pipe_cnt):
@@ -535,6 +540,8 @@ class AM_IH(AM_IP):
 
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+  def halt_engines(self):
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0): self.adev.reg(f"regSDMA0_{self.sdma_name}_CNTL").update(halt=1)
   def init_hw(self):
     for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else 1):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
