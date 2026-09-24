@@ -646,7 +646,7 @@ class TestCustomKernel(unittest.TestCase):
       return mul_call.sink(arg=KernelInfo(name="call_in_kernel", opts_to_apply=()))
     a = Tensor([1., -2., 3., 0.]).realize()
     out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
-    out.realize()
+    self.assertEqual(out.tolist(), [4., -2., 8., 2.])
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
