@@ -598,9 +598,8 @@ class TestCustomKernel(unittest.TestCase):
     assert_kernel_count(2 if x[0].uop.contiguous_view() is None else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
-  @Context(DEV="CPU")
   def test_simple_from_source(self):
-    a = Tensor.arange(4).clone().realize()
+    a = Tensor.arange(4).clone("CPU").realize()
     src = "void test_src(int* restrict a) { a[0] = 1; }"
     def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
