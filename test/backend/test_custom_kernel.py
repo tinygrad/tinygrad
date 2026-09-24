@@ -645,8 +645,7 @@ class TestCustomKernel(unittest.TestCase):
       return multiplied.sink(arg=KernelInfo(name="add_then_mul", opts_to_apply=()))
     a = Tensor([1., -2., 3., 0.]).realize()
     out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
-    ast = out.schedule_linear().src[-1].src[0]
-    to_program(ast, Device[Device.DEFAULT].renderer)
+    out.realize()
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
