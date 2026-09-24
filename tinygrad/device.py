@@ -92,7 +92,6 @@ class BufferSpec:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
-  zero: bool = False
   external_ptr: int|None = None
 
 class MultiBuffer:
@@ -276,7 +275,7 @@ class Allocator(Generic[DeviceType]):
 
   def free(self, storage:BufferStorage, size:int, options:BufferSpec|None=None):
     spec = options if options is not None else self.default_buffer_spec
-    if LRU and self.lru and not (spec.nolru or spec.zero) and spec.external_ptr is None: self.cache[(size, options)].append(storage)
+    if LRU and self.lru and not spec.nolru and spec.external_ptr is None: self.cache[(size, options)].append(storage)
     else: self.do_free(storage, spec)
 
   def free_cache(self):

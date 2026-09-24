@@ -297,7 +297,7 @@ def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVPro
 
 class NVAllocator(Allocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero)
+    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
     self.dev.synchronize()
@@ -704,7 +704,7 @@ class NVDevice(Compiled):
     self.intra_unk_off = (round_up(self.intra_top_off, 0x10000) + (64 << 10)) if intra_unk_size > 0 else None
     filter_sz = round_up(round_up(self.intra_top_off, 0x10000) + (64 << 10) + intra_unk_size, 2 << 20)
 
-    def _vid_buf(sz): return Buffer(self.device, sz, dtypes.uint8, options=BufferSpec(zero=True, nolru=True), preallocate=True)
+    def _vid_buf(sz): return Buffer(self.device, sz, dtypes.uint8, options=BufferSpec(nolru=True), initial_value=bytes(sz))
     if "NVDEC:0" not in self.fifos:
       self.fifos["NVDEC:0"] = self._new_gpu_fifo("NVDEC:0", 0, self.nvdevice, offset=0x200000, entries=2048, video=True)
       self.vid_coloc_buf, self.vid_filter_buf, self.vid_stat_buf = _vid_buf(coloc_sz), _vid_buf(filter_sz), _vid_buf(0x1000)
