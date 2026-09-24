@@ -207,32 +207,27 @@ class TestZ3Shifts(unittest.TestCase):
   def test_integer_shifts(self):
     for dtype in dtypes.ints:
       a = UOp.variable("a", dtype.min, dtype.max, dtype, param=True)
-      b = Variable("b", 0, 2**dtype.bitsize)
+      b = Variable("b", 0, 2*dtype.bitsize)
       values = {dtype.min, dtype.min+1, 0, 1, 3, dtype.max-1, dtype.max}
       if dtype in dtypes.sints: values.update((-3, -1))
       for op in (Ops.SHL, Ops.SHR):
         solver = z3.Solver(ctx=z3.Context())
         result, za, zb = uops_to_z3(solver, a.alu(op, b), a, b)
-        for count in (0, 1, dtype.bitsize-1, dtype.bitsize, dtype.bitsize+1, 2**dtype.bitsize):
+        for count in (0, 1, dtype.bitsize-1, dtype.bitsize, dtype.bitsize+1, 2*dtype.bitsize):
           constant, = uops_to_z3(solver, a.alu(op, UOp.const(count)))
           for value in values:
             with self.subTest(dtype=str(dtype), op=op.name, value=str(value), count=str(count)):
-              expected = (-1 if op is Ops.SHR and value < 0 else 0) if count >= dtype.bitsize else exec_alu(op, dtype, [value, count])
+              # The bounds checker models mathematical integers, like its ADD/MUL and the original constant shifts.
+              expected = exec_alu(op, dtype, [value, count], truncate_output=False)
               actual = z3.simplify(z3.substitute(result, (za, z3.IntVal(value, ctx=solver.ctx)), (zb, z3.IntVal(count, ctx=solver.ctx))))
               self.assertEqual(actual.as_long(), expected)
               self.assertEqual(z3.simplify(z3.substitute(constant, (za, z3.IntVal(value, ctx=solver.ctx)))).as_long(), expected)
 
-  def test_shift_count_dtype(self):
-    for dtype in dtypes.ints:
-      for count in (1, 1 + (1 << dtype.bitsize), -1):
-        with self.subTest(dtype=str(dtype), count=str(count)):
-          solver = z3.Solver(ctx=z3.Context())
-          result, = uops_to_z3(solver, UOp.const(1, dtype).alu(Ops.SHL, UOp.const(count, dtype)))
-          if count != -1: self.assertEqual(z3.simplify(result).as_long(), 2)
-          elif dtypes.is_unsigned(dtype): self.assertEqual(z3.simplify(result).as_long(), 0)
-          else:
-            self.assertEqual(solver.check(result < 0), z3.sat)
-            self.assertEqual(solver.check(result > 0), z3.sat)
+  def test_lowered_shift_count(self):
+    n = UOp.variable("n", 0, 63, dtypes.uint32, param=True)
+    idx = UOp.const(65535, dtypes.uint64).alu(Ops.SHR, n)
+    self.assertTrue(validate_index_with_z3(65536, idx, UOp.const(True)))
+    self.assertFalse(validate_index_with_z3(65535, idx, UOp.const(True)))
 
   def test_weak_shifts_do_not_truncate(self):
     a = Variable("a", -(2**1200), 2**1200+7)

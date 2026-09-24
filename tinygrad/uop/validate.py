@@ -29,28 +29,13 @@ z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
   Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
 
+# Decompose the count into power-of-two shifts, keeping the checker's unbounded integer arithmetic.
 def z3_shift(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
   a, b = (ctx[1][s] for s in x.src)
-  if (dt:=x.src[1].dtype) != dtypes.weakint: b = z3.simplify((b - dt.min) % (1 << dt.bitsize) + dt.min)
-  bits = x.dtype.bitsize
-  if x.dtype == dtypes.weakint:
-    # Weak integers do not wrap: choose enough bits for every possible input and left-shift result.
-    if isinstance(b, z3.IntNumRef) and b.as_long() >= 0:
-      return a / (1 << b.as_long()) if x.op is Ops.SHR else a * (1 << b.as_long())
-    bits = max(abs(int(x.src[0].vmin)), abs(int(x.src[0].vmax))).bit_length() + 1
-    if x.op is Ops.SHL: bits += max(0, int(x.src[1].vmax))
-  if x.dtype != dtypes.weakint: a = (a - x.dtype.min) % (1 << bits) + x.dtype.min
-  result = a
-  # Integer barrel shifter: each stage shifts by 1, 2, 4, ... bits. All divisors/multipliers are constants.
-  # This stays in linear integer arithmetic instead of mixing Int2BV/BV2Int with index arithmetic.
-  for i in range((bits-1).bit_length()):
-    step = 1 << i
-    shifted = result / (1 << step) if x.op is Ops.SHR else result * (1 << step)
-    result = z3.If((b / step) % 2 == 1, shifted, result)
-  result = z3.If(b >= bits, z3.If(a < 0, -1, 0) if x.op is Ops.SHR else 0, result)
-  if x.dtype != dtypes.weakint and x.op is Ops.SHL: result = (result - x.dtype.min) % (1 << bits) + x.dtype.min
-  # Leave undefined negative counts unconstrained rather than masking them into valid counts.
-  return z3.simplify(z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=ctx[0].ctx), result))
+  for i in range(max(0, int(x.src[1].vmax)).bit_length()):
+    factor = 1 << (1 << i)
+    a = z3.If((b / (1 << i)) % 2 == 1, a / factor if x.op is Ops.SHR else a * factor, a)
+  return z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=ctx[0].ctx), a)
 
 def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
