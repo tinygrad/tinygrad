@@ -210,15 +210,18 @@ class AM_SMU(AM_IP):
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    # Reset can take down MMIO before acknowledging the message, so do not poll the SMU response.
+    # The SMU acks the message before starting the reset. The ack is the barrier that proves the reset was
+    # taken: config space does NOT drop during a mode1 reset, so a config check alone passes before the
+    # reset starts and the boot races the reset (which can wedge the gpu until power cycled).
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) or self.adev.ip_ver[am.MP0_HWIP] in {(13,0,0), (13,0,7), (13,0,10)}:
-      self._smu_cmn_send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
-    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12), (13,0,15)}: self._smu_cmn_send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
-    else: self._smu_cmn_send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
+      self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
+    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12), (13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
+    else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
 
     if self.adev.is_hive(): return # all hive members must receive the reset before waiting
     time.sleep(0.5) # 500ms
-    # Config Retry returns 0x0001; wait for AMD's vendor ID before touching MMIO.
+    # Config reads fail fast (0xffff) on a wedged gpu; mmio reads would hang until the root port
+    # completion timeout, so check config space before touching mmio.
     wait_cond(self.adev.pci_dev.read_config, 0, 2, value=0x1002, timeout_ms=2000,
       msg=f"am {self.adev.devfmt}: gpu did not return from mode1 reset, reboot required")
 
