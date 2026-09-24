@@ -1,10 +1,7 @@
 import functools, io, pathlib, re, struct
-from typing import Any, Callable
-from dataclasses import dataclass
+from typing import Any, Callable, NamedTuple
 
-from tinygrad.tensor import Tensor
-from tinygrad.device import Device
-from tinygrad.dtype import dtypes
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
 
@@ -196,8 +193,7 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-@dataclass(frozen=True)
-class GGUFTensor:
+class GGUFTensor(NamedTuple):
   data: Tensor
   shape: tuple[int, ...]
   ggml_type: int
@@ -221,8 +217,7 @@ def _gguf_parse(tensor: Tensor, device:str|None=None) -> tuple[dict, dict[str, G
   for name, dims, typ, off in t_infos:
     n = prod(dims)
     size = n*_GGML_NATIVE[typ].itemsize if typ in _GGML_NATIVE else n//_GGML_QUANT[typ][0]*_GGML_QUANT[typ][1]
-    data, shape = tensor[data_start+off:data_start+off+size], tuple(reversed(dims))
-    state_dict[name] = GGUFTensor(data, shape, typ)
+    state_dict[name] = GGUFTensor(tensor[data_start+off:data_start+off+size], tuple(reversed(dims)), typ)
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:

@@ -86,9 +86,8 @@ class Linear(nn.Linear):
     # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
     word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
     storage = raw.src[0] if raw.op is Ops.BITCAST else raw
-    sources = storage.src if storage.op is Ops.MSTACK else (storage,)
     if any((off:=u.contiguous_view_offset()) is None or off*u.dtype.itemsize % word_dtype.itemsize or
-           u.buf_uop.dtype not in (dtypes.uint8, word_dtype) for u in sources): return
+           u.buf_uop.dtype not in (dtypes.uint8, word_dtype) for u in (storage.src if storage.op is Ops.MSTACK else (storage,))): return
     self.ggml_type = ggml_type
     self.weight = Tensor(storage) if storage.dtype == word_dtype else Tensor(raw).bitcast(word_dtype).contiguous()
   def __call__(self, x:Tensor) -> Tensor:

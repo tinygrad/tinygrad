@@ -512,9 +512,8 @@ class Transformer:
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0))
-    count = len(devices) if devices else 1
-    if devices: config = shard_config(config, count)
-    model = Transformer(config, output_size=config.vocab_size//count)
+    if devices: config = shard_config(config, len(devices))
+    model = Transformer(config, output_size=config.vocab_size//len(devices) if devices else None)
     if devices:
       for name,target in nn.state.get_state_dict(model).items(): target.replace(state_dict.pop(name))
     else:  # NOTE: rope_freqs.weight (32,) is unused
