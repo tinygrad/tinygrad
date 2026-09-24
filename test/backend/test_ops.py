@@ -2909,11 +2909,6 @@ class TestOps(TensorTestCase):
     data = [math.inf, -math.inf, math.nan]
     helper_test_op((), lambda: torch.tensor(data)[torch.tensor([0, 1, 2])], lambda: Tensor(data)[Tensor([0, 1, 2])])
 
-  def test_unsigned_indices(self):
-    x = Tensor(list(range(256)), dtype=dtypes.int32)
-    indices = Tensor([0, 127, 128, 255], dtype=dtypes.uint8)
-    self.assertEqual(x[indices].tolist(), [0, 127, 128, 255])
-
   def test_fancy_indexing_index_dtypes(self):
     helper_test_op((), lambda: torch.tensor([10., 20., 30., 40.])[torch.tensor([1, 2, 3, 0])],
                        lambda: Tensor([10., 20., 30., 40.])[Tensor([1, 2, 3, 0], dtype=dtypes.uint8)])

@@ -24,6 +24,11 @@ class TestTinygrad(unittest.TestCase):
     x = Tensor(list(range(20)), dtype=dtypes.uint8).realize()
     self.assertEqual(gray(x[4:]).tolist(), [i ^ (i >> 1) for i in range(4, 20)])
 
+  def test_unsigned_indices(self):
+    x = Tensor(list(range(256)), dtype=dtypes.int32)
+    indices = Tensor([0, 127, 128, 255], dtype=dtypes.uint8)
+    self.assertEqual(x[indices].tolist(), [0, 127, 128, 255])
+
   def test_deviceless_const_realize_noop(self):
     t = Tensor(UOp.const(2.0).cast(dtypes.float))
     uop = t.uop
