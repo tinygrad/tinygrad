@@ -8,8 +8,9 @@ from tinygrad.nn.state import TensorIO
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
-  dtype = dtypes.uint32 if grid_shape[1] == 4 else dtypes.uint64
-  return Tensor.const(grid, dtype).to(device, force=True).bitcast(dtypes.uint8).float().reshape(grid_shape)
+  # The entries are consumed as bytes; 32-bit words also work on devices without native uint64.
+  words = tuple((v >> shift) & 0xffffffff for v in grid for shift in range(0, 8*grid_shape[1], 32))
+  return Tensor.const(words, dtypes.uint32).to(device, force=True).bitcast(dtypes.uint8).float().reshape(grid_shape)
 
 def _ggml_iq_signs(device: str|tuple[str, ...]|None) -> Tensor:
   return Tensor.const(tuple(i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)), dtypes.uint8).to(device, force=True)

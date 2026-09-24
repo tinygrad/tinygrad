@@ -267,7 +267,11 @@ class TestGGUF(unittest.TestCase):
 
     for rt in reader.tensors:
       ref = dequantize(rt.data, rt.tensor_type)
-      np.testing.assert_equal(tensors[rt.name].numpy(), ref.reshape(tensors[rt.name].shape))
+      # Check every value, without requiring a single >128 MiB output binding on WebGPU implementations.
+      t = tensors[rt.name].flatten()
+      ref = ref.reshape(t.shape)
+      chunk = (64 << 20) // t.dtype.itemsize
+      for start in range(0, t.numel(), chunk): np.testing.assert_equal(t[start:start+chunk].numpy(), ref[start:start+chunk])
 
     for k, f in reader.fields.items():
       if k.startswith("GGUF."): continue  # skip file header keys (version, tensor_count, kv_count)
