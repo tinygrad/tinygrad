@@ -94,7 +94,7 @@ class TestArgOrder(unittest.TestCase):
 class TestCallCodegen(unittest.TestCase):
   def test_call_stack_pointer(self):
     slot = UOp.placeholder((1,), dtypes.uint32, addrspace=AddrSpace.REG)
-    call = UOp.custom_function("callback", UOp.const(0, dtypes.uint64)).call(slot[0], ret_dtype=dtypes.void)
+    call = UOp.custom_function("callback").call(UOp.const(0, dtypes.uint64), slot[0], ret_dtype=dtypes.void)
     prg = to_program(call.sink(arg=KernelInfo("call_stack")), ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
     self.assertIn("(unsigned int*)((buf", prg.src[2].arg)
 

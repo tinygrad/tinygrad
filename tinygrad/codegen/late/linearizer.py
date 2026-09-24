@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort())
+  lst = list(sink.toposort(enter_calls=False))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
@@ -40,7 +40,7 @@ def linearize(sink:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in u.src:
+    for v in (u.src[1:] if u.op is Ops.CALL else u.src):
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]
