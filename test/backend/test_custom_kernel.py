@@ -608,9 +608,8 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
 
-  @Context(DEV="CPU")
   def test_simple_from_source_alt(self):
-    a = Tensor.arange(4).clone().realize()
+    a = Tensor.arange(4).clone("CPU").realize()
     src = "void copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
     def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
       sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
