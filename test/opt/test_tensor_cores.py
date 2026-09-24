@@ -160,11 +160,11 @@ class TestTensorCores(unittest.TestCase):
     axis = sche.axis_types.index(AxisType.REDUCE)
     if AxisType.UNROLL in sche.axis_types:
       # this tc keeps an unrolled reduce outside the WMMA, grouping inside it must be rejected
-      with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.GROUP_REDUCE)))
+      with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.LOCAL)))
     else:
       x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
       helper_linearizer_opt(x.matmul(y, dtype=tc.dtype_out),
-                            [[Opt(OptOps.SPLIT, axis, (amt, AxisType.GROUP_REDUCE, top))] for amt in (2, 4) for top in (False, True)],
+                            [[Opt(OptOps.SPLIT, axis, (amt, AxisType.LOCAL, top))] for amt in (2, 4) for top in (False, True)],
                             apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")

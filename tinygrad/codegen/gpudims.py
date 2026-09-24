@@ -48,7 +48,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # extract global/local dims
   global_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type is AxisType.GLOBAL])
-  local_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+  local_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL)])
   if not global_dims and not local_dims: return None
 
   # get global and local shape

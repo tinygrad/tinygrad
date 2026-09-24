@@ -233,13 +233,13 @@ class TestCustomKernel(unittest.TestCase):
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
-  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_gemm_group_refused(self):
     # k is tagged REDUCE but custom_gemm has no Ops.REDUCE
     a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
     ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError):
-      Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE)))
+      Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.LOCAL)))
 
   def test_gemm_unroll_refused(self):
     # k is tagged REDUCE but custom_gemm has no Ops.REDUCE, so the expander has nothing to contract the stores back with
@@ -248,20 +248,20 @@ class TestCustomKernel(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)))
 
-  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
-    # j%2 splits j into two ranges, both are still GROUP_REDUCE
+    # j%2 splits j into two ranges, both are still LOCAL
     def kernel(C:UOp, A:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.GROUP_REDUCE)
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.LOCAL)
       return C[i].store((A[i, j] * (j%2).cast(A.dtype)).reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
 
-  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_nested_group_reduce(self):
     # the inner group's stage is indexed by the outer group's range, which is live at the inner reduce
     def kernel(C:UOp, B:UOp) -> UOp:
-      i, g1, g2 = UOp.range(4, 0), UOp.range(4, 1, AxisType.GROUP_REDUCE), UOp.range(8, 2, AxisType.GROUP_REDUCE)
+      i, g1, g2 = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOCAL), UOp.range(8, 2, AxisType.LOCAL)
       return C[i].store(B[i, g1, g2].reduce(g2, arg=Ops.ADD).reduce(g1, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     b = Tensor.arange(128).reshape(4, 4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), b, fxn=kernel)[0].tolist(), b.sum((1, 2)).tolist())
@@ -338,6 +338,30 @@ class TestCustomKernel(unittest.TestCase):
     ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
+
+  def test_loop_local_barrier_inner_loop_load(self):
+    # tmp is loaded inside the k loop. the end of the t loop still needs a barrier, and it leaves no range open
+    def kernel(C:UOp, A:UOp) -> UOp:
+      l, t, k = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP), UOp.range(4, 2, AxisType.REDUCE)
+      tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      v = tmp.after(tmp[l].store(A[t, l]))[k].reduce(k, arg=Ops.ADD)
+      return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(8, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
+    self.assertEqual(prg.ranges, {})
+    self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 2)
+
+  def test_local_barrier_after_ended_loop(self):
+    # tmp is read after the k loop that stored it. the barrier before the read leaves no range open
+    def kernel(C:UOp, A:UOp) -> UOp:
+      k = UOp.range(4, 0, AxisType.REDUCE)
+      tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      tmp = tmp.after(k)[k].set(A[k], end=k)
+      return C[0].store(tmp[0]).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
+    self.assertEqual(prg.ranges, {})
+    self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
 
   def test_split_range_id_free_of_loop(self):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
