@@ -215,7 +215,12 @@ class AM_SMU(AM_IP):
     elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12), (13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
 
-    if not self.adev.is_hive(): time.sleep(0.5) # 500ms
+    if self.adev.is_hive(): return # all hive members must receive the reset before waiting
+    time.sleep(0.5) # 500ms
+    # Config reads fail fast (0xffff) on a wedged gpu; mmio reads would hang until the root port
+    # completion timeout, so check config space before touching mmio.
+    wait_cond(self.adev.pci_dev.read_config, 0, 2, value=0x1002, timeout_ms=2000,
+      msg=f"am {self.adev.devfmt}: gpu did not return from mode1 reset, reboot required")
 
   def read_table(self, table_t, arg):
     if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12),(13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
@@ -411,6 +416,11 @@ class AM_GFX(AM_IP):
       else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
     time.sleep(0.05)  # Wait for MEC to be ready
 
+  def halt_engines(self):
+    for xcc in range(self.xccs):
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_halt=1, inst=xcc)
+      else: self.adev.regCP_MEC_CNTL.update(mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
+
   def _config_mec(self):
     def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0, xcc=0):
       for pipe in range(pipe_cnt):
@@ -535,6 +545,8 @@ class AM_IH(AM_IP):
 
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+  def halt_engines(self):
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0): self.adev.reg(f"regSDMA0_{self.sdma_name}_CNTL").update(halt=1)
   def init_hw(self):
     for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else 1):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
