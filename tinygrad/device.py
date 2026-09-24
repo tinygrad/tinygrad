@@ -299,7 +299,6 @@ class Allocator(Generic[DeviceType]):
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
-  def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 
 class HostAllocator(Allocator):
   def __init__(self, dev): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
