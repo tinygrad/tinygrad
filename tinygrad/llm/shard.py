@@ -7,12 +7,10 @@ from tinygrad.helpers import prod
 from tinygrad.llm.gguf import gguf_read, ggml_data_to_tensor, GGUFTensor, _GGML_NATIVE, _GGML_QUANT
 from tinygrad.llm.kernels.amd import HALFWORD_QUANTS, Q4_K, Q5_K, Q6_K, IQ4_XS, amd_custom_kernels_supported
 
-if TYPE_CHECKING:
-  from tinygrad.llm.model import TransformerConfig
+if TYPE_CHECKING: from tinygrad.llm.model import TransformerConfig
 
 def shard_config(config:"TransformerConfig", count:int) -> "TransformerConfig":
-  assert config.ssm is not None
-  assert all(d % count == 0 for d in (config.n_heads, config.n_kv_heads, config.hidden_dim, config.vocab_size,
+  assert config.ssm is not None and all(d % count == 0 for d in (config.n_heads, config.n_kv_heads, config.hidden_dim, config.vocab_size,
     config.ssm.group_count, config.ssm.time_step_rank, config.ssm.inner_size)), 'uneven TP dimensions'
   return replace(config, n_heads=config.n_heads//count, n_kv_heads=config.n_kv_heads//count, hidden_dim=config.hidden_dim//count,
     ssm=replace(config.ssm, group_count=config.ssm.group_count//count, time_step_rank=config.ssm.time_step_rank//count,
@@ -20,8 +18,7 @@ def shard_config(config:"TransformerConfig", count:int) -> "TransformerConfig":
 
 def tp_sum(x:Tensor) -> Tensor:
   if not isinstance(x.device, tuple): return x
-  padded = x.pad_to(x.max_shape)
-  return Tensor(padded.uop.allreduce(Ops.ADD, x.device)).shrink(tuple((0, s) for s in x.shape))
+  return Tensor(x.pad_to(x.max_shape).uop.allreduce(Ops.ADD, x.device)).shrink(tuple((0, s) for s in x.shape))
 
 def gguf_load_sharded(fn:Tensor|str|pathlib.Path, devices:tuple[str, ...]) -> tuple[dict, dict[str, Tensor]]:
   kv, state = gguf_read(fn)
@@ -35,8 +32,7 @@ def apply_shards(state:dict[str, GGUFTensor], kv:dict, devices:tuple[str, ...]) 
   assert all(kv.get(f'{arch}.attention.{k}', len(devices)) % len(devices) == 0 for k in ('head_count', 'head_count_kv')), 'uneven heads'
   packed_kernels = all(amd_custom_kernels_supported(d) for d in devices)
   weights = {}
-  for name,value in state.items():
-    raw, shape, typ = value.data, value.shape, value.ggml_type
+  for name,(raw,shape,typ) in state.items():
     if name == 'token_embd.weight':
       weights[name] = ggml_data_to_tensor(raw.to(devices[0]), prod(shape), typ).reshape(shape)
       continue
@@ -62,8 +58,7 @@ def apply_shards(state:dict[str, GGUFTensor], kv:dict, devices:tuple[str, ...]) 
       pieces = [Tensor.cat(*(p.chunk(len(devices), dim=axis)[rank] for p in parts), dim=axis) for rank in range(len(devices))]
     else: pieces = storage.chunk(len(devices), dim=axis) if axis is not None else [storage]*len(devices)
     word = (dtypes.uint16 if typ in HALFWORD_QUANTS else dtypes.uint32) if packed_kernels and typ in (Q4_K, Q5_K, Q6_K, IQ4_XS) else dtypes.uint8
-    shards = [p.contiguous().flatten().bitcast(word).to(d).clone().realize() for p,d in zip(pieces, devices)]
-    data = Tensor(UOp.mstack(*(p.uop for p in shards)))
+    data = Tensor(UOp.mstack(*(p.contiguous().flatten().bitcast(word).to(d).clone().realize().uop for p,d in zip(pieces, devices))))
     data = ggml_data_to_tensor(data.bitcast(dtypes.uint8), prod(local), typ).reshape(local)
     weights[name] = data if packed_kernels and typ in (Q4_K, Q5_K, Q6_K, IQ4_XS) else data.realize()
   return weights
