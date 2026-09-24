@@ -227,7 +227,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
     return buf.after(*ended_stores)
 
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.ALLOC, arg=ParamArg(next(ctx), dtype, size, device=x.arg.device))
+    buf = UOp(Ops.ALLOC, src=UOp.rng_src(x.arg.device), arg=ParamArg(next(ctx), dtype, size, device=x.arg.device))
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 

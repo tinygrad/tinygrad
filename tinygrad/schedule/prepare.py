@@ -164,12 +164,14 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
-  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=UOp.rng_src(copy.device),
+            arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=UOp.rng_src(x.device),
+            arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 

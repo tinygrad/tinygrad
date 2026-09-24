@@ -37,7 +37,8 @@ class CreationMixin(DTypeMixin, MovementMixin):
     if dt in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dt}")
     new_shape = argfix(*shape)
     max_shape = to_max_shape(new_shape)
-    u = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), dt, prod(max_shape), device=canonicalize_device(device), bind_on_realize=True))
+    dev = canonicalize_device(device)
+    u = UOp(Ops.ALLOC, src=UOp.rng_src(dev), arg=ParamArg(next(UOp.unique_num), dt, prod(max_shape), device=dev, bind_on_realize=True))
     u = u.reshape(max_shape).shrink_to(new_shape)
     return cls._wrap_uop(u)
 

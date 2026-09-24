@@ -100,7 +100,7 @@ pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
   # bind ALLOCs to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, src=(), name="b"), create_new_buffer),
+  (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
@@ -245,7 +245,7 @@ def canonicalize_call_body(c:UOp):
 pm_canonicalize_alloc = PatternMatcher([
   # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc
   (UPat(Ops.CALL, name="c"), lambda c: canonicalize_call_body(c)),
-  (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
+  (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
 ])
 
 def replace_input_buffer(ctx:CallifyCtx, b:UOp):
@@ -254,7 +254,7 @@ def replace_input_buffer(ctx:CallifyCtx, b:UOp):
 
 pm_replace_buf = PatternMatcher([
   # replace GLOBAL BUFFERs with PARAMs for cache key normalization (Variables are ALU PARAMs, they don't match this)
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.BUFFER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # replace bound Variables with renamed value-stripped PARAMs for cache key normalization, so different values hit same cache
