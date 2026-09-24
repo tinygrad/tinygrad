@@ -3,7 +3,8 @@ import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
 from tinygrad.dtype import Invalid
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.codegen import to_program
 from test.helpers import assert_kernel_count, KernelCountException
 
 class TestFunction(unittest.TestCase):
@@ -570,13 +571,13 @@ class TestFunctionTuple(unittest.TestCase):
   def test_custom_kernel_program_invalids_not_captured(self):
     # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
     # still must not be captured as an input -- else it is read before the kernel writes it
-    src = "void k(float* restrict data0, float* restrict data1) { for (int i=0;i<4;i++) data0[i]=data1[i]*2.0f; }"
-    lib = Device["CPU"].compiler.compile(src)
+    renderer = Device["CPU"].renderer
     def prog(C:UOp, A:UOp) -> UOp:
-      sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-                 arg=ProgramInfo(global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1)))
+      i = UOp.range(4, 0)
+      prg = to_program(C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="k")), renderer)
+      sink = UOp.sink(C.base, A.base, arg=prg.src[0].arg)
+      # Keep the compiled kernel, but hide its stores exactly as in an opaque external PROGRAM.
+      return prg.replace(src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), *prg.src[2:]))
 
     @function(precompile=True)
     def f(a:Tensor):

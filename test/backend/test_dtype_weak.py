@@ -114,7 +114,9 @@ class TestWeakStorageBoundary(unittest.TestCase):
     edges = (big.clone(), big.sum(), big.reshape(1).max(), big.reshape(1).mean(), Tensor.stack(big, Tensor(1)).sum() - 1,
              Tensor([2**40]), big.full_like(2**40))
     for t in edges: self.assertEqual(t.item(), 2**40)
-    self.assertEqual(Tensor(UOp.variable("b", 0, 2**40).bind(2**35+3)).clone().item(), 2**35+3)
+    # Unlike int64 storage, long scalar arguments cannot be emulated; exercise this boundary on CPU.
+    bound = Tensor(UOp.variable("b", 0, 2**40).bind(2**35+3)).clone("CPU")
+    self.assertEqual((bound.dtype, bound.item()), (dtypes.int64, 2**35+3))
     self.assertEqual(Tensor([10, 20, 30])[[2**32+1]].tolist(), [0])  # a wide list index is out of range, not wrapped
     with Context(DEFAULT_INT=dtypes.int64): self.assertEqual(Tensor(2).clone().dtype, dtypes.int64)
 
