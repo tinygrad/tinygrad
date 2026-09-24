@@ -10,7 +10,7 @@ rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.ta
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
-bnxt_src = ["https://raw.githubusercontent.com/torvalds/linux/v6.18/drivers/" + s for s in
+bnxt_src = ["https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/drivers/" + s + "?h=v6.18" for s in
             ("infiniband/hw/bnxt_re/roce_hsi.h", "infiniband/hw/bnxt_re/qplib_rcfw.h", "infiniband/hw/bnxt_re/qplib_res.h",
              "net/ethernet/broadcom/bnxt/bnxt_hwrm.h")]
 ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
@@ -43,7 +43,7 @@ def load(name, files, **kwargs):
           with tarfile.open(fetch(src, gunzip=src.endswith("gz"))) as tf:
             tf.extractall(srcpath)
             if not isinstance(srcs, list): srcpath += tf.getnames()[0] # if we just have a single tarball, make this the root
-        else: fetch(src, name=srcpath + src.split('/')[-1])
+        else: fetch(src, name=srcpath + src.split('/')[-1].split('?')[0])
       files, kwargs['args'] = [str(f).format(srcpath) for f in files], [a.format(srcpath) for a in kwargs.get('args', [])]
       kwargs['anon_names'] = {k.format(srcpath):v for k,v in kwargs.get('anon_names', {}).items()}
       if (preprocess:=kwargs.pop('preprocess', None)): preprocess(srcpath)
@@ -187,7 +187,7 @@ def __getattr__(nm):
                   preprocess=_extract_deb)
     case "bnxt":
       kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
-      return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1]}" for s in bnxt_src]],
+      return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1].split('?')[0]}" for s in bnxt_src]],
                   srcs=[linux_headers_kern_deb, *bnxt_src],
                   args=["-Du8=unsigned char", "-Du32=unsigned int", "-Du64=unsigned long long", "-D__le16=unsigned short",
                         "-D__le32=unsigned int", "-D__le64=unsigned long long", "-D__be16=unsigned short", "-D__be32=unsigned int", f"-I{kh}"],
