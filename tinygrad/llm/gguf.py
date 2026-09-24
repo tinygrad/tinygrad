@@ -1,7 +1,9 @@
 import functools, io, pathlib, re, struct
 from typing import Any, Callable
+from dataclasses import dataclass
 
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
@@ -194,9 +196,14 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
-  # TODO: remove the need for copy to default device
-  tensor = tensor.to(None).realize()
+@dataclass(frozen=True)
+class GGUFTensor:
+  data: Tensor
+  shape: tuple[int, ...]
+  ggml_type: int
+
+def _gguf_parse(tensor: Tensor, device:str|None=None) -> tuple[dict, dict[str, GGUFTensor]]:
+  if device is not None: tensor = tensor.to(device).realize()
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
   magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
@@ -210,7 +217,12 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  state_dict = {}
+  for name, dims, typ, off in t_infos:
+    n = prod(dims)
+    size = n*_GGML_NATIVE[typ].itemsize if typ in _GGML_NATIVE else n//_GGML_QUANT[typ][0]*_GGML_QUANT[typ][1]
+    data, shape = tensor[data_start+off:data_start+off+size], tuple(reversed(dims))
+    state_dict[name] = GGUFTensor(data, shape, typ)
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
@@ -218,6 +230,14 @@ def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
   if kv.get('split.no', 0) != 0: raise ValueError(f"multi-part GGUF must be loaded from the first split, got split.no={kv['split.no']}")
   if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
   return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
+
+def gguf_read(fn: Tensor|str|pathlib.Path, device:str|None=None) -> tuple[dict, dict[str, GGUFTensor]]:
+  """Read metadata and raw weight views, moving payloads only when a device is specified."""
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), device)
+  if kv.get('split.count', 1) <= 1: return kv, sd
+  if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp), device)[1])
+  return kv, sd
 
 def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   """
@@ -234,8 +254,6 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
-  if kv.get('split.count', 1) <= 1: return kv, sd
-  if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
-  return kv, sd
+  # TODO: remove the need for copy to default device
+  kv, sd = gguf_read(fn, Device.DEFAULT)
+  return kv, {name: ggml_data_to_tensor(value.data, prod(value.shape), value.ggml_type).reshape(value.shape) for name,value in sd.items()}
