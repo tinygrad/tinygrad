@@ -1,14 +1,20 @@
 # uops tests that pass on NULL backend (no copyout needed)
-import math, unittest
+import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Timing, Context, cdiv, Target
-from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
+from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
+from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, AxisType, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.codegen import to_program
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.wgsl import WGSLRenderer
+from tinygrad.runtime.ops_python import PythonRenderer
+from tinygrad.uop.ops import ParamArg, PatternMatcher, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.codegen.late.coalesce import memory_coalescing
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.weak import pm_lower_weak
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
@@ -532,6 +538,82 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_expand_is_none(self): self._check(UOp.empty(1).expand(2), None)
   def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
+                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
+class TestBitcastBufferView(unittest.TestCase):
+  @Context(SPEC=2)
+  def test_render(self):
+    buf = UOp.param(0, dtypes.uint32, 4)
+    uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
+    idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
+    self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
+    Device[Device.DEFAULT].renderer.render(uops)
+
+class TestLocalAccess(unittest.TestCase):
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
+  def test_packed_smem_size(self):
+    renderer = WGSLRenderer(Target("WEBGPU", arch="shader-f16"))
+    _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
+    # a partial word still needs a whole word, so sizes that don't fill one must round up
+    for size in (16, 5):
+      for dtype in _dtypes:
+        temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
+        uops = to_uops_list([temp], ren=renderer)
+        out = renderer.render(uops)
+        # half is supported in wgsl, so it doesn't have to be packed
+        corrected_size = ceildiv(size, 4//dtype.itemsize) if dtype != dtypes.half else size
+        self.assertIn(f",{corrected_size}>;", out)
+
+class TestAssembly(unittest.TestCase):
+  def setUp(self): self.renderer = PTXRenderer(Target("CUDA", arch="sm_80"))
+
+  def test_bitshift_left(self):
+    g1 = UOp.param(0, dtypes.int32, 3)
+    out = UOp.param(1, dtypes.int32, 2)
+    c1 = UOp.const(2)
+    c2 = UOp.const(3)
+    l1 = g1.index(c1)
+    a1 = UOp(Ops.MUL, src=(l1, c1))
+    a2 = UOp(Ops.MUL, src=(l1, c2))
+    uops = to_uops_list([out.index(UOp.const(0)).store(a1), out.index(UOp.const(1)).store(a2)], ren=self.renderer)
+    self.renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHL, ops)
+    self.assertIn(Ops.MUL, ops)
+
+  @unittest.skip("this is a questionable microoptimization i won't enforce")
+  def test_mulacc_unrolled(self):
+    # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
+    # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)
+    a = Tensor.empty(1024)
+    b = Tensor.empty(1024)
+    c = (a*b).sum()
+    ast = c.schedule_linear().src[-1].src[0]
+    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UNROLL))]
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = to_program(ast, self.renderer)
+    uops = tuple(program.src[1].src)
+    self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
+
+  def test_mulacc_shl(self):
+    g1 = UOp.param(0, dtypes.int32, 2)
+    c1 = UOp.const(0)
+    c2 = UOp.const(1)
+    expr = g1.index(c1) * UOp.const(4096) + g1.index(c2)
+    uops = to_uops_list([expr], ren=self.renderer)
+    self.renderer.render(uops)
+    self.assertIn(Ops.MULACC, [x.op for x in uops])
+
+  def test_use_cmpeq(self):
+    g = UOp.param(0, dtypes.uint32, 8)
+    c = UOp.const(7)
+    comp = g.index(c).ne(c).ne(True)
+    uops = to_uops_list([comp], ren=self.renderer)
+    self.renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.CMPEQ, ops)
+    self.assertNotIn(Ops.CMPNE, ops)
 
 if __name__ == '__main__':
   unittest.main()

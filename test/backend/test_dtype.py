@@ -325,11 +325,6 @@ class TestBitCast(unittest.TestCase):
       a = Tensor(rand_for_dtype(dt1, 32).reshape(2, 2, 8), dtype=dt1)
       _test_op(lambda: a.bitcast(dt2), dt2, _to_torch_storage(a).view(_to_torch_dtype(dt2)).tolist())
 
-  def test_shape_change_bitcast_exceptions(self):
-    with self.assertRaises(RuntimeError):
-      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16).shape
-
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
     b = a.bitcast(dtypes.int32)

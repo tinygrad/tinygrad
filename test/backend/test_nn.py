@@ -7,9 +7,8 @@ from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
-from test.helpers import check_schedule
+from test.helpers import check_schedule, not_support_multi_device, needs_second_gpu, slow
 from tinygrad.engine.realize import run_linear
-from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
 @slow
 class TestNN(unittest.TestCase):
@@ -136,11 +135,6 @@ class TestNN(unittest.TestCase):
     self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=16, DIMS=[28, 33], C2=32, K=9, S=1, P='same')
   def test_conv2d_same_padding_with_dilation(self):
     self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 31], C2=32, K=(3,5), S=1, P='same', D=(2,3))
-
-  def test_conv2d_same_padding_invalid_stride(self):
-    self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=2, padding='same')
-  def test_conv2d_same_padding_invalid_padding_str(self):
-    self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=1, padding='not_same')
 
   @unittest.skip("Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
@@ -449,15 +443,6 @@ class TestNN(unittest.TestCase):
     with Context(NOOPT=1):
       self.test_embedding_one_kernel(ops=0, kcount=2)
 
-  def test_embedding_shape(self):
-    vocab_size, embed_size = 10, 16
-    layer = Embedding(vocab_size, embed_size)
-    for rank in range(5):
-      shp = (1,) * rank
-      a = Tensor([3]).reshape(shp)
-      result = layer(a)
-      self.assertEqual(result.shape, shp + (embed_size,))
-
   def test_embedding_regression(self):
     # used to fail bounds check
     embedding = Embedding(100, 1024)
@@ -574,13 +559,6 @@ class TestNN(unittest.TestCase):
     self.assertEqual(layer.bias.uop.axis, 0)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
-
-  def test_load_state_dict_shape_mismatch(self):
-    d1, d2 = 2, 4
-    layer = Linear(d1, d1, bias=False)
-    state_dict = {'weight': Tensor.randn(d2, d2)}
-    with self.assertRaisesRegex(ValueError, r'Shape mismatch in layer `weight`: Expected shape \(2, 2\), but found \(4, 4\) in state dict.'):
-      load_state_dict(layer, state_dict)
 
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)

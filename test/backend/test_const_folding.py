@@ -1,37 +1,11 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.dtype import DTYPES_DICT
-from tinygrad.uop.ops import Ops, UOp, GroupOp
-from tinygrad.codegen.decomp.op import threefry2x32
+from tinygrad.uop.ops import Ops
 import numpy as np
 from test.helpers import not_support_multi_device
-
-def _check_ast_count(desired_count:int, t:Tensor):
-  # NOTE: this has side effect because everything can be scheduled only once
-  schedule = t.schedule_linear()
-  asts = [s for s in schedule.src if s.src[0].op is Ops.SINK]
-  len(asts)
-  # NOT SUPPORTED ANYMORE
-  #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
+from test.null.test_const_folding import _check_ast_count
 
 class TestMovedConstFolding(unittest.TestCase):
-  def test_contiguous_deviceless_const(self):
-    t = Tensor(UOp.const(2.0, dtypes.float)).contiguous()
-    self.assertIs(t.uop, UOp.const(2.0, dtypes.float))
-    self.assertIsNone(t.uop.device)
-
-  def test_add_shrunk_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
-
-  def test_add_padded_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
-
-  def test_mul_shrunk_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(6).shrink(((1, 5),)))
-
-  def test_add_padded_one(self):
-    _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
-
   def test_copy_padded_const(self):
     schedule = Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
     assert not any(si.src[0].op is Ops.STORE for si in schedule.src), "const copy should be folded"
@@ -109,13 +83,6 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor(4).max())
     np.testing.assert_equal(Tensor(4).max().numpy(), 4)
 
-  def test_sum_output_dtype(self):
-    # sum output dtype can be different from input
-    for dt in DTYPES_DICT.values():
-      if dt in Device[Device.DEFAULT].renderer.supported_dtypes():
-        t = Tensor.ones(16, dtype=dt).reshape(4, 4)
-        assert t.sum().dtype == t.contiguous().sum().dtype
-
 @unittest.skipIf(not_support_multi_device() or True, "no multi, RANGEIFY doesn't support multi const folding")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
@@ -165,12 +132,6 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
     np.testing.assert_equal((t ** one).numpy(), np.arange(16))
     np.testing.assert_equal((one ** t).numpy(), [1] * 16)
-
-class TestThreefryConstFolding(unittest.TestCase):
-  def test_threefry(self):
-    # THREEFRY(const,const) folds to a const once decomposed
-    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64)).simplify()
-    self.assertEqual([u.op for u in x.toposort() if u.op in GroupOp.ALU], [])
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang

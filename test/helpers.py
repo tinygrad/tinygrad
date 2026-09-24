@@ -1,4 +1,4 @@
-import os, time, struct, functools, unittest
+import os, sys, time, struct, functools, unittest
 from dataclasses import replace
 from typing import Any, Callable
 import numpy as np
@@ -87,6 +87,33 @@ def assert_jit_cache_len(fxn, expected_len):
     if count != expected_len: raise KernelCountException(expected_len, count)
     return
   if len(linear.src) != expected_len: raise KernelCountException(expected_len, len(linear.src))
+
+def prepare_test_op(low, high, shps, vals, forward_only=False):
+  import torch
+  if shps is None:
+    ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
+  else:
+    np.random.seed(0)
+    np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtypes.default_float)) for size in shps]
+    ts = [torch.tensor(data, requires_grad=(not forward_only)) for data in np_data]
+  for i in range(len(ts)):
+    # NOTE: torch default int64 for python ints input
+    if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
+  tst = [Tensor(x.detach().cpu().numpy()) for x in ts]
+  return ts, tst
+
+class TensorTestCase(unittest.TestCase):
+  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn=None, expected=None, forward_only=False, exact=False, vals=None, low=-1.5, high=1.5):
+    if DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV": self.skipTest('helper_test_exception fails in CI CUDA')
+    ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
+    if tinygrad_fxn is None:
+      tinygrad_fxn = torch_fxn
+    with self.assertRaises(expected) as torch_cm:
+      torch_fxn(*ts)
+    with self.assertRaises(expected) as tinygrad_cm:
+      tinygrad_fxn(*tst)
+    if exact: self.assertEqual(str(torch_cm.exception), str(tinygrad_cm.exception))
+    if sys.stdout.isatty(): print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
 
 def min_normal(dt:DType) -> float: return 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
 

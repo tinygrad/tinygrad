@@ -203,10 +203,6 @@ class TestGGUF(unittest.TestCase):
     # TODO: replace 41 with GGMLQuantizationType.Q1_0.value on next gguf-py release
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 128, 41).numpy().flatten(), expected)
 
-  def test_expected_failure_unknown_type(self):
-    with self.assertRaises(ValueError):
-      ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
-
   @staticmethod
   def _build_gguf(tensors, kvs):
     # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]

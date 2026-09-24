@@ -2,12 +2,6 @@ import unittest, math
 
 from tinygrad import dtypes, Tensor, Device
 from tinygrad.helpers import getenv, DEV, Context
-from tinygrad.codegen import to_program
-
-from tinygrad.uop.ops import Ops
-from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
 from test.helpers import not_support_multi_device, needs_second_gpu
 from test.unit.test_randomness import equal_distribution, normal_test
 
@@ -68,17 +62,6 @@ class TestRandomness(unittest.TestCase):
     r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
-
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 callee saved registers have ulong dtype")
-  def test_threefry_doesnt_use_long(self):
-    linear = Tensor.rand(20).schedule_linear()
-    for call in linear.src:
-      ast = call.src[0]
-      if ast.op is Ops.SINK:
-        prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
-        for u in tuple(prg.src[1].src):
-          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.src[0].arg.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
@@ -171,63 +154,6 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 1].size == 0
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
-
-  def test_rand_like(self):
-    empty = Tensor.empty((80, 44))
-    rand = Tensor.rand_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
-
-  def test_randn_like(self):
-    empty = Tensor.empty((80, 44))
-    rand = Tensor.randn_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
-
-  def test_rand_like_zero_shape(self):
-    empty = Tensor.empty(0, 20)
-    rand = Tensor.rand_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
-
-  def test_rand_like_more_dims(self):
-    empty = Tensor.empty((1, 2, 3, 4, 5, 6))
-    rand = Tensor.rand_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
-
-  def test_rand_like_dtype(self):
-    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
-    rand = Tensor.rand_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
-
-    empty = Tensor.empty((80, 44))
-    rand = Tensor.rand_like(empty, dtype=dtypes.float16)
-    assert rand.shape == empty.shape
-    assert rand.dtype == dtypes.float16
-    assert rand.device == empty.device
-
-  def test_randn_like_dtype(self):
-    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
-    rand = Tensor.randn_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
-
-    empty = Tensor.empty((80, 44))
-    rand = Tensor.randn_like(empty, dtype=dtypes.float16)
-    assert rand.shape == empty.shape
-    assert rand.dtype == dtypes.float16
-    assert rand.device == empty.device
-
-  def test_randn_device(self):
-    self.assertEqual(Tensor.randn(3,3,device="CPU").device, "CPU")
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   def test_randn_finite(self, default_float):
