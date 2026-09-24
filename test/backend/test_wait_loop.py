@@ -1,15 +1,14 @@
-import unittest, threading
-from tinygrad import Tensor, UOp
+import unittest, threading, functools
+from tinygrad import Tensor, UOp, Context
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import Ops, KernelInfo
+from tinygrad.renderer.isa.x86 import X86Renderer
 
-def wait_loop_kernel(C:UOp) -> UOp:
-  N = 10
-
-  # a RANGE with no src is a bound-less loop header: a jump target with no induction variable.
-  # the compare and conditional backedge are expanded by the renderers from the loop RANGE/END
+def wait_loop_kernel(C:UOp, N=10) -> UOp:
+  # a void RANGE is a bound-less loop header: a jump target with no induction variable.
+  # the compare and conditional backedge are expanded by the renderers from RANGE/BACKEDGE
   l = UOp.loop(0)
 
   i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
@@ -20,10 +19,10 @@ def wait_loop_kernel(C:UOp) -> UOp:
   # i + 1, read loop-carried through after(l)
   inc = i.after(l)[0].load() + 1
 
-  # i = inc; END(store, l, cond): conditional backedge, loop again while inc < N (do-while)
+  # i = inc; BACKEDGE(store, l, cond): loop again while inc < N (do-while)
   # NOTE: the cond uses the computed value, not a reload of the register
   st = i[0].store(inc)
-  i = i.after(st.end(l, inc < N))
+  i = i.after(st.backedge(l, inc < N))
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="wait_loop"))
 
@@ -37,16 +36,29 @@ def nested_loop_kernel(C:UOp) -> UOp:
   inc = i.after(l, r)[0].load() + 1
   st = i[0].store(inc)
 
-  lend = st.end(l, inc < (r.cast(dtypes.int)+1)*3)
+  lend = st.backedge(l, inc < (r.cast(dtypes.int)+1)*3)
   i = i.after(lend.end(r))
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="nested_loop", opts_to_apply=()))
+
+def pressure_loop_kernel(C:UOp, n=13) -> UOp:
+  vs = [C[j+1].load() for j in range(n)]
+  l = UOp.loop(0)
+
+  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = i.after(i[0].store(0))
+
+  inc = i.after(l)[0].load() + 1
+  st = i[0].store(inc)
+  i = i.after(st.backedge(l, inc < sum(v & inc for v in vs)))
+
+  return C[0].store(i[0].load()).sink(arg=KernelInfo(name="pressure_loop", opts_to_apply=()))
 
 def wait_ext_kernel() -> UOp:
   sig = UOp.param(0, dtypes.int, 1, volatile=True)
   l = UOp.loop(0)
   v = sig.after(l)[0].load()
-  e = v.end(l, v < 1)
+  e = v.backedge(l, v < 1)
   return e.sink(arg=KernelInfo(name="wait_ext"))
 
 def two_loops_kernel(C:UOp) -> UOp:
@@ -57,10 +69,10 @@ def two_loops_kernel(C:UOp) -> UOp:
   i = i.after(i[0].store(0))
 
   inc1 = i.after(l1)[0].load() + 1
-  i = i.after(i[0].store(inc1).end(l1, inc1 < 10))
+  i = i.after(i[0].store(inc1).backedge(l1, inc1 < 10))
 
   inc2 = i.after(l2)[0].load() + 1
-  i = i.after(i[0].store(inc2).end(l2, inc2 < 25))
+  i = i.after(i[0].store(inc2).backedge(l2, inc2 < 25))
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="two_loops", opts_to_apply=()))
 
@@ -74,10 +86,10 @@ def loop_in_loop_kernel(C:UOp) -> UOp:
   inc = i.after(l1, l2)[0].load() + 1
   st = i[0].store(inc)
 
-  # the outer END closes the inner END, and its cond reloads the register after the inner loop (in scope at the outer level)
-  e2 = st.end(l2, inc % 4 != 0)
+  # the outer BACKEDGE closes the inner loop, and its cond reloads the register after the inner loop
+  e2 = st.backedge(l2, inc % 4 != 0)
   oc = i.after(e2)[0].load()
-  i = i.after(e2.end(l1, oc < 12))
+  i = i.after(e2.backedge(l1, oc < 12))
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
 
@@ -100,6 +112,25 @@ class TestWaitLoop(unittest.TestCase):
     c.realize()
     self.assertEqual(c.item(), 25)
 
+  # TODO: x86's lower_loop builds an Ops.IF node after regalloc, which fails spec_full
+  @(unittest.expectedFailure if isinstance(Device[Device.DEFAULT].renderer, X86Renderer) else lambda f: f)
+  def test_wait_loop_spec(self):
+    c = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=functools.partial(wait_loop_kernel, N=7))[0]
+    with Context(SPEC=2): c.realize()
+    self.assertEqual(c.item(), 7)
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "TODO: do-while loop under register pressure segfaults on x86")
+  def test_loop_carried_registers(self):
+    # more loads live across the backedge than any register file (x86 15 gprs, arm64 31, sass 255, rdna3 256 vgprs)
+    c = Tensor.custom_kernel(Tensor.ones(301, dtype=dtypes.int), fxn=functools.partial(pressure_loop_kernel, n=300))[0]
+    self.assertEqual(c[0].item(), 2)
+
+  def test_register_pressure_loop(self):
+    c = Tensor.zeros(16, dtype=dtypes.int).contiguous()
+    c = Tensor.custom_kernel(c, fxn=pressure_loop_kernel)[0]
+    c.realize()
+    self.assertEqual(c[0].item(), 1)
+
   def test_loop_in_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
     c = Tensor.custom_kernel(c, fxn=loop_in_loop_kernel)[0]
@@ -110,7 +141,7 @@ class TestWaitLoop(unittest.TestCase):
 class TestVolatileLoops(unittest.TestCase):
   def test_async_wait_ext(self):
     sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    try: sig_view = sig_buf.as_memoryview(force_zero_copy=True).cast('i')
+    try: sig_view = sig_buf.host.view(fmt='i')
     except (AssertionError, NotImplementedError): self.skipTest(f"{Device.DEFAULT} does not support host-visible buffers")
     sig_view[0] = 0
 

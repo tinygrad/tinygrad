@@ -1,14 +1,15 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import GlobalCounters
+from tinygrad.helpers import GlobalCounters, Target
 from tinygrad.engine.realize import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import Ops, UOp, AxisType
+from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from test.helpers import replace_opts
 
 def flops_mem(uops, ignore_indexing=False):
@@ -101,6 +102,12 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
 class TestUOpsStats(unittest.TestCase):
+  def test_isa_store_estimate(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    prg = to_program(buf.index(1).store(5).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
+    self.assertEqual(prg.src[0].arg.estimates.mem, 4)
+    self.assertEqual(prg.src[0].arg.estimates.lds, 4)
+
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
@@ -178,7 +185,7 @@ class TestStatsOptimized(unittest.TestCase):
 
   def check_gemm(self, p:UOp, extra_flops=0, half=False):
     est = p.src[0].arg.estimates
-    print(p.arg.name, est.ops, est.mem, est.lds)
+    print(p.src[0].arg.name, est.ops, est.mem, est.lds)
     self.assertEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
     self.assertEqual(est.mem, 3*N*N*(2 if half else 4)) # 3 NxN mats with floats
 
@@ -232,7 +239,7 @@ class TestStatsOptimized(unittest.TestCase):
 
   def test_gemm_group(self):
     try:
-      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE))]), renderer=Device[Device.DEFAULT].renderer)
+      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.SPLIT, 2, (4, AxisType.LOCAL))]), renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     SZ = N*N*4
@@ -243,7 +250,7 @@ class TestStatsOptimized(unittest.TestCase):
   def test_reduce(self):
     p = to_program(replace_opts(self.ast_reduce, []), renderer=Device[Device.DEFAULT].renderer)
     est = p.src[0].arg.estimates
-    print(p.arg.name, est.ops, est.mem, est.lds)
+    print(p.src[0].arg.name, est.ops, est.mem, est.lds)
     self.assertEqual(est.ops, N*N)
     self.assertEqual(est.mem, N*N*4 + 4)
 

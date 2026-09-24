@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import ctypes, pathlib, argparse, pickle, dataclasses, threading, itertools
-from typing import Any, Generator
+from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.runtime.autogen import rocprof
@@ -37,7 +37,8 @@ class WaveExec(WaveSlot):
     insts_array = (struct*(len(self.insts)//sz)).from_buffer(self.insts)
     for inst in insts_array:
       inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst.category)
-      yield InstExec(inst_typ or "UNKNOWN", inst.pc.address, inst.stall, inst.duration, inst.time)
+      yield InstExec(inst_typ.replace("ROCPROFILER_THREAD_TRACE_DECODER_", "") if inst_typ else "UNKNOWN",
+                     inst.pc.address, inst.stall, inst.duration, inst.time)
 
 @dataclasses.dataclass(frozen=True)
 class OccEvent(WaveSlot):
@@ -127,31 +128,6 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[int, dict[int, Inst]]) 
     raise exc
   return ROCParseCtx
 
-def unpack_insts(w:WaveExec, pc_to_inst:dict[int, Inst]) -> dict:
-  columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
-  inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
-  # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
-  #           The idle time can be caused by:
-  #             * Arbiter loss
-  #             * Source or destination register dependency
-  #             * Instruction cache miss
-  # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
-  # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
-  prev_instr = w.begin_time
-  start_pc = None
-  rows:dict[int, dict[str, Any]] = {}
-  for pc, inst in pc_to_inst.items():
-    if start_pc is None: start_pc = pc
-    rows[pc] = {"pc":pc-start_pc, "inst":str(inst), "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
-  for e in w.unpack_insts():
-    if not (row:=rows[e.pc]).get("type"): row["type"] = str(e.typ).split("_")[-1]
-    row["hit_count"] += 1
-    row["dur"] += e.dur
-    row["stall"] += e.stall
-    row["hits"]["rows"].append((row["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
-    prev_instr = max(prev_instr, e.time + e.dur)
-  return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns}
-
 def main() -> None:
   from tabulate import tabulate
   from tinygrad.viz.serve import amd_decode
@@ -185,8 +161,8 @@ def main() -> None:
   for w in itertools.islice(waves, args.n):
     if w.wave_loc not in run_numbers: run_numbers[w.wave_loc] = itertools.count()
     print(f"{w.wave_loc} N:{next(run_numbers[w.wave_loc])} Total Cycles:{w.end_time-w.begin_time}")
-    table = unpack_insts(w, pc_to_inst)
-    print(tabulate([r[:len(table["cols"])] for r in table["rows"]], headers=table["cols"], tablefmt="github"))
+    rows = [(e.time, f"0x{e.pc:x}", pc_to_inst[e.pc], e.typ, e.dur, e.stall) for e in w.unpack_insts()]
+    print(tabulate(rows, headers=("Timestamp", "PC", "Instruction", "Type", "Duration", "Stall"), tablefmt="github"))
 
 if __name__ == "__main__":
   main()

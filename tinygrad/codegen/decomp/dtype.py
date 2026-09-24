@@ -106,8 +106,7 @@ def f2f(v, fr:DType, to:DType, sat=True):
     if fr in dtypes.fp8_fnuz:
       fnuz_nan = sign.ne(0) & nosign.eq(0)
       qnan = shl(shl(1, te) - 1, tm) | shl(1, tm - 1)
-      # the fnuz bias can exceed the target's: exp in [1, fb-tb] is normal in fr but lands below to's normal range, so it flushes like a denormal
-      return fnuz_nan.where(qnan, sign | (exp < max(fb - tb, 0) + 1).where(0, norm)).bitcast(to)
+      return fnuz_nan.where(qnan, sign | exp.eq(0).where(0, norm)).bitcast(to)
     # fp8e4m3 has only one nan
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
@@ -194,7 +193,7 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
    f2f(x.bitcast(f2f_dt[ctx[0]]), ctx[0], ctx[1]) if bc.dtype == ctx[0] else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
    f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype == ctx[0] else None),
-  (UPat(GroupOp.All-GroupOp.Defines-{Ops.CAST, Ops.BITCAST, Ops.CONST}, dtypes.floats, name="x"), lambda ctx,x:
+  (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, dtypes.floats, name="x"), lambda ctx,x:
    UOp(x.op, src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src), arg=x.arg, tag=x.tag) if x.dtype == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
    st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
@@ -205,7 +204,7 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
   def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
   for fr in sorted(filter(_should_emulate, ctx[0])):
-    to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+    to = dtypes.int if fr == dtypes.long else dtypes.float
     if DEBUG >= 2: print(f"emulating {fr} as {to}")
     pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
     sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx={} if pm is pm_long_decomp else (fr, to), bottom_up=True)

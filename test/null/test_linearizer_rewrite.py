@@ -39,7 +39,7 @@ class TestLinearizerRewrite(unittest.TestCase):
     #assert prg.src[0].arg.applied_opts != (), f"expected opts to apply, got {prg.src[0].arg.applied_opts}"
 
     prg = to_program(ast.replace(arg=KernelInfo(name="custom")), Device["CPU"].renderer)
-    self.assertEqual(prg.arg.name, "custom")
+    self.assertEqual(prg.src[0].arg.name, "custom")
 
 if __name__ == '__main__':
   unittest.main()

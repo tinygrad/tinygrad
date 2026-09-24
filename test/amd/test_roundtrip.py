@@ -58,20 +58,20 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.uop.ops import Ops
-  from tinygrad.engine.realize import compile_linear, resolve_params, unwrap_multi
+  from tinygrad.engine.realize import lower_and_compile, resolve_params, unwrap_multi
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
-  linear = compile_linear(out.schedule_linear())
+  linear = lower_and_compile(out.schedule_linear())
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
-  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
+  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from bulk STORE
 
   for call in linear.src:
     ast = call.src[0]
     for bufs, _ in unwrap_multi(call, resolve_params(call, ())):
-      if ast.op is Ops.COPY:
-        # Handle COPY: extract source data to initialize destination buffer
+      if ast.op is Ops.STORE:
+        # Handle bulk STORE: extract source data to initialize destination buffer
         if len(bufs) >= 2:
           dst_buf, src_buf = bufs[0], bufs[1]
           dst_id = id(dst_buf)
@@ -79,7 +79,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
             buf_pool[dst_id] = dst_buf.nbytes
           # Get source data if it's from numpy/CPU
           if hasattr(src_buf, 'base') and src_buf.base is not None and src_buf.base.is_allocated():
-            src_data = bytes(src_buf.base._buf)
+            src_data = bytes(src_buf.base.as_memoryview())
             buf_data[dst_id] = src_data
       elif ast.op is Ops.PROGRAM:
         info = ast.arg

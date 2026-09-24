@@ -192,7 +192,8 @@ class TestViz(unittest.TestCase):
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
-      src = [Tensor.empty(1).uop for _ in range(10)]
+      # NOTE: can't use BUFFER uops as srcs here, reconstructed traces don't retain their Buffers so identity with the live uops is lost
+      src = [UOp.const(i, dtypes.int) for i in range(10)]
       a = UOp(Ops.PYLITERAL, src=tuple(src), arg=arg)
       exec_rewrite(a, [PatternMatcher([])])
     a2 = next(viz.get_details(0, 0))["graph"][id(a)]
@@ -227,7 +228,7 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype))])
     with save_viz() as viz:
       inner = UOp.const(3)
-      call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
+      call = UOp.sink(inner).call()
       graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
@@ -453,14 +454,14 @@ class TestVizIntegration(unittest.TestCase):
   def test_jit(self):
     with save_viz():
       @TinyJit
-      def f(a, b, c): return (a+b).contiguous().mul(3), c.add(1).contiguous().assign(a.to(c.device)), b.assign(c.to(b.device))
+      def f(a, b, c): return (a+b).contiguous().mul(3), c.add(a.to(c.device)).contiguous(), b.assign(c.to(b.device))
       a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
       for _ in range(3): Tensor.realize(*f(a, b, c))
     out = load_profile(cpu_events)
     self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
-    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 3)
     for graph in out["layout"]["NULL Graph"]["events"]:
       graph_st, graph_et = graph["st"], graph["st"]+graph["dur"]
       for k in ["NULL", "NULL:1", "NULL:SDMA:0", "NULL:1:SDMA:0"]:
@@ -499,19 +500,18 @@ class TestVizIntegration(unittest.TestCase):
 
   def test_view_source_alt(self):
     src = "void E_3(float* data0_3) {}"
-    binary = Device["CPU"].renderer.compiler.compile(src)
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
-                                   UOp(Ops.BINARY, arg=binary)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
-    codegen_idx = len(lst)-1
+    # the codegen item is not the last one: the hcq compile and link groups come after it
+    codegen_idx = next((i for i,it in enumerate(lst) if any(s["name"] == "View Source" for s in it["steps"])), None)
+    assert codegen_idx is not None, "must have source rendering in list"
     steps = lst[codegen_idx]["steps"]
-    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
-    assert src_idx is not None, "must have source rendering in list"
+    src_idx = next(i for i,s in enumerate(steps) if s["name"] == "View Source")
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertEqual(src, src_render)
 
@@ -531,6 +531,19 @@ class TestVizIntegration(unittest.TestCase):
     events = [e for e in profile["layout"]["NULL"]["events"] if e["name"] == kernel_name]
     self.assertEqual({e["ref"] for e in events}, kernels)
 
+  @needs_tracked_pm
+  def test_index_label(self):
+    with save_viz() as viz:
+      vals = Tensor.empty(16, device="NULL")
+      idxs = Tensor.empty(4, device="NULL", dtype=dtypes.uint)
+      vals[idxs % 16].realize()
+    labels:list[str] = []
+    for i in range(len(viz.list_items())):
+      for j in range(len(viz.data.trace.rewrites[i])):
+        for u in (step:=next(viz.get_details(i, j)))["_sink"].toposort():
+          if u.op is Ops.INDEX: labels.append(step["graph"][id(u)]["label"])
+    for label in labels: self.assertNotIn("UOp(", label)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
@@ -542,7 +555,7 @@ class TestVizProfiler(unittest.TestCase):
     with save_viz():
       a = Tensor.ones(1, device="NULL").contiguous().realize()
       a.to("NULL:1").realize()
-    range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
+    range_events = flatten(e.ents for e in cpu_events if isinstance(e, ProfileGraphEvent))
     compute_events = [e for e in range_events if e.device == "NULL"]
     copy_events = [e for e in range_events if e.device.endswith(":SDMA:0")]
     self.assertGreater(len(compute_events), 0, "expected compute events on base device")
@@ -729,7 +742,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
 def _alloc(b:int):
-  a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
+  a = Tensor.empty(b, device="NULL", dtype=dtypes.char).realize()
   a.uop.buffer.allocate()
   return a
 
@@ -834,7 +847,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 @needs_tracked_pm
 class TestCfg(unittest.TestCase):
-  def get_cfg(self, name:str, k:Kernel):
+  def get_cfg(self, name:str, k:Kernel, target:str="gfx1100"):
     insts = k.finalize()
     def fxn(out:UOp) -> UOp:
       lidx = UOp.special(1, "lidx0")
@@ -842,7 +855,7 @@ class TestCfg(unittest.TestCase):
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     with save_viz() as viz:
-      with Context(DEV="NULL::gfx1100"):
+      with Context(DEV=f"NULL::{target}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
         _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
@@ -1013,19 +1026,34 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
 
+  def test_agpr(self):
+    from tinygrad.renderer.amd.dsl import v
+    from tinygrad.runtime.autogen.amd.cdna.ins import v_accvgpr_read, s_endpgm, v_mfma_scale_f32_16x16x128_f8f6f4
+    k = Kernel()
+    k.emit(v_accvgpr_read(v[0], v[0]))
+    k.emit(v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[4:7], v[8:11], v[0:3], neg=0, neg_hi=0, opsel=0, opsel_hi=0, cbsz=4, acc_cd=1, acc=0,
+                                             blgp=4, scale_src0=v[12].offset, scale_src1=v[13].offset))
+    k.emit(s_endpgm())
+    ret = self.get_cfg("agpr", k, target="gfx950")
+    read_tok, mfma_tok, *_ = ret["data"]["pc_tokens"].values()
+    self.assertEqual([t["st"] for t in read_tok[1:3]], ["v0", "a0"])
+    self.assertEqual([t["st"] for t in mfma_tok[1:5]], ["a[0:3]", "v[4:7]", "v[8:11]", "a[0:3]"])
+    self.assertTrue(set(read_tok[1]["keys"]).isdisjoint(read_tok[2]["keys"]))
+
 # launch viz cli without subprocess
-def run_cli(*cli_args) -> list[dict]:
+def run_cli(*cli_args, json_fmt=True) -> list[dict]:
   from tinygrad.viz.cli import main, get_arg_parser
-  args = get_arg_parser().parse_args(cli_args+("--json",))
+  args = get_arg_parser().parse_args(cli_args+(("--json",) if json_fmt else ()))
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
-  return [json.loads(line) for line in buf.getvalue().strip().splitlines()]
+  stdout = buf.getvalue().strip()
+  return [json.loads(line) for line in stdout.splitlines()] if json_fmt else [{"out":stdout}]
 
 @contextlib.contextmanager
-def write_files(viz) -> list[str]:
+def write_files(rewrites=None, profile=cpu_events) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
-    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-    (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps((rewrites.data if rewrites is not None else VizData()).trace))
+    (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(profile))
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
@@ -1070,10 +1098,11 @@ class TestCLI(unittest.TestCase):
       out = run_cli(*files, "-s", "NULL")
       aggregate = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(out), 3*2)
-    # flops increases as N gets larger
+    # Operation count increases with N; FLOPS is a rate and also depends on the measured duration.
     gflops = [row["fmt"]["FLOPS"] for row in out]
-    self.assertGreater(gflops[4], gflops[2])
-    self.assertGreater(gflops[5], gflops[3])
+    flops = [rate * row["dur_ms"] * 1e-3 for rate, row in zip(gflops, out)]
+    self.assertGreater(flops[4], flops[2])
+    self.assertGreater(flops[5], flops[3])
     # aggregate flops
     self.assertEqual(len(aggregate), 2)
     agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]

@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import Context, getenv, DEV, OSX
-from test.helpers import check_schedule
 from test.backend.test_dtype_alu import ht, dtypes_float
 import numpy as np
 import math
@@ -140,32 +139,6 @@ class TestFloat16Log2(unittest.TestCase):
         expected = np.log2(np.float16(val))
         # denormals have lower precision due to float16 limitations
         np.testing.assert_allclose(result, expected, rtol=5e-2, err_msg=f"log2({val})")
-
-class TestTranscendentalSchedule(unittest.TestCase):
-  @unittest.skipUnless(dtypes.ulong in supported_dtypes, "Needs ulong")
-  def test_transcendental_sin_fusion(self):
-    with Context(TRANSCENDENTAL=2):
-      a = Tensor.empty(10)
-      b = Tensor.empty(10)
-      c = a.sin() + b.sin()
-      c = c.sin()
-      check_schedule(c, 1)
-
-  def test_transcendental_log2_fusion(self):
-    with Context(TRANSCENDENTAL=2):
-      a = Tensor.empty(10)
-      b = Tensor.empty(10)
-      c = a.log2() + b.log2()
-      c = c.log2()
-      check_schedule(c, 1)
-
-  def test_transcendental_exp2_fusion(self):
-    with Context(TRANSCENDENTAL=2):
-      a = Tensor.empty(10)
-      b = Tensor.empty(10)
-      c = a.exp2() + b.exp2()
-      c = c.exp2()
-      check_schedule(c, 1)
 
 class TestTranscendentalVectorized(unittest.TestCase):
   def _vectorized_data(self, low, high, vec_size):

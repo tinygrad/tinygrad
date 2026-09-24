@@ -16,14 +16,14 @@ class Ops(FastEnum):
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
-  # BUFFER allocates global/local/register storage depending on its addrspace
-  BUFFER = auto()
+  # BUFFER references bound storage; ALLOC declares unbound global storage
+  BUFFER = auto(); ALLOC = auto()
 
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
-  # CALL is a kernel invocation; calls with RETURNED inputs are value-producing (and gradient-able), the rest are opaque
+  # CALL is a kernel invocation; value-producing calls write to ALLOC arguments
   PARAM = auto(); CALL = auto()
 
   # renderer
@@ -36,9 +36,6 @@ class Ops(FastEnum):
 
   # vector creation / item selection
   STACK = auto()
-
-  # RETURNED is a placeholder for a buffer a call writes and returns: it's an input to the call and you AFTER on it
-  RETURNED = auto()
 
   # hcq specific
   GETADDR = auto()
@@ -74,6 +71,7 @@ class Ops(FastEnum):
 
   # control flow ops
   BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto()
+  BACKEDGE = auto()  # (body, unbounded RANGE, condition): repeat while condition is true
 
   # const.
   CONST = auto()
@@ -87,7 +85,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # ops that adjust the behavior of the scheduler
-  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
+  CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
   STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
@@ -114,7 +112,7 @@ class GroupOp:
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
-  Defines = {Ops.PARAM, Ops.BUFFER}
+  Defines = {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}

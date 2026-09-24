@@ -33,7 +33,8 @@ def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
 
 renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
-  (UPat(Ops.BUFFER, name="x"), lambda x: x.arg.name if isinstance(x.arg, ParamArg) and x.arg.name is not None else f"b{x.arg.slot}"),
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
+   x.arg.name if isinstance(x.arg, ParamArg) and x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
   (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
@@ -52,6 +53,9 @@ renderer = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx, x)})"),
   (UPat(set(syms.keys()), name="x"), lambda ctx,x: strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")),
   (UPat((Ops.INDEX, Ops.STAGE), name="x"), lambda x, ctx: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx"),)), lambda ctx,idx: f"{ctx[idx.src[0]]}{ctx[idx]}"),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx"), UPat(name="alt"), UPat(name="gate"))),
+   lambda ctx,idx,alt,gate: f"({ctx[idx.src[0]]}{ctx[idx]} if {ctx[gate]} else {ctx[alt]})"),
   (UPat(Ops.STACK, name="x"), lambda ctx,x: f"{{{','.join([ctx[y] for y in x.src])}}}"),
   (UPat(GroupOp.All, name="x"), lambda x: str(x)),
 ])
@@ -78,8 +82,8 @@ def render_marg(ctx,x:UOp):
   if x.op in {Ops.PAD, Ops.SHRINK}: pieces = [f"({marg_str(ctx, a[0])}, {marg_str(ctx, a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
-sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
-         Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.DETACH}
+sugar = {Ops.SINK, Ops.END, Ops.BACKEDGE, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
+         Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
@@ -106,11 +110,6 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CDIV, Ops.CMOD}, name="x"), lambda ctx,x:
     strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")
     if x.src[0]._broadcasted(x.src[1]) == x.src else f"{ctx[x.src[0]]}.alu({x.op}, {ctx[x.src[1]]})"),
-  # `.contiguous` is a no-op for weak dtypes, CONTIGUOUS, deviceless or buffer-backed inputs:
-  # the sugar would change the graph for those, so render them via .alu() instead
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x:
-   f"{ctx[x.src[0]]}.alu(Ops.CONTIGUOUS)" if x.src[0].dtype in dtypes.weaks or x.src[0].op is Ops.CONTIGUOUS
-   or x.src[0].device is None or x.src[0].has_buffer_identity() else None),
   (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join(([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
   (UPat(sugar, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}("+', '.join([ctx[y] for y in x.src[1:]] + \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
@@ -144,8 +143,8 @@ def pyrender(ast:UOp) -> str:
 
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST}
-  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.STACK,
-                     Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END}
+  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.STACK,
+                     Ops.BUFFER, Ops.ALLOC, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END, Ops.BACKEDGE}
 
   to_render: set[UOp] = {ast}
   for u in lst:
@@ -153,7 +152,10 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op is Ops.REDUCE: to_render.add(u.src[0])
-    if u.op is Ops.CALL and u.src[0].dtype is dtypes.void: raise NotImplementedError("call can't be pyrendered")
+    if u.op is Ops.CALL and u.body.dtype is dtypes.void and u.body.op is not Ops.CUSTOM_FUNCTION: # a call into C renders, its dtype rides in the arg
+      raise NotImplementedError("call can't be pyrendered")
+    # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
+    if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue

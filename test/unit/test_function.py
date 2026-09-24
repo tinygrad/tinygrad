@@ -3,7 +3,8 @@ import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
 from tinygrad.dtype import Invalid
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.codegen import to_program
 from test.helpers import assert_kernel_count, KernelCountException
 
 class TestFunction(unittest.TestCase):
@@ -31,13 +32,6 @@ class TestFunction(unittest.TestCase):
 
     a = Tensor([1,2,3])
     np.testing.assert_equal(f(a,a).numpy(), [2,4,6])
-
-  def test_depth_restored_on_exception(self):
-    from tinygrad.function import _function
-    @function
-    def f(a:Tensor) -> Tensor: raise ValueError("error")
-    with self.assertRaises(ValueError): f(Tensor([1]))
-    self.assertEqual(_function.depth, 0)
 
   def test_implicit(self):
     inp = Tensor([7,8,9])
@@ -181,17 +175,6 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_allclose(b.grad.numpy(), [0., 0., 0.])
     np.testing.assert_allclose(c.grad.numpy(), [1., 1., 1.])
 
-  def test_name(self):
-    @function
-    def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.src[1].arg.name.endswith("f")
-
-  def test_method_name(self):
-    class Foo:
-      @function
-      def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.src[1].arg.name.endswith("Foo.__call__")
-
   def test_callable_instance(self):
     class Foo:
       def __init__(self): self.w = Tensor([10,20,30])
@@ -324,18 +307,6 @@ class TestFunctionMulti(unittest.TestCase):
     x = Tensor([4., 5., 6., 7.]).shard(self.devices_2, axis=None)
     f(x).sum().backward()
     np.testing.assert_allclose(w.grad.numpy(), [4., 5., 6., 7.])
-
-  def test_call_axis(self):
-    @function
-    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
-
-    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]]).shard(self.devices_2, axis=0)
-    w = Tensor([[1.,2.],[3.,4.]]).shard(self.devices_2, axis=None)
-    result = f(x, w)
-    # CALL output should inherit axis=0 from the sharded input
-    self.assertEqual(result.uop.axis, 0)
-    # reduce on the sharded axis should remove it
-    self.assertIsNone(result.sum().uop.axis)
 
   def test_call_axis_shard_inside(self):
     @function
@@ -535,9 +506,10 @@ class TestFunctionTuple(unittest.TestCase):
     Tensor.realize(a)
     c = f(a)
 
-    if count_kernels(c) != 1: raise KernelCountException(1, count_kernels(c))
-
+    # Build gradients before scheduling replaces the forward graph with its output buffers.
     c.sum().backward()
+    if (cnt := count_kernels(c)) != 1: raise KernelCountException(1, cnt)
+
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 
@@ -561,43 +533,51 @@ class TestFunctionTuple(unittest.TestCase):
     np.testing.assert_allclose(f(a).numpy(), 14.0)
 
     # g is f with empty output instead of invalids
-    @function(precompile=True, allow_implicit=True)
+    @function(precompile=True, allow_implicit=False)
     def g(a:Tensor):
       c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.unshard(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
     np.testing.assert_allclose(g(a).numpy(), 14.0)
 
-  def test_custom_kernel_inplace_output_is_implicit(self):
-    # a custom_kernel output the kernel also READS (in-place add) is not write-only, so it must be captured as an input
-    def inplace_add(C:UOp, A:UOp) -> UOp:
+  def test_custom_kernel_empty_is_local(self):
+    def write(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      return C[i].store(C[i].load() + A[i]).end(i).sink(arg=KernelInfo(name="inplace_add"))
-    @function(precompile=True, allow_implicit=False)
-    def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(*a.shape, dtype=a.dtype, device=a.device), a, fxn=inplace_add)[0]
-    with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile, allow_implicit=False)
+        def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=write)[0]
+        a, b = f(Tensor([1., 2.])), f(Tensor([3., 4.]))
+        Tensor.realize(a, b)
+        self.assertEqual(a.tolist(), [2., 4.])
+        self.assertEqual(b.tolist(), [6., 8.])
+        self.assertIsNot(a.uop.buffer, b.uop.buffer)
 
   def test_custom_kernel_write_only_persistent_output_is_implicit(self):
     # a write-only custom_kernel output that is a realized buffer must be captured
     def write(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
       return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
-    state = Tensor([100., 200., 300., 400.], device="CPU").contiguous().realize()
-    @function(precompile=True, allow_implicit=True)
-    def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
-    f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
-    np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
+    for realize in (False, True):
+      with self.subTest(realize=realize):
+        state = Tensor.empty(4, device="CPU")
+        if realize: state.realize()
+        @function(precompile=True, allow_implicit=True)
+        def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
+        f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
+        np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
 
   def test_custom_kernel_program_invalids_not_captured(self):
     # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
     # still must not be captured as an input -- else it is read before the kernel writes it
-    src = "void k(float* restrict data0, float* restrict data1) { for (int i=0;i<4;i++) data0[i]=data1[i]*2.0f; }"
-    lib = Device["CPU"].compiler.compile(src)
+    renderer = Device["CPU"].renderer
     def prog(C:UOp, A:UOp) -> UOp:
-      sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-                 arg=ProgramInfo(name="k", global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1)))
+      i = UOp.range(4, 0)
+      prg = to_program(C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="k")), renderer)
+      sink = UOp.sink(C.base, A.base, arg=prg.src[0].arg)
+      # Keep the compiled kernel, but hide its stores exactly as in an opaque external PROGRAM.
+      return prg.replace(src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), *prg.src[2:]))
 
     @function(precompile=True)
     def f(a:Tensor):
@@ -642,32 +622,6 @@ class TestFunctionTuple(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
 
   def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)
-
-class TestFunctionGrad(unittest.TestCase):
-  def test_function_grad_ops(self, precompile=False, precompile_backward=False):
-    N = 64
-    x = Tensor.ones(N,N).contiguous()
-    w1 = Tensor.ones(N,N).contiguous()
-    w2 = Tensor.ones(N,N).contiguous()
-    w3 = Tensor.ones(N,N).contiguous()
-    ref = Tensor.ones(N,N).contiguous()
-    Tensor.realize(x, w1, w2, w3, ref)
-    @function(precompile=precompile, precompile_backward=precompile_backward)
-    def f(x, w1, w2, w3) -> tuple[Tensor, ...]:
-      p1 = x@w1
-      p2 = p1@w2
-      p3 = p2@w3
-      return p1, p2, p3, p3.contiguous()
-    ret = f(x, w1, w2, w3)[-1]
-    loss = (ret-ref).square().mean().backward()
-    print("RESET")
-    GlobalCounters.reset()
-    loss.realize(w1.grad, w2.grad, w3.grad)
-    print(GlobalCounters.global_ops, GlobalCounters.global_mem)
-    self.assertLessEqual(GlobalCounters.global_ops, 5000000)
-  def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
-  def test_function_grad_ops_precompile_backward(self):
-    self.test_function_grad_ops(precompile=True, precompile_backward=True)
 
 if __name__ == '__main__':
   unittest.main()

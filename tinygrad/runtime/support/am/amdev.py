@@ -1,10 +1,10 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array, contextlib
+import ctypes, collections, dataclasses, functools, hashlib, array, contextlib, time
 from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv, wait_cond
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
+from tinygrad.runtime.support.memory import MemoryManager, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -33,7 +33,7 @@ class AMFirmware:
     blob, sos_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_sos.bin", versioned_header='struct_psp_firmware_header')
     fw_bin = sos_hdr.psp_fw_bin
 
-    for fw_i in range(sos_hdr.psp_fw_bin_count):
+    for fw_i in range(sos_hdr.psp_aux_fw_bin_index if sos_hdr.header.header_version_minor == 1 else sos_hdr.psp_fw_bin_count):
       fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
       ucode_start_offset = fw_bin_desc.offset_bytes + sos_hdr.header.ucode_array_offset_bytes
       self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
@@ -136,15 +136,13 @@ class AMPageTableEntry:
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator((1 << 44), base=0x200000000000) # global for all devices.
-
   def on_range_mapped(self):
     # Invalidate TLB after mappings.
     self.dev.gmc.flush_tlb(ip='GC', vmid=0)
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev:
-  Version = 0xA0000008
+  Version = 0xA000000D
 
   def _disable_aspm(self):
     # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
@@ -197,9 +195,16 @@ class AMDev:
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
+        # Quiesce first: mode1 reset over live engines at max clocks can wedge the GPU until power cycled.
+        self.gfx.fini_hw()
+        self.smu.set_clocks(level=0)
+        self.gfx.halt_engines()
+        self.sdma.halt_engines()
+        time.sleep(0.1)
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
+    elif not self.is_vf: self.psp._tmr_init()
 
     # Booting done
     self.is_booting = False
@@ -213,6 +218,7 @@ class AMDev:
         self.smu.set_clocks(level=None)
       else: self.smu.set_clocks(level=-1) # last level, max perf.
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
       self.reg("regSCRATCH_REG7").write(AMDev.Version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
@@ -222,8 +228,8 @@ class AMDev:
     self.smi_dev, self.is_err_state = smi_dev, False
 
     # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
-      va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base, reserve_ptable=not self.large_bar,
+    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(3 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
+      va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=MemoryManager.va_allocator.base, reserve_ptable=not self.large_bar,
       palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.fw = AMFirmware(self)
 

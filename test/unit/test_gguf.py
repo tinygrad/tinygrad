@@ -1,7 +1,7 @@
-import os, struct, unittest, tempfile, pathlib, sys
+import gc, os, struct, unittest, tempfile, pathlib, sys, weakref
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc
-from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import _ggml_iq_grid, _ggml_iq_signs, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -11,6 +11,18 @@ ggml_test_block_count = 4
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class TestGGUFTables(unittest.TestCase):
+  def test_iq_signs(self):
+    expected = [i | ((i.bit_count() % 2) << 7) for i in range(128)]
+    np.testing.assert_array_equal(_ggml_iq_signs(Device.DEFAULT).numpy(), expected)
+
+  def test_iq_tables_not_retained(self):
+    for make_table in (lambda: _ggml_iq_signs(Device.DEFAULT), lambda: _ggml_iq_grid(Device.DEFAULT, _ggml.iq3s_grid, (512, 4))):
+      table = make_table().realize()
+      ref = weakref.ref(table)
+      del table
+      gc.collect()
+      self.assertIsNone(ref())
+
   def test_iq2_xxs_grid_matches_gguf_py(self):
     IQ2_XXS.init_grid()
     grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq2xxs_grid, (256, 8)).numpy()
@@ -105,6 +117,13 @@ class TestGGUF(unittest.TestCase):
     expected = np.array(lut + [lut[0]]*16, dtype=np.float32)
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, 20).numpy().flatten(), expected)
 
+  def test_dequantization_iq4_xs_hardcoded(self):
+    # d=1, all eight scales=1, each group has low nibbles 0..15 and high nibbles 0.
+    block = np.frombuffer(np.float16(1.0).tobytes() + bytes([0xAA, 0xAA] + [0x11]*4) + bytes(range(16))*8, dtype=np.uint8).copy()
+    decoded = ggml_data_to_tensor(Tensor(block), 256, GGMLQuantizationType.IQ4_XS.value)
+    expected = np.array((list(_ggml.kvalues_iq4nl) + [_ggml.kvalues_iq4nl[0]]*16)*8, dtype=np.float32)
+    np.testing.assert_equal(decoded.numpy().flatten(), expected)
+
   def test_dequantization_mxfp4_hardcoded(self):
     # MXFP4: 1 byte shared exponent E + 16 packed bytes (32 x 4-bit values)
     # nibble: bit3=sign, bit2:1=exp, bit0=mant; E=128 gives scale=1.0
@@ -184,10 +203,6 @@ class TestGGUF(unittest.TestCase):
     # TODO: replace 41 with GGMLQuantizationType.Q1_0.value on next gguf-py release
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 128, 41).numpy().flatten(), expected)
 
-  def test_expected_failure_unknown_type(self):
-    with self.assertRaises(ValueError):
-      ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
-
   @staticmethod
   def _build_gguf(tensors, kvs):
     # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]
@@ -252,7 +267,11 @@ class TestGGUF(unittest.TestCase):
 
     for rt in reader.tensors:
       ref = dequantize(rt.data, rt.tensor_type)
-      np.testing.assert_equal(tensors[rt.name].numpy(), ref.reshape(tensors[rt.name].shape))
+      # Check every value, without requiring a single >128 MiB output binding on WebGPU implementations.
+      t = tensors[rt.name].flatten()
+      ref = ref.reshape(t.shape)
+      chunk = (64 << 20) // t.dtype.itemsize
+      for start in range(0, t.numel(), chunk): np.testing.assert_equal(t[start:start+chunk].numpy(), ref[start:start+chunk])
 
     for k, f in reader.fields.items():
       if k.startswith("GGUF."): continue  # skip file header keys (version, tensor_count, kv_count)

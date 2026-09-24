@@ -65,6 +65,20 @@ class TestTensorVariable(unittest.TestCase):
     if CHECK_OOB: self.assertRaises(RuntimeError, t.sum().item)
     else: t.sum().item()  # silent OOB: reads 2 elements past the buffer, result depends on the allocator
 
+  def test_symbolic_contiguous_flip(self):
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int32).realize()
+    for n in (1, 2, 4):
+      with self.subTest(n=n):
+        v = Variable("stage_v", 1, 4).bind(n)
+        self.assertEqual(a[:v].flip(0).contiguous().sum().item(), n*(n+1)//2)
+
+  def test_symbolic_contiguous_flip_2d(self):
+    a = Tensor([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=dtypes.int32).realize()
+    for n in (1, 2, 4):
+      with self.subTest(n=n):
+        v = Variable("stage_v", 1, 4).bind(n)
+        self.assertEqual(a[:, :v].flip(1).contiguous().sum().item(), n*(n+5))
+
   def test_symbolic_shape_mul_variable_tensor(self):
     # NOTE: the buffer dim must cover the variable's vmax
     vv = Variable("a", 1, 10).bind(2)
@@ -166,7 +180,7 @@ class TestTensorVariable(unittest.TestCase):
     # TODO: Tensor creation from unbound variable should assert
     # with self.assertRaises(AssertionError): t = Tensor.empty(3, v)
     vb = v.bind(3)
-    t = Tensor.empty(3, vb)
+    t = Tensor.empty(3, vb).realize()
     assert t.uop.base.buffer.size == 30
     assert t.uop.shape == (3, vb)
 
@@ -193,13 +207,6 @@ class TestTensorVariable(unittest.TestCase):
     # verify the values by shrinking to concrete shape first
     np.testing.assert_equal(splits[0].shrink(((0, 5), (0, 3))).numpy(), np.arange(30).reshape(10, 3)[:5, :3])
     np.testing.assert_equal(splits[1].shrink(((0, 5), (0, 3))).numpy(), np.arange(30).reshape(10, 3)[5:, :3])
-
-  def test_symbolic_chunk_error_on_symbolic_dim(self):
-    # chunk should fail when trying to split along a symbolic dimension
-    vv = Variable("a", 1, 10).bind(4)
-    t = Tensor.ones(10, 8).contiguous()[:vv, :]  # shape (vv, 8)
-    with self.assertRaises(AssertionError):
-      t.chunk(2, dim=0)  # can't split along symbolic dim
 
   def test_symbolic_var_sum(self, var_name="u"):
     t = Variable("t", 1, 10).bind(4)

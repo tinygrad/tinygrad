@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, get_args, Generic, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
-  import tinygrad.runtime.support.hcq as hcq, fcntl
-  ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+  import tinygrad.runtime.support.system as system, fcntl
+  ioctl = __fd.ioctl if isinstance(__fd, system.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
   if __struct is None: return ioctl((__base<<8)|__nr, __payload or (args[0] if args else 0))
   if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(*args, **kwargs)))<<16)|(__base<<8)|__nr, out)):
     raise RuntimeError(f"ioctl returned {rc}")
@@ -138,4 +138,5 @@ class DLL(ctypes.CDLL):
 
   def __getattr__(self, nm):
     if self.nm not in self._loaded_: raise AttributeError(f"failed to load library {self.nm}: {self.emsg}")
-    return super().__getattr__(nm)
+    (fn:=super().__getattr__(nm)).__module__ = f"tinygrad.runtime.autogen.{self.nm}"
+    return fn

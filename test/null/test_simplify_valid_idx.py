@@ -60,6 +60,10 @@ class TestValidIdxSimplification(unittest.TestCase):
     valid = (alu0 < 57) & (alu0 >= 1)
     self.assertIsNone(simplify_valid(valid))
 
+  def test_bitwise_and_is_not_a_valid(self):
+    ridx0 = Range(0, 16)
+    self.assertEqual(simplify_valid_idx(UOp.sink((ridx0 & UOp.const(12, dtypes.int)) & ridx0)).src[0].render(), "((int)(r0)&12&(int)(r0))")
+
   def test_valid_order_matters1(self):
     ridx0 = Range(0, 2)
     v0 = ridx0<1
@@ -513,6 +517,13 @@ class TestDropTrueGate(unittest.TestCase):
     result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
     self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
+
+  def test_const_gate_clause_is_not_moved_to_load(self):
+    # a const clause constrains nothing, so moving it only adds "&True" to the load's valid
+    r0, r1 = Range(0, 32), Range(1, 32)
+    idx = UOp.param(0, dtypes.float, 1024).index((r0+r1+r1*32-31).valid((r0+r1<31).ne(True)))
+    where = UOp.const(True).where(idx, UOp.const(0.0))
+    self.assertIs(graph_rewrite(where, pm_move_where_on_load), where)
 
 class TestRangeShrink(unittest.TestCase):
   def get_ranges(self, sink):

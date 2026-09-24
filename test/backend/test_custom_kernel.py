@@ -2,9 +2,12 @@ import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
+from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import assert_kernel_count, KernelCountException
+from test.helpers import assert_kernel_count
+from test.null.test_custom_kernel import custom_elementwise_add_kernel, custom_elementwise_addmul_kernel, custom_gemm
 
 # **** kernels ****
 
@@ -23,26 +26,11 @@ def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   i = UOp.range(A.numel(), 0)
   return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.numel()}"))
 
-def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
-  C,A,B = C.flatten(), A.flatten(), B.flatten()
+def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+  # A is unused on purpose: the kernel takes call buffers 0 and 2, not 0, 1, 2
+  C, B = C.flatten(), B.flatten()
   i = UOp.range(C.numel(), 0)
-  return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.numel()}")).simplify()
-
-def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
-  C,D,A,B = C.flatten(), D.flatten(), A.flatten(), B.flatten()
-  assert C.numel() == D.numel()
-  i = UOp.range(C.numel(), 0)
-  store_c = C[i].store(A[i]+B[i])
-  store_d = D[i].store(A[i]*B[i])
-  return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.numel()}")).simplify()
-
-def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
-  assert A.shape[1] == B.shape[0]
-  i, j, k = UOp.range(C.shape[0], 0), UOp.range(C.shape[1], 1), UOp.range(A.shape[1], 2, axis_type=AxisType.REDUCE)
-  C = C[i, j].set(0.0)
-  C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
-  prog = C.end(i, j)
-  return prog.sink(arg=KernelInfo(name=f"custom_gemm_{C.shape[0]}_{C.shape[1]}_{A.shape[1]}", opts_to_apply=()))
+  return C[i].store(B[i] + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
 
 def custom_sum(B:UOp, A:UOp) -> UOp:
   i = UOp.range(A.shape[0], 0, axis_type=AxisType.REDUCE)
@@ -184,6 +172,11 @@ class TestCustomKernel(unittest.TestCase):
     b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
 
+  def test_unused_buffer_arg(self):
+    a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
+    out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
     tst = Tensor.empty(1)
@@ -216,6 +209,75 @@ class TestCustomKernel(unittest.TestCase):
 
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_group_reduce_split_range(self):
+    # j%2 splits j into two ranges, both are still LOCAL
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.LOCAL)
+      return C[i].store((A[i, j] * (j%2).cast(A.dtype)).reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_nested_group_reduce(self):
+    # the inner group's stage is indexed by the outer group's range, which is live at the inner reduce
+    def kernel(C:UOp, B:UOp) -> UOp:
+      i, g1, g2 = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOCAL), UOp.range(8, 2, AxisType.LOCAL)
+      return C[i].store(B[i, g1, g2].reduce(g2, arg=Ops.ADD).reduce(g1, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    b = Tensor.arange(128).reshape(4, 4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), b, fxn=kernel)[0].tolist(), b.sum((1, 2)).tolist())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_local_reduce(self):
+    # a reduce over a thread range combines across threads
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    for at in (AxisType.LOCAL, AxisType.WARP):
+      def kernel(C:UOp, A:UOp) -> UOp:
+        i, j = UOp.range(4, 0), UOp.range(8, 1, at)
+        return C[i].store(A[i, j].reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a.sum(1).tolist())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
+  def test_stage_then_reduce(self):
+    # the STAGE ends j, so the accumulator of the reduce over jj is initialized before the jj loop, not inside it
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j, jj = UOp.range(4, 0), UOp.range(8, 1, AxisType.LOOP), UOp.range(8, 2, AxisType.LOOP)
+      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
+  def test_reg_stage_then_reduce(self):
+    # the REG buffer of the STAGE and the accumulator of the reduce are different buffers
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j, jj = UOp.range(4, 0), UOp.range(8, 1, AxisType.LOOP), UOp.range(8, 2, AxisType.LOOP)
+      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.REG))
+      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
+
+  def test_reg_placeholder_then_reduce(self):
+    # the accumulator of the reduce does not reuse the slot of a REG placeholder in the kernel
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.REDUCE)
+      reg = UOp.placeholder((1,), dtypes.float, 0, addrspace=AddrSpace.REG)
+      reg = reg.after(i)[0].set(A[i, 0])
+      return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
+
+  def test_split_range_id_free_of_loop(self):
+    # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
+    def kernel(C:UOp, A:UOp) -> UOp:
+      r, l = UOp.range(4, 0), UOp.loop(1)
+      cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
+      cnt = cnt.after(r)[0].set(0)
+      cnt = cnt.after(cnt[0].store(nxt:=cnt.after(l)[0] + 1).backedge(l, nxt < 3))
+      return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
+    a = Tensor([1., 2, 3, 4])
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
@@ -264,27 +326,6 @@ class TestCustomKernel(unittest.TestCase):
     Tensor.realize(O_custom, O_ref)
     self.assertTrue(O_custom.allclose(O_ref, atol=1e-3).item())
 
-  def test_gemm_qkv(self):
-    B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
-    H, QKV = H_KV * REP, H_KV * (REP + 2) * D
-
-    x = Tensor.empty(B*N, K_DIM)
-    w = Tensor.empty(K_DIM, QKV)
-    qkv = Tensor.empty(B*N, QKV)
-
-    qkv = Tensor.custom_kernel(qkv, x, w, fxn=custom_gemm)[0]
-    qkv = qkv.reshape(B, N, H_KV, REP + 2, D)
-
-    q = qkv[:, :, :, :REP, :].reshape(B, N, H, D).transpose(1, 2)
-    k = qkv[:, :, :, REP, :].transpose(1, 2)
-    v = qkv[:, :, :, REP + 1, :].transpose(1, 2)
-
-    out = q.scaled_dot_product_attention(k, v, enable_gqa=True)
-
-    GlobalCounters.reset()
-    out.realize()
-    assert_kernel_count(5)
-
   def test_simple_reshape(self):
     a = Tensor.ones(2,3,4).realize()
     b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_add_one_kernel)[0]
@@ -294,47 +335,6 @@ class TestCustomKernel(unittest.TestCase):
     c.realize()
     assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
     assert_kernel_count(2)
-
-  def test_multi_after_schedule_order(self):
-    """Test correct scheduling order when custom_kernel has multiple outputs.
-
-    custom_kernel with 4 arguments creates 4 AFTERs from the same kernel.
-    The custom_kernel depends on both A2 and B2, so it must be scheduled after both.
-    E only depends on A2, so E can run before custom_kernel finishes waiting for B2.
-
-    Expected schedule order: [A2, B2, E, custom_addmul, final_sum]
-    The custom_addmul kernel should be at index 3.
-    """
-
-    A, B = Tensor.empty(4, 4), Tensor.empty(4, 4)
-    A2 = (A + 1).contiguous()                      # kernel 0: depends on A
-    B2 = (B * 2).contiguous()                      # kernel 1: depends on B
-    C, D = Tensor.empty(4, 4), Tensor.empty(4, 4)
-    C, D, _, _ = Tensor.custom_kernel(C, D, A2, B2, fxn=custom_elementwise_addmul_kernel)  # depends on A2 AND B2
-    E = (A2 * 3).contiguous()                      # kernel 2: depends only on A2
-    result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
-    schedule = result.schedule_linear().src
-
-    # Find the custom_addmul kernel position
-    custom_idx = next((i for i, item in enumerate(schedule)
-                       if hasattr(item.src[0], "arg") and hasattr(item.src[0].arg, "name")
-                       and "custom_addmul" in item.src[0].arg.name), None)
-
-    self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
-    self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
-
-  def test_invalids_into_custom_kernel_no_empty_kernel(self):
-    from tinygrad.engine.realize import compile_linear
-    a = Tensor.full((4, 4), 3.).contiguous()
-    b = Tensor.full((4, 4), 2.).contiguous()
-    Tensor.realize(a, b)
-    out = Tensor.invalids(*a.shape, dtype=a.dtype)
-    out, *_ = Tensor.custom_kernel(out, a, b, fxn=custom_elementwise_add_kernel)
-    compiled = compile_linear(out.schedule_linear())
-    for call in compiled.src:
-      prg = call.src[0]
-      if prg.op is not Ops.PROGRAM: continue
-      self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
 
   def test_multi_invalids_custom_kernel_no_copy(self):
     devs = ("CPU:0", "CPU:1")
@@ -413,6 +413,21 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
+  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
+  def test_custom_kernel_source_copy(self):
+    from tinygrad.codegen import do_to_program
+    def custom_source(out:UOp, inp:UOp) -> UOp:
+      prg_uop = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer)
+      # construct a plain Ops.PROGRAM
+      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),)+prg_uop.src[2:])
+    out = Tensor([-1]).realize()
+    cpu_src = Tensor([2], device="CPU").realize()
+    out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
+    cp = out.to("CPU").realize()
+    self.assertEqual(out.tolist(), [3])
+    self.assertEqual(cp.tolist(), [3])
+
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
@@ -430,12 +445,9 @@ class TestCustomKernel(unittest.TestCase):
   def test_simple_from_source(self):
     a = Tensor.arange(4).clone().realize()
     src = "void test_src(int* restrict a) { a[0] = 1; }"
-    # TODO: it currently requires a compiler for Ops.BINARY
-    from tinygrad.device import Device
-    binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))
     a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
 
@@ -443,11 +455,9 @@ class TestCustomKernel(unittest.TestCase):
   def test_simple_from_source_alt(self):
     a = Tensor.arange(4).clone().realize()
     src = "void copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
-    from tinygrad.device import Device
-    binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
       sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))
     out = Tensor.custom_kernel(Tensor.empty_like(a), a+1, fxn=custom_src_kernel)[0]
     GlobalCounters.reset()
     out.realize()
@@ -465,6 +475,22 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
+  @unittest.expectedFailure
+  def test_call_in_kernel(self):
+    def kernel(C:UOp, A:UOp) -> UOp:
+      dst = UOp.param(0, dtypes.float, (4,))
+      src = UOp.param(1, dtypes.float, (4,))
+      i = UOp.range(4, 0)
+      add_1 = dst[i].store(src[i] + 1).end(i).sink()
+      mul_2 = dst[i].store(src[i] * 2).end(i).sink()
+      tmp = UOp.placeholder((4,), dtypes.float, addrspace=AddrSpace.REG)
+      add_call = add_1.call(tmp, A, name="add")
+      mul_call = mul_2.call(C, tmp.after(add_call), name="mul")
+      return mul_call.sink(arg=KernelInfo(name="call_in_kernel", opts_to_apply=()))
+    a = Tensor([1., -2., 3., 0.]).realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [4., -2., 8., 2.])
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
@@ -472,9 +498,8 @@ class TestCustomKernelInput(unittest.TestCase):
     y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y.realize()
-    kernel_count = GlobalCounters.kernel_count
+    assert_kernel_count(max_kernels)
     self.assertEqual(y.tolist(), x.add(1).tolist())
-    if kernel_count > max_kernels: raise KernelCountException(max_kernels, kernel_count)
     # same test with @function, input is PARAM
     from tinygrad import function
     x0 = Tensor.arange(32).clone("CPU").realize()
@@ -485,19 +510,18 @@ class TestCustomKernelInput(unittest.TestCase):
       return Tensor.custom_kernel(y, xv, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y = run(x0).realize()
-    kernel_count = GlobalCounters.kernel_count
+    assert_kernel_count(max_kernels)
     self.assertEqual(y.tolist(), mop_fxn(x0).add(1).tolist())
-    if kernel_count > max_kernels: raise KernelCountException(max_kernels, kernel_count)
 
-  def test_reshape(self): self._test_mop(lambda x: x.reshape(16, 2), max_kernels=2)
-  def test_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T, max_kernels=3)
-  def test_double_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T.T, max_kernels=2)
+  def test_reshape(self): self._test_mop(lambda x: x.reshape(16, 2), max_kernels=1)
+  def test_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T, max_kernels=2)
+  def test_double_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T.T, max_kernels=1)
   def test_shrink(self): self._test_mop(lambda x: x[:4], max_kernels=1)
   def test_pad(self): self._test_mop(lambda x: x[:4].pad(((0, 4),)), max_kernels=2)
   def test_flip(self): self._test_mop(lambda x: x.flip(0), max_kernels=2)
   def test_offset_shrink(self): self._test_mop(lambda x: x[4:8], max_kernels=2)
-  def test_2d_shrink(self): self._test_mop(lambda x: x.reshape(4, 8)[:, 2:6], max_kernels=3)
-  def test_expand(self): self._test_mop(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), max_kernels=3)
+  def test_2d_shrink(self): self._test_mop(lambda x: x.reshape(4, 8)[:, 2:6], max_kernels=2)
+  def test_expand(self): self._test_mop(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), max_kernels=2)
 
 class TestUnshardIndex(unittest.TestCase):
   """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
@@ -643,11 +667,6 @@ class TestUOpReduce(unittest.TestCase):
   def test_uop_sum_all(self):
     a = Tensor.arange(6).reshape(2, 3).float()
     self.assertAlmostEqual(Tensor(a.uop.sum()).item(), 15.0)
-
-  def test_uop_sum_keepdim(self):
-    a = Tensor.arange(6).reshape(2, 3).float()
-    result = Tensor(a.uop.sum(axis=1, keepdim=True))
-    assert result.shape == (2, 1)
 
   def test_uop_sum_negative_axis(self):
     a = Tensor.arange(6).reshape(2, 3).float()

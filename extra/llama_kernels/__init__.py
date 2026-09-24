@@ -16,7 +16,7 @@ def _local_abs_max_fxn(x_p, device):
 def local_abs_max(x:Tensor) -> Tensor:
   param = x.as_param(0)
   fxn = _local_abs_max_fxn(param.uop, x.device)
-  return Tensor(fxn[0].uop.call(x.uop).gettuple(0))
+  return Tensor(fxn[0].uop.call_with_output(x.uop))
 
 def shard_shape(shape:tuple, axis:int, ndev:int) -> list:
   s = list(shape)

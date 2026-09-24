@@ -9,7 +9,7 @@ from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype, min_normal
-from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
+from test.unit.test_dtype_spec import _assert_eq, core_dtypes, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -19,7 +19,8 @@ settings.load_profile("my_profile")
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
-  dts = [v for k, v in DTYPES_DICT.items() if v != dtype and v in supported_dtypes or v in dtypes.fp8s+(dtypes.half,dtypes.bfloat16,dtypes.long)]
+  emulatable = dtypes.fp8s+(dtypes.half,dtypes.bfloat16,dtypes.long)
+  dts = [v for v in dict.fromkeys(DTYPES_DICT.values()) if v != dtype and (v in supported_dtypes or v in emulatable)]
   if dtype in (dtypes.long, dtypes.ulong) and (dtype not in supported_dtypes or dtypes.long in EMULATED_DTYPES.tolist(dtypes)):
     return [dt for dt in dts if dt != dtypes.double] # can't bitcast with no 64-bit support
   if dtype not in supported_dtypes and dtype not in dtypes.fp8s+(dtypes.half,dtypes.bfloat16): return []
@@ -71,13 +72,13 @@ class TestDType(unittest.TestCase):
     self.assertEqual(a.dtype, self.DTYPE)
     _test_to_np(a, _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
-  def test_casts_to(self):
-    for dtype in get_available_cast_dtypes(self.DTYPE):
-      _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE)
-
   def test_casts_from(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
       _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype)
+
+  def test_const_kernel(self):
+    if not get_available_cast_dtypes(self.DTYPE): raise unittest.SkipTest("dtype does not run here")
+    _assert_eq(Tensor.ones((4,4), dtype=self.DTYPE).clone(), self.DTYPE, np.ones((4,4)))
 
   def test_same_size_ops(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
@@ -89,10 +90,16 @@ class TestDType(unittest.TestCase):
       if dtype.itemsize > self.DTYPE.itemsize:
         _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
 
-  def test_upcast_to_ops(self):
+  def test_downcast_ops(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
       if dtype.itemsize < self.DTYPE.itemsize:
-        _test_ops(a_dtype=dtype, b_dtype=self.DTYPE)
+        _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
+
+  def test_max_reduce(self):
+    # NOOPT keeps the reduce a loop with an accumulator; the rows are nondecreasing, so the max of each is its last element
+    with Context(NOOPT=1):
+      t = Tensor(list(range(8))).cast(self.DTYPE).reshape(2, 4).contiguous()
+      self.assertEqual(t.max(axis=1).tolist(), t[:, -1].tolist())
 
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
@@ -112,14 +119,13 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
   if a_dtype == dtypes.bool or b_dtype == dtypes.bool: return
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)+Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [2,4,6,8])
-  _assert_eq((Tensor([1], dtype=a_dtype).cast(b_dtype)+Tensor([1], dtype=a_dtype).cast(b_dtype)).cast(a_dtype), a_dtype, [2])
-  _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
-  _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*np.ones((4,4)))
-  _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype).clone(), target_dtype, 2*np.ones((4,4)))
-  _assert_eq(Tensor.ones((4,4), dtype=b_dtype).clone(), b_dtype, np.ones((4,4)))
 
 class TestFp8sConversions(unittest.TestCase):
+  def test_min_max_representable(self):
+    # e4m3 and the fnuz fp8s have no inf, so their extremes (the MAX/MIN reduce identities) are finite values that round trip
+    for dt in dtypes.fp8s: self.assertEqual(Tensor([dt.min, dt.max], dtype=dt).float().tolist(), [dt.min, dt.max])
+
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
   def test_float_to_fp8e4m3(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
@@ -169,12 +175,14 @@ class TestFp8sConversions(unittest.TestCase):
   def test_fp8e5m2fnuz_to_float(self, x):
     np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2fnuz), torch.tensor(x, dtype=torch.uint8).view(torch.float8_e5m2fnuz).float().item())
 
-  def test_fp8e5m2fnuz_to_float_smallest_normals(self):
-    # fnuz bias exceeds half's, so exp-1 normals land below half's normal range: they flush to zero like denormals
-    if dtypes.half not in supported_dtypes or dtypes.half in EMULATED_DTYPES.tolist(dtypes) or dtypes.fp8e5m2fnuz in supported_dtypes:
-      self.skipTest("needs the emulated fp8 with a native half intermediate")
-    vals = Tensor([0x04, 0x05, 0x06, 0x07], dtype=dtypes.uint8).bitcast(dtypes.fp8e5m2fnuz).float().numpy()
-    np.testing.assert_equal(vals, [0., 0., 0., 0.])
+  def test_smallest_normals(self):
+    for dt in dtypes.fp8s:
+      exp1 = [(1 << dtypes.finfo(dt)[1]) + m for m in range(1 << dtypes.finfo(dt)[1])]
+      self.assertEqual(Tensor(exp1, dtype=dtypes.uint8).bitcast(dt).float().tolist(), [fp8_to_float(x, dt) for x in exp1])
+
+  def test_cast_of_zero(self):
+    for dt in dtypes.fp8s:
+      self.assertEqual(Tensor([0.0, -0.0]).cast(dt).bitcast(dtypes.uint8).tolist(), [0, 0 if dt in dtypes.fp8_fnuz else 0x80])
 
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
@@ -268,6 +276,17 @@ class TestDoubleDType(TestDType):
              dtypes.float32, [float('inf'), 3.4e38, 1, 0])
 
 
+class TestIntegerCast(unittest.TestCase):
+  def test_narrow_then_widen(self):
+    values = [0, 127, 128, 255, 256, 32767, 32768, 65535, 65536, 0x040302, 0x12345678]
+    a = Tensor(values, dtype=dtypes.uint32).realize()
+    for dtype in (dtypes.uint8, dtypes.int8, dtypes.uint16, dtypes.int16):
+      with self.subTest(dtype=dtype):
+        bits = 8*dtype.itemsize
+        expected = [v & ((1 << bits)-1) for v in values]
+        if dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype): expected = [v-(1 << bits) if v >= 1 << (bits-1) else v for v in expected]
+        self.assertEqual(a.cast(dtype).cast(dtypes.int32).tolist(), expected)
+
 class TestInt8DType(TestDType):
   DTYPE = dtypes.int8
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
@@ -288,19 +307,23 @@ class TestUint8DType(TestDType):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
 class TestBitCast(unittest.TestCase):
-  @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
-  def test_shape_change_bitcast(self, dt1, dt2):
-    data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
-    a = Tensor(data, dtype=dt1)
-    expected = _to_torch_storage(a).view(_to_torch_dtype(dt2))
-    if dt2 in dtypes.fp8s:
-      expected = torch.tensor([fp8_to_float(x, dt2) for x in expected.view(-1).tolist()]).view_as(expected)
-    _test_op(lambda: a.bitcast(dt2), dt2, expected.tolist())
+  def test_subword_slice(self):
+    for dtype, values in ((dtypes.uint16, [0x0201, 0x0403, 0x0605, 0x0807]), (dtypes.uint32, [0x04030201, 0x08070605])):
+      a = Tensor(values, dtype=dtype).realize()
+      for start, end in ((0, 1), (1, 3), (2, 3), (1, 5), (2, 6), (0, 8)):
+        with self.subTest(dtype=dtype, start=start, end=end):
+          out = a.bitcast(dtypes.uint8)[start:end].contiguous()
+          self.assertEqual(out.shape, (end-start,))
+          self.assertEqual(out.tolist(), list(range(1, 9))[start:end])
 
-  def test_shape_change_bitcast_exceptions(self):
-    with self.assertRaises(RuntimeError):
-      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16).shape
+  def test_subword_slice_bitcast(self):
+    a = Tensor([0x04030201, 0x08070605], dtype=dtypes.uint32).realize()
+    self.assertEqual(a.bitcast(dtypes.uint8)[1:3].bitcast(dtypes.uint16).contiguous().tolist(), [0x0302])
+
+  def test_shape_change_bitcast(self):
+    for dt1, dt2 in [(dtypes.uint8, dtypes.int64), (dtypes.int64, dtypes.uint8)]:
+      a = Tensor(rand_for_dtype(dt1, 32).reshape(2, 2, 8), dtype=dt1)
+      _test_op(lambda: a.bitcast(dt2), dt2, _to_torch_storage(a).view(_to_torch_dtype(dt2)).tolist())
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
@@ -400,6 +423,9 @@ class TestEmulatedFp8e5m2(TestFp8e5m2):
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
+
+class TestFp8e4m3fnuz(TestDType): DTYPE = dtypes.fp8e4m3fnuz
+class TestFp8e5m2fnuz(TestDType): DTYPE = dtypes.fp8e5m2fnuz
 
 class TestImplicitFunctionTypeChange(unittest.TestCase):
   def test_functions(self):

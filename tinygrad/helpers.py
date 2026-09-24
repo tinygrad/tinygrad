@@ -5,7 +5,8 @@ import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfi
 from collections import defaultdict
 import shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
-from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
+from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload, TYPE_CHECKING
+if TYPE_CHECKING: import numpy
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -35,6 +36,7 @@ def get_shape(x) -> tuple[int, ...]:
   return (len(subs),) + (subs[0] if subs else ())
 def is_image_shape(shape): return shape is not None and len(shape) == 3 and shape[-1] == 4
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
+def is_numpy_ndarray(x) -> TypeGuard[numpy.ndarray]: return str(type(x)) == "<class 'numpy.ndarray'>"
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st
   colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
@@ -166,6 +168,8 @@ def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
+  # ContextDecorator otherwise reuses self, so recursive calls overwrite old_context.
+  def _recreate_cm(self): return Context(**self.kwargs)
   def __enter__(self):
     self.old_context:dict[str, Any] = {k: ContextVar._cache[k].value for k in self.kwargs}
     for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
@@ -226,20 +230,21 @@ class _DEV(ContextVar):
   # get target for device string, kwargs are passed if not already specified
   def target(self, dev:str, **kwargs) -> Target:
     assert (v:=getenv(k:=f"{dev}_CC", "")) == "", \
-      f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device != dev] + [f'{dev}:{v}'])}' instead"
+      f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device and t.device != dev] + [f'{dev}:{v}'])}' instead"
     return replace(next((t for t in self._value if not t.device or t.device == dev), Target(device=dev)).replacedefault(**kwargs), device=dev)
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
-JIT, JIT_BATCH_SIZE = ContextVar("JIT", 1), ContextVar("JIT_BATCH_SIZE", 32)
+JIT = ContextVar("JIT", 1)
 WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
 USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("TC_MIN_GLOBALS", 0)
 TRANSCENDENTAL = ContextVar("TRANSCENDENTAL", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
+ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
-VALIDATE_WITH_CPU, HCQ2 = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("HCQ2", 0)
+VALIDATE_WITH_CPU, HCQ2 = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("HCQ2", 1)
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
@@ -395,7 +400,7 @@ if getenv("DEBUG_GC"):
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 22
+VERSION = 24
 _db_connection = threading.local()
 def db_connection():
   if (conn:=getattr(_db_connection, "conn", None)) is None:
@@ -502,9 +507,12 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
   return fp
 
 def fetch_fw(path:str, name:str, sha256:str) -> bytes:
-  if sys.version_info >= (3,14) and (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
-    from compression.zstd import decompress
-    if hashlib.sha256(b:=decompress(p.read_bytes())).hexdigest() == sha256: return b
+  if (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
+    try:
+      if sys.version_info >= (3,14): from compression.zstd import decompress
+      else: from zstandard import decompress
+      if hashlib.sha256(b:=decompress(p.read_bytes())).hexdigest() == sha256: return b
+    except ImportError: pass
   return fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/0a6871b19abf5d6e024b5d208b101ae53e7fa0de/{path}/{name}",
                subdir="fw", sha256=sha256).read_bytes()
 

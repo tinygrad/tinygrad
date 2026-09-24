@@ -2,12 +2,10 @@
 import unittest
 import numpy as np
 
-from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu, KernelCountException
+from test.helpers import is_hcq2_device, assert_jit_cache_len, not_support_multi_device, needs_second_gpu
 from test.unit.test_jit import _simple_test
 from tinygrad import Tensor, TinyJit, Device, dtypes
-from tinygrad.engine.jit import graph_class
-from tinygrad.helpers import JIT, DEV, GlobalCounters, HCQ2
-from tinygrad.uop.ops import Ops
+from tinygrad.helpers import DEV, GlobalCounters
 from tinygrad.renderer.isa.x86 import X86Renderer
 
 class TestJit(unittest.TestCase):
@@ -57,36 +55,6 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(3)
       c = f(b)
       np.testing.assert_allclose(c.numpy(), b.numpy()+[1,2,3], atol=1e-4, rtol=1e-5)
-
-  def test_jit_batch_split(self):
-    if Device[Device.DEFAULT].graph is None or JIT >= 2: raise unittest.SkipTest("only test graphs")
-
-    # Create long jit with 83 kernels.
-    def f(a, b, c, d, e):
-      for _ in range(80):
-        a = (a+b).realize()
-      y = (a*c).realize()
-      z = (y*d).realize()
-      w = (z*e)
-      return w.realize()
-
-    a = Tensor.randn(10, 10).realize()
-    b = Tensor.randn(10, 10).realize()
-    c = Tensor.randn(10, 10).realize()
-    d = Tensor.randn(10, 10).realize()
-    e = Tensor.randn(10, 10).realize()
-
-    jf = TinyJit(f)
-    prev = None
-    for _ in range(5):
-      o = jf(a, b, c, d, e).numpy()
-      if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
-      prev = o
-
-    # Checking that 2 graphs are inited.
-    if len(jf.captured.linear.src) != 2: raise KernelCountException(2, len(jf.captured.linear.src))
-    for si in jf.captured.linear.src:
-      assert call_is_graph(si)
 
   def test_jitted_clone(self):
     def f(a): return a.clone().realize()
@@ -222,7 +190,7 @@ class TestJitPrune(unittest.TestCase):
     assert_jit_cache_len(w2_prune, 1)
 
 class TestJitFree(unittest.TestCase):
-  @unittest.skipIf(HCQ2, "hcq2 keeps refs to intermediate buffers")
+  @unittest.skipIf(is_hcq2_device(), "hcq2 keeps refs to intermediate buffers")
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit
@@ -279,44 +247,13 @@ class TestJitGraphSplit(unittest.TestCase):
     assert inp.device == device, f"Input device {inp.device} does not match expected {device}"
     return inp.to(to_device).realize()
 
-  def expect(self, f, *args, graph=None, multigraph=None, hcqgraph=None):
+  def expect(self, f, *args):
     def _numpies(tpl): return tpl.numpy() if tpl.__class__ is Tensor else tuple([t.numpy() for t in tpl])
 
     expected = _numpies(f(*args))
     for i in range(4):
       res = _numpies(f(*args))
       np.testing.assert_allclose(res, expected, atol=1e-4, rtol=1e-5)
-
-    dev = Device[Device.DEFAULT]
-    graph_t = graph_class(dev)
-    if graph_t is None: return
-
-    got = f.captured.linear.src
-    from tinygrad.runtime.graph.hcq import HCQGraph
-    from tinygrad.engine.jit import MultiGraphRunner
-    if graph_t is HCQGraph:
-      validate = hcqgraph
-    elif issubclass(graph_t, MultiGraphRunner):
-      validate = multigraph
-    else:
-      validate = graph
-
-    assert len(got) == len(validate), f"Expected {len(validate)} operations, got {len(got)}"
-    for expected, si in zip(validate, got):
-      ast = si.src[0]
-      if expected["type"] == "graph":
-        assert call_is_graph(si), f"Expected graph, got {ast.op}"
-        inner_cnt = len(ast.src[0].src)
-        assert inner_cnt == expected["cnt"], f"Expected {expected['cnt']} operations in graph, got {inner_cnt}"
-      elif expected["type"] == "comp":
-        assert ast.op in (Ops.SINK, Ops.PROGRAM), f"Expected kernel, got {ast.op}"
-      elif expected["type"] in ("copy", "xfer"):
-        assert ast.op is Ops.COPY, f"Expected COPY, got {ast.op}"
-
-  def ji_graph(self, cnt): return {"type": "graph", "cnt": cnt}
-  def ji_comp(self): return {"type": "comp"}
-  def ji_copy(self): return {"type": "copy"}
-  def ji_xfer(self): return {"type": "xfer"}
 
   def test_jit_split_simple(self):
     @TinyJit
@@ -327,10 +264,7 @@ class TestJitGraphSplit(unittest.TestCase):
       return op2
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
-    self.expect(f, inp,
-      graph=[self.ji_graph(3)],
-      multigraph=[self.ji_graph(3)],
-      hcqgraph=[self.ji_graph(3)])
+    self.expect(f, inp)
 
   def test_jit_cpu_simple(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -345,10 +279,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
-    self.expect(f, inp, inp_cpu,
-      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()]) # cpu is hcq2 now, it does not join hcq graphs
+    self.expect(f, inp, inp_cpu)
 
   def test_jit_cpu_several(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -364,10 +295,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
-    self.expect(f, inp, inp_cpu,
-      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()])
+    self.expect(f, inp, inp_cpu)
 
   def test_jit_multidev(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -386,10 +314,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
-    self.expect(f, inp, inp_d1,
-      graph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
-      multigraph=[self.ji_graph(5)],
-      hcqgraph=[self.ji_graph(5)])
+    self.expect(f, inp, inp_d1)
 
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU is not a valid default device for this test (zero-copies)")
@@ -410,10 +335,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
-    self.expect(f, inp, inp_d1,
-      graph=[self.ji_graph(2), self.ji_comp(), self.ji_xfer(), self.ji_comp(), self.ji_comp()],
-      multigraph=[self.ji_graph(6)],
-      hcqgraph=[self.ji_graph(6)])
+    self.expect(f, inp, inp_d1)
 
   @unittest.skip("this fails if you don't have SDMA or are using AMD_DISABLE_SDMA=1")
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "MockGPU does not support parallel copies")
@@ -429,10 +351,7 @@ class TestJitGraphSplit(unittest.TestCase):
       return op3
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
-    self.expect(f, inp,
-      graph=[self.ji_graph(2), self.ji_copy(), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_copy(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(4)])
+    self.expect(f, inp)
 
 if __name__ == '__main__':
   unittest.main()

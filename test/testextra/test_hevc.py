@@ -98,7 +98,7 @@ class TestHevc(unittest.TestCase):
       Variable("pos", 0, max_hist + 1).bind(frame_pos), out_image_size, opaque[1], history)
 
     compiled = compile_linear(decoded.linear_with_vars()[0])
-    self.assertTrue(any(call.src[0].op is Ops.PROGRAM for call in compiled.src))
+    self.assertTrue(any(call.without_after.src[0].op is Ops.PROGRAM for call in compiled.src))
     encdec_calls = [call for call in compiled.src if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "encdec"]
     self.assertEqual(len(encdec_calls), 1)
 

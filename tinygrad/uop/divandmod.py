@@ -22,7 +22,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.val) > 0:
     # nested_div: (x%(k*c))//c -> (x//c)%k (requires k>0); the mod case is handled by remove_nested_mod below
-    if d.op is Ops.FLOORDIV and x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None and k > 0: return x.src[0] // y % k
+    if d.op is Ops.FLOORDIV and x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None and k.vmin > 0: return x.src[0] // y % k
 
     # remove_nested_mod in sum: (a%4 + b)%2 -> (a+b)%2
     if d.op is Ops.FLOORMOD:

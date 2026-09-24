@@ -208,13 +208,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a[:j, :], b[:, :i]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_invalid_symbolic_reshape(self):
-    a = Tensor.rand(30)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      # Cannot reshape into symbolic from non-symbolic
-      with self.assertRaises(ValueError): a.reshape((3, vi))
-
   def test_shrink(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
@@ -247,6 +240,14 @@ class TestSymbolicOps(unittest.TestCase):
       a = Tensor(1).unsqueeze(0).pad((0, 1)).unsqueeze(0)
       symbolic = a.expand(vi, 2)[:i, :2].numpy()
       expected = a.expand(i, 2).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_pad_to_var_shape(self):
+    a, b = Tensor.rand(4).realize(), Tensor.rand(10).realize()
+    for i in range(5, 8):
+      vi = Variable("i", 5, 10).bind(i)
+      symbolic = (a.pad(((0, vi-4),)) + b[:vi]).sum().item()
+      expected = (a.pad(((0, i-4),)) + b[:i]).sum().item()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_slice_var_shape(self):

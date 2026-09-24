@@ -4,7 +4,7 @@ import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections
 from tinygrad.helpers import DEBUG, NO_COLOR, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -66,6 +66,8 @@ class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.pcibus, self.devfmt = pcibus, pcibus
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.is_vf = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1)
+    self.vf_rlc_gated:list[tuple[int, int]] = []
     self.pci_state = self.read_pci_state()
     if self.pci_state == "D0": self._init_from_d0()
 

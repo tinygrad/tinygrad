@@ -3,9 +3,9 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
+from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -919,6 +919,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a % -8) // 2, -4, 0, "(a%-8//2)")
     self.helper_test_variable((a % -8) % 2, 0, 1, "(a%2)")
 
+  def test_nested_div_mod_symbolic_inner_divisor(self):
+    a = Variable("a", 0, 100)
+    self.helper_test_variable((a % (Variable("n", 1, 10)*4)) // 2, 0, 19, "(a//2%(n*2))")
+    check_uop_against_string(self, (a % (Variable("n", 0, 10)*4) // 2).simplify(), "(a%(n*4)//2)")
+
   def test_floordiv_lt_negative_c(self):
     # x//d<c with negative c also reduces to x<c*d for d>0
     idx = Variable("idx", -20, 20)
@@ -942,6 +947,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
     self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
+
+  def test_mul_by_zero_casted_to_emulated_dtype(self):
+    # a float zero cast to bfloat16 is one committed const, so the mul-by-zero fold still sees it
+    x = Variable("x", 0, 3, dtypes.bfloat16)
+    self.assertIs(graph_rewrite(x*uconst(0.0).cast(dtypes.float).cast(dtypes.bfloat16), sym), UOp.const(0.0, dtypes.bfloat16))
 
   def test_cast_bool_to_int_ne_const(self):
     cond = Variable("a", 0, 3) < 2
@@ -1016,6 +1026,10 @@ class TestSymbolic(unittest.TestCase):
   def test_bitcast_chain(self):
     a = UOp.variable("a", 0, 3, dtype=dtypes.int32, param=True)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
+    # a const of an emulated float dtype bitcasts to its storage bits and back
+    for dt, sdt, bits in ((dtypes.bfloat16, dtypes.ushort, 16256), (dtypes.fp8e4m3, dtypes.uchar, 56), (dtypes.fp8e5m2, dtypes.uchar, 60)):
+      self.assertIs(graph_rewrite(UOp.const(1.0, dt).bitcast(sdt), sym), UOp.const(bits, sdt))
+      self.assertIs(graph_rewrite(UOp.const(bits, sdt).bitcast(dt), sym), UOp.const(1.0, dt))
 
   def test_negation_in_where(self):
     cond = Variable("x", 0, 3) < 2
@@ -1032,8 +1046,8 @@ class TestSymbolic(unittest.TestCase):
   def test_where_cast(self):
     cond = Variable("s", 0, 3, dtypes.int) < 2
     a = Variable("a", 0, 3, dtypes.int)
-    self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
-    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), uconst(2.0)))
+    self.assertIs(graph_rewrite(w:=cond.where(a, a+1).cast(dtypes.half), sym), w)
+    self.assertIs(graph_rewrite(w:=cond.where(a, uconst(2)).cast(dtypes.half), sym), w)
     self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
 
   def test_where_const_gate_keeps_stated_width(self):
@@ -1093,6 +1107,13 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", 0, 3)
     expr = (x<5).where((x<5).logical_not().where(a, b)*2, c)
     self.helper_test_variable(expr, 0, 6, "(x<5).where((b*2), c)")
+
+  def test_where_closure_folding_before_gate_merge(self):
+    # the outer cond folds inside the inner gate before the two gates merge, so the merged gate carries no redundant conjunct
+    x = Variable("x", 0, 10)
+    a = Variable("a", 0, 3)
+    cond, gate = x < 5, Variable("y", 0, 10) < 7
+    check_uop_against_string(self, graph_rewrite(cond.where((cond & gate).where(a, 0), 0), symbolic), "((x<5)&(y<7)).where(a, 0)")
 
   def test_where_closure_folding_valid(self):
     # a valid gate on the same cond folds in the true branch, the live else value is kept
@@ -1465,10 +1486,11 @@ class TestGatedUopGivenValid(unittest.TestCase):
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
-  def test_end_preserves_constant_backedge(self):
-    loop, backedge = UOp.loop(0), UOp.const(False)
-    end = graph_rewrite(UOp(Ops.NOOP).end(loop, backedge), sym)
-    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, backedge))
+  def test_backedge_preserves_constant_condition(self):
+    loop, cond = UOp.loop(0), UOp.const(False)
+    end = graph_rewrite(UOp(Ops.NOOP).backedge(loop, cond), sym)
+    self.assertEqual(end.op, Ops.BACKEDGE)
+    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, cond))
 
   def test_range_split_on_mod(self):
     # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
@@ -1478,7 +1500,7 @@ class TestRangeSplitting(unittest.TestCase):
     buf = UOp.param(0, dtypes.int, 1)
     val = (r0 % uconst(2)).cast(dtypes.int)
     store = UOp(Ops.STORE, src=(buf.index(uconst(0)), val))
-    sink = UOp(Ops.SINK, src=(UOp(Ops.END, src=(store, r0)),))
+    sink = store.sink().end(r0).sink(arg=KernelInfo())  # nested SINK must not split the range independently of END
     # count RANGEs before
     ranges_before = len([u for u in sink.toposort() if u.op is Ops.RANGE])
     # apply the range splitting optimization
@@ -1486,6 +1508,7 @@ class TestRangeSplitting(unittest.TestCase):
     # count RANGEs after - should have more due to splitting
     ranges_after = len([u for u in sink_after.toposort() if u.op is Ops.RANGE])
     self.assertGreater(ranges_after, ranges_before, "RANGE should be split when used with mod of divisible constant")
+    self.assertFalse(sink_after.ranges, "split ranges must still be closed by END")
 
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):
@@ -1507,6 +1530,17 @@ class TestBounds(unittest.TestCase):
     assert (alu0+2559).vmin == 0 and (alu0+2559).vmax == 2559
     assert ((alu0+2559)//-4).vmin == -640 and ((alu0+2559)//-4).vmax == 0
     assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 640
+
+  def test_where_float_consts(self):
+    cond = Variable("s", 0, 3) < 2
+    w = cond.where(uconst(0.0), cond.where(uconst(1.0), uconst(3.0)))
+    self.assertEqual((w.vmin, w.vmax), (0.0, 3.0))
+    self.assertEqual((w.cast(dtypes.int).vmin, w.cast(dtypes.int).vmax), (0, 3))
+    n = cond.where(uconst(math.nan), uconst(1.0))
+    self.assertEqual((n.vmin, n.vmax), (-math.inf, math.inf))
+    # an infinite bound passes through the cast, the finite one still rounds
+    i = cond.where(uconst(-math.inf), uconst(2.7)).cast(dtypes.int)
+    self.assertEqual((i.vmin, i.vmax), (dtypes.int.min, 2))
 
 class TestFuzzFailure(unittest.TestCase):
   def test_fuzz_failure1(self):

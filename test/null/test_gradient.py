@@ -79,5 +79,33 @@ class TestRealizeMeansRealize(unittest.TestCase):
     y = x * 2
     y.sum().gradient(x)[0].realize()
 
+class TestTensorGradient(unittest.TestCase):
+  def test_cast_before_view(self):
+    x = Tensor([1.0, 1, 1, 1])
+    x_reshaped = x.reshape(2,2)
+    x_casted = x_reshaped.cast(dtypes.float16)
+    x_casted.mean().gradient(x_reshaped)
+
+  def test_non_float_tensor_raise(self):
+    x = Tensor([1, 2, 3])
+    with self.assertRaises(RuntimeError): x.sum().gradient(x)
+    with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
+
+  def test_const_target_raise(self):
+    t = Tensor(2.0)
+    with self.assertRaises(RuntimeError): (t * 2.0).gradient(t)
+
+  def test_setitem_on_grad_used_tensor_raises(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    _ = (x * 2.0).sum()
+    with self.assertRaises(RuntimeError):
+      x[0] = 99.0
+
+  def test_bare_const_skipped_by_backward(self):
+    Tensor.manual_seed(0)
+    w = Tensor(1.0)
+    (Tensor.rand(()) + w).backward()
+    self.assertIsNone(w.grad)
+
 if __name__ == '__main__':
   unittest.main()

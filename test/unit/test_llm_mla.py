@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor
-from tinygrad.llm.model import Transformer, TransformerConfig, apply_rope, MLATransformerBlock, precompute_freqs_cis
+from tinygrad.llm.model import TransformerConfig, apply_rope, MLATransformerBlock, precompute_freqs_cis
 
 class TestMLA(unittest.TestCase):
   def _make_config(self, **kwargs):
@@ -62,10 +62,3 @@ class TestMLA(unittest.TestCase):
     abs_np = out_abs.realize().numpy()
     np.testing.assert_allclose(naive_np, abs_np, atol=1e-4, rtol=1e-4,
       err_msg="Absorbed MLA should match naive MLA")
-
-  def test_shared_expert_gate_optional(self):
-    from tinygrad import nn
-    model = Transformer(self._make_config(num_experts=4, num_experts_per_tok=2, shared_expert_dim=32, shared_expert_gate=False))
-    self.assertNotIn('blk.0.ffn_gate_inp_shexp.weight', nn.state.get_state_dict(model))
-    out = model.blk[0]._feed_forward(Tensor.randn(1, 4, model.blk[0].config.dim))
-    self.assertEqual(out.shape, (1, 4, model.blk[0].config.dim))

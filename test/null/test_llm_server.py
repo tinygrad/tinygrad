@@ -1,5 +1,10 @@
 import unittest, threading, time, json
 from unittest.mock import Mock, patch
+from tinygrad.llm.model import Transformer, TransformerConfig
+from tinygrad.llm.serve import StreamRouter
+
+TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                           norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -285,6 +290,20 @@ class TestLLMToolCalls(unittest.TestCase):
     ], tools=self.tools())
     self.assertEqual(second.choices[0].message.content, "done")
     self.assertEqual(second.choices[0].finish_reason, "stop")
+
+class TestTransformerGenerate(unittest.TestCase):
+  def test_warmup(self):
+    model, calls = Transformer(TEST_CONFIG), []
+    def generate(tokens, **kwargs):
+      calls.append(tokens)
+      yield from (1, 2)
+    with patch.object(model, "generate", generate): model.warmup()
+    self.assertEqual(calls, [[0], [0]])
+
+  def test_template_starts_reasoning(self):
+    router = StreamRouter(reasoning=True)
+    self.assertEqual(list(router.route("reasoning</think>answer")),
+                     [("reasoning_content", "reasoning"), ("content", "answer")])
 
 if __name__ == '__main__':
   unittest.main()

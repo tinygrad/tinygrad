@@ -1,9 +1,11 @@
-import unittest, struct, contextlib, statistics, gc
+import unittest, struct, contextlib, statistics
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
+from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, flatten, ansistrip
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
-from tinygrad.runtime.support.hcq import HCQCompiled
-from tinygrad.engine.realize import get_runtime
+from extra.hcq1.hcq import HCQCompiled
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS
+from tinygrad.engine.realize import run_linear
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen import to_program
 
 MOCKGPU = DEV.interface.startswith("MOCK")
@@ -14,9 +16,7 @@ def _dev_base(d):
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
-  saved = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
   Compiled.profile_events.clear()
-  for x in saved: Compiled.profile_events.append(x)
 
   cpu_events.clear()
 
@@ -28,16 +28,30 @@ def helper_collect_profile(*devs):
     for x in Compiled.profile_events: profile_list.append(x)
     profile_list.extend(cpu_events)
 
+def filter_ranges(p): return flatten([e.ents for e in p if isinstance(e, ProfileGraphEvent)])+[e for e in p if isinstance(e, ProfileRangeEvent)]
+
+def helper_host_buffer(dev:Compiled, **kwargs) -> Buffer:
+  return Buffer(getattr(dev, "host", "PYTHON"), 2, dtypes.float, **kwargs)
+
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
   dev_events = [x for x in profile if getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent)]
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], HCQCompiled) or Device.DEFAULT in HCQ_DEVS | {"CPU"}, "Dev not supported")
+class TestSimpleProfiler(unittest.TestCase):
+  def test_profiler(self):
+    with helper_collect_profile(Device[Device.DEFAULT]) as profile:
+      Tensor.empty(32).add(1).realize()
+    profile = filter_ranges(profile)
+    self.assertTrue(any(e.device == Device.DEFAULT for e in profile))
+
 # TODO: support in HCQCompiled
 is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
-@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
+@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in HCQ_DEVS,
+                     "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -48,19 +62,19 @@ class TestProfiler(unittest.TestCase):
     si = self.b.schedule_linear().src[-1]
 
     TestProfiler.prg = to_program(si.src[0], TestProfiler.d0.renderer)
-    TestProfiler.runtime = get_runtime(TestProfiler.d0.device, TestProfiler.prg)
-    TestProfiler.b.uop.buffer.allocate()
+    run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)))
 
   def test_profile_kernel_run(self, wait=False):
-    runner_name = TestProfiler.runtime.name
+    runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
     with helper_collect_profile(TestProfiler.d0) as profile:
-      gs, ls = TestProfiler.prg.arg.launch_dims({})
-      TestProfiler.runtime(TestProfiler.b.uop.buffer._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls, wait=wait)
+      run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)), wait=wait)
 
-    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
+    helper_profile_filter_device(profile, TestProfiler.d0.device)
+    profile = filter_ranges(profile)
+    kernel_runs = [x for x in profile if x.device == TestProfiler.d0.device]
     assert len(kernel_runs) == 1, "one kernel run is expected"
-    assert kernel_runs[0].name == runner_name, "kernel name is not correct"
+    assert ansistrip(kernel_runs[0].name) == runner_name, "kernel name is not correct"
+    self.assertEqual(kernel_runs[0].profile_key, TestProfiler.prg.key)
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_kernel_run_wait(self):
@@ -68,29 +82,32 @@ class TestProfiler(unittest.TestCase):
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    src = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1))
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf1.copy_from(src)
 
-    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
-    assert len(kernel_runs) == 1, "one kernel run is expected"
+    profile = filter_ranges(profile)
+    kernel_runs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{src.device}:COPY"))]
+    self.assertEqual(len(kernel_runs), 1)
 
   def test_profile_multiops(self):
-    runner_name = TestProfiler.runtime.name
+    runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    src, dst = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1)), helper_host_buffer(TestProfiler.d0, preallocate=True)
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
-      gs, ls = TestProfiler.prg.arg.launch_dims({})
-      TestProfiler.runtime(buf1._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
-      buf1.as_memoryview()
+      buf1.copy_from(src)
+      run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(UOp.from_buffer(buf1), TestProfiler.a.uop),)))
+      dst.copy_from(buf1)
 
-    evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
+    profile = filter_ranges(profile)
+    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{src.device}:COPY"))]
 
-    assert len(evs) == 3, "3 kernel runs are expected"
+    assert len(evs) == 3, "unexpected number of kernel and copy events"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
     prg_events = [e for e in evs if e.device == TestProfiler.d0.device]
-    assert any(e.name == runner_name for e in prg_events), "kernel name is not correct"
+    assert any(ansistrip(e.name) == runner_name for e in prg_events), "kernel name is not correct"
 
     #for i in range(1, 3):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
@@ -106,25 +123,29 @@ class TestProfiler(unittest.TestCase):
       buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
       buf2.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
 
+    profile = filter_ranges(profile)
     for dev in [TestProfiler.d0.device, d1.device]:
-      evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
-      assert len(evs) == (0 if hasattr(TestProfiler.d0.allocator, '_as_buffer') else 1), "one kernel runs are expected"
+      evs = [x for x in profile if _dev_base(x.device) == dev]
+      assert len(evs) == (0 if buf1._host_mv() is not None else 1), "one kernel runs are expected"
 
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
+    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
       buf1.to(f"{Device.DEFAULT}:1").realize()
 
-    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
+    profile = filter_ranges(profile)
+    kernel_runs = [x for x in profile if x.device.startswith(TestProfiler.d0.device)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
 
-  @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
+  @unittest.skipIf(Device.DEFAULT in "METAL", "METAL does not support queue wait interrupts")
   def test_profile_graph(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
+    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
 
     def f(a):
       x = (a + 1).realize()
@@ -141,8 +162,13 @@ class TestProfiler(unittest.TestCase):
     _, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     _, _ = helper_profile_filter_device(profile, d1.device)
 
-    assert len(graph_evs) == 2, "2 graph events are expected"
-    assert len(graph_evs[0].ents) == 2, "two entities are expected"
+    if Device.DEFAULT in HCQ_DEVS:
+      ents = flatten(e.ents for e in graph_evs)
+      assert len(ents) == 4, "two kernel runs and two copies are expected"
+      assert sum(ansistrip(e.name).startswith("copy") for e in ents) == 2, "two copies are expected"
+    else:
+      assert len(graph_evs) == 2, "2 graph events are expected"
+      assert len(graph_evs[0].ents) == 2, "two entities are expected"
 
   @unittest.skipIf(MOCKGPU, "skip MOCKGPU")
   @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "must be HCQ")
@@ -191,37 +217,6 @@ class TestProfiler(unittest.TestCase):
 
     range_events = [p for p in profile if isinstance(p, ProfileRangeEvent) and p.device == dev]
     self.assertEqual(len(range_events), 2)
-
-  @unittest.skip("this test is flaky")
-  @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
-  def test_graph(self):
-    from test.backend.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs
-    device = TestProfiler.d0.device
-    bufs = [helper_alloc_rawbuffer(device, fill=True) for _ in range(5)]
-    graphs = [[helper_exec_op(device, bufs[0], [bufs[1], bufs[2]]), helper_exec_op(device, bufs[0], [bufs[3], bufs[4]]),]]
-    with helper_collect_profile(dev:=TestProfiler.d0) as profile:
-      helper_test_graphs(dev.graph, graphs, runs:=2)
-      # NOTE: explicitly trigger deletion of all graphs
-      graphs.clear()
-      gc.collect()
-    graphs = [e for e in profile if isinstance(e, ProfileGraphEvent)]
-    self.assertEqual(len(graphs), runs)
-    for ge in graphs:
-      self.assertEqual(len(ge.ents), len(graphs))
-
-  @unittest.skip("this test is flaky")
-  def test_trace_metadata(self):
-    with Context(TRACEMETA=1):
-      a = Tensor.empty(1)+2
-      b = Tensor.empty(1)+2
-      with helper_collect_profile(TestProfiler.d0) as profile:
-        Tensor.realize(a, b)
-    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
-    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and _dev_base(e.device) == e.device]
-    self.assertEqual(len(exec_points), len(range_events), 2)
-    self.assertEqual(len(dedup(e.arg['name'] for e in exec_points)), 1)
-    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
 
 if __name__ == "__main__":
   unittest.main()

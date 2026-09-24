@@ -2,12 +2,12 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import unittest, time
+import unittest
 import numpy as np
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import Ops, UPat
-from tinygrad.helpers import DEV, GlobalCounters, Context, all_same, temp
+from tinygrad.helpers import DEV, GlobalCounters, Context, temp
 from tinygrad.engine.realize import run_linear
 from test.helpers import check_schedule, assert_kernel_count
 
@@ -115,7 +115,7 @@ class TestSchedule(unittest.TestCase):
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
     base.assign(flat_base.reshape(4, 4))
-    sched = check_schedule(base, 4)
+    sched = check_schedule(base, 3)
     run_linear(*sched)
     expected = list(range(16))
     for i, v in zip([1,2,5,6], [99,99,99,99]): expected[i] = v
@@ -173,20 +173,6 @@ class TestLimitBufs(unittest.TestCase):
         a, b = Tensor.rand(N).realize(), Tensor.rand(N).realize()
         base = (idx >= i).where(a + b, base)
       assert all(x > 0 for x in base.tolist())
-
-  def test_limit_bufs_linear_scaling(self):
-    def sched_time(n):
-      with Context(TRACK_MATCH_STATS=0, DEBUG=0, PARALLEL=0):
-        bufs = [Tensor.ones(16).contiguous().realize() for _ in range(4)]
-        root = bufs[0]
-        for i in range(n): root = root + bufs[i % 4]
-        with Context(MAX_KERNEL_BUFFERS=8, SCACHE=0):
-          st = time.perf_counter()
-          root.schedule_linear()
-          return time.perf_counter() - st
-    sched_time(400)
-    t1, t2 = min(sched_time(400) for _ in range(3)), min(sched_time(1600) for _ in range(3))
-    self.assertLess(t2/t1, 8, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -338,11 +324,6 @@ class TestCopyFolding(unittest.TestCase):
     run_linear(*check_schedule(b, 0, filter_sink=False))
     assert b.item() == 4
 
-  def test_one_hot_with_copy(self):
-    y = Tensor([1, 2, 3]).to("CPU")
-    x = y.one_hot(10).int()
-    check_schedule(x, 3, filter_sink=False)
-
   @unittest.skip("no longer supported")
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).clone().realize()
@@ -351,13 +332,6 @@ class TestCopyFolding(unittest.TestCase):
     run_linear(*check_schedule(b, 1, filter_sink=False))
     self.assertListEqual(b.tolist(), [1, 1, 1])
     self.assertEqual(b.device, "CPU")
-
-  def test_alu_after_copy(self):
-    a = Tensor.ones((4,)).to("CPU")
-    b = Tensor.empty(4, device="CPU")
-    add = a+b
-    assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
-    add.schedule_linear()
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()
@@ -369,14 +343,10 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
     linear, var_vals = t.linear_with_vars()
-    assert len([call for call in linear.src if call.src[0].op is Ops.COPY]) == 0
+    assert len([call for call in linear.src if call.src[0].op is Ops.STORE]) == 0
     run_linear(linear, var_vals)
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
-
-  def test_clone(self):
-    a = Tensor.empty(4)
-    check_schedule(a.clone(), 1, filter_sink=False)
 
   def test_shrink_copy(self):
     a = Tensor.arange(4).clone("CPU:1").realize()

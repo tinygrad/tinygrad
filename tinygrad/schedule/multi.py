@@ -8,7 +8,7 @@ from tinygrad.schedule.allreduce import handle_allreduce
 
 def _apply_shrink(marg, s:UOp, i:int) -> UOp:
   new_arg = [tuple([x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
-                    (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss]) for ss in marg]
+                    (drng:=[r for r in x.ranges if r.axis_type is AxisType.DEVICE]) else x for x in ss]) for ss in marg]
   return s._mop(Ops.SHRINK, tuple(new_arg))
 
 def mstack_early_shrink(ms:UOp, shrink:UOp):
@@ -31,7 +31,8 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lower_broadcast_copy),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
   (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lambda c,x:
-    x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
+    (m if (m:=x.mselect(0)).device == c.device else m.copy_to_device(c.device))
+    if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # move shrink before MSTACK
@@ -221,7 +222,7 @@ def index_multi(root:UOp, multi:UOp):
   return multi.src[0].index(*idxs)
 
 def _shard_idx(rng:UOp, dev_idx:int) -> int:
-  drngs = [r for r in rng.ranges if r.arg[-1] is AxisType.DEVICE]
+  drngs = [r for r in rng.ranges if r.axis_type is AxisType.DEVICE]
   return 0 if not drngs else int(rng.substitute({drngs[0]: drngs[0].const_like(dev_idx)}).ssimplify())
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
@@ -269,10 +270,10 @@ def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
 
 def rewrite_into_function(call:UOp):
-  if call.arg is None or call.arg.precompile: return None
+  if not call.is_inline_call: return None
   # the call body is a plain parametric program: multi rewrites it like anything else (the output PARAM dests sub-view per
   # shard through the normal store rules), and all srcs (args and RETURNEDs) become their per-shard views
-  new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
+  new_body = graph_rewrite(call.body, multi_pm, name="subcall")
   assert new_body.op is Ops.SINK
   return call.replace(src=(new_body,) + tuple(a.src[0] if a.op is Ops.UNSHARD else a for a in call.src[1:]))
 
@@ -289,17 +290,18 @@ multi_pm = PatternMatcher([
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
+  # a COPY of a sharded value copies every shard to the target device
   (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 
   # rewrite value-producing calls explicitly for UNSHARD
-  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call) if call.num_returned else None),
+  (UPat(Ops.CALL, name="call"), rewrite_into_function),
   (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
-    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg) if root.num_returned == 0 else None),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
+    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat(Ops.UNSHARD, name="multi"))), store_value_multi),

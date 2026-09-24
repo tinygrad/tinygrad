@@ -7,9 +7,8 @@ from tinygrad.uop.ops import UOp, Ops, AxisType
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
 ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
-FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
-IMMEDIATE_SCALE = getenv("IMMEDIATE_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
+PRESTORE_WT = getenv("PRESTORE_WT", 0)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -27,8 +26,13 @@ def clip_grads(grads:list[Tensor], grad_acc, clip_norm) -> Tensor:
   for g in grads: g.assign((g * (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype))
   return total_norm
 
-def fclip_grads(grads:list[Tensor], clip_norm) -> Tensor:
-  total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
+def fclip_grads(grads:list[Tensor], clip_norm) -> tuple[list[Tensor], Tensor]:
+  if getenv("FAST_GRAD_NORM", 0):
+    from extra.gptoss_kernels.grad_norm import sum_squares_bf16
+    squares = [sum_squares_bf16(g) if g.dtype == dtypes.bfloat16 else g.float().square().sum() for g in grads]
+  else:
+    squares = [g.float().square().sum() for g in grads]
+  total_norm = Tensor.stack(*squares).sum().sqrt().contiguous()
   scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
   return [(g * scale).cast(g.dtype) for g in grads], total_norm
 
@@ -59,8 +63,7 @@ class GradAccClipAdamW(Optimizer):
     updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
     fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
-    fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
-    return extra + self.params + self.buffers + (self.master_params or []) + fp8_inv_scales + fp8_next_inv_scales
+    return extra + self.params + self.buffers + (self.master_params or []) + fp8_inv_scales
 
   def fstep(self, grads:list[Tensor], grad_norm:Tensor|None=None):
     Tensor.realize(*([grad_norm] if grad_norm is not None else []), *self.fschedule_step(grads))
@@ -96,33 +99,19 @@ class GradAccClipAdamW(Optimizer):
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
       out = stochastic_round_bf16(new_w)
       return out.shard_like(t) if offloaded else out
-    if t.dtype in dtypes.fp8s:
-      if MXFP8:
-        from extra.gemm.cdna_asm_gemm import quantize_mxfp8
-        w_q, w_e8, _ = quantize_mxfp8(new_w.reshape(-1, new_w.shape[-1]))
-        if self.zero: w_q, w_e8 = self._zero_gather(w_q), self._zero_gather(w_e8)
-        new_e8 = w_e8.reshape(t._inv_scale.shape)
-        t._inv_scale.assign(new_e8.shard_like(t._inv_scale) if offloaded else new_e8)
-        ret = w_q.reshape(t.shape)
-        return ret.shard_like(t) if offloaded else ret
-      from examples.mlperf.models.flat_llama import FP8_MAX
-      if IMMEDIATE_SCALE:
-        amax_axis = tuple(range(t._inv_scale.ndim, new_w.ndim))
-        new_inv = ((new_w.float().abs().max(axis=amax_axis).detach() + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-        t._inv_scale.assign(new_inv.shard_like(t._inv_scale) if offloaded else new_inv)
-        scale = new_inv.reciprocal().reshape(*new_inv.shape, *([1]*(new_w.ndim-new_inv.ndim)))
-        ret = (new_w * scale).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
-        return ret.shard_like(t) if offloaded else ret
-      # delayed scaling: reuse previous step's inv_scale
-      t._inv_scale.assign(t._next_inv_scale)
-      inv_scale = t._inv_scale.to(new_w.device) if offloaded else t._inv_scale
-      scale = inv_scale.reciprocal().reshape(*inv_scale.shape, *([1]*(new_w.ndim-inv_scale.ndim)))
-      scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
-      ret = scaled.cast(t.dtype)
-      # update inv_scale for next step from quantized result
-      new_amax = (ret.float().abs().max(axis=tuple(range(inv_scale.ndim, ret.ndim))) * inv_scale * FP8_AMAX_MARGIN).detach()
-      new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-      t._next_inv_scale.assign(new_inv.shard_like(t._next_inv_scale) if offloaded else new_inv)
+    if MXFP8 and t.dtype in dtypes.fp8s:
+      from extra.gemm.cdna_asm_gemm import quantize_mxfp8
+      w_q, w_e8, _ = quantize_mxfp8(new_w.reshape(-1, new_w.shape[-1]))
+      if self.zero: w_q, w_e8 = self._zero_gather(w_q), self._zero_gather(w_e8)
+      new_e8 = w_e8.reshape(t._inv_scale.shape)
+      t._inv_scale.assign(new_e8.shard_like(t._inv_scale) if offloaded else new_e8)
+      ret = w_q.reshape(t.shape)
+      if PRESTORE_WT and hasattr(t, '_wT_q'):
+        from extra.gemm.cdna_asm_gemm import _mx_block_scale_3d
+        w_phys = ret.cast(dtypes.bfloat16) * _mx_block_scale_3d(new_e8).cast(dtypes.bfloat16)
+        wT_q, wT_e8, _ = quantize_mxfp8(w_phys.transpose(1, 2))
+        t._wT_q.assign(wT_q.shard_like(t._wT_q) if offloaded else wT_q)
+        t._wT_e8.assign(wT_e8.shard_like(t._wT_e8) if offloaded else wT_e8)
       return ret.shard_like(t) if offloaded else ret
     out = new_w.cast(t.dtype)
     return out.shard_like(t) if offloaded else out

@@ -3,7 +3,6 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
-from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException
 
 class TestArange(unittest.TestCase):
@@ -19,11 +18,10 @@ class TestArange(unittest.TestCase):
     self.assertLess(self._get_flops(Tensor.arange(256).clone(), np.arange(256)), 256*4)
     self.assertLess(self._get_flops(Tensor.arange(2560).clone(), np.arange(2560)), 2560*4)
 
-  def test_cat_complexity(self):
-    x = Tensor.arange(2**10) + Tensor.empty((), dtype=dtypes.uint32)
-    out = x.cat(x).cat(Tensor.empty(1, dtype=dtypes.uint32))
-    linear = compile_linear(out.schedule_linear())
-    self.assertLessEqual(estimate_uop(linear.src[-1]).ops, out.numel()*20)
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "emulated half costs more ops")
+  def test_arange_complexity_half(self):
+    self.assertLess(self._get_flops(Tensor.arange(256, dtype=dtypes.half).clone(), np.arange(256, dtype=np.float16)), 256*4)
+    self.assertLess(self._get_flops(Tensor.arange(2560, dtype=dtypes.half).clone(), np.arange(2560, dtype=np.float16)), 2560*4)
 
   @unittest.skipIf(Device.DEFAULT == "CL", "flaky in CI")
   def test_arange_cumsum(self):
@@ -37,13 +35,6 @@ class TestArange(unittest.TestCase):
     with Context(NOOPT=1):
       # NOTE: not every backend supports CMPEQ
       self.assertLessEqual(self._get_flops(Tensor.eye(2560).clone(), np.eye(2560)), 2*2560*2560)
-
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexing is weird")
-  def test_tri_complexity(self):
-    with Context(NOOPT=1):
-      t = Tensor.ones(256, 256).contiguous().realize()
-      linear = compile_linear(t.triu().schedule_linear())
-      self.assertLessEqual(estimate_uop(linear.src[-1]).ops, 4 * 256 * 256)
 
 DSET, DDIM = 2048, 32
 
@@ -86,6 +77,16 @@ class TestIndexing(unittest.TestCase):
       # no global ops because they are all indexing
       self.assertLess(GlobalCounters.global_ops, 1000)
     np.testing.assert_allclose(comp, dataset.numpy()[12])
+
+  def test_index_two_in_one_reduce(self):
+    a, b = Tensor.rand(DSET, DDIM).realize(), Tensor.rand(DSET, DDIM).realize()
+    i, j = Tensor([3, 50, 99]).realize(), Tensor([7, 1, 2000]).realize()
+    with Context(NOOPT=1):
+      GlobalCounters.reset()
+      r = Tensor.arange(DSET)[None, :, None]
+      comp = ((r == i[:, None, None]).where(a[None], 0) + (r == j[:, None, None]).where(b[None], 0)).sum(1).numpy()
+      self.assertLess(GlobalCounters.global_ops, 4*DSET)
+    np.testing.assert_allclose(comp, a.numpy()[[3, 50, 99]] + b.numpy()[[7, 1, 2000]])
 
   def test_index(self):
     dataset = Tensor.rand(DSET, DDIM).realize()

@@ -9,6 +9,11 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 42)
     self.assertEqual(uop.vmax, 42)
 
+  def test_vmin_vmax_copy(self):
+    src = UOp.new_buffer("CPU", 4, dtypes.int32) & 3
+    for copy in (src.contiguous(), src.copy_to_device("CPU:1")):
+      self.assertEqual((copy.vmin, copy.vmax), (0, 3))
+
   def test_vmin_vmax_cmpne(self):
     uop = UOp.const(42)
     def test_bool(u, x):
@@ -167,6 +172,17 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.const(4.5).cast(dtypes.float).cast(dtypes.int)._min_max, (4, 4))
     x = UOp.const(4.5).cast(dtypes.float)
     self.assertIs(x.ne(x.cast(dtypes.int).cast(dtypes.float)).simplify().arg, True)
+    # a source reaching past the destination clamps to its edge
+    self.assertEqual(UOp.variable('x', 2e9, 3e9, dtypes.float).cast(dtypes.int)._min_max, (2000000000, dtypes.int.max))
+    # a source entirely past the destination has no value in it
+    self.assertEqual(UOp.variable('x', 3e9, 4e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
+    self.assertEqual(UOp.variable('x', -4e9, -3e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
+    self.assertEqual(UOp.variable('x', 200, 300, dtypes.int).cast(dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
+    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
+    self.assertEqual(UOp.const(math.inf).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
+    self.assertEqual(UOp.const(math.nan, dtypes.float)._min_max, (-math.inf, math.inf))
+    # a weak destination has no width to clamp to
+    self.assertEqual(UOp.variable('x', 5, 7, dtypes.int).cast(dtypes.weakfloat)._min_max, (5, 7))
 
   def test_vmin_vmax_cast_int_to_float_grid(self):
     # a cast to float only takes values on the float grid, so its bounds are the source bounds rounded at the destination

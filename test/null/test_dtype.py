@@ -65,5 +65,11 @@ class TestInvalidSingleton(unittest.TestCase):
   def test_pickle(self):
     self.assertIs(pickle.loads(pickle.dumps(Invalid)), Invalid)
 
+class TestBitCast(unittest.TestCase):
+  def test_shape_change_bitcast_exceptions(self):
+    with self.assertRaises(RuntimeError):
+      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16).shape
+
 if __name__ == "__main__":
   unittest.main()

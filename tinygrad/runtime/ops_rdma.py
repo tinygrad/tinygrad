@@ -1,105 +1,167 @@
 from __future__ import annotations
-import mmap, struct, functools
 from typing import cast
-from tinygrad.uop.ops import sint
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue, HCQBuffer, FileIOInterface
-from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta
-from tinygrad.runtime.support.memory import VirtMapping, AddrSpace
-from tinygrad.runtime.support.mlx.mlxdev import MLXDev, MLXQP
-from tinygrad.helpers import unwrap, to_be32, to_be64
+import functools, struct, operator, re
+from tinygrad.device import Allocator, Buffer, BufferSpec, BufferStorage, Compiled, Device
+from tinygrad.dtype import dtypes, DType
+from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
+from tinygrad.engine.realize import get_call_arg_uops
+from tinygrad.runtime.autogen import bnxt
+from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
+from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
+from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
+from tinygrad.runtime.support.system import filter_visible_devices
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
 
-class RDMACopyQueue(HWQueue):
-  def __init__(self, dev:RDMADevice):
-    self.dev = dev
-    super().__init__()
+RDMA_CHUNK = 1 << 30 # a wqe length is 32 bits
 
-  def _wqe_data(self, buf:HCQBuffer, sz:int, nic:RDMADevice) -> bytes:
-    cast(HCQAllocatorBase, nic.allocator)._map(buf)
-    return struct.pack('>IIQ', sz, buf.mappings[nic].meta, buf.mappings[nic].va_addr + (buf.va_addr - buf.base.va_addr))
+BNXT_IDS = (0x14e4, ((0xffff, (0x1760,)),), 0x02) # vendor, (mask, device ids), base class
 
-  def encode_ring(self, hwq:HWQueue, dev:HCQCompiled, iface:MLXIface, qp:MLXQP, cq_buf:HCQBuffer, head:sint, ring_uar:bool=False):
-    for buf in [iface.dbr_buf, cq_buf] + ([iface.uar_buf] if ring_uar else []): cast(HCQAllocator, dev.allocator)._map(buf)
-    hwq.write(iface.dbr_buf.offset(qp.qp_dbr + (4 if ring_uar else 0)), to_be32(head + 1))
-    if ring_uar: hwq.write(iface.uar_buf.offset(0x800), to_be64(((head << 8) | 0x0a) << 32 | ((qp.qp_info['qpn'] << 8) | 2)), b64=True)
-    hwq.poll_bit(cq_buf.offset((head & (qp.cq_size - 1)) * 64 + 60, 4), ((head >> (qp.cq_size.bit_length() - 1)) & 1) << 24, mask=0x01000000)
-    hwq.write(iface.dbr_buf.offset(qp.cq_dbr), to_be32((head + 1) & 0xFFFFFF))
-    return self
+class BNXTIface(PCIIfaceBase):
+  def __init__(self, dev:RDMADevice, index:int):
+    super().__init__(dev, index, *BNXT_IDS[:2], vram_bar=2, va_start=MemoryManager.va_allocator.base, va_size=MemoryManager.va_allocator.size,
+                     dev_impl_t=BNXTDev, base_class=BNXT_IDS[2])
+  def device_fini(self): self.dev_impl.fini()
 
-  def copy(self, dest:HCQBuffer, src:HCQBuffer, sz:int):
-    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=unwrap(dest.owner).rdma_dev())
+  def storage(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> BufferStorage: # nic memory any gpu of the node maps
+    va = MemoryManager.alloc_vaddr(size:=round_up(mem.nbytes, 0x1000), 0x1000)
+    mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
+    return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
+  def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
+    return Buffer(self.dev.device, mem.nbytes, dtypes.uint8, opaque=self.storage(mem, paddrs, snooped))
 
-    sq_wqe = bytearray(64)
-    sq_wqe[4:8] = struct.pack('>I', (src_qp.qp_info['qpn'] << 8) | 2)
-    sq_wqe[11] = 0x08 # CE: signal completion
-    sq_wqe[16:32] = self._wqe_data(src, sz, self.dev)
+  @functools.cached_property
+  def doorbell(self) -> Buffer:
+    off = self.dev_impl.db_off & ~0xfff
+    return self.buffer(self.pci_dev.map_bar(2, off=off, size=0x1000), [self.pci_dev.bar_info(2)[0] + off], snooped=False)
 
-    self.q(remote_nic, bytes(sq_wqe), self._wqe_data(dest, sz, remote_nic))
-    return self
+class BNXTAllocator(Allocator):
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage: # sysmem: the counters, the batch slots, the timeline
+    return self.dev.iface.storage(*self.dev.iface.pci_dev.alloc_sysmem(round_up(size, 0x1000)))
+  def _copyin(self, dest:BufferStorage, src:memoryview): unwrap(dest.host)[:len(src)] = src
+  def _map(self, buf:Buffer) -> BufferStorage: # a memory region over the buffer's pages, keyed at the gpu virtual address
+    iface = getattr(Device[buf.device], "iface", None)
+    if not isinstance(iface, PCIIfaceBase) or iface.peer_group != self.dev.peer_group: raise RuntimeError("RDMA requires memory on its node")
+    mapping = buf.meta.mapping # the nic reaches vram over pcie: the bar, even where gpus reach each other over xgmi
+    paddrs = mapping.paddrs if mapping.aspace is AddrSpace.SYS else PCIIfaceBase.p2p_paddrs(iface, mapping.paddrs)[0]
+    align = buf._buf | functools.reduce(operator.or_, (p | s for p, s in paddrs)) # every address a multiple of the page: fewer pbl entries
+    log_page = max(l for l in (12, 13, 16, 18, 20, 21, 22, 30) if not align & ((1 << l) - 1)) # the page sizes the nic has
+    key = self.dev.iface.dev_impl.register_mem([p + off for p, size in paddrs for off in range(0, size, 1 << log_page)],
+                                              mapping.size, log_page, va=buf._buf)
+    return BufferStorage(key, key)
+  def _offset(self, buf, size:int, offset:int): return buf
+  def _unmap(self, storage:BufferStorage): self.dev.iface.dev_impl.unregister_mem(storage.meta)
 
-  def _submit(self, dev:RDMADevice):
-    for remote_nic, sq_wqe, rq_wqe in zip(self._q[0::3], self._q[1::3], self._q[2::3]):
-      src_qp, dest_qp, _, _ = dev.iface.connect(remote_nic)
-      assert src_qp.head + 1 - to_be32(src_qp.dev.dbr[src_qp.qp_dbr // 4 + 1]) <= (1 << src_qp.log_sq_size), "SQ ring full"
-      assert src_qp.head + 1 - to_be32(dest_qp.dev.dbr[dest_qp.qp_dbr // 4]) <= (1 << dest_qp.log_rq_size), "RQ ring full"
-      dest_qp.qp_buf.view((src_qp.head & ((1 << dest_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
-      sq_view = src_qp.qp_buf.view(src_qp.sq_offset + (src_qp.head & ((1 << src_qp.log_sq_size) - 1)) * 64, 64)
-      sq_view[:] = struct.pack('>I', (src_qp.head << 8) | 0x0a) + sq_wqe[4:]
-      src_qp.head += 1
+@functools.cache
+def rdma_nic_for(dev, anchor) -> RDMADevice|None:
+  def node(s:str) -> str: return ":".join(s.split(":")[:3]) if s.startswith("remote:") else ""
+  def bus(s:str) -> int: return int(re.findall(r":([0-9a-f]{2}):[0-9a-f]{2}\.[0-7]", s)[-1], 16)
+  gpu = dev.iface.pci_dev.pcibus
+  try: nics = [(i, n) for i, (_, n) in enumerate(filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")) if node(n) == node(gpu)]
+  except RuntimeError: return None # no pcie on this machine
 
-class MLXIface(PCIIfaceBase):
-  def __init__(self, dev:RDMADevice, dev_id:int):
-    cl, pcibus = System.list_devices(vendor=0x15b3, devices=((0xffff, (0x101b,)),))[dev_id]
-    self.dev = dev
-    self.pci_dev = cl("mlx", pcibus)
-    self.mlx_dev = MLXDev(self.pci_dev, ip=f"10.0.0.{dev_id}")
-    self.uar_buf = self._buf([self.mlx_dev.pci_dev.bar_info(0)[0] + self.mlx_dev.uar * 0x1000])
-    self.dbr_buf = self._buf(self.mlx_dev.dbr_paddrs)
+  # the closest nic to the anchor on dev's node
+  return cast(RDMADevice, Device[f"RDMA:{min(nics, key=lambda x: abs(bus(x[1]) - bus(anchor.iface.pci_dev.pcibus)))[0]}"]) if nics else None
 
-  def is_bar_small(self) -> bool: return False
+class RDMADevice(Compiled):
+  ifaces = [BNXTIface]
 
-  def _buf(self, paddrs:list[int]) -> HCQBuffer:
-    va = FileIOInterface.anon_mmap(0, size:=len(paddrs) * 0x1000, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, 0)
-    mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=True)
-    return HCQBuffer(va, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
+  def __init__(self, device:str):
+    self.iface = self._select_iface(device)
+    super().__init__(device, BNXTAllocator(self), [], None)
 
-  @functools.cache
-  def connect(self, remote_nic:RDMADevice) -> tuple[MLXQP, MLXQP, HCQBuffer, HCQBuffer]:
-    src_qp, dest_qp = MLXQP(self.mlx_dev, log_sq_size=7, log_rq_size=7), MLXQP(remote_nic.iface.mlx_dev, log_sq_size=7, log_rq_size=7)
-    src_qp.connect(dest_qp)
-    dest_qp.connect(src_qp)
-    return src_qp, dest_qp, self._buf(src_qp.cq_paddrs), remote_nic.iface._buf(dest_qp.cq_paddrs)
+# *****************
+# UOps implementation
 
-class RDMAAllocator(HCQAllocatorBase):
-  def __init__(self, dev:RDMADevice): super().__init__(dev, batch_cnt=0)
+@functools.cache
+def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
+  # one qp per gpu pair
+  nics = [unwrap(rdma_nic_for(Device[d], Device[min(pair)])) for d in pair]
+  qps = {nic.device: BNXTQP(nic.iface.dev_impl) for nic in nics}
+  for nic, q in zip(nics, qps.values()):
+    bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
+    bufs |= {name: Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
+    rules = [(UPat(Ops.PARAM, tag=to_name("rdma", *pair, n)), lambda ctx, b=b: b) for n, b in bufs.items()]
+    nic.pm_bufferize = PatternMatcher(rules) + nic.pm_bufferize
+  for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
+  return qps
 
-  def _do_map(self, buf:HCQBuffer) -> HCQBuffer:
-    owner = unwrap(buf.base.owner)
-    bar, paddrs = owner.iface.pci_dev.bar_info(owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs  # type: ignore[attr-defined]
-    page_sz = (2 << 20) if min(sz for _, sz in paddrs) >= (2 << 20) else (4 << 10)
-    pages = [bar + p + off for p, sz in paddrs for off in range(0, sz, page_sz)]
-    return HCQBuffer(bar + paddrs[0][0], buf.base.size, owner=owner,
-                     meta=self.dev.iface.mlx_dev.register_mem(pages, len(pages) * page_sz, page_sz.bit_length() - 1))
+def rdma_mem(nic:str, pair:tuple[str, str], name:str, size:int, dtype:DType=dtypes.uint8) -> UOp:
+  return UOp.placeholder((size,), dtype, 0, device=nic, volatile=True, tag=to_name("rdma", *pair, name))
+def rdma_ring(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp:
+  return rdma_mem(nic, pair, "rq" if is_recv else "sq", RING_ENTRIES * (WQE_SIZE if is_recv else WQE_SIZE + 8))
+def rdma_cq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rcq" if is_recv else "scq", CQ_ENTRIES * 32)
+def rdma_seq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rq_seq" if is_recv else "sq_seq", 1, dtypes.uint64)
+def rdma_psn(nic:str, pair:tuple[str, str]) -> UOp: return rdma_mem(nic, pair, "psn", 1, dtypes.uint64) # the next psn of the sends
+def rdma_db(nic:str, pair:tuple[str, str]) -> UOp: return rdma_mem(nic, pair, "db", 0x1000)
 
-  def _do_free(self, buf:HCQBuffer, options): self.dev.iface.mlx_dev.unregister_mem(buf.meta)
-  def _unmap(self, mb): self.dev.iface.mlx_dev.unregister_mem(mb.meta)
+def rdma_wire(call:UOp) -> UOp|None:
+  if call.op is not Ops.CALL or call.src[0].op is not Ops.STORE: return None
+  return next((b for b in get_call_arg_uops(call) if to_tuple(b.device)[0].startswith("RDMA")), None)
+def is_rdma(call:UOp) -> bool: return rdma_wire(call) is not None
 
-  def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQCompiled, dest_dev:HCQCompiled):
-    # sync device
-    src_q = unwrap(dest_dev.hw_compute_queue_t)().wait(src_dev.timeline_signal, src_dev.timeline_value - 1)
-    dest_q = unwrap(dest_dev.hw_compute_queue_t)().wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1)
+def queue_of(call:UOp) -> tuple[tuple[str, str], bool]:
+  (dst, src), wire = get_call_arg_uops(call), unwrap(rdma_wire(call))
+  gpu = to_tuple((dst if wire is src else src).device)[0]
+  return (min(gpu, wire.tag), max(gpu, wire.tag)), wire is src
 
-    # rdma body + encode doorbell rings
-    src_qp, dest_qp, src_cq_buf, dest_cq_buf = self.dev.iface.connect(remote_nic:=dest_dev.rdma_dev())
-    RDMACopyQueue(self.dev).copy(dest, src, sz) \
-                           .encode_ring(src_q, src_dev, self.dev.iface, src_qp, src_cq_buf, src_qp.head, ring_uar=True) \
-                           .encode_ring(dest_q, dest_dev, remote_nic.iface, dest_qp, dest_cq_buf, src_qp.head) \
-                           .submit(self.dev)
+def ins(name:str, *src:UOp|int) -> UOp:
+  return UOp(Ops.INS, arg=(name, dtypes.void), src=tuple(UOp.const(s, dtypes.uint32) if isinstance(s, int) else s for s in src))
 
-    # signal completion
-    src_q.signal(src_dev.timeline_signal, src_dev.next_timeline()).submit(src_dev)
-    dest_q.signal(dest_dev.timeline_signal, dest_dev.next_timeline()).submit(dest_dev)
+def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the ops of each copy of a submit on one queue
+  (pair, is_recv), nic = queue_of(calls[0]), cast(RDMADevice, Device[unwrap(rdma_wire(calls[0])).device])
+  qp = rdma_qp(pair)[nic.device]
+  ring, cq = rdma_ring(nic.device, pair, is_recv), rdma_cq(nic.device, pair, is_recv)
+  seq, psn = rdma_seq(nic.device, pair, is_recv), rdma_psn(nic.device, pair)
+  bufs = [get_call_arg_uops(c)[0 if is_recv else 1] for c in calls]
+  wqes, packets = sum(ceildiv(b.nbytes(), RDMA_CHUNK) for b in bufs), sum(ceildiv(b.nbytes(), MTU) for b in bufs)
 
-class RDMADevice(HCQCompiled):
-  def __init__(self, device:str=""):
-    self.iface = MLXIface(self, int(device.split(":")[1]) if ":" in device else 0)
-    super().__init__(device, RDMAAllocator(self), [], None, signal_t=None)
+  assert wqes <= min(RING_ENTRIES, CQ_ENTRIES), "a batch posts at most a ring of wqes per pair"
+
+  # next slot and psn persist in nic memory. read once per submit and own it
+  bumps = [seq.index(0).store(seq.index(0).load() + wqes)] + ([] if is_recv else [psn.index(0).store(psn.index(0).load() + packets)])
+  n, p = seq.after(*bumps).index(0).load() - wqes, psn.after(*bumps).index(0).load() - packets
+
+  ring_addr, cq_addr = ring.getaddr(devs), cq.getaddr(devs)
+  db = rdma_db(nic.device, pair).getaddr(devs) + (nic.iface.dev_impl.db_off & 0xfff)
+  ring_db = db_value(qp.qpn, bnxt.DBC_DBC_TYPE_RQ if is_recv else bnxt.DBC_DBC_TYPE_SQ, 0, 0)
+  cq_db = db_value(qp.rcq_id if is_recv else qp.scq_id, bnxt.DBC_DBC_TYPE_CQ, 0, 0)
+
+  copies = []
+  for buf in bufs:
+    ops:list[UOp] = []
+    for off in range(0, buf.nbytes(), RDMA_CHUNK): # a wqe per chunk, each completed
+      size = min(RDMA_CHUNK, buf.nbytes() - off)
+
+      # sdma fills in the wqe
+      hdr, key = struct.unpack("<8I", (recv_wqe if is_recv else send_wqe)(0, 0, size)[:32]), unwrap_view(buf)[0].getaddr(nic.device)
+      ops += [ins("write", ring_addr + (n % RING_ENTRIES) * WQE_SIZE, *hdr, buf.getaddr(devs) + off, key.cast(dtypes.uint32), size)]
+
+      # a send also fills in its msn entry: the slot, the psn after it (a psn per packet), its first psn
+      if not is_recv: ops += [ins("write", ring_addr + RING_ENTRIES * WQE_SIZE + (n % RING_ENTRIES) * 8,
+                                  ((n % RING_ENTRIES) << 48) | (((p + ceildiv(size, MTU)) & 0xffffff) << 24) | (p & 0xffffff))]
+
+      # rings the doorbell: the slot after the wqe and the epoch of its pass
+      ops += [ins("write", db, ((n + 1) % RING_ENTRIES | ((n + 1) // RING_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | ring_db)]
+
+      # waits for the cqe, acks the cq
+      ops += [ins("wait_eq", cq_addr + (n % CQ_ENTRIES) * 32 + 24, (n // CQ_ENTRIES & 1 ^ 1 | (2 if is_recv else 0)).cast(dtypes.uint16)),
+              ins("write", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
+      n, p = n + 1, p + ceildiv(size, MTU)
+
+    # and invalidate the gpu caches on recv
+    copies.append(ops + ([ins("barrier")] if is_recv else []))
+  return copies
+
+# *****************
+# encode rewrite
+
+def rdma_submit(ctx, submit:UOp, lin:UOp) -> UOp|None:
+  if not (queues:={i: queue_of(u) for i, u in enumerate(lin.src) if is_rdma(u)}): return None
+
+  ops = [[u] for u in lin.src]
+  for q in dict.fromkeys(queues.values()):
+    positions = [i for i in queues if queues[i] == q]
+    for i, copy_ops in zip(positions, rdma_copies(lin.arg[0], [lin.src[i] for i in positions])): ops[i] = copy_ops
+  return submit.replace(src=(lin.replace(src=tuple(flatten(ops))),))
+pm_rdma_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), rdma_submit)])

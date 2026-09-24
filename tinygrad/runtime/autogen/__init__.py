@@ -18,7 +18,7 @@ cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cud
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
 opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
 comgr_2_src = "https://repo.radeon.com/rocm/apt/6.2/pool/main/c/comgr/comgr_2.8.0.60200-66~24.04_amd64.deb"
-macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+def macossdk(): return system("xcrun --show-sdk-path")
 
 llvm_lib = (
   (win_llvm:=r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ") +
@@ -169,14 +169,13 @@ def __getattr__(nm):
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   dll=clang_lib, prolog=["from tinygrad.helpers import WIN, OSX"], args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
-      return load("metal", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
+      return load("metal", lambda: [f"{macossdk()}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
-                  dll="'Metal'", args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
-    case "iokit": return load("iokit", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
-                              args=["-isysroot", macossdk])
-    case "corefoundation": return load("corefoundation",
-                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
-                                       dll="'CoreFoundation'",args=["-isysroot", macossdk])
+                  dll="'Metal'", args=lambda: ["-xobjective-c", "-isysroot", macossdk()], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", lambda: [f"{macossdk()}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
+                              args=lambda: ["-isysroot", macossdk()])
+    case "corefoundation": return load("corefoundation", lambda: [f"{macossdk()}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h"
+                                       for s in ["String", "Data"]], dll="'CoreFoundation'", args=lambda: ["-isysroot", macossdk()])
     case "llvm_qcom": return load("llvm_qcom", [root/"extra/tinydreno.h"], dll="'llvm-qcom'")
     case "ggml_common": return load("ggml_common", ["{}/ggml-common.h"], srcs=ggml_common_src,
                                     args=["-DGGML_COMMON_DECL_C", "-DGGML_COMMON_IMPL_C"], macros=False)
@@ -192,9 +191,9 @@ def __getattr__(nm):
                   srcs=[linux_headers_kern_deb, *bnxt_src],
                   args=["-Du8=unsigned char", "-Du32=unsigned int", "-Du64=unsigned long long", "-D__le16=unsigned short",
                         "-D__le32=unsigned int", "-D__le64=unsigned long long", "-D__be16=unsigned short", "-D__be32=unsigned int", f"-I{kh}"],
-                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
+                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_(un)?rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
                             r"|vnic_(alloc|cfg)|cfa_l2_filter_alloc|port_phy_cfg)_(input|output)|(cmd|resp)_hdr)$",
-                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|register_mr)(_resp)?"
+                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|(de)?register_mr)(_resp)?"
                             r"|cq_(base|req)|sq_(rdma_hdr|sge))$",
                             r"(BNXT|CMDQ|CREQ|CQ|SQ|DBC|PTU|RCFW|HWRM|VNIC|RING_ALLOC|STAT_CTX|CFA_L2_FILTER|PORT_PHY_CFG|FIRMWARE_FIRST"
                             r"|FUNC_(QCAPS|QCFG|RESET|DRV_RGTR|BACKING_STORE))_"], preprocess=_extract_deb)

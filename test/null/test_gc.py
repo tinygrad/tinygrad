@@ -1,10 +1,8 @@
 #!/usr/bin/env python
-import gc, inspect
+import gc, weakref, contextlib
 import unittest
 import numpy as np
-from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_linear
-from tinygrad.uop.ops import UOp
 from tinygrad.tensor import Tensor
 
 def _allocations_of_type(t):
@@ -20,12 +18,15 @@ def tensors_allocated():
   gc.collect()
   return _allocations_of_type(Tensor)
 
-def bufs_allocated():
+@contextlib.contextmanager
+def assert_freed(*objects):
+  refs = [weakref.ref(obj) for obj in objects]
+  del objects
+  yield
   gc.collect()
-  return _allocations_of_type(Buffer)
+  for ref in refs: assert ref() is None, f"{ref()} was not freed"
 
 class TestGC(unittest.TestCase):
-
   def test_gc(self):
     Tensor.manual_seed(0)
     base = tensors_allocated()
@@ -57,64 +58,50 @@ class TestGC(unittest.TestCase):
     Tensor.manual_seed(0)
 
   def test_schedule_gc(self):
-    init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
     y = Tensor.ones(5, 5).contiguous()
     y.schedule_linear()
-    del x
-    del y
-    self.assertEqual(bufs_allocated()-init, 0)
+    with assert_freed(x.uop.buffer, y.uop.buffer):
+      del x, y
 
   def test_schedule_gc_with_inputs(self):
-    init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
-    y = x+Tensor.ones(256).contiguous()
-    del x
-    run_linear(*y.linear_with_vars())
-    self.assertEqual(bufs_allocated()-init, 1)
-    del y
-    self.assertEqual(bufs_allocated()-init, 0)
+    with assert_freed(x.uop.buffer):
+      y = x+Tensor.ones(256).contiguous()
+      del x
+      run_linear(*y.linear_with_vars())
+    with assert_freed(y.uop.buffer):
+      del y
 
   def test_toposort_blocks_gc(self):
-    init = bufs_allocated()
     x = Tensor.ones(4,4).contiguous().realize()+1
-    self.assertEqual(bufs_allocated()-init, 1)
-    # try commenting this part out, it's green!
-    x.uop.toposort()
-    del x
-    if bufs_allocated()-init != 0:
-      print(inspect.getclosurevars(UOp.toposort().fget))
-      raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
+    with assert_freed(x.uop.src[0].buffer):
+      x.uop.toposort()
+      del x
 
-  def test_buffer_refcount(self):
-    init = bufs_allocated()
-    a = Tensor.empty(10)
-    self.assertEqual(bufs_allocated()-init, 0)
-    a.realize()
+  def test_buffer_ownership(self):
+    a = Tensor.empty(10).realize()
     real_buf = a.uop.buffer
-    # after the Tensor UOp is deleted there shouldn't be any references on the Buffer
-    self.assertEqual(real_buf.uop_refcount, 1)
-    self.assertEqual(bufs_allocated()-init, 1)
-    del a.uop
-    self.assertEqual(real_buf.uop_refcount, 0)
-    self.assertEqual(bufs_allocated()-init, 1) # keep the buffer alive
-    del real_buf
-    self.assertEqual(bufs_allocated()-init, 0)
+    with assert_freed(real_buf):
+      self.assertFalse(real_buf.is_allocated())
+      a.realize()
+      self.assertIs(a.uop.arg.buffer, real_buf)
+      del a.uop # the Buffer object is still held by real_buf
+      del real_buf
 
-  def test_assign_refcount(self):
-    init = bufs_allocated()
+  def test_assign_keeps_buffer(self):
     a = Tensor.full((4,), 1.).contiguous()
     a.realize()
     real_buf = a.uop.buffer
-    self.assertEqual(real_buf.uop_refcount, 1)
-    a.assign(Tensor.full((4,), 2.))
-    self.assertIs(a.uop.src[0].buffer, real_buf)
-    # NOTE: this is still 1, we don't count the ASSIGN
-    self.assertEqual(real_buf.uop_refcount, 1)
-    a.realize()
-    del a
-    self.assertEqual(real_buf.uop_refcount, 0) # no UOps for this Buffer
-    self.assertEqual(bufs_allocated()-init, 1) # Buffer is alive
+    with assert_freed(real_buf):
+      a.assign(Tensor.full((4,), 2.))
+      # assign writes in place: the AFTER still references the same Buffer
+      self.assertIs(a.uop.src[0].buffer, real_buf)
+      a.realize()
+      self.assertIs(a.uop.buffer, real_buf)
+      del a
+      self.assertTrue(real_buf.is_allocated()) # the Buffer object is still held here
+      del real_buf
 
 if __name__ == '__main__':
   unittest.main()

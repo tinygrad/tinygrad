@@ -21,7 +21,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL}
 
@@ -46,17 +46,16 @@ pm_generate_realize_map = PatternMatcher([
   # realize the inputs of custom kernel calls
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
   # always realize
-  (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  (UPat(Ops.STORE, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
-  # sometimes we need to realize the src of STORE if there's a self-access
+  # sometimes we need to realize the src of STORE if there's a self-access, or if it's a cross device store
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 
 @dataclass(frozen=True)
 class BufferizeOpts:
-  # on AddrSpace.LOCAL, device is the id
-  device: str|tuple[str, ...]|int|None
+  device: str|tuple[str, ...]|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   removable: bool = True
 
@@ -67,10 +66,10 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
-  if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL}: return ()
+  if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.RANGE, Ops.SPECIAL}: return ()
   # the store of a bound Variable only carries the input value, it has no data srcs
   if op is Ops.STORE and src[0].is_variable: return ()
-  if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
+  if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END, Ops.BACKEDGE}: return src[:1]
   return src
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
@@ -80,23 +79,20 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   for i, s in enumerate(x.src):
     new_src = s
     src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
+    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
-      realized_ranges = ctx.realize_map[s]
-      assert isinstance(realized_ranges, list), "realize map must contain range list"
-      closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
+      assert isinstance(ctx.realize_map[s], list), "realize map must contain range list"
+      closed_ranges = ctx.range_map[s][1]
       if s.op is Ops.STORE:
         # add the ends if this is a store
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
         del ctx.realize_map[s]
       else:
         removable = s.op not in ALWAYS_CONTIGUOUS and s not in ctx.non_removable
-        # LOCAL: None in the device assigns it a number later
-        opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
-               BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
+        opts = BufferizeOpts(device=s.device, removable=removable)
         new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
-        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(src_rngs) if i in realized_ranges])
+        if x in ctx.range_map: new_src = new_src.index(*src_rngs)
     new_srcs.append(new_src)
   return new_srcs
 
@@ -146,7 +142,7 @@ pm_apply_rangeify = PatternMatcher([
 
 pm_fix_deviceless = PatternMatcher([
   (UPat(Ops.STAGE, name="b"),
-    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.addrspace is AddrSpace.GLOBAL and b.arg.device is None else None),
+    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.device is None else None),
 ])
 
 @functools.cache

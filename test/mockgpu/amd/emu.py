@@ -69,7 +69,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32
+from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, _bitreverse, _countbits
 
 MASK32 = 0xFFFFFFFF
 
@@ -321,10 +321,10 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr')
-  sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT)
-  vmem = UOp.param(2, dtypes.uint32, 1 << 46)
-  lds = UOp.param(3, dtypes.uint32, 16384)
-  scratch = UOp.param(4, dtypes.uint8, 1 << 30)
+  sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
+  vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
+  lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
+  scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
   # Cache PARAM UOps by wave_size so all _Ctx instances with same wave_size share identical UOp references
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
@@ -332,10 +332,10 @@ class _Ctx:
   def __init__(self, inst_size: int, wave_size: int = 32):
     self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size)
+    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
     self.vgpr = _Ctx._vgpr_cache[wave_size]
     if wave_size == 64:
-      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp.param(5, dtypes.uint32, 256 * wave_size)
+      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr")
       self.accvgpr = _Ctx._accvgpr_cache[wave_size]
     else:
       self.accvgpr = self.vgpr
@@ -537,15 +537,20 @@ class _Ctx:
           stores.extend([self.wsgpr_dyn(_c(EXEC_LO.offset), lo), self.wsgpr_dyn(_c(EXEC_LO.offset + 1), hi)])
         else: stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.extend(self.wmask(_c(VCC_LO.offset), val))
+      elif dest.startswith('PC'):  # S_SETPC/S_SWAPPC jump: write PC directly (caller skips inc_pc)
+        lo, hi = _split64(val.cast(dtypes.uint64))
+        stores.extend([self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)])
     return stores
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp | int], sdst_reg: UOp, sdst_size: int) -> UOp:
     """Compile a scalar instruction with dynamic destination register."""
     pcode = get_pcode(op)
-    srcs.update(self.base_srcs(self.rexec()), VCC=self.rmask(_c(VCC_LO.offset)))
+    srcs.update(self.base_srcs(self.rexec()), VCC=self.rmask(_c(VCC_LO.offset)), PC=self.rpc().cast(dtypes.int64))
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs)
-    return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
+    # PC-writing ops (S_SETPC/S_SWAPPC) jump instead of advancing to the next instruction
+    inc = [] if any(dest.startswith('PC') for dest, _ in assigns) else self.inc_pc()
+    return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *inc)
 
   def compile_lane_pcode(self, op, inst) -> UOp:
     """Compile cross-lane ops (READLANE/WRITELANE/PERMLANE) using pcode parser."""
@@ -678,7 +683,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
             'VCCZ': vcc.eq(UOp.const(0, vcc.dtype)).cast(dtypes.uint32),
             'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
-      if dest == 'PC' or dest.startswith('PC.'):
+      if dest.startswith('PC'):
         lo, hi = _split64(val.cast(dtypes.uint64))
         return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
   return UOp.sink(*ctx.inc_pc())
@@ -1247,10 +1252,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     if is_fp8: return _FUNCS[f"{fp8_fmt}_to_f32"](raw >> UOp.const(sub_idx * 8, dtypes.uint32)).bitcast(dtypes.uint32)
     h = (raw >> UOp.const(sub_idx * 16, dtypes.uint32)) & UOp.const(0xFFFF, dtypes.uint32)
     if is_bf16: return h << UOp.const(16, dtypes.uint32)  # bf16 is the upper 16 bits of f32
-    # f16 -> f32 bit pattern, done in integer domain so the optimizer can't fold away the conversion
-    sign, exp, mant = (h >> _c(15)) & _c(1), (h >> _c(10)) & _c(0x1F), h & _c(0x3FF)
-    f32_bits = (sign << _c(31)) | ((exp + _c(112)) << _c(23)) | (mant << _c(13))
-    return exp.eq(_c(0)).where(_c(0), f32_bits)
+    return _FUNCS['f16_to_f32'](h).bitcast(dtypes.uint32)
 
   def mn_idx(lane: UOp) -> UOp:  # M/N matrix index held by a lane
     if M == 32:  # (lane%32)/16 selects the 16-wide block, (lane%32)%16 the index within it
@@ -1323,7 +1325,8 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   vdst_reg = ctx.inst_field(type(inst).vdst)
   src0_r, src1_r = ctx.inst_field(type(inst).src0) - _c(256), ctx.inst_field(type(inst).src1) - _c(256)
   src2_r = ctx.inst_field(type(inst).src2)
-  src2_r = (src2_r >= 256).where(src2_r - _c(256), src2_r)
+  is_c_vgpr = src2_r >= _c(256)
+  src2_r = is_c_vgpr.where(src2_r - _c(256), src2_r)  # also keeps the unused VGPR-side index in bounds when src2 is a constant
   output_type = op_name.split("WMMA_", 1)[1].split("_", 1)[0]
   is_bf16, is_rdna4 = 'BF16' in op_name, isinstance(inst, ir4.VOP3P)
   cvt = _FUNCS['bf16_to_f32' if is_bf16 else 'f16_to_f32']
@@ -1353,12 +1356,15 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     return n + lane_bit * 16, vgpr
 
   # Accumulator C. RDNA4 f16/bf16 packs two f32 accumulator VGPRs into one f16 VGPR; RDNA3 uses the lo half of each.
+  # src2 may be a VGPR or an inline/scalar constant (128 = int 0, the usual ", 0" C form); the runner must handle both dynamically
+  out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
+  cbits = ctx.rsrc_dyn(src2_r, None, 32)
+  cval_const = cvt(cbits & UOp.const(0xFFFF, dtypes.uint32)) if output_type in ("F16", "BF16") else cbits.bitcast(out_dt)
   if output_type in ("F16", "BF16"):
-    mat_c = [gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)))
+    mat_c = [is_c_vgpr.where(gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0))), cval_const)
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
   else:
-    out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(vgpr), UOp.const(lane, dtypes.int)).bitcast(out_dt)
+    mat_c = [is_c_vgpr.where(ctx.rvgpr_dyn(src2_r + _c(vgpr), UOp.const(lane, dtypes.int)).bitcast(out_dt), cval_const)
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
   mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
 
@@ -1526,9 +1532,9 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
   pcode = get_pcode(inst.op)
-  # CDNA pcode uses CalcGlobalAddr/CalcDsAddr to compute address from raw components, but make_addr already handles this.
+  # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
-  if isinstance(inst, (irc.GLOBAL, irc.FLAT, irc.SCRATCH, irc.DS, ir4.VSCRATCH)) and 'Calc' in pcode and 'Addr' in pcode:
+  if isinstance(inst, (irc.GLOBAL, irc.FLAT, irc.SCRATCH, irc.DS, ir4.VFLAT, ir4.VSCRATCH)) and 'Calc' in pcode and 'Addr' in pcode:
     pcode = re.sub(r'addr\s*=\s*Calc\w+Addr\([^)]*\)\s*;?\n?', '', pcode).replace('MEM[addr', 'MEM[ADDR')
 
   is_lds = isinstance(inst, (ir3.DS, ir4.DS, irc.DS))
@@ -1548,7 +1554,9 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     offset0, offset1 = ctx.inst_field(type(inst).offset0), ctx.inst_field(type(inst).offset1)  # type: ignore[union-attr]
     offset, saddr_reg = (offset1 << _c(8)) | offset0, None  # DS offset is 16-bit: (offset1 << 8) | offset0
   else:
-    offset0, offset1, saddr_reg = _c(0), _c(0), ctx.optional_field(inst, 'saddr')
+    # FLAT always uses a VGPR pair; its unused saddr bits can be zero rather than NULL.
+    offset0, offset1 = _c(0), _c(0)
+    saddr_reg = None if isinstance(inst, (ir3.FLAT, ir4.VFLAT, irc.FLAT)) else ctx.optional_field(inst, 'saddr')
     offset = ctx.inst_field_signed(getattr(type(inst), 'ioffset' if hasattr(type(inst), 'ioffset') else 'offset'))
 
   # Data width from canonical_op_bits (32/64/96/128), default to 32 for untyped ops
@@ -1557,9 +1565,19 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
   data1_reg = ctx.inst_field(type(inst).data1) if is_lds else _c(0)  # type: ignore[union-attr]
 
+  if is_lds and op_name == 'DS_SWIZZLE_B32':
+    # The manual's reverse_bits operates on five-bit lane indices; thread indices wrap within the wave.
+    funcs = {'reverse_bits': lambda x: _bitreverse(x, 32) >> _c(27), 'count_ones': _countbits,
+             'thread_in': lambda x: ctx.rvgpr_dyn(addr_reg, x & _c(ctx.wave_size - 1)),
+             'thread_valid': lambda x: _lane_active(exec_mask, x & _c(ctx.wave_size - 1))}
+    result, _ = parse_pcode(pcode, {'offset0': offset0.cast(dtypes.uint8), 'offset1': offset1.cast(dtypes.uint8)}, funcs)
+    values = [result[f'thread_out@{i}'] for i in range(ctx.wave_size)]
+    # Snapshot every source before writing: destination and source registers may be identical.
+    reads = UOp(Ops.STACK, src=tuple(values))
+    return UOp.sink(*(ctx.wvgpr_dyn(vdst_reg, _c(i), val, exec_mask, after=reads) for i, val in enumerate(values)), *ctx.inc_pc())
+
   # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
   if is_lds and 'PERMUTE' in op_name:
-    pcode = get_pcode(inst.op)
     srcs = {'ADDR': addr_reg, 'DATA0': vdata_reg, 'VDST': vdst_reg, 'OFFSET': offset,
             'EXEC': exec_mask.cast(dtypes.uint64), '_vgpr': ctx.vgpr, '_wave_size': ctx.wave_size}
     _, assigns = parse_pcode(pcode, srcs)
@@ -1587,7 +1605,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(0, dtypes.uint64)) \
         if saddr_reg is not None else UOp.const(0, dtypes.uint64)
       return base + addr_offset + saddr_contrib + offset64
-    # FLAT/GLOBAL: choose between SGPR base (saddr) or VGPR pair (addr) based on saddr validity
+    # GLOBAL can use an SGPR base plus a VGPR offset; FLAT always uses the full VGPR pair.
     saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else UOp.const(0, dtypes.uint64)
     vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
     # When saddr is valid: base = saddr pair, vaddr is 32-bit offset; otherwise: base = 0, vaddr is 64-bit address
@@ -1821,8 +1839,8 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
-  # NOTE: renderer output is not reproducible because of _MXCSRContext. PROFILE=0 prevents emulator instruction runners from polluting profiling.
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
+  # NOTE: renderer output is not reproducible because of _MXCSRContext.
+  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(sink, Device['CPU'].renderer)
     runtime = get_runtime('CPU', prg)
   _canonical_runner_cache.append((type(inst), base, mask, size, (prg, runtime)))
@@ -1864,14 +1882,14 @@ class WaveState:
     # CDNA (wave64) has separate ACCVGPR file; RDNA shares with VGPR
     if wave_size == 64:
       self.accvgpr_buf = Buffer('CPU', vgpr_size, dtypes.uint32).ensure_allocated()
-      ctypes.memset(self.accvgpr_buf._buf.va_addr, 0, vgpr_size * 4)
+      ctypes.memset(self.accvgpr_buf._buf, 0, vgpr_size * 4)
     else:
       self.accvgpr_buf = self.vgpr_buf
-    self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
-    self._sgpr_mv = self.sgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
+    self._vgpr_mv = self.vgpr_buf.host.view(fmt='I').mv
+    self._sgpr_mv = self.sgpr_buf.host.view(fmt='I').mv
     # Zero memory using ctypes memset (much faster than Python loops)
-    ctypes.memset(self.vgpr_buf._buf.va_addr, 0, vgpr_size * 4)
-    ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)
+    ctypes.memset(self.vgpr_buf._buf, 0, vgpr_size * 4)
+    ctypes.memset(self.sgpr_buf._buf, 0, SGPR_COUNT * 4)
     # Pre-populate inline constants at indices 128-255
     for i in range(65): self._write_sgpr(128 + i, i)  # 128-192: integers 0-64
     for i in range(16): self._write_sgpr(193 + i, (-(i + 1)) & MASK32)  # 193-208: -1 to -16
@@ -1947,7 +1965,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Use Buffer objects with external_ptr=0 for vmem
   vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', scratch_size * wave_size, dtypes.uint8).ensure_allocated() if scratch_size else None
+  # Scratch is per-lane private memory: each wave needs its own region so data spilled before s_barrier survives other waves' execution.
+  n_waves = -(-total_threads // wave_size)
+  scratch_buf = Buffer('CPU', scratch_size * wave_size * n_waves, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
   if PROFILE:
@@ -1971,10 +1991,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     waves: list[tuple[WaveState, list]] = []
     for wave_start in range(0, total_threads, wave_size):
       st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data, wave_size)
-      waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
-                         ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                         ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0),
-                         ctypes.c_uint64(st.accvgpr_buf._buf.va_addr)]))
+      scratch_base = scratch_buf._buf + (wave_start // wave_size) * scratch_size * wave_size if scratch_buf else 0
+      waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf), ctypes.c_uint64(st.vgpr_buf._buf),
+                         ctypes.c_uint64(vmem_buf._buf), ctypes.c_uint64(lds_buf._buf),
+                         ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
     done = [False] * len(waves)
     for _ in range(10_000_000):
       if all(done): return
@@ -2005,7 +2025,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     for gidz, gidy, gidx in itertools.product(range(gz), range(gy), range(gx)):
       _run_workgroup(gidx, gidy, gidz, tracing)
       tracing = False  # only trace the first workgroup
-      if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))  # reset LDS for next workgroup
+      if lds_size > 0: ctypes.memset(lds_buf._buf, 0, max(lds_size, 4))  # reset LDS for next workgroup
 
   if PROFILE: sqtt_traces.append(sqtt_finalize())
   return 0

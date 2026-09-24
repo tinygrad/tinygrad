@@ -94,11 +94,15 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   else:
     return buf.index(cidx.src[1], cidx.src[0])
 
+def store_image(x:UOp, d:UOp) -> UOp:
+  # image load/store is always float, a half image converts on store
+  def as_float(s:UOp):
+    return s.src[0] if x.src[0].dtype is dtypes.half and s.op is Ops.CAST and s.src[0].dtype is dtypes.float else s.cast(dtypes.float)
+  return x.store(UOp.stack(*[as_float(s) for s in d.src]) if d.op is Ops.STACK else as_float(d))
+
 pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
-  # image load/store is always float
-  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
-  (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
+  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), store_image),
 ])
 
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
@@ -113,6 +117,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
+      if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
@@ -133,8 +138,6 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       lengths = [128,64,32,16,8,4]
       must_divide = False
     elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
-      pass
-    elif buf.addrspace == AddrSpace.REG:
       pass
     elif is_image_shape(buf._shape):
       lengths = [4]

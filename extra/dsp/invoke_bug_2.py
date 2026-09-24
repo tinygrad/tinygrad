@@ -268,7 +268,7 @@ return HAP_perf_get_time_us() == 1 ? 4 : 0;
 if __name__ == "__main__":
   dev = DSPDevice()
 
-  bufs = [dev.allocator.alloc(0x60000) for _ in range(4)]
+  bufs = [dev.allocator.alloc(0x60000).buf for _ in range(4)]
 
   only_entry = dev.compiler.compile(entry)
   app1 = dev.runtime("test", only_entry)

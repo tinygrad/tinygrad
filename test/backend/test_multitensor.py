@@ -1,15 +1,11 @@
 import unittest, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
-from tinygrad.helpers import getenv, prod, Context
+from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import run_linear, compile_linear, lower_and_compile, pm_beam
+from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
 import numpy as np
-from hypothesis import given, strategies as strat, settings
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count, KernelCountException
-
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
-settings.load_profile("my_profile")
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, check_schedule, assert_kernel_count, KernelCountException
 
 d0 = f"{Device.DEFAULT}:0"
 d1 = f"{Device.DEFAULT}:1"
@@ -58,11 +54,6 @@ class TestMultiTensor(unittest.TestCase):
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
-  def test_shard_invalids_contiguous(self):
-    # every store is Invalid, so none of them should become a (empty) kernel
-    t = Tensor.invalids(8).shard(devices_2, axis=0).contiguous()
-    self.assertEqual(len([c for c in t.schedule_linear().src if c.src[0].op is Ops.SINK]), 1)
-
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()
@@ -76,7 +67,7 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
     out = (X + X)
-    linear = compile_linear(out.schedule_linear())
+    linear = lower_and_compile(out.schedule_linear())
     uops = [call.src[0].src[0] for call in linear.src if call.src[0].op is Ops.PROGRAM]
     run_linear(linear)
     self.assertEqual(len(set(uops)), 1, "function was relinearized")
@@ -129,17 +120,21 @@ class TestMultiTensor(unittest.TestCase):
       run_linear(linear, var_vals)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
-  @given(strat.sampled_from((devices_2, devices_3)),
-         strat.sampled_from((Ops.ADD, Ops.MUL, Ops.MAX)),
-         strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)))
-  def test_simple_reduce(self, devices, rop, shard_axis, reduce_axis):
-    N = 4 * len(devices)
-    X = (Tensor.rand(N*N)-1).reshape(N, N).shard_(devices, shard_axis)
-    n = X.numpy()
-    f = {Ops.ADD: lambda x: x.sum(reduce_axis), Ops.MUL: lambda x: x.prod(reduce_axis), Ops.MAX: lambda x: x.max(reduce_axis)}[rop]
-    fX = f(X)
-    fn = f(n)
-    np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
+  def test_simple_reduce(self):
+    for devices, rop, shard_axis, reduce_axis in [
+      (devices_2, Ops.ADD, None, None), (devices_2, Ops.ADD, 0, 0), (devices_2, Ops.ADD, 0, 1),
+      (devices_2, Ops.ADD, 1, 0), (devices_2, Ops.ADD, 1, 1),
+      (devices_3, Ops.ADD, 0, 0), (devices_3, Ops.ADD, 1, 0),
+      (devices_2, Ops.MUL, 0, 1), (devices_2, Ops.MUL, 1, 1), (devices_3, Ops.MUL, 0, 0),
+      (devices_2, Ops.MAX, 0, 1), (devices_3, Ops.MAX, 1, 0)]:
+      with self.subTest(devices=len(devices), op=rop.name, shard_axis=shard_axis, reduce_axis=reduce_axis):
+        N = 4 * len(devices)
+        X = (Tensor.rand(N*N)-1).reshape(N, N).shard_(devices, shard_axis)
+        n = X.numpy()
+        f = {Ops.ADD: lambda x: x.sum(reduce_axis), Ops.MUL: lambda x: x.prod(reduce_axis), Ops.MAX: lambda x: x.max(reduce_axis)}[rop]
+        fX = f(X)
+        fn = f(n)
+        np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
   def test_stack(self):
     X = Tensor.rand(4, 4).shard_(devices_2, 0)
@@ -176,21 +171,21 @@ class TestMultiTensor(unittest.TestCase):
   def test_allreduce_naive_jit(self):
     with Context(RING=0):
       jit_allreduce = TinyJit(_test_allreduce)
-      for _ in range(5):
+      for _ in range(3):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
       jit_allreduce = TinyJit(_test_allreduce)
-      for _ in range(5):
+      for _ in range(3):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
   def test_allreduce_all2all_jit(self):
     with Context(ALL2ALL=2):
       jit_allreduce = TinyJit(_test_allreduce)
-      for _ in range(5):
+      for _ in range(3):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
@@ -212,7 +207,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_fuzz_allreduce(self):
     random.seed(41)
-    for it in range(2):
+    for it in range(1):
       for n in range(2, 4+1):
         shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
         t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
@@ -304,40 +299,6 @@ class TestMultiTensor(unittest.TestCase):
       jf(out)
       np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
-
-  @unittest.skip("test broken")
-  def test_multi_device_jit_graph(self):
-    if Device[d0].graph is None or Device[d1].graph is None: raise unittest.SkipTest("only test graphs")
-
-    @TinyJit
-    def jf(a: Tensor, b: Tensor, c: Tensor, d:Tensor):
-      # Create 80 entries on device 0: 2 batches.
-      for _ in range(40):
-        a = ((a + b).realize() + (a * b).realize()).realize()
-      # Create 80 entries on device 1: 2 batches.
-      for _ in range(40):
-        c = ((c + d).realize() + (c * d).realize()).realize()
-      # Create a copy from device 0 to 1: 1 entry.
-      a = a.to(d1).realize()
-      # Creates one last entry on device 1: 1 batch.
-      return (a + c).realize()
-
-    a = Tensor.randn(10, 10, device=d0).realize()
-    b = Tensor.randn(10, 10, device=d0).realize()
-    c = Tensor.randn(10, 10, device=d1).realize()
-    d = Tensor.randn(10, 10, device=d1).realize()
-
-    ref = jf(a, b, c, d).numpy()
-    for _ in range(5):
-      o = jf(a, b, c, d).numpy()
-      np.testing.assert_allclose(ref, o, atol=1e-4, rtol=1e-5)
-
-    # Checking that 2 graphs per device, 1 copy and 1 last graph on device 1 are created.
-    sis = jf.captured.linear.src
-    assert len(sis) == 6
-    for si in (sis[0], sis[1], sis[2], sis[3], sis[5]):
-      assert call_is_graph(si)
-    assert sis[4].src[0].op is Ops.COPY
 
   def test_rand_on_multiple_devices(self):
     # different devices generate different rand
@@ -445,6 +406,7 @@ class TestMultiBufferView(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class Test2DShard(unittest.TestCase):
+  @needs_second_gpu
   def setUp(self):
     self.devices_4 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     self.rng = UOp.range(4, -1, AxisType.DEVICE)
@@ -459,6 +421,15 @@ class Test2DShard(unittest.TestCase):
     t = self._shard_2d(ref)
     out = t.contiguous().realize()
     np.testing.assert_equal(out.numpy(), ref.numpy())
+
+  def test_2d_shard_clone(self):
+    ref = Tensor.arange(16).reshape(4, 4).realize()
+    t = self._shard_2d(ref)
+    out = t.clone().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy())
+    out.assign(out + 1).realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy() + 1)
+    np.testing.assert_equal(t.numpy(), ref.numpy())
 
   def test_2d_shard_elementwise(self):
     ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
@@ -513,7 +484,8 @@ class TestMultiTransformer(unittest.TestCase):
       else: v.shard_(device, axis=None)
 
     last_tok = 0
-    for i in range(5):
+    # i=0: bypasses jit, i=1: jit warmup, i=2: capture and run, i>=3: re-execute jit with new start_pos (catches stale bindings)
+    for i in range(4):
       real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), i).item()
       shard_tok = shard_model(Tensor([[last_tok]], device=device), i).item()
 

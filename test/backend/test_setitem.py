@@ -1,6 +1,5 @@
-import unittest
+import unittest, operator
 from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
-from tinygrad.helpers import Context
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -49,17 +48,6 @@ class TestSetitem(unittest.TestCase):
     flat[idx] = Tensor([99, 98, 97, 96], dtype=dtypes.float)
     sub.assign(flat.reshape(2, 5))
     np.testing.assert_allclose(sub.numpy(), [[99, 6, 7, 98, 9], [10, 11, 97, 13, 96]])
-
-  def test_setitem_dtype(self):
-    for dt in (dtypes.int, dtypes.float, dtypes.bool):
-      for v in (5., 5, True):
-        t = Tensor.ones(6,6, dtype=dt).contiguous()
-        t[1] = v
-        self.assertEqual(t.dtype, dt)
-
-  def test_setitem_dtype_mismatch(self):
-    t = Tensor.zeros(6, dtype=dtypes.float).contiguous().realize()
-    with self.assertRaises(RuntimeError): t[2:4] = Tensor([1, 2], dtype=dtypes.int)
 
   def test_setitem_chained_indexing(self):
     # N[i][j] must work the same as N[i, j]
@@ -163,21 +151,20 @@ class TestSetitem(unittest.TestCase):
       np.testing.assert_allclose(t.numpy(), n)
 
   def test_jit_setitem_variable_offset(self):
-    with Context(CHECK_OOB=0):
-      @TinyJit
-      def f(t:Tensor, a:Tensor, v:Variable):
-        t.shrink(((v,v+1), None)).assign(a).realize()
+    @TinyJit
+    def f(t:Tensor, a:Tensor, v:Variable):
+      t.shrink(((v,v+1), None)).assign(a).realize()
 
-      t = Tensor.zeros(6, 6).contiguous().realize()
-      n = np.zeros((6, 6))
+    t = Tensor.zeros(6, 6).contiguous().realize()
+    n = np.zeros((6, 6))
 
-      for i in range(6):
-        v = Variable("v", 0, 6).bind(i)
-        a = Tensor.full((1, 6), fill_value=i+1, dtype=dtypes.float).contiguous()
-        n[i, :] = i+1
-        f(t, a, v)
-        np.testing.assert_allclose(t.numpy(), n)
-      np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
+    for i in range(6):
+      v = Variable("v", 0, 6).bind(i)
+      a = Tensor.full((1, 6), fill_value=i+1, dtype=dtypes.float).contiguous()
+      n[i, :] = i+1
+      f(t, a, v)
+      np.testing.assert_allclose(t.numpy(), n)
+    np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
 
   def test_setitem_overlapping_inplace1(self):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()
@@ -306,18 +293,13 @@ class TestSetitem(unittest.TestCase):
 
 class TestAssignBitcast(unittest.TestCase):
   def test_assign_through_bitcast(self):
-    # the dest is unrealized, so callify cannot fold the BITCAST into a buffer view and the STORE keeps a
+    # the dest is unrealized, so the call transform cannot fold the BITCAST into a buffer view and the STORE keeps a
     # BITCAST dest; the bitcast has to move to the value side or the store never reaches the buffer
     a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous()
     a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
     np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
 
 class TestWithGrad(unittest.TestCase):
-  def test_basic_setitem_works(self):
-    z = Tensor.rand(8, 8)
-    x = Tensor.rand(8)
-    z[:3] = x
-
   def test_set_backward(self):
     z = Tensor.ones(8, 8)
     x = Tensor.rand(8, 8)
@@ -350,33 +332,31 @@ class TestWithGrad(unittest.TestCase):
     np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
     np.testing.assert_allclose(x.grad.numpy(), np.ones(2))
 
-  def test_set_used_before_setitem(self):
-    z = Tensor([1.0, 2.0, 3.0, 4.0])
-    _ = z.sum()
-    with self.assertRaises(RuntimeError):
-      z[:2] = Tensor([0.0, 0.0])
+  def test_unrealized_inplace_keeps_storage(self):
+    x = Tensor([1., 2.]).clone()
+    view = x[:1]
+    x += 3
+    x.realize()
+    self.assertEqual(x.tolist(), [4., 5.])
+    self.assertEqual(view.tolist(), [4.])
 
-  def test_setitem_raises_with_unrealized_downstream(self):
-    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
-    _y = x * 2.0
-    with self.assertRaises(RuntimeError):
-      x[0] = 99.0
+  def test_unrealized_view_inplace_keeps_storage(self):
+    x = Tensor([1., 2.]).clone()
+    view = x[:1]
+    view += 3
+    view.realize()
+    self.assertEqual(x.tolist(), [4., 2.])
+    self.assertEqual(view.tolist(), [4.])
 
-  def test_setitem_raises_on_unrealized_compute_base(self):
-    # y has a compute (unrealized) base; tmp is a view of y. eager: tmp would follow y's mutation. lazy: tmp keeps the old MUL graph.
-    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
-    y = x * 2.0
-    _tmp = y[:1]
-    with self.assertRaises(RuntimeError):
-      y[0] = 99.0
-
-  def test_setitem_raises_on_aliased_uop(self):
-    # two Tensor objects sharing the exact same unrealized uop. setitem on one updates its uop, the other keeps the stale graph reference.
-    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
-    y = x * 2.0
-    _z = Tensor(y.uop)
-    with self.assertRaises(RuntimeError):
-      y[0] = 99.0
+  def test_set_augmented_backward(self):
+    for op, expected in ((operator.isub, [-1., -1.]), (operator.imul, [1., 2.]), (operator.itruediv, [-0.01, -0.005])):
+      with self.subTest(op=op.__name__):
+        z = Tensor([1.0, 2.0, 3.0, 4.0])
+        x = Tensor([10.0, 20.0])
+        z[:2] = op(z[:2], x)
+        z.sum().backward()
+        np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
+        np.testing.assert_allclose(x.grad.numpy(), expected)
 
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):

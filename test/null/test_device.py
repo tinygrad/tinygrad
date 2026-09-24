@@ -64,14 +64,14 @@ class TestDevice(unittest.TestCase):
     result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device[Device.DEFAULT].renderer'],
                             env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"}, capture_output=True)
     self.assertNotEqual(result.returncode, 0)
-    self.assertIn(b"deprecated", result.stderr)
+    self.assertIn(b"deprecated, use DEV=CPU:LLVM instead", result.stderr)
 
   @unittest.skipIf(WIN, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import ClangCompiler
       from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
-      try: _, _ = CPULLVMCompiler(), ClangCompiler()
+      try: _, _ = CPULLVMCompiler(arch:=Device["CPU"].renderer.target.arch.split(",")), ClangCompiler(arch)
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import ClangCompiler; "
@@ -89,7 +89,7 @@ class TestDevice(unittest.TestCase):
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler; "
-                 "from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler")
+                 "from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler")
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "AMD:LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
@@ -102,7 +102,7 @@ class TestDevice(unittest.TestCase):
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
-    try: _, _ = CPULLVMCompiler(), ClangCompiler()
+    try: _, _ = CPULLVMCompiler(arch:=Device["CPU"].renderer.target.arch.split(",")), ClangCompiler(arch)
     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
     with Context(DEV="CPU:LLVM"):
@@ -118,7 +118,7 @@ class TestDevice(unittest.TestCase):
   def test_compiler_autodetect_fallback(self):
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
 
-    try: CPULLVMCompiler()
+    try: CPULLVMCompiler(Device["CPU"].renderer.target.arch.split(","))
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
 
     dev = Device["CPU"]

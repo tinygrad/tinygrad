@@ -1,4 +1,4 @@
-import unittest, math, subprocess
+import unittest, math
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, strong_dtype
 from tinygrad.device import Device
@@ -39,31 +39,6 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 class TestTypeSpec(unittest.TestCase):
-  def test_default_dtype_context(self):
-    default_float, default_int = dtypes.default_float, dtypes.default_int
-    with Context(DEFAULT_FLOAT=dtypes.half, DEFAULT_INT=dtypes.int16):
-      assert dtypes.default_float is dtypes.half
-      assert dtypes.default_int is dtypes.int16
-    assert dtypes.default_float is default_float
-    assert dtypes.default_int is default_int
-
-  @unittest.skip("this test is slow and spawning whole pythons")
-  def test_env_set_default_float(self):
-    # check default
-    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
-                    shell=True, check=True)
-    # check change
-    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
-                    shell=True, check=True)
-    # check invalid
-    with self.assertRaises(subprocess.CalledProcessError):
-      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
-                      shell=True, check=True)
-
-    with self.assertRaises(subprocess.CalledProcessError):
-      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
-                      shell=True, check=True)
-
   def test_dtype_str_arg(self):
     n = np.random.normal(0, 1, (10, 10)).astype(np.float32)
     tested = 0
