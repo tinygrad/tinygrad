@@ -329,7 +329,7 @@ def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_wa
   flat_accs = [acc for output_accs in accs for acc in output_accs]
   lds = UOp.placeholder((output_waves, 32, len(flat_accs)*8), dtypes.float32, slot=33, addrspace=AddrSpace.LOCAL)
   stores = [lds[wave, lane, a*8+i].store(acc.after(update)[i].load()) for a,acc in enumerate(flat_accs) for i in range(8)]
-  lds = lds.after(UOp.barrier(UOp.group(*stores)))
+  lds = lds.after(*stores)
   def values(ai:int) -> tuple[UOp, ...]:
     own = tuple(lds[wave, lane, ai*8+i].load() for i in range(8))
     peer = tuple(lds[wave, lane ^ 16, ai*8+i].load() for i in range(8))
@@ -391,7 +391,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
   word_indices = (half, half+2) if rdna4 else tuple(range(4))
   local_lut = UOp.placeholder((256,), dtypes.uint32, slot=32, addrspace=AddrSpace.LOCAL)
   tid, lut_items = wave*32+lane, 256//(32*output_waves)
-  lut = local_lut.after(UOp.group(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items))).barrier())
+  lut = local_lut.after(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items)))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     d, scale = _iq4_scales(raw, base, subgroup)
     scale = scale * d
@@ -411,8 +411,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
   if grids:
     grid = UOp.placeholder((int(grids[0].numel()),), dtypes.uint32, slot=32, addrspace=AddrSpace.LOCAL)
     tid, threads = wave*32+lane, output_waves*32
-    grid = grid.after(UOp.group(*(grid[tid+i*threads].store(grids[0][tid+i*threads])
-                                 for i in range(int(grid.numel())//threads))).barrier())
+    grid = grid.after(*(grid[tid+i*threads].store(grids[0][tid+i*threads]) for i in range(int(grid.numel())//threads)))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     if ggml_type == IQ4_NL: base += subgroup*9  # eight independent 18-byte blocks per 256 weights
     def byte(offset): return _load_byte(raw, base, offset)
@@ -566,8 +565,7 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
   stores = [lds_acc[wave, h, lane].store((acc_reg[h].load() / sum_reg[h].load().maximum(1)).cast(dtypes.half)) for h in range(G)]
   # NOTE: duplicate stores of the same value from every lane are harmless here
   stores += [ml_lds[wave, h, i].store(x) for h in range(G) for i, x in enumerate((max_reg[h].load(), sum_reg[h].load()))]
-  barrier = UOp.barrier(UOp.group(*stores))
-  acc_lds, ml_lds = acc_lds.after(barrier), ml_lds.after(barrier)
+  acc_lds, ml_lds = acc_lds.after(*stores), ml_lds.after(*stores)
   tid = wave*WARP_SIZE + lane
   final_stores:list[UOp] = []
   for i in range(-(-G*D//(WAVES*WARP_SIZE))):
@@ -667,8 +665,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   load_k = UOp.range(KV_ELEMS_PER_THREAD, 90)
   kval = k.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k].float()
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_k].store(kval).end(load_k)
-  qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
-  Q_lds, KV_lds_k = Q_lds.after(qk_load_barrier), KV_lds.after(qk_load_barrier)
+  Q_lds, KV_lds_k = Q_lds.after(Q_store, K_store), KV_lds.after(Q_store, K_store)
   S_reg = _reg((TM, TN), 6, 0, n_tile)
   k_qk, tm1, tn1 = UOp.range(D//WMMA_K, 101, AxisType.REDUCE), UOp.range(TM//WMMA_ACC, 200), UOp.range(TN, 201)
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
@@ -710,9 +707,8 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   v_pos = n_tile*BLOCK_N + (tid*KV_ELEMS_PER_THREAD + load_v)//D
   vval = (v_pos < valid_kv_len).where(v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v].float(), 0)
   V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(vval).end(load_v)
-  pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
-  P_lds, V_lds = P_lds.after(pv_barrier), V_lds.after(pv_barrier)
-  pv_acc = _reg((TM, TD), 10, 0, n_tile).after(pv_barrier)
+  P_lds, V_lds = P_lds.after(P_store, V_store), V_lds.after(P_store, V_store)
+  pv_acc = _reg((TM, TD), 10, 0, n_tile)
   k_pv, tm2, tn2 = UOp.range(BLOCK_N//WMMA_K, 400, AxisType.REDUCE), UOp.range(TM//WMMA_ACC, 401), UOp.range(TD, 402)
   pv_frag = pv_acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
   p_frag = P_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
@@ -721,7 +717,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   pv_done = pv_frag.store(UOp.wmma(p_frag, v_frag, pv_frag.after(k_pv), *WMMA_ARG)).end(tm2, tn2).end(k_pv)
   pv_acc = pv_acc.after(pv_done)
   ri5, rj5 = UOp.range(TM, 410), UOp.range(TD, 411)
-  n_tile_end = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5).barrier().end(n_tile)
+  n_tile_end = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5).end(n_tile)
   acc, l_i, m_i = acc.after(n_tile_end), l_i.after(n_tile_end), m_i.after(n_tile_end)
   acc = acc.after(acc.store(acc * (1 / l_i).reshape(TM, 1).expand(TM, TD)))
   o = o.reshape(WAVES_M, *row_shape, WAVES_N, TD, LANES_PER_WAVE_N) \
