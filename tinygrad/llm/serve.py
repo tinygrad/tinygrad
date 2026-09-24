@@ -14,19 +14,19 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
       call = json.loads(s)
       return call["name"], call.get("arguments", call.get("parameters", {}))
     except (json.JSONDecodeError, KeyError): return None
-  for call_pattern, arg_pattern in (
-    # GLM: name<arg_key>key</arg_key><arg_value>value</arg_value>...
-    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)",
-     r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>"),
-    # XML: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
-    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?", r"<parameter=([^>]+)>(?:\r?\n)?(.*?)(?:\r?\n)?</parameter>"),
-  ):
-    if (m := re.fullmatch(call_pattern, s, re.DOTALL)):
+  # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
+  # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
+  patterns = (
+    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>"),
+    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$", r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>"))
+  for call_pattern, arg_pattern in patterns:
+    if (fm := re.match(call_pattern, s, re.DOTALL)):
       args = {}
-      for key, value in re.findall(arg_pattern, m.group(2), re.DOTALL):
-        try: args[key] = json.loads(value)
-        except json.JSONDecodeError: args[key] = value
-      return m.group(1), args
+      for pm in re.finditer(arg_pattern, fm.group(2), re.DOTALL):
+        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
+        try: args[pm.group(1)] = json.loads(value)
+        except json.JSONDecodeError: args[pm.group(1)] = value
+      return fm.group(1), args
   return None
 
 def normalize_messages(messages:list[dict]) -> None:

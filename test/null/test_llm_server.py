@@ -9,25 +9,23 @@ TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2,
 class TestParseToolCall(unittest.TestCase):
   def test_argument_newlines(self):
     for value in ("", "text", " text ", "\n", "\nfirst\nsecond\n\n", "\r\nfirst\r\nsecond\r\n\r\n"):
-      with self.subTest(value=value):
-        self.assertEqual(parse_tool_call(f"write<arg_key>content</arg_key><arg_value>{value}</arg_value>"),
+      for newline in ("\n", "\r\n"):
+        self.assertEqual(parse_tool_call(f"write<arg_key>content</arg_key><arg_value>{newline}{value}{newline}</arg_value>"),
                          ("write", {"content":value}))
-        for newline in ("\n", "\r\n"):
-          self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
-                           ("write", {"content":value}))
+        self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
+                         ("write", {"content":value}))
 
   def test_json_arguments(self):
     for value in ('"text"', '42', 'true', 'null', '[1, "two"]', '{"nested":{"ok":true}}'):
       for call in (f"read<arg_key>value</arg_key><arg_value>{value}</arg_value>",
                    f"<function=read><parameter=value>{value}</parameter></function>"):
-        with self.subTest(call=call): self.assertEqual(parse_tool_call(call), ("read", {"value":json.loads(value)}))
+        self.assertEqual(parse_tool_call(call), ("read", {"value":json.loads(value)}))
 
   def test_glm_multiple_arguments(self):
     for separator in ("", "\n"):
       call = separator.join(("write", "<arg_key>path</arg_key>", "<arg_value>out.txt</arg_value>",
                              "<arg_key>content</arg_key>", "<arg_value>\nhello\n</arg_value>"))
-      with self.subTest(separator=separator):
-        self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"\nhello\n"}))
+      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"hello"}))
 
   def test_glm_no_arguments(self):
     self.assertEqual(parse_tool_call("tools.ping-v1"), ("tools.ping-v1", {}))
@@ -35,7 +33,7 @@ class TestParseToolCall(unittest.TestCase):
   def test_invalid_glm_call(self):
     for call in ("not a call", "read<arg_key>path</arg_key>", "read<arg_key>path</arg_key><arg_value>unfinished",
                  "read<arg_key>path</arg_key><arg_value>a</arg_value>trailing junk"):
-      with self.subTest(call=call): self.assertIsNone(parse_tool_call(call))
+      self.assertIsNone(parse_tool_call(call))
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -296,7 +294,7 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual("".join(c.choices[0].delta.content or "" for c in chunks if c.choices), "before")
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([tc.function.name for tc in calls], ["read", "read"])
-    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"\nb\n"}])
+    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"b"}])
     self.assertEqual([tc.index for tc in calls], [0, 1])
     self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
 
