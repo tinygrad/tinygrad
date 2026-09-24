@@ -15,11 +15,6 @@ from tinygrad.engine.realize import run_linear
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
 pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
 
-def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
-  becomes = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape)
-             for u in big_sink.toposort(enter_calls=False) if is_store_after(u)}
-  assert not any(x in becomes for x in becomes.values())
-  return becomes
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -181,18 +176,19 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    bases = {u.base for u in sink.src}
-    # Bind output allocations beneath wrappers so all aliases retain the same storage and call dependencies.
-    for u in sink.src:
-      u = u.base
-      while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0].base
-      if (b:=u.storage_base).op is Ops.ALLOC: bases.add(b)
-    tensor_map:dict[UOp, UOp] = {}
+    # The outputs and the ALLOCs beneath their wrappers get bound storage, so all aliases share storage and call dependencies.
+    bases = {x.base for x in sink.src}
+    for x in list(bases):
+      while x.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: x = x.src[0].base
+      if (b:=x.storage_base).op is Ops.ALLOC: bases.add(b)
+
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
+    tensor_map:dict[UOp, UOp] = {}
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
       if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, x.max_numel(), x.dtype)
-      if x in bases and u.needs_storage():
+      elif x in bases and u.needs_storage():
+        # unwrap the rebuilt output to the compute; a STAGE means a contiguous view was requested
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
           contiguous |= src.op is Ops.STAGE
@@ -200,15 +196,18 @@ class Tensor(RandMixin):
         if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(after_ok=True): u = src
         elif src.op is Ops.AFTER and (src.src[1].op is Ops.STORE or (not contiguous and src.storage_base.has_buffer_identity())): u = src
         elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
-        else:
+        else:  # allocate fresh storage and store the compute into it
           buf = UOp.new_buffer(src.device, prod(src.max_shard_shape), src.dtype).reshape(src.max_shard_shape).shrink_to(src.shard_shape)
           if isinstance(src.device, tuple) and src.axis is not None: buf = buf.unshard(src.axis)
           u = buf.after(buf.store(src))
       if u is not x: tensor_map[x] = u
 
     sink = tensor_map.get(sink, sink)
-    becomes_map = get_becomes_map(sink)
-    # Compose replacements before updating tensors: map values must already reference final storage.
+    # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
+    # Tensors so map values reference final storage.
+    becomes_map = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape)
+                   for u in sink.toposort(enter_calls=False) if is_store_after(u)}
+    assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
 
