@@ -29,12 +29,14 @@ z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
   Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
 
-# Decompose the count into power-of-two shifts, keeping the checker's unbounded integer arithmetic.
+# Factor out the minimum count, then shift by its varying bits. Constant counts need no stages.
 def z3_shift(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
   a, b = (ctx[1][s] for s in x.src)
-  for i in range(max(0, int(x.src[1].vmax)).bit_length()):
+  lo = max(0, int(x.src[1].vmin))
+  a = a / (1 << lo) if x.op is Ops.SHR else a * (1 << lo)
+  for i in range(max(0, int(x.src[1].vmax)-lo).bit_length()):
     factor = 1 << (1 << i)
-    a = z3.If((b / (1 << i)) % 2 == 1, a / factor if x.op is Ops.SHR else a * factor, a)
+    a = z3.If(((b-lo) / (1 << i)) % 2 == 1, a / factor if x.op is Ops.SHR else a * factor, a)
   return z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=ctx[0].ctx), a)
 
 def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
