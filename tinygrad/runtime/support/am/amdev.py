@@ -195,19 +195,13 @@ class AMDev:
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
-        # quiesce before the reset: a mode1 reset over live engines at max clocks can wedge the gpu (power cycle to recover).
-        # mirror what a clean exit (fini) does: dequeue hqds, drop clocks to the lowest level, then halt the engines.
+        # Quiesce first: mode1 reset over live engines at max clocks can wedge the GPU until power cycled.
         self.gfx.fini_hw()
         self.smu.set_clocks(level=0)
         self.gfx.halt_engines()
         self.sdma.halt_engines()
         time.sleep(0.1)
         self.smu.mode1_reset()
-        # a wedged gpu hangs mmio reads until the root port completion timeout. config reads fail fast (0xffff), check before any mmio
-        for _ in range(10):
-          if self.pci_dev.read_config(0, 2) != 0xffff: break
-          time.sleep(0.2)
-        else: raise RuntimeError(f"am {self.devfmt}: gpu did not return from mode1 reset, reboot required")
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
     elif not self.is_vf: self.psp._tmr_init()
