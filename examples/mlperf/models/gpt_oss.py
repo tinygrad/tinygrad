@@ -14,7 +14,7 @@ from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm, mx_pack
 from extra.gemm.moe_gemm import grouped_mx_gemm
-from extra.gemm.moe_routing import route, dispatch, combine, router_mfma, Routing, BLOCK_ROW
+from extra.gemm.moe_routing import route, dispatch, dispatch_fp8, combine, router_mfma, Routing, BLOCK_ROW
 from extra.gptoss_kernels.embedding import GPTOSSEmbedding
 
 FP8_DTYPE = dtypes.fp8e4m3
@@ -284,13 +284,13 @@ class GPTOSS:
         logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
         r = route(logits.reshape(-1, self.n_experts), self.experts_per_tok, self.n_experts)
       inp = inp.reshape(-1, dim)
-      xg = dispatch(_pad_cols(inp.cast(dtypes.bfloat16)), r)
+      xg = (dispatch_fp8 if getenv("FP8_DISPATCH", 0) else dispatch)(_pad_cols(inp.cast(dtypes.bfloat16)), r)
       h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
       y = swiglu(h, self.swiglu_limit)
       z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
           + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
       out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
-      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.topi, r.dest_row, r.off]
+      return out, [x_normed, rrms, *(xg if isinstance(xg, tuple) else (xg,)), h, y, z, r.weights, r.topi, r.dest_row, r.off]
     else:
       logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
       thresh = logits.topk(self.experts_per_tok)[0][..., -1:]

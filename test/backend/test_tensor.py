@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes, nn, Context
+from tinygrad import Tensor, Device, dtypes, nn, Context, function
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
@@ -18,6 +18,17 @@ m_init = np.random.randn(1,3).astype(np.float32)
 gradient = np.random.randn(1,3).astype(np.float32)
 
 class TestTinygrad(unittest.TestCase):
+  def test_sliced_input(self):
+    @function(precompile=True)
+    def gray(x): return x ^ (x >> 1)
+    x = Tensor(list(range(20)), dtype=dtypes.uint8).realize()
+    self.assertEqual(gray(x[4:]).tolist(), [i ^ (i >> 1) for i in range(4, 20)])
+
+  def test_unsigned_indices(self):
+    x = Tensor(list(range(256)), dtype=dtypes.int32)
+    indices = Tensor([0, 127, 128, 255], dtype=dtypes.uint8)
+    self.assertEqual(x[indices].tolist(), [0, 127, 128, 255])
+
   def test_deviceless_const_realize_noop(self):
     t = Tensor(UOp.const(2.0).cast(dtypes.float))
     uop = t.uop
