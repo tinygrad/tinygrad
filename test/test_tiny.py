@@ -1,5 +1,6 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
+from unittest.mock import patch
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn, function
 from tinygrad.helpers import getenv, OSX
 
@@ -106,6 +107,20 @@ class TestTiny(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU's timestamp-query is unreliable on dawn's metal backend")
   def test_beam(self):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_plus()
+
+  def test_beam_timing_failure_not_fatal(self):
+    # an exception while timing a candidate (e.g. a device fault) skips that candidate, it must not kill the search
+    for sz, e in ((17, RuntimeError("Device fault detected")), (19, KeyError("fault"))):
+      with patch("tinygrad.codegen.opt.search._time_program", side_effect=e) as tm, Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0):
+        self.assertListEqual((Tensor.ones(sz) + Tensor.ones(sz)).tolist(), [2.0]*sz)
+      self.assertGreater(tm.call_count, 0)
+    # BEAM_STRICT_MODE opts back into raising (getenv is cached, clear it after changing the env)
+    with patch.dict("os.environ", {"BEAM_STRICT_MODE": "1"}), \
+         patch("tinygrad.codegen.opt.search._time_program", side_effect=KeyError("fault")), Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0):
+      getenv.cache_clear()
+      try:
+        with self.assertRaises(KeyError): (Tensor.ones(23) + Tensor.ones(23)).tolist()
+      finally: getenv.cache_clear()
 
   # *** symbolic (to allow less recompilation) ***
 

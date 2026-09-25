@@ -143,8 +143,8 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
                                  dev_timeout=getenv("BEAM_DEV_TIMEOUT", 1))
         except Exception as e:
           if BEAM_DEBUG: print(f"BEAM failed for opts: {candidates[i].applied_opts}\n{e}")
-          if isinstance(e, RuntimeError): continue
-          raise
+          if getenv("BEAM_STRICT_MODE"): raise
+          continue
         timed.append((candidates[i], min(tms)))
         if BEAM_DEBUG > 1:
           print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(prg.src[1].src):5d} uops",
