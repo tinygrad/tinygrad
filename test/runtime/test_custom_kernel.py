@@ -531,7 +531,7 @@ class TestCustomKernel(unittest.TestCase):
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
-    x = mop_fxn(Tensor.arange(32).clone("CPU").realize())
+    x = mop_fxn(Tensor.arange(32).clone().realize())
     y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y.realize()
@@ -539,7 +539,7 @@ class TestCustomKernelInput(unittest.TestCase):
     self.assertEqual(y.tolist(), x.add(1).tolist())
     # same test with @function, input is PARAM
     from tinygrad import function
-    x0 = Tensor.arange(32).clone("CPU").realize()
+    x0 = Tensor.arange(32).clone().realize()
     @function(precompile=True)
     def run(a:Tensor) -> Tensor:
       xv = mop_fxn(a)

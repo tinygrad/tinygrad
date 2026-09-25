@@ -9,7 +9,7 @@ from tinygrad.codegen.opt.search import Opt, OptOps
 from tinygrad.codegen import to_program
 
 class TestLinearizerFailure(unittest.TestCase):
-  @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local and Device[Device.DEFAULT].renderer.has_shared, "requires local/shared memory")
   def test_failure_beam_mnist(self):
     c0 = UOp.param(0, dtypes.uchar, 4014080)
     c1 = UOp.range(UOp.const(512), 0, AxisType.GLOBAL)
@@ -25,7 +25,7 @@ class TestLinearizerFailure(unittest.TestCase):
     c11 = c5.alu(Ops.CMPNE, ((((c3*UOp.const(6000))+c6)+((c7*UOp.const(16))+c8)).alu(Ops.CMPLT, UOp.const(59999)).where(UOp.const(0).cast(dtypes.int), UOp.const(1).cast(dtypes.int)).reduce(c7, c8, arg=Ops.ADD)+UOp.const(-1).cast(dtypes.int))).where(UOp.const(0).cast(dtypes.uchar), c10).reduce(c6, arg=Ops.ADD)
     c12 = c0.index((((c1*UOp.const(7840))+(c2*UOp.const(10)))+c3).valid(UOp.const(True))).store(c11).end(c1, c2, c3)
     ast = c12.sink(arg=KernelInfo(name='test', applied_opts=(Opt(op=OptOps.SPLIT, axis=4, arg=(16, AxisType.LOCAL)),), opts_to_apply=None))
-    _ = to_program(ast, Device["METAL"].renderer)
+    _ = to_program(ast, Device[Device.DEFAULT].renderer)
 
 if __name__ == '__main__':
   unittest.main()
