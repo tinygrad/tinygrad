@@ -88,7 +88,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(tst.numpy(), a.numpy())
 
   def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
-    a = Tensor.arange(16).reshape(4, 4).clone(device="CPU").realize()
+    a = Tensor.arange(16).reshape(4, 4).clone().realize()
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)

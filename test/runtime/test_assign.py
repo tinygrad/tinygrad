@@ -72,7 +72,7 @@ class TestAssign(unittest.TestCase):
 
   def test_assign_flip(self):
     ref = np.arange(16, dtype=np.float32)
-    X = Tensor(ref, device="CPU").contiguous().realize()
+    X = Tensor(ref).contiguous().realize()
     GlobalCounters.reset()
     xs = X[::-1]
     xs.assign(xs + X)

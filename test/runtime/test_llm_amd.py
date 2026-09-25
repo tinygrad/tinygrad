@@ -14,7 +14,7 @@ class TestQ8Quantize(unittest.TestCase):
   def test_quant_tables_not_retained(self):
     # one _iq_grid table and the iq4 lut cover both table creation paths
     for typ in (18, 23):
-      table = (iq4_half_lut("CPU") if typ == 23 else _iq_grid("CPU", typ)).realize()
+      table = (iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)).realize()
       ref = weakref.ref(table)
       del table
       gc.collect()
@@ -24,7 +24,8 @@ class TestQ8Quantize(unittest.TestCase):
     for ggml_type, type_size in QUANT_SIZES.items():
       with self.subTest(ggml_type=ggml_type):
         packed = np.arange(type_size + 4, dtype=np.uint8)
-        raw = Tensor(packed, device="CPU").realize()[4:]
+        raw = Tensor(packed).realize()[4:]
+        if raw.uop.contiguous_view() is None: self.skipTest("requires buffer views")
         decoded = ggml_data_to_tensor(raw, 256, ggml_type).reshape(1, 256)
         linear = Linear(256, 1, bias=False)
         linear.set_quantized(decoded)

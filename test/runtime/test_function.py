@@ -561,17 +561,17 @@ class TestFunctionTuple(unittest.TestCase):
       return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
     for realize in (False, True):
       with self.subTest(realize=realize):
-        state = Tensor.empty(4, device="CPU")
+        state = Tensor.empty(4)
         if realize: state.realize()
         @function(precompile=True, allow_implicit=True)
         def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
-        f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
+        f(Tensor([1., 2., 3., 4.]).contiguous().realize()).realize()
         np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
 
   def test_custom_kernel_program_invalids_not_captured(self):
     # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
     # still must not be captured as an input -- else it is read before the kernel writes it
-    renderer = Device["CPU"].renderer
+    renderer = Device[Device.DEFAULT].renderer
     def prog(C:UOp, A:UOp) -> UOp:
       i = UOp.range(4, 0)
       prg = to_program(C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="k")), renderer)
@@ -584,18 +584,18 @@ class TestFunctionTuple(unittest.TestCase):
       c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
       return Tensor.custom_kernel(c, a, fxn=prog)[0]
 
-    a = Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()
+    a = Tensor([1., 2., 3., 4.]).contiguous().realize()
     np.testing.assert_allclose(f(a).numpy(), [2., 4., 6., 8.])
 
   def test_invalid_store_into_realized_buffer_is_captured(self):
     # only fresh invalids() scratch is skipped; a realized buffer is a real input even if an Invalid store
     # writes into part of it (its other elements must be preserved), so it is still captured
-    state = Tensor([10., 20., 30., 40.], device="CPU").contiguous().realize()
+    state = Tensor([10., 20., 30., 40.]).contiguous().realize()
     @function(precompile=True, allow_implicit=True)
     def f(a:Tensor):
       after = state.uop.after(state.uop.shrink(((0, 2),)).store(Invalid))
       return Tensor(after).contiguous() + a
-    out = f(Tensor([1., 1., 1., 1.], device="CPU").contiguous().realize())
+    out = f(Tensor([1., 1., 1., 1.]).contiguous().realize())
     np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])
 
   def test_custom_kernel_precompile_further_compute(self, multi=False, kernel_count:int=2):
