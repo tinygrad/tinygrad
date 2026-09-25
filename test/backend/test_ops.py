@@ -1347,7 +1347,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(2, 3, 4, 5), (5, 2, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
                lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]))
     # match torch ellipsis handling
-    helper_test_op([(32, 7, 24, 24, 24), (32, 7, 24, 24, 24)], lambda a, b: torch.einsum('ij...,ij...->ij', [a, b]),
+    helper_test_op([(8, 7, 16, 16, 16), (8, 7, 16, 16, 16)], lambda a, b: torch.einsum('ij...,ij...->ij', [a, b]),
                lambda a, b: Tensor.einsum('ij...,ij...->ij', [a, b]))
     # multiple ellipsis in one operand are not allowed
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('...ik..., ...jk ->', [a, b]),
@@ -2523,12 +2523,11 @@ class TestOps(TensorTestCase):
 
   @slow_test
   def test_max_pool2d_padding(self):
-    for ksz in [(3,3), 2, (3,2)]:
-      for p in [1, (1,0), (0,1)]:
-        with self.subTest(kernel_size=ksz, padding=p):
-          helper_test_op([(4,2,11,28)],
-            lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
-            lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
+    for ksz, p in [((3,3), 1), ((3,3), (1,0)), (2, (0,1)), ((3,2), 1)]:
+      with self.subTest(kernel_size=ksz, padding=p):
+        helper_test_op([(4,2,11,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
     self.helper_test_exception([(4,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
                    lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
 

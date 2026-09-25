@@ -12,7 +12,8 @@ class TestQ8Quantize(unittest.TestCase):
     self.assertEqual(_wmma_rdna4(device), Device[device].target[0] == 12)
 
   def test_quant_tables_not_retained(self):
-    for typ in (17, 18, 21, 22, 23):
+    # one _iq_grid table and the iq4 lut cover both table creation paths
+    for typ in (18, 23):
       table = (iq4_half_lut("CPU") if typ == 23 else _iq_grid("CPU", typ)).realize()
       ref = weakref.ref(table)
       del table
@@ -151,9 +152,10 @@ class TestQ8Quantize(unittest.TestCase):
 
   def test_quant_linear_fallback(self):
     if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
-    for typ, size in QUANT_SIZES.items():
+    # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here
+    for typ in (12, 14, 17, 23):
       with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, size, in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True, custom=False)
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
 
   def test_quant_linear_bias(self):
     for typ in (12, 21, 23):

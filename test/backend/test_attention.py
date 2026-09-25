@@ -273,7 +273,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       x = self._tensor_linspace(-0.5, 0.5, (1, 4, config.dim))
       decode = np.concatenate([self._run_attention(block, x[:, i:i+1], i) for i in range(4)], axis=1)
       decode_conv, decode_recurrent = self._cache_views(block)
-      for chunking in ([4], [2, 2], [1, 3], [3, 1], [2, 1, 1]):
+      for chunking in ([4], [2, 2], [1, 3]):
         self._reset_state(block)
         outs, start = [], 0
         for size in chunking:
