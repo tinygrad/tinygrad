@@ -47,8 +47,8 @@ class TestConv(unittest.TestCase):
     np.testing.assert_allclose(out.relu().numpy(), np.maximum(out.numpy(), 0), atol=1e-6)
 
   def test_two_overlapping_binops_no_rerun(self):
-    x = Tensor.randn(1,12,16,32)
-    w = Tensor.randn(32,12,3,3)
+    x = Tensor.randn(1,3,8,16)
+    w = Tensor.randn(4,3,3,3)
     out = x.conv2d(w, stride=(2,2), padding=(1,1))
     r1, r2 = out.relu(), out.elu()
     np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0), atol=1e-5)

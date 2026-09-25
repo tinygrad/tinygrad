@@ -12,8 +12,6 @@ from extra.datasets import fetch_mnist
 np.random.seed(1337)
 Tensor.manual_seed(1337)
 
-X_train, Y_train, X_test, Y_test = fetch_mnist()
-
 class TinyBobNet:
   def __init__(self):
     self.l1 = Tensor.scaled_uniform(784, 128)
@@ -26,6 +24,7 @@ class TinyBobNet:
     return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
 def lr_scheduler_training(sched_fn=None, args=None):
+  X_train, Y_train, X_test, Y_test = fetch_mnist()
   model = TinyBobNet()
   optim = Adam(model.parameters(), lr=0.01)
   if sched_fn is not None: sched = sched_fn(optim, **args)

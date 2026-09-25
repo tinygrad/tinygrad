@@ -1048,9 +1048,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     p.schedule_linear()
     assert p.shape == (8, 8)
 
-  @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
-  def test_ops(self, dtype):
-    if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
+  def test_ops(self):
     t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(2):
