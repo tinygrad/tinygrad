@@ -22,6 +22,9 @@ pm_canonicalize = mop_cleanup+PatternMatcher([
     lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
 ])
 
+pm_replace_param = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx[p.arg.slot]),])
+pm_apply_calls = PatternMatcher([(UPat(Ops.CALL, name="c"), lambda c: graph_rewrite(c.body, pm_replace_param, ctx=c.src[1:])),])
+
 # ************************** PREPARE **************************
 
 def copy_to_anon_store(x:UOp, copy:UOp):
@@ -170,7 +173,7 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
 
   # canonicalize
-  sink = graph_rewrite(sink, pm_canonicalize, name="canonicalize")
+  sink = graph_rewrite(sink, pm_apply_calls+pm_canonicalize, name="canonicalize")
 
   # add safe STAGEs to never duplicate compute
   # we compute the number of times a buffer is consumed. if > 1, we realize
