@@ -348,6 +348,13 @@ jobs:
         if [[ "${{ matrix.dev }}" == "NV" ]]; then
           DEBUG=2 DEV=CUDA python -m pytest -rA test/test_tiny.py
         fi
+    - name: Test device
+      run: |
+        python -m pytest -n=auto test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+        if [[ "${{ matrix.dev }}" == "NV" ]]; then
+          DEV=NV:PTX python -m pytest -n=auto test/device/nv --durations=20
+          DEV=CUDA:PTX python -m pytest -n=auto test/device/nv --durations=20
+        fi
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "METAL" ]]; then
@@ -472,6 +479,8 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
+    - name: Test device
+      run: python -m pytest -n=auto test/device/qcom --durations=20
     - name: compile
       run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl
     - name: run pickle
@@ -514,6 +523,8 @@ jobs:
         PYTHONPATH=. DEV=CPU QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
+    - name: Test device
+      run: DEV=DSP python -m pytest -n=auto test/device/dsp --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 

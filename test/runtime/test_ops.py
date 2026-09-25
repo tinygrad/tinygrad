@@ -2403,10 +2403,6 @@ class TestOps(TensorTestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,stride=2),
       lambda x,w: Tensor.conv2d(x,w,stride=2))
 
-  @unittest.skipUnless(Device.DEFAULT == "CPU" and DEV.renderer == "LLVM", "DEVECTORIZE=0 only for LLVM")
-  def test_strided_conv2d_simple_vec(self):
-    self.test_strided_conv2d_simple()
-
   @slow_test
   def test_strided_conv2d(self):
     bs = 4
