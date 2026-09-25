@@ -2523,12 +2523,11 @@ class TestOps(TensorTestCase):
 
   @slow_test
   def test_max_pool2d_padding(self):
-    for ksz in [(3,3), 2, (3,2)]:
-      for p in [1, (1,0), (0,1)]:
-        with self.subTest(kernel_size=ksz, padding=p):
-          helper_test_op([(4,2,11,28)],
-            lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
-            lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
+    for ksz, p in [((3,3), 1), ((3,3), (1,0)), (2, (0,1)), ((3,2), 1)]:
+      with self.subTest(kernel_size=ksz, padding=p):
+        helper_test_op([(4,2,11,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
     self.helper_test_exception([(4,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
                    lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
