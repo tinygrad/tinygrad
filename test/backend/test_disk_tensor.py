@@ -54,7 +54,7 @@ test_size = 1024*1024*1024*2
 def _test_bitcasted(t: Tensor, dt: DType, expected):
   np.testing.assert_allclose(t.bitcast(dt).numpy(), expected)
 
-# sudo su -c 'sync; echo 1 > /proc/sys/vm/drop_caches' && python3 test/unit/test_disk_tensor.py TestRawDiskBuffer.test_readinto_read_speed
+# sudo su -c 'sync; echo 1 > /proc/sys/vm/drop_caches' && python3 test/backend/test_disk_tensor.py TestRawDiskBuffer.test_readinto_read_speed
 class TestRawDiskBuffer(unittest.TestCase):
   @unittest.skipIf(not test_fn.exists(), "download LLaMA weights for read in speed tests")
   def test_readinto_read_speed(self):
