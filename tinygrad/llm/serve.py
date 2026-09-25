@@ -15,13 +15,18 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
       return call["name"], call.get("arguments", call.get("parameters", {}))
     except (json.JSONDecodeError, KeyError): return None
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
-  if (fm := re.match(r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", s, re.DOTALL)):
-    args = {}
-    for pm in re.finditer(r"<parameter=([^>]+)>(.*?)</parameter>", fm.group(2), re.DOTALL):
-      value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
-      try: args[pm.group(1)] = json.loads(value)
-      except json.JSONDecodeError: args[pm.group(1)] = value
-    return fm.group(1), args
+  # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
+  patterns = (
+    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>"),
+    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$", r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>"))
+  for call_pattern, arg_pattern in patterns:
+    if (fm := re.match(call_pattern, s, re.DOTALL)):
+      args = {}
+      for pm in re.finditer(arg_pattern, fm.group(2), re.DOTALL):
+        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
+        try: args[pm.group(1)] = json.loads(value)
+        except json.JSONDecodeError: args[pm.group(1)] = value
+      return fm.group(1), args
   return None
 
 def normalize_messages(messages:list[dict]) -> None:
