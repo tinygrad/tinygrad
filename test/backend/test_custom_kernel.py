@@ -515,7 +515,7 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(A[i].reduce(i, arg=Ops.ADD))
 
     def call_add_sum(C:UOp, A:UOp) -> UOp:
-      tmp = UOp.alloc_like(A, 0, addrspace=AddrSpace.REG)
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
       add_call = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG), A.param_like(1)).sink().call(tmp, A, name="add")
       sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp.after(add_call), name="sum")
       return sum_call.sink(arg=KernelInfo(name="call_in_kernel"))
