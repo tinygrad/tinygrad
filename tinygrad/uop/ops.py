@@ -428,7 +428,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.UNSHARD: return tuple(s*(int(self.src[1:][self.arg.index(a)].vmax)+1) if a in self.arg else s for a,s in enumerate(ps))
+        case Ops.UNSHARD: return tuple(int(r.vmax)+1 for r in self.src[1:]) + ps
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -473,7 +473,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     if self.op is Ops.BARRIER: return tuple(flatten([x.ended_ranges for x in self.src]))
-    # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
+    # UNSHARD closes the ranges it prepends to the shape.
     if self.op is Ops.UNSHARD: return self.src[1:]
     return ()
 
@@ -690,9 +690,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def unshard(self, axis:int|tuple[int, ...]|None, device_range:UOp|tuple[UOp, ...]|None=None):
     assert axis is not None, "multi None is no longer supported"
-    # an UNSHARD carries the value and one sharding range per sharded axis (arg is the tuple of sharded axes,
-    # sorted). the single-axis axis form defaults the range to a DEVICE range over the devices; a range need not
-    # be DEVICE, e.g. a LOCAL range shards a kernel tile into per-thread fragments
+    # UNSHARD prepends the ranges; PERMUTE/RESHAPE insert and merge them into the requested axes.
     if isinstance(axis, int): axis = (axis,)
     if device_range is None:
       assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
@@ -700,26 +698,59 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(device_range, UOp): device_range = (device_range,)
     assert isinstance(device_range, tuple) and len(axis) == len(device_range) and len(set(axis)) == len(axis)
     axis, device_range = map(tuple, zip(*sorted(zip(axis, device_range))))
-    return UOp(Ops.UNSHARD, src=(self, *device_range), arg=axis)
+    by_axis = dict(zip(axis, range(len(axis))))
+    perm = tuple(j for i in range(len(self.shape)) for j in ((by_axis[i], len(axis)+i) if i in by_axis else (len(axis)+i,)))
+    shape = tuple(s*(int(device_range[by_axis[i]].vmax)+1) if i in by_axis else s for i,s in enumerate(self.shape))
+    return UOp(Ops.UNSHARD, src=(self, *device_range)).permute(perm).reshape(shape)
 
-  @property
+  @functools.cached_property
   def sharding(self) -> tuple[tuple[int, UOp], ...]:
     """(axis, RANGE) pairs this value is sharded over (the source of truth for shard bounds/counts)."""
-    return tuple(zip(self.arg, self.src[1:])) if self.op is Ops.UNSHARD else ()
+    if self.op is Ops.UNSHARD: return tuple(enumerate(self.src[1:]))
+    if self.op not in {Ops.RESHAPE, Ops.PERMUTE}: return ()
+    sharding = self.src[0].sharding
+    if self.op is Ops.PERMUTE: return tuple(sorted((self.marg.index(a), r) for a,r in sharding))
+    acc = [ssimplify(x) for x in itertools.accumulate(self.shape, operator.mul, initial=1)]
+    ret = []
+    for ax, rng in sharding:
+      target = ssimplify(prod(self.src[0].shape[:ax]))
+      if target not in acc: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
+      new_ax = len(acc) - acc[::-1].index(target) - 1
+      if new_ax == len(self.shape) or self.shape[new_ax] % (int(rng.vmax)+1) != 0:
+        raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
+      ret.append((new_ax, rng))
+    return tuple(ret)
+
+  @functools.cached_property
+  def shard_view(self) -> UOp:
+    """The local view, retaining singleton dimensions for bare UNSHARD ranges."""
+    assert self.sharding, f"not an UNSHARD view: {self.op}"
+    if self.op is Ops.UNSHARD:
+      local, shape = self.src[0], (1,)*(len(self.src)-1) + self.src[0].shape
+    else:
+      local = self.src[0].shard_view
+      counts = {a:int(r.vmax)+1 for a,r in self.sharding}
+      shape = tuple(s//counts.get(i, 1) for i,s in enumerate(self.shape))
+      if self.op is Ops.PERMUTE:
+        # Moving singleton shard axes does not permute local storage.
+        non_one = [i for i,s in enumerate(local.shape) if s != 1]
+        if [i for i in self.marg if i in non_one] != non_one: return local.permute(self.marg)
+    while local.op is Ops.RESHAPE: local = local.src[0]
+    return local.reshape(shape)
 
   @property
   def bounds(self):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
     dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
-    return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in range(dcount)], initial=0)))
+    return tuple(itertools.pairwise(itertools.accumulate([self.shard_view.shape[self.axis] for _ in range(dcount)], initial=0)))
 
   @functools.cached_property
   def axis(self) -> int|None:
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
     if self.op is Ops.COPY: return None
     if self.op is Ops.UNSHARD:
-      if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
-      return self.arg[0]
+      if len(self.src) != 2: raise RuntimeError("UOp is sharded on multiple axes, use .sharding")
+      return 0
     if self.op is Ops.PARAM: return None
     # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
     if self.op in GroupOp.ALU.union({Ops.STACK}):
@@ -793,10 +824,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # base with UNSHARD
   @property
   def unsharded_base(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
-    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
-    # TODO: why can't this be in normal base?
-    if self.op is Ops.UNSHARD: return self.src[0].base
+    if self.op in GroupOp.Movement or self.op in {Ops.DETACH, Ops.UNSHARD}: return self.src[0].unsharded_base
     return self
 
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
@@ -949,6 +977,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def has_buffer_identity(self, after_ok=False):
     """Check if this UOp has a storage identity in the graph, whether or not its buffer is bound."""
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
+    if self.op is Ops.PERMUTE and self.sharding: return self.shard_view.has_buffer_identity(after_ok)
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
     return self.op in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM}
@@ -969,6 +998,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     # a bare STAGE (same-device materialization) keeps the source's buffer
     if self.op is Ops.STAGE and self.arg is None: return self.src[0].buffer
+    if self.op is Ops.PERMUTE and self.sharding: return self.shard_view.buffer
     if self.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
     # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage

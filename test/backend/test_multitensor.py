@@ -67,10 +67,11 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
-    assert X.uop.src[0].shape == (128,)
-    # the MULTI carries and ends the DEVICE range as its second src
-    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
-    assert X.uop.ended_ranges == X.uop.src[1:]
+    unshard = X.uop.base
+    assert unshard.src[0].shape == (128,)
+    # the UNSHARD carries and ends the DEVICE range as its second src
+    assert unshard.src[1].op is Ops.RANGE and unshard.src[1].arg[-1] is AxisType.DEVICE
+    assert unshard.ended_ranges == unshard.src[1:]
     (X + X).realize()
 
   @unittest.expectedFailure # TODO: fix

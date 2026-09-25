@@ -597,14 +597,13 @@ class TestUnshardIndex(unittest.TestCase):
   def test_strided_fragment_index(self):
     # thread ty owns rows {ty, ty+8, ty+16, ty+24, ..., ty+56} of a 64-row fragment --
     # strided ownership. idx = ty + ir*8 where shard_sz=8 (8 threads, shard rows=8).
-    # The contiguous check (idx - rng*shard_sz) fails; the strided check
-    # (idx-rng) % shard_sz == 0 must succeed. This is the pattern the index_multi fix adds.
+    # PERMUTE places the thread range inside the row dimension before RESHAPE merges it.
     def kernel(C:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
       ir = UOp.range(8, 1, AxisType.LOOP)
       j = UOp.range(8, 2, AxisType.LOOP)
       # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows {ty, ty+8, ..., ty+56}.
-      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      frag = UOp(Ops.UNSHARD, src=(UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG), ty)).permute(1, 0, 2).reshape(64, 8)
       return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)

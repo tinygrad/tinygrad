@@ -29,7 +29,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
       if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
         placed[key] = target.storage_base
       elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[key] = target
+      elif (src.op is Ops.BUFFER or src.sharding) and src.has_buffer_identity(): placed[key] = target
       if key in placed:
         if item is not st: placed[item] = st.src[1]
         items.append(st.src[1])
