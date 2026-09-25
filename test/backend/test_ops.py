@@ -1347,7 +1347,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(2, 3, 4, 5), (5, 2, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
                lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]))
     # match torch ellipsis handling
-    helper_test_op([(32, 7, 24, 24, 24), (32, 7, 24, 24, 24)], lambda a, b: torch.einsum('ij...,ij...->ij', [a, b]),
+    helper_test_op([(8, 7, 16, 16, 16), (8, 7, 16, 16, 16)], lambda a, b: torch.einsum('ij...,ij...->ij', [a, b]),
                lambda a, b: Tensor.einsum('ij...,ij...->ij', [a, b]))
     # multiple ellipsis in one operand are not allowed
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('...ik..., ...jk ->', [a, b]),

@@ -1,6 +1,6 @@
 import gc, os, struct, unittest, tempfile, pathlib, sys, weakref
 from tinygrad import dtypes, Tensor, fetch, Device
-from tinygrad.helpers import disable_gc
+from tinygrad.helpers import disable_gc, Context
 from tinygrad.llm.gguf import _ggml_iq_grid, _ggml_iq_signs, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
@@ -266,10 +266,10 @@ class TestGGUF(unittest.TestCase):
     reader = GGUFReader(fp)
 
     # Check every value, dequantizing both implementations in bounded, block-aligned chunks.
-    # Realize in batches so same-shape dequants fuse into few kernels, but never batch two chunks of the same
-    # tensor: the scheduler would merge them into one store of the whole tensor, exceeding device buffer limits.
+    # Realize in batches so same-shape dequants fuse into few kernels; .contiguous() gives each chunk its own
+    # store, since realizing a bare shrink would compute the whole parent tensor (exceeds WEBGPU buffer limits).
+    # LRU=0: the many distinct chunk sizes would otherwise accumulate in the allocator cache (100s of MB of RSS).
     pending: list[tuple[Tensor, np.ndarray]] = []
-    pending_tensors: set[str] = set()
     pending_bytes = 0
     def flush():
       nonlocal pending_bytes
@@ -277,20 +277,19 @@ class TestGGUF(unittest.TestCase):
       Tensor.realize(*[c for c, _ in pending])
       for c, ref in pending: np.testing.assert_equal(c.numpy(), ref)
       pending.clear()
-      pending_tensors.clear()
       pending_bytes = 0
-    for rt in reader.tensors:
-      t = tensors[rt.name].flatten()
-      block_size, type_size = GGML_QUANT_SIZES[rt.tensor_type]
-      data = rt.data.view(np.uint8).reshape(-1)
-      chunk = (8 << 20) // t.dtype.itemsize
-      for start in range(0, t.numel(), chunk):
-        if rt.name in pending_tensors or pending_bytes >= (64 << 20): flush()
-        end = min(start+chunk, t.numel())
-        ref = dequantize(data[start//block_size*type_size:end//block_size*type_size], rt.tensor_type)
-        pending.append((t[start:end], ref.reshape(-1)))
-        pending_tensors.add(rt.name)
-        pending_bytes += (end-start) * t.dtype.itemsize
+    with Context(LRU=0), open(fp, 'rb') as f:  # read raw bytes directly: the reader's memmap faults the whole file into RAM
+      for rt in reader.tensors:
+        t = tensors[rt.name].flatten()
+        block_size, type_size = GGML_QUANT_SIZES[rt.tensor_type]
+        chunk = (8 << 20) // t.dtype.itemsize
+        for start in range(0, t.numel(), chunk):
+          if pending_bytes >= (64 << 20): flush()
+          end = min(start+chunk, t.numel())
+          f.seek(rt.data_offset + start//block_size*type_size)
+          ref = dequantize(np.frombuffer(f.read((end-start)//block_size*type_size), dtype=np.uint8), rt.tensor_type)
+          pending.append((t[start:end].contiguous(), ref.reshape(-1)))
+          pending_bytes += (end-start) * t.dtype.itemsize
     flush()
 
     for k, f in reader.fields.items():
