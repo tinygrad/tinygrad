@@ -3,13 +3,13 @@ from tinygrad import Tensor, Context
 import numpy as np
 
 def orthogonality_helper(A:Tensor, tolerance=1e-5):
-  a = A.numpy()
-  identity = np.broadcast_to(np.eye(a.shape[-2], dtype=a.dtype), a.shape[:-2]+(a.shape[-2], a.shape[-2]))
-  np.testing.assert_allclose(a @ a.swapaxes(-2, -1), identity, atol=tolerance, rtol=tolerance)
+  b_shape,m = A.shape[0:-2],A.shape[-2]  #outer dimension should be the dim along orthogonality
+  A_identity = (Tensor.eye(m).reshape((1,)*len(b_shape)+(m,m)).expand(b_shape+(m,m)))
+  np.testing.assert_allclose((A @ A.transpose(-2,-1)).numpy(),A_identity.numpy(),atol=tolerance,rtol=tolerance)
 
 def reconstruction_helper(A:list[Tensor],B:Tensor, tolerance=1e-5):
-  reconstructed = functools.reduce(np.matmul, [a.numpy() for a in A])
-  np.testing.assert_allclose(reconstructed, B.numpy(), atol=tolerance, rtol=tolerance)
+  reconstructed_tensor = functools.reduce(Tensor.matmul, A)
+  np.testing.assert_allclose(reconstructed_tensor.numpy(),B.numpy(),atol=tolerance,rtol=tolerance)
 
 class TestLinAlg(unittest.TestCase):
   def test_svd_general(self):

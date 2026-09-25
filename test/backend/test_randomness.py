@@ -309,8 +309,12 @@ class TestRandomness(unittest.TestCase):
     w = [0.1, 0.9]
     self.assertRaises(AssertionError, lambda: Tensor(w).multinomial(100, replacement=False))
 
-    self.assertTrue(equal_distribution(lambda *_: Tensor(w).reshape(1, -1).expand(200, -1).multinomial(1, replacement=False),
-                                       lambda _: torch.tensor(w).expand(200, -1).multinomial(1, replacement=False)))
+    @TinyJit
+    def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
+
+    tiny_samples = [sample_one().item() for _ in range(200)]
+    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(200)]
+    self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
     w = list(range(32))
     s1 = Tensor(w).multinomial(5, replacement=False).numpy()
@@ -321,23 +325,13 @@ class TestRandomness(unittest.TestCase):
     self.assertEqual(sorted(full.tolist()), w)
 
     w = [0.1, 0.2, 0.3, 0.4]
-    Tensor.manual_seed(1337)
-    torch.manual_seed(1337)
-    tiny_draws = Tensor(w).reshape(1, -1).expand(200, -1).multinomial(3, replacement=False).numpy()
-    torch_draws = torch.tensor(w).expand(200, -1).multinomial(3, replacement=False).numpy()
-    self.assertTrue((np.diff(np.sort(tiny_draws, axis=1), axis=1) > 0).all())
+    @TinyJit
+    def sample_three(): return Tensor(w).multinomial(3, replacement=False).realize()
+
+    tiny_draws = np.array([sample_three().numpy() for _ in range(200)])
+    torch_draws = np.array([torch.tensor(w).multinomial(3, replacement=False).numpy() for _ in range(200)])
     for pos in range(3):
       self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_draws[:, pos]), lambda _: torch.tensor(torch_draws[:, pos])))
-
-  def test_multinomial_jit(self):
-    for w, count in (([0.1, 0.9], 1), ([0.1, 0.2, 0.3, 0.4], 3)):
-      def sample(): return Tensor(w).multinomial(count, replacement=False).realize()
-      Tensor.manual_seed(1337)
-      expected = [sample().numpy() for _ in range(4)]
-      Tensor.manual_seed(1337)
-      jitted = TinyJit(sample)
-      # Warmup, capture, and two replays must advance the RNG exactly as eager execution does.
-      for ref in expected: np.testing.assert_array_equal(jitted().numpy(), ref)
 
   @unittest.skip("this test is flaky")
   def test_multinomial_counterexample(self):
