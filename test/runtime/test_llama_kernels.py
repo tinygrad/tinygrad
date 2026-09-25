@@ -6,7 +6,7 @@ from extra.llama_kernels.swiglu import swiglu
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import assert_kernel_count
-from test.backend.test_asm_gemm import has_hipcc, is_cdna4
+from test.runtime.test_asm_gemm import has_hipcc, is_cdna4
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)
