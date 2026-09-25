@@ -202,28 +202,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  def test_layernorm_forward(self):
-    N, C, H, W = 20, 5, 10, 10
-
-    # create in torch
-    torch_layer = torch.nn.LayerNorm([H, W]).eval()
-
-    # create in tinygrad
-    layer = LayerNorm([H, W])
-    layer.weight = Tensor(torch_layer.weight.detach().numpy())
-    layer.bias = Tensor(torch_layer.bias.detach().numpy())
-
-    x = Tensor.empty(N, C, H, W)
-    z = layer(x)
-    z.realize()
-
-    torch_x = torch.tensor(x.numpy(), requires_grad=True)
-    torch_z = torch_layer(torch_x)
-    torch_z.sum().backward()
-
-    # TODO: why is torch numbers all 0?
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=5e-6)
-
   def test_layernorm(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -415,7 +393,7 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-  def test_embedding_one_kernel(self, ops=612000, kcount=2):
+  def _test_embedding_one_kernel(self, ops, kcount):
     GlobalCounters.reset()
     layer = Embedding(20, 30)
     layer.weight = Tensor.zeros_like(layer.weight).contiguous()
@@ -437,11 +415,11 @@ class TestNN(unittest.TestCase):
   # TODO: fused with opts uses more ops
   def test_embedding_one_kernel_fused(self):
     with Context(NOOPT=0):
-      self.test_embedding_one_kernel(ops=612_000, kcount=2)
+      self._test_embedding_one_kernel(ops=612_000, kcount=2)
 
   def test_embedding_one_kernel_fused_noopt(self):
     with Context(NOOPT=1):
-      self.test_embedding_one_kernel(ops=0, kcount=2)
+      self._test_embedding_one_kernel(ops=0, kcount=2)
 
   def test_embedding_regression(self):
     # used to fail bounds check

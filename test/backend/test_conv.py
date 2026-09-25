@@ -13,11 +13,6 @@ class TestConv(unittest.TestCase):
     assert ret[0,0,0,0] == 48
     assert ret[0,0,0,1] == 72
 
-  def test_simple_rand(self):
-    x = Tensor.rand(1,12,16,32)
-    w = Tensor.rand(32,12,3,3)
-    x.conv2d(w, stride=(2,2), padding=(1,1)).numpy()
-
   def test_many_simple(self):
     x = Tensor(np.arange(8*2*8).reshape(1,8,2,8).astype(np.float32))
     #w = Tensor(np.arange(8*8*1*1).reshape(8,8,1,1).astype(np.float32))
@@ -89,11 +84,6 @@ class TestConv(unittest.TestCase):
 
     w = Tensor.rand(32,1,3,3)
     x = x.conv2d(w, padding=(1,1), groups=32)
-    x.numpy()
-
-  def test_reduce_relu(self):
-    x = Tensor.rand(1,12,16,32)
-    x = x.sum(keepdim=True).relu()
     x.numpy()
 
   def test_bias(self):

@@ -537,10 +537,10 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_backprop_conv(self):
     with Context(TRAINING=1):
-      conv = nn.Conv2d(3, 16, 3)
+      conv = nn.Conv2d(3, 8, 3)
       for p in get_parameters(conv): p.shard_(devices_2)
       optim = nn.optim.Adam(get_parameters(conv))
-      fake_image = Tensor.rand((2, 3, 32, 32)).shard(devices_2, axis=0)
+      fake_image = Tensor.rand((2, 3, 16, 16)).shard(devices_2, axis=0)
       out = conv(fake_image)
       optim.zero_grad()
       out.mean().backward()

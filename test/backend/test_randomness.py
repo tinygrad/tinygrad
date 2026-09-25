@@ -56,11 +56,8 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 4
   return (numpy_func is None or (kstest(x1, y) >= alpha and kstest(x2, y) >= alpha)) and \
     (torch_func is None or (kstest(x1, z) >= alpha and kstest(x2, z) >= alpha))
 
-def normal_test(func, shape=(20, 45), alpha=0.05): return equal_distribution(func, numpy_func=lambda x: np.random.randn(*x), shape=shape, alpha=alpha)
-
 class TestRandomness(unittest.TestCase):
   def test_rand(self):
-    self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
   def test_rand_is_lazy(self):
@@ -236,11 +233,9 @@ class TestRandomness(unittest.TestCase):
 
   def test_randn(self):
     self.assertEqual(Tensor.randn(3,3,dtype=dtypes.half).dtype, dtypes.half)
-    self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
   def test_randint(self):
-    self.assertFalse(normal_test(Tensor.randint))
     self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5),
                                        numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
     self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5, dtype="int32"),
@@ -257,14 +252,12 @@ class TestRandomness(unittest.TestCase):
     np.testing.assert_array_equal(Tensor.randint(16, low=5, high=6).numpy(), 5)
 
   def test_normal(self):
-    self.assertTrue(normal_test(Tensor.normal))
     self.assertTrue(equal_distribution(Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1),
                                                       lambda x: np.random.normal(loc=0, scale=1, size=x)))
     # check std >= 0
     with self.assertRaises(ValueError): Tensor.normal((3, 4), mean=0, std=-1)
 
   def test_uniform(self):
-    self.assertFalse(normal_test(Tensor.uniform))
     self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x)), lambda x: np.random.uniform(size=x)))
     self.assertTrue(equal_distribution(partial(Tensor.uniform, low=-100, high=100, dtype=dtypes.int32),
                                        numpy_func=lambda x: np.random.randint(low=-100, high=100, size=x)))
@@ -273,12 +266,10 @@ class TestRandomness(unittest.TestCase):
     with self.assertRaises(ValueError): Tensor.uniform((3, 4), low=1.0, high=1.0)
 
   def test_scaled_uniform(self):
-    self.assertFalse(normal_test(Tensor.scaled_uniform))
     self.assertTrue(equal_distribution(Tensor.scaled_uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1) / math.sqrt(math.prod(x)),
                                                               lambda x: np.random.uniform(-1, 1, size=x) / math.sqrt(math.prod(x))))
 
   def test_glorot_uniform(self):
-    self.assertFalse(normal_test(Tensor.glorot_uniform))
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)),
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 

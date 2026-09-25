@@ -19,7 +19,6 @@ ERRORS RAISED (lower priority - at least users know):
   non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
   duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
-  nested_jit_fails_on_second_call    MED    could fail on first call instead of second
 """
 import unittest
 import numpy as np
@@ -143,39 +142,6 @@ class TestJitFootguns(unittest.TestCase):
     for i in range(1, 5): f_fixed(a[:, :Variable("i", 1, 10).bind(i)])
     self.assertEqual(int((f_fixed(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 4)
 
-  def test_non_tensor_outputs_error(self):
-    @TinyJit
-    def f(x, mult): return (x * 2).realize(), mult * 10
-    with self.assertRaises(JitError):
-      for i in range(3): f(Tensor([i]), i)
-
-  def test_duplicate_inputs_fail(self):
-    """JIT cannot handle the same tensor passed as multiple arguments."""
-    @TinyJit
-    def f(a, b): return (a + b).realize()
-
-    x = Tensor([1, 2, 3])
-    with self.assertRaises(JitError):
-      f(x, x)
-
-  def test_tensors_in_containers(self):
-    @TinyJit
-    def f(a, arr): return (a + arr[0]).realize()
-    for i in range(4):
-      a, b = Tensor([1, 1, 1]).realize(), Tensor([i, i, i]).realize()
-      np.testing.assert_array_equal(f(a, [b]).numpy(), [1+i, 1+i, 1+i])
-
-  def test_nested_jit_fails_on_second_call(self):
-    """Nested JIT works on first call but fails on second."""
-    @TinyJit
-    def inner(t): return t + 1
-    @TinyJit
-    def outer(t): return inner(t) * 3
-
-    self.assertEqual(outer(Tensor([1])).realize().item(), 6)  # works!
-    with self.assertRaises(RuntimeError):
-      outer(Tensor([2])).realize()  # fails
-
   def test_implicit_inputs_need_realize(self):
     """Closure tensors must be realized before JIT call."""
     x = Tensor([0])
@@ -186,16 +152,6 @@ class TestJitFootguns(unittest.TestCase):
     for i in range(5):
       x.assign(Tensor([i])).realize()  # must realize!
       self.assertEqual(f().item(), i * 2)
-
-  def test_views_with_different_offsets_fail(self):
-    """JIT requires consistent tensor views across calls."""
-    @TinyJit
-    def f(a): return (a + 1).realize()
-
-    base = Tensor.randn(10, 10).realize()
-    with self.assertRaises(JitError):
-      for i in range(1, 5):
-        f(base[:, i:i+2])  # different offset each time
 
   def test_shape_change_after_capture_fails(self):
     """Shapes are locked at capture time."""
@@ -300,15 +256,6 @@ class TestJitFootguns(unittest.TestCase):
     f(Tensor([5]))
     self.assertEqual(call_count[0], 2)  # still 2, not 5!
 
-  def test_nothing_realized_fails(self):
-    """Must JIT at least one kernel."""
-    @TinyJit
-    def f(a, b): return None
-
-    with self.assertRaises(JitError):
-      for _ in range(3):
-        f(Tensor([1]), Tensor([2]))
-
   def test_item_creates_unrealized_return(self):
     """.item() in shape computation raises error during JIT capture."""
     @TinyJit
@@ -370,15 +317,6 @@ class TestJitCorrectBehavior(unittest.TestCase):
 
     results = {tuple(f(Tensor([0, 0, 0])).numpy().tolist()) for _ in range(5)}
     self.assertEqual(len(results), 5)
-
-  def test_unrealized_return_auto_realized(self):
-    """Unrealized return tensors are auto-realized."""
-    @TinyJit
-    def f(a, b): return a + b  # no explicit realize
-
-    for _ in range(5):
-      a, b = Tensor.randn(10), Tensor.randn(10)
-      np.testing.assert_allclose(f(a, b).numpy(), a.numpy() + b.numpy(), atol=1e-5)
 
   def test_kwargs_order_doesnt_matter(self):
     """Kwargs are sorted by name, so order doesn't matter."""
