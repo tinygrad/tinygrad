@@ -1,6 +1,7 @@
 import unittest, itertools
+from dataclasses import replace
 
-from tinygrad.codegen.late.coalesce import indexing_simplify
+from tinygrad.codegen.late.coalesce import indexing_simplify, pm_simplify_add_image
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.weak import pm_commit_weak
@@ -502,6 +503,15 @@ class TestImageSimplification(unittest.TestCase):
                               (Special("gidx0", 10), idx_y))
     off = graph_rewrite(load.sink(), pm_commit_weak+indexing_simplify).src[0].src[0]
     self.assertEqual(off.src[1].get_valid(), UOp.const(True))
+
+class TestImageStore(unittest.TestCase):
+  def test_half_store_converts_lane_by_lane(self):
+    # a half4 stored to a half image converts to float per lane: a half4->float4 CAST is not valid OpenCL
+    img = UOp.param(0, dtypes.half, 256)
+    img = img.replace(arg=replace(img.arg, image=(8, 8)))
+    gidx0, gidx1 = Special("gidx0", 8), Special("gidx1", 8)
+    store = graph_rewrite(img.index(gidx1, gidx0).store(UOp.param(1, dtypes.half, (64, 4)).index(gidx1*8+gidx0)), pm_simplify_add_image)
+    self.assertEqual([(s.op, s.shape) for s in store.src[1].src], [(Ops.CAST, ())]*4)
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
