@@ -1,6 +1,7 @@
 import gc, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
+from tinygrad.helpers import Context
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
@@ -27,7 +28,9 @@ class QuantLinearMixin:
     @function(allow_implicit=True)
     def run(x:Tensor): return linear(x)
     for tokens in token_counts:
-      with self.subTest(tokens=tokens):
+      # TODO: z3 cannot model the integer ORs in custom IQ3_S/IQ2_S lookup indices.
+      # Compile locally so the CHECK_OOB override also applies to compilation.
+      with self.subTest(tokens=tokens), Context(**({"CHECK_OOB": 0, "PARALLEL": 0} if custom and ggml_type in (21, 22) else {})):
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
         wmma = custom and (32 if symbolic else tokens) % 16 == 0 and out_features % 16 == 0

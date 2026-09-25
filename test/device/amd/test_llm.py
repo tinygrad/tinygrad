@@ -5,6 +5,7 @@ from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
                                       QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
+from tinygrad.helpers import Context, DEV, OSX
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
@@ -84,7 +85,9 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     scales = np.array([0, 2**-24, -2**-24, 2**-14, -0.00035, .001, .0037, -.125, 1, -4, 8], np.float16)
     identity = Tensor(np.eye(768, dtype=np.float16)).realize()
     for typ, size in QUANT_SIZES.items():
-      with self.subTest(ggml_type=typ):
+      # TODO: z3 cannot model the integer ORs in IQ3_S/IQ2_S lookup indices.
+      # Compile locally so the CHECK_OOB override also applies to compilation.
+      with self.subTest(ggml_type=typ), Context(**({"CHECK_OOB": 0, "PARALLEL": 0} if typ in (21, 22) else {})):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
         blocks = packed.reshape(-1, 18) if typ == 20 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
@@ -295,6 +298,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
+  @unittest.skipIf(OSX and DEV.interface.startswith("MOCK"), "TODO: incorrect results in the macOS AMD emulator")
   def test_flash_attention_decode_symbolic_gqa(self):
     with patch.object(Tensor, "scaled_dot_product_attention", side_effect=AssertionError("expected custom decode")):
       self._test_flash_decode(8, 2, 256, 128, 37, symbolic=True)
@@ -302,6 +306,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
 
   def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
+  @unittest.skipIf(OSX and DEV.interface.startswith("MOCK"), "TODO: incorrect results in the macOS AMD emulator")
   def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
   def _test_flash_decode(self, heads, kv_heads, dim, n, valid, symbolic=False):
