@@ -1783,8 +1783,8 @@ class TestOps(TensorTestCase):
                        lambda: (Tensor.eye(10)@Tensor.eye(10).flip(0)), forward_only=True)
 
   def test_broadcast_full(self):
-    # broadcasting is op-independent: cover the plain path with add and the range-clamped path with pow
-    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.pow, Tensor.pow)]:
+    # keep mul/div: their gradients exercise data-dependent reductions when both operands broadcast
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.mul, Tensor.mul), (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
       for shapes in [((5,3,14,16), (5,1,14,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           if tinygrad_op != Tensor.pow:
