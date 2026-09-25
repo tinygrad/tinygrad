@@ -1381,7 +1381,9 @@ class TestOps(TensorTestCase):
     for a_shape, b_shape in [((3,5), (2,5,7)), ((2,3,4,5), (2,1,5,7)), ((2,1,4,5), (1,3,5,7))]:
       with self.subTest(a_shape=a_shape, b_shape=b_shape), Context(IMAGE=1, FLOAT16=0):
         a, b = (rng.standard_normal(shape).astype(np.float32) for shape in (a_shape, b_shape))
-        np.testing.assert_allclose((Tensor(a) @ Tensor(b)).numpy(), a @ b, atol=1e-5, rtol=1e-5)
+        out = (Tensor(a) @ Tensor(b)).realize()
+        self.assertEqual(out.shape, (a @ b).shape)
+        if not COMPILE_ONLY: np.testing.assert_allclose(out.numpy(), a @ b, atol=1e-5, rtol=1e-5)
 
   def test_mulacc_with_zero_strides(self):
     helper_test_op(
