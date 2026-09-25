@@ -133,6 +133,27 @@ debug_tag_factor = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda ctx,x: x.rtag(ctx[0][x] if x not in ctx[1] else 'REAL') if x.tag is None else None),
 ])
 
+# ***** split ****
+
+def gather_param(ctx:dict[UOp, UOp], x:UOp):
+  if x in ctx: return ctx[x]
+  ret = x.param_like(len(ctx))
+  ctx[x] = ret
+  return ret
+
+pm_gather = PatternMatcher([
+  (UPat((Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.COPY), name="x"), gather_param),
+])
+
+def split_kernel(x:UOp):
+  ctx = {}
+  x = graph_rewrite(x, pm_gather, ctx=ctx, name="gather", bottom_up=True)
+  return UOp(Ops.CALL, src=(x,)+tuple(ctx.keys()))
+
+pm_split = PatternMatcher([
+  (UPat((Ops.STAGE, Ops.STORE, Ops.COPY), name="x"), split_kernel),
+])
+
 @rewrite_group(lambda _,ret: f"Schedule2 {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
@@ -165,6 +186,7 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   sink = graph_rewrite(sink.substitute(realize), remove_all_tags, name="untag")
 
   # split into calls
+  sink = graph_rewrite(sink, pm_split, name="split kernels", bottom_up=True)
 
   # prepare, convert to stores
   sink = graph_rewrite(sink, pm_prepare, name="prepare")

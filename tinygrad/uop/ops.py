@@ -1839,6 +1839,12 @@ class RewriteContext:
           # otherwise we are done
           self.replace[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
+    if root not in self.replace:
+      def label(u:UOp) -> str: return f"{u.op.name}@{id(u):x}"
+      details = [f"  {label(n)} -> {label(new_n)} waits for {label(dep)}"
+                 for dep, waiters in itertools.islice(waitlist.items(), 5) for n, _, new_n in waiters[:1]]
+      raise RuntimeError("graph_rewrite stalled: unresolved rewrite dependencies (possible cycle). "
+                         "A replacement may depend on the node being rewritten.\n" + "\n".join(details))
     return self.replace[root]
 
 @rewrite_group(new_ctx=False)
