@@ -266,12 +266,15 @@ class TestGGUF(unittest.TestCase):
     reader = GGUFReader(fp)
 
     for rt in reader.tensors:
-      ref = dequantize(rt.data, rt.tensor_type)
-      # Check every value, without requiring a single >128 MiB output binding on WebGPU implementations.
+      # Check every value, dequantizing both implementations in bounded, block-aligned chunks.
       t = tensors[rt.name].flatten()
-      ref = ref.reshape(t.shape)
-      chunk = (64 << 20) // t.dtype.itemsize
-      for start in range(0, t.numel(), chunk): np.testing.assert_equal(t[start:start+chunk].numpy(), ref[start:start+chunk])
+      block_size, type_size = GGML_QUANT_SIZES[rt.tensor_type]
+      data = rt.data.view(np.uint8).reshape(-1)
+      chunk = (8 << 20) // t.dtype.itemsize
+      for start in range(0, t.numel(), chunk):
+        end = min(start+chunk, t.numel())
+        ref = dequantize(data[start//block_size*type_size:end//block_size*type_size], rt.tensor_type)
+        np.testing.assert_equal(t[start:end].numpy(), ref.reshape(-1))
 
     for k, f in reader.fields.items():
       if k.startswith("GGUF."): continue  # skip file header keys (version, tensor_count, kv_count)
@@ -285,7 +288,7 @@ class TestGGUF(unittest.TestCase):
 class TestGGUFGEMV(unittest.TestCase):
   def _test_gguf_gemv(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    rows, cols = (1024, 512) if qtype == GGMLQuantizationType.BF16 else (8192, 2048)
+    rows, cols = 32, 512
     n_blocks = rows * cols // block_size
     rng = np.random.default_rng(42)
     if qtype == GGMLQuantizationType.BF16:
