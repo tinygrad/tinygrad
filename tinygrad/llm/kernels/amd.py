@@ -52,7 +52,7 @@ def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
     val = val.maximum(other) if maximum else val + other
   return val
 
-def _reg(shape:tuple[int, ...], slot:int, value:float, dep:UOp|None=None) -> UOp:
+def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
   ret = UOp.alloc(shape, dtypes.float, addrspace=AddrSpace.REG)
   return ret.after((ret if dep is None else ret.after(dep)).store(ret.const_like(value)))
 
