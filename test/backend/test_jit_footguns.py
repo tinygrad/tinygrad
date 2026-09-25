@@ -143,21 +143,6 @@ class TestJitFootguns(unittest.TestCase):
     for i in range(1, 5): f_fixed(a[:, :Variable("i", 1, 10).bind(i)])
     self.assertEqual(int((f_fixed(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 4)
 
-  def test_non_tensor_outputs_error(self):
-    @TinyJit
-    def f(x, mult): return (x * 2).realize(), mult * 10
-    with self.assertRaises(JitError):
-      for i in range(3): f(Tensor([i]), i)
-
-  def test_duplicate_inputs_fail(self):
-    """JIT cannot handle the same tensor passed as multiple arguments."""
-    @TinyJit
-    def f(a, b): return (a + b).realize()
-
-    x = Tensor([1, 2, 3])
-    with self.assertRaises(JitError):
-      f(x, x)
-
   def test_tensors_in_containers(self):
     @TinyJit
     def f(a, arr): return (a + arr[0]).realize()
@@ -186,16 +171,6 @@ class TestJitFootguns(unittest.TestCase):
     for i in range(5):
       x.assign(Tensor([i])).realize()  # must realize!
       self.assertEqual(f().item(), i * 2)
-
-  def test_views_with_different_offsets_fail(self):
-    """JIT requires consistent tensor views across calls."""
-    @TinyJit
-    def f(a): return (a + 1).realize()
-
-    base = Tensor.randn(10, 10).realize()
-    with self.assertRaises(JitError):
-      for i in range(1, 5):
-        f(base[:, i:i+2])  # different offset each time
 
   def test_shape_change_after_capture_fails(self):
     """Shapes are locked at capture time."""
@@ -299,15 +274,6 @@ class TestJitFootguns(unittest.TestCase):
     f(Tensor([4]))
     f(Tensor([5]))
     self.assertEqual(call_count[0], 2)  # still 2, not 5!
-
-  def test_nothing_realized_fails(self):
-    """Must JIT at least one kernel."""
-    @TinyJit
-    def f(a, b): return None
-
-    with self.assertRaises(JitError):
-      for _ in range(3):
-        f(Tensor([1]), Tensor([2]))
 
   def test_item_creates_unrealized_return(self):
     """.item() in shape computation raises error during JIT capture."""

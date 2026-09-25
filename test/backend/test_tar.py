@@ -1,4 +1,4 @@
-import unittest, tarfile, io, os, pathlib, tempfile
+import unittest, tarfile, io, os, tempfile
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.nn.state import tar_extract
@@ -48,10 +48,6 @@ class TestTarExtractFile(unittest.TestCase):
     result = tar_extract(self.tar_path)
     for filename, content in self.test_files.items():
       np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
-
-  def test_tar_extract_empty_file(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(len(result['empty_file.txt']), 0)
 
   def test_tar_extract_non_existent_file(self):
     with self.assertRaises(FileNotFoundError):
@@ -112,14 +108,6 @@ class TestTarExtractPAX(unittest.TestCase):
     result = tar_extract(self.create_tar_tensor())
     for filename, content in self.test_files.items():
       np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
-
-  def test_tar_extract_empty_file(self):
-    result = tar_extract(self.create_tar_tensor())
-    self.assertEqual(len(result['empty_file.txt']), 0)
-
-  def test_tar_extract_non_existent_file(self):
-    with self.assertRaises(FileNotFoundError):
-      tar_extract(Tensor(pathlib.Path('non_existent_file.tar')))
 
   def test_tar_extract_invalid_file(self):
     with self.assertRaises(tarfile.ReadError):

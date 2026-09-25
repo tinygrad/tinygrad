@@ -2354,12 +2354,7 @@ class TestOps(TensorTestCase):
               lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
               lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
-  @slow_test
-  @unittest.skip("redundant: bs/cout are loop dims, kernel×cin sweep covered by test_conv2d")
-  def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
-  @unittest.skip("redundant: cin=1 covered by test_conv2d_bs_1_cin_1")
-  def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
   @slow_test
   def test_large_input_conv2d(self):
