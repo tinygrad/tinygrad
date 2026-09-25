@@ -134,11 +134,6 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-ew_devectorizer = PatternMatcher([
-  # unpack broadcasting
-  (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
-])
-
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
@@ -335,8 +330,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image,
-                       name="add images", ctx=({}, ren), bottom_up=True)
+  sink = graph_rewrite(sink, symbolic_simple+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies

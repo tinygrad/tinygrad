@@ -98,7 +98,8 @@ def store_image(x:UOp, d:UOp) -> UOp:
   # image load/store is always float, a half image converts on store
   def as_float(s:UOp):
     return s.src[0] if x.src[0].dtype is dtypes.half and s.op is Ops.CAST and s.src[0].dtype is dtypes.float else s.cast(dtypes.float)
-  return x.store(UOp.stack(*[as_float(s) for s in d.src]) if d.op is Ops.STACK else as_float(d))
+  lanes = d.src if d.op is Ops.STACK else tuple(d.index(i) for i in range(d.shape[0]))
+  return x.store(UOp.stack(*[as_float(s) for s in lanes]))
 
 pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
