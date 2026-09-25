@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
-from tinygrad.uop.ops import KernelInfo, AxisType, Ops, ParamArg
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import assert_kernel_count
@@ -514,7 +514,8 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(A[i].reduce(i, arg=Ops.ADD))
 
     def call_add_sum(C:UOp, A:UOp) -> UOp:
-      tmp = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), A.dtype, N, addrspace=AddrSpace.REG))
+      #tmp = UOp(Ops.ALLOC, arg=ParamArg(-1, A.dtype, N, addrspace=AddrSpace.REG))
+      tmp = UOp.placeholder((N,), A.dtype, addrspace=AddrSpace.REG)
       add_call = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG), A.param_like(1)).sink().call(tmp, A, name="add")
       sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp.after(add_call), name="sum")
       return sum_call.sink(arg=KernelInfo(name="call_in_kernel"))
