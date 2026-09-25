@@ -187,12 +187,12 @@ class TestSetitem(unittest.TestCase):
 
   def test_setitem_advanced_indexing(self):
     # Example from https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
-    t = Tensor.zeros(10,20,30,40,50, dtype=dtypes.int).contiguous()
+    t = Tensor.zeros(2,9,3,6,5, dtype=dtypes.int).contiguous()
     ind_1 = Tensor([5,3,7,8])
     ind_2 = Tensor([[[0],[1],[2]],[[3],[4],[5]]])
-    v = Tensor.arange(2*3*4*10*30*50).reshape(2,3,4,10,30,50)
+    v = Tensor.arange(2*3*4*2*3*5).reshape(2,3,4,2,3,5)
     t[:, ind_1, :, ind_2, :] = v
-    n = np.zeros((10,20,30,40,50), dtype=np.int32)
+    n = np.zeros((2,9,3,6,5), dtype=np.int32)
     n[:, ind_1.numpy(), :, ind_2.numpy(), :] = v.numpy()
     np.testing.assert_equal(t.numpy(), n)
 
