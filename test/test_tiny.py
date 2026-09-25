@@ -110,7 +110,8 @@ class TestTiny(unittest.TestCase):
 
   def test_beam_timing_failure_not_fatal(self):
     # an exception while timing a candidate (e.g. a device fault) skips that candidate, it must not kill the search
-    for sz, e in ((17, RuntimeError("Device fault detected")), (19, KeyError("fault"))):
+    # NOTE: sizes <= 16 so an upcast action applies on devices without locals, otherwise there are no candidates to time
+    for sz, e in ((8, RuntimeError("Device fault detected")), (12, KeyError("fault"))):
       with patch("tinygrad.codegen.opt.search._time_program", side_effect=e) as tm, Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0):
         self.assertListEqual((Tensor.ones(sz) + Tensor.ones(sz)).tolist(), [2.0]*sz)
       self.assertGreater(tm.call_count, 0)
@@ -119,7 +120,7 @@ class TestTiny(unittest.TestCase):
          patch("tinygrad.codegen.opt.search._time_program", side_effect=KeyError("fault")), Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0):
       getenv.cache_clear()
       try:
-        with self.assertRaises(KeyError): (Tensor.ones(23) + Tensor.ones(23)).tolist()
+        with self.assertRaises(KeyError): (Tensor.ones(4) + Tensor.ones(4)).tolist()
       finally: getenv.cache_clear()
 
   # *** symbolic (to allow less recompilation) ***
