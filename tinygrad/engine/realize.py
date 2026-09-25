@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import decimal, array
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -292,4 +292,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       else:
         from tinygrad.tensor import Tensor
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-    yield max(pm_exec.rewrite(linear.src[0].without_after, ctx) or [0.0])
+    yield unwrap((pm_exec.rewrite(linear.src[0].without_after, ctx) or [0.0])[-1])
