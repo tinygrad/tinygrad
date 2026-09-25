@@ -631,9 +631,9 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert b.grad is not None
     np.testing.assert_allclose(a.grad.numpy(), b.grad.numpy())
 
-  def test_clone_deviceless_const_to_cpu(self):
-    t = Tensor(UOp.const(2.0).cast(dtypes.float)).clone(device="CPU")
-    self.assertEqual(t.device, "CPU")
+  def test_clone_deviceless_const_to_device(self):
+    t = Tensor(UOp.const(2.0).cast(dtypes.float)).clone(device=Device.DEFAULT)
+    self.assertEqual(t.device, Device.DEFAULT)
     np.testing.assert_equal(t.numpy(), 2.0)
 
   def test_reduce_default(self):

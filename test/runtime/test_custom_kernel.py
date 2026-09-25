@@ -470,29 +470,6 @@ class TestCustomKernel(unittest.TestCase):
     assert_kernel_count(2 if x[0].uop.contiguous_view() is None else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
-  @Context(DEV="CPU")
-  def test_simple_from_source(self):
-    a = Tensor.arange(4).clone().realize()
-    src = "void test_src(int* restrict a) { a[0] = 1; }"
-    def custom_src_kernel(A:UOp, B:UOp) -> UOp:
-      sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))
-    a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
-    self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
-
-  @Context(DEV="CPU")
-  def test_simple_from_source_alt(self):
-    a = Tensor.arange(4).clone().realize()
-    src = "void copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
-    def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
-      sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))
-    out = Tensor.custom_kernel(Tensor.empty_like(a), a+1, fxn=custom_src_kernel)[0]
-    GlobalCounters.reset()
-    out.realize()
-    assert_kernel_count(2)
-    self.assertEqual(out.tolist(), [1, 2, 3, 4])
-
   @unittest.skip("this shouldn't be expected to work")
   def test_inplace_transpose(self):
     def custom_assign_row_max_kernel(A:UOp) -> UOp:
@@ -515,8 +492,7 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(A[i].reduce(i, arg=Ops.ADD))
 
     def call_add_sum(C:UOp, A:UOp) -> UOp:
-      #tmp = UOp(Ops.ALLOC, arg=ParamArg(-1, A.dtype, N, addrspace=AddrSpace.REG))
-      tmp = UOp.placeholder((N,), A.dtype, addrspace=AddrSpace.REG)
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
       add_call = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG), A.param_like(1)).sink().call(tmp, A, name="add")
       sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp.after(add_call), name="sum")
       return sum_call.sink(arg=KernelInfo(name="call_in_kernel"))
@@ -532,7 +508,7 @@ class TestCustomKernel(unittest.TestCase):
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
-    x = mop_fxn(Tensor.arange(32).clone("CPU").realize())
+    x = mop_fxn(Tensor.arange(32).clone().realize())
     y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y.realize()
@@ -540,7 +516,7 @@ class TestCustomKernelInput(unittest.TestCase):
     self.assertEqual(y.tolist(), x.add(1).tolist())
     # same test with @function, input is PARAM
     from tinygrad import function
-    x0 = Tensor.arange(32).clone("CPU").realize()
+    x0 = Tensor.arange(32).clone().realize()
     @function(precompile=True)
     def run(a:Tensor) -> Tensor:
       xv = mop_fxn(a)

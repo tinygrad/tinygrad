@@ -113,7 +113,7 @@ jobs:
         key: be-minimal
         deps: testing_unit
     - name: Run runtime tests
-      run: SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_symbolic_ops.py test/runtime/test_renderer_failures.py::TestRendererFailures --durations=20
+      run: SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_symbolic_ops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
     - name: Test IMAGE support
       run: IMAGE=1 DEV=PYTHON python3 test/runtime/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
     - name: Test emulated tensor cores
@@ -227,7 +227,7 @@ jobs:
     - name: Run runtime tests
       run: |
         DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
-        DEV=CPU python -m pytest -n=auto test/runtime/ --durations=20
+        DEV=CPU python -m pytest -n=auto test/runtime/ test/device/cpu --durations=20
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
@@ -255,7 +255,7 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/opt --ignore test/runtime/test_custom_kernel.py --ignore test/runtime/test_hashing.py --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/opt test/device/cpu --ignore test/runtime/test_custom_kernel.py --ignore test/runtime/test_hashing.py --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -353,7 +353,7 @@ jobs:
           deps: testing
           llvm: 'true'
       - name: Test ONNX (CPU)
-        run: DEV=CPU python -m pytest -n=auto test/external/external_test_onnx_backend.py test/external/external_test_onnx_runner.py test/external/external_test_onnx_ops.py test/runtime/test_quantize_onnx.py --durations=20
+        run: DEV=CPU python -m pytest -n=auto test/external/external_test_onnx_backend.py test/external/external_test_onnx_runner.py test/external/external_test_onnx_ops.py test/device/cpu/test_quantize_onnx.py --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -451,7 +451,7 @@ jobs:
         llvm: "true"
         qemu: "true"
     - name: Run tests
-      run: MOCKDSP=1 DEV=DSP python -m pytest -n=auto test/test_tiny.py test/runtime/test_transcendental.py::TestTranscendentalVectorized test/runtime/test_quantize_onnx.py
+      run: MOCKDSP=1 DEV=DSP python -m pytest -n=auto test/test_tiny.py test/runtime/test_transcendental.py::TestTranscendentalVectorized test/device/dsp
 
   testlinux:
     strategy:
@@ -486,7 +486,7 @@ jobs:
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run runtime tests
-      run: python -m pytest -n=auto test/runtime --durations=20
+      run: python -m pytest -n=auto test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -535,7 +535,7 @@ jobs:
           PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_asm_matmul.py
           PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_copy_matmul.py
       - name: Run LLVM test
-        run: DEV=MOCKKFD+AMD:LLVM python test/device/test_amd_llvm.py
+        run: DEV=MOCKKFD+AMD:LLVM python test/device/amd/test_llvm.py
 
   testmockam:
     name: Linux (am)
@@ -573,7 +573,7 @@ jobs:
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: *linux
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
@@ -598,7 +598,7 @@ jobs:
         if: ${{ matrix.backend == 'amd' && matrix.arch == 'gfx950' }}
         run: PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py test/runtime/test_asm_gemm.py::TestAsmGEMM --durations=20
+        run: python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd --durations=20
       - name: Run opt tests
         run: python -m pytest -n=auto test/opt --durations=20
       - name: Run disk copy tests
@@ -637,7 +637,11 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
-        run: python -m pytest -n=auto test/runtime --ignore test/runtime/test_multitensor.py --durations=20
+        # NV and CUDA share the NVIDIA device tests.
+        run: python -m pytest -n=auto test/runtime test/device/nv --ignore test/runtime/test_multitensor.py --durations=20
+      - name: Run NV PTX device tests
+        if: matrix.backend == 'nv'
+        run: DEV=MOCK+NV:PTX python -m pytest -n=auto test/device/nv --durations=20
       - name: Run TestOps.test_add with PMA
         run: VIZ=-1 PMA=1 PMA_BUFFER_SIZE=8 DEBUG=5 python3 test/runtime/test_ops.py TestOps.test_add
       - name: Run process replay tests

@@ -21,7 +21,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")
-    t = Tensor.rand(10, 10).to("CPU").realize()
+    t = Tensor.rand(10, 10).realize()
     st = pickle.dumps(t)
     t_values = t.numpy()
     del t # free buffers
@@ -32,7 +32,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_realized_tensor_alt2(self):
     print("** init")
-    t = Tensor.rand(10, 10).to("CPU").realize()
+    t = Tensor.rand(10, 10).realize()
     tensor_uop = t.uop
     assert tensor_uop.is_realized, f"expected {tensor_uop} to be realized"
     t_values = t.numpy()

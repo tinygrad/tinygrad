@@ -1,40 +1,17 @@
-import gc, unittest, weakref
+import unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid, _wmma_rdna4)
+                                      QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
+from tinygrad.helpers import Context, DEV, OSX
+from test.runtime.test_llm_quantized import QuantLinearMixin
 
-class TestQ8Quantize(unittest.TestCase):
+class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_wmma_architecture_selection(self):
     if not amd_custom_kernels_supported(device:=Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     self.assertEqual(_wmma_rdna4(device), Device[device].target[0] == 12)
-
-  def test_quant_tables_not_retained(self):
-    # one _iq_grid table and the iq4 lut cover both table creation paths
-    for typ in (18, 23):
-      table = (iq4_half_lut("CPU") if typ == 23 else _iq_grid("CPU", typ)).realize()
-      ref = weakref.ref(table)
-      del table
-      gc.collect()
-      self.assertIsNone(ref())
-
-  def test_quant_weights_share_storage(self):
-    for ggml_type, type_size in QUANT_SIZES.items():
-      with self.subTest(ggml_type=ggml_type):
-        packed = np.arange(type_size + 4, dtype=np.uint8)
-        raw = Tensor(packed, device="CPU").realize()[4:]
-        decoded = ggml_data_to_tensor(raw, 256, ggml_type).reshape(1, 256)
-        linear = Linear(256, 1, bias=False)
-        linear.set_quantized(decoded)
-        linear.weight.realize()
-        self.assertEqual(linear.ggml_type, ggml_type)
-        self.assertEqual(linear.weight.dtype, dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
-        self.assertEqual(linear.weight.nbytes(), type_size)
-        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[4:])
-        raw.assign(raw.full_like(1)).realize()
-        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -108,7 +85,9 @@ class TestQ8Quantize(unittest.TestCase):
     scales = np.array([0, 2**-24, -2**-24, 2**-14, -0.00035, .001, .0037, -.125, 1, -4, 8], np.float16)
     identity = Tensor(np.eye(768, dtype=np.float16)).realize()
     for typ, size in QUANT_SIZES.items():
-      with self.subTest(ggml_type=typ):
+      # TODO: z3 cannot model the integer ORs in IQ3_S/IQ2_S lookup indices.
+      # Compile locally so the CHECK_OOB override also applies to compilation.
+      with self.subTest(ggml_type=typ), Context(**({"CHECK_OOB": 0, "PARALLEL": 0} if typ in (21, 22) else {})):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
         blocks = packed.reshape(-1, 18) if typ == 20 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
@@ -149,13 +128,6 @@ class TestQ8Quantize(unittest.TestCase):
     for typ in (10, 11, 17, 18, 20, 21, 22):
       with self.subTest(ggml_type=typ):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
-
-  def test_quant_linear_fallback(self):
-    if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
-    # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here
-    for typ in (12, 14, 17, 23):
-      with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
 
   def test_quant_linear_bias(self):
     for typ in (12, 21, 23):
@@ -281,48 +253,6 @@ class TestQ8Quantize(unittest.TestCase):
         x = rng.normal(size=(tokens, 128)).astype(np.float16)
         np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ w.astype(np.float32).T + bias, rtol=2e-3, atol=2e-3)
 
-  def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128),
-                         bias=False, custom=True, symbolic=False):
-    if custom and not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
-    rng = np.random.default_rng(42)
-    packed = rng.integers(0, 256, (out_features*in_features//256, block_bytes), dtype=np.uint8)
-    if ggml_type in (11, 14): packed[:, -2:] = np.array([0.001], dtype=np.float16).view(np.uint8)
-    elif ggml_type == 10:
-      packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
-      packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
-    elif ggml_type == 20: packed.reshape(-1, 18)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
-    else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
-    if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
-    raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
-    decoded = ggml_data_to_tensor(raw, out_features*in_features, ggml_type).reshape(out_features, in_features)
-    weight = decoded.numpy()
-    linear = Linear(in_features, out_features, bias=False)
-    linear.weight = decoded
-    bias_value = rng.normal(size=out_features).astype(np.float32) if bias else 0
-    if bias: linear.bias = Tensor(bias_value)
-    @function(allow_implicit=True)
-    def run(x:Tensor): return linear(x)
-    for tokens in token_counts:
-      with self.subTest(tokens=tokens):
-        x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
-        reference_x = x.astype(np.float32)
-        wmma = custom and (32 if symbolic else tokens) % 16 == 0 and out_features % 16 == 0
-        if wmma: reference_x = x.astype(np.float16).astype(np.float32)
-        if custom and not wmma:
-          grouped = reference_x.reshape(tokens, -1, 32)
-          scale = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
-          reference_x = (np.clip(np.rint(grouped/scale), -127, 127)*scale).reshape(tokens, in_features)
-        reference_w = weight.astype(np.float16).astype(np.float32) if wmma else weight
-        inp = Tensor(x) if not symbolic else Tensor(np.pad(x, ((0, 32-tokens), (0, 0)))).contiguous()[:
-          UOp.variable("wmma_tokens", 1, 32).bind(tokens)]
-        actual = (run if tokens == 1 or symbolic else linear)(inp)[:tokens].numpy()
-        self.assertEqual(linear.ggml_type, ggml_type if custom else None)
-        np.testing.assert_allclose(actual, reference_x @ reference_w.T + bias_value, rtol=3e-3, atol=2e-2)
-        if not symbolic and tokens == 3 and ggml_type not in (12, 13, 14, 23):
-          sym = Tensor(np.pad(x, ((0, 1), (0, 0)))).contiguous()[:UOp.variable("tokens", 1, 4).bind(3)]
-          np.testing.assert_allclose(linear(sym)[:3].numpy(), reference_x @ reference_w.T + bias_value, rtol=3e-3, atol=2e-2)
-    self.assertEqual(linear.ggml_type, ggml_type if custom else None)
-
   def test_q6_linear_multiple_tokens(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
@@ -368,6 +298,7 @@ class TestQ8Quantize(unittest.TestCase):
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
+  @unittest.skipIf(OSX and DEV.interface.startswith("MOCK"), "TODO: incorrect results in the macOS AMD emulator")
   def test_flash_attention_decode_symbolic_gqa(self):
     with patch.object(Tensor, "scaled_dot_product_attention", side_effect=AssertionError("expected custom decode")):
       self._test_flash_decode(8, 2, 256, 128, 37, symbolic=True)
@@ -375,6 +306,7 @@ class TestQ8Quantize(unittest.TestCase):
   def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
 
   def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
+  @unittest.skipIf(OSX and DEV.interface.startswith("MOCK"), "TODO: incorrect results in the macOS AMD emulator")
   def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
   def _test_flash_decode(self, heads, kv_heads, dim, n, valid, symbolic=False):
