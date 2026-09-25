@@ -747,9 +747,9 @@ class TestJitInsideJit(unittest.TestCase):
     def g(t): return f(t) * 3
 
     # NOTE: first does not raise
-    g(Tensor([1])).realize()
+    self.assertEqual(g(Tensor([1])).realize().item(), 6)
     with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
-      g(Tensor([1])).realize()
+      g(Tensor([2])).realize()
 
 class TestJitRandom(unittest.TestCase):
   def test_jit_rangeify(self):

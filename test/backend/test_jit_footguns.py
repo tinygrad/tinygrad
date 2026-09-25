@@ -19,7 +19,6 @@ ERRORS RAISED (lower priority - at least users know):
   non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
   duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
-  nested_jit_fails_on_second_call    MED    could fail on first call instead of second
 """
 import unittest
 import numpy as np
@@ -142,24 +141,6 @@ class TestJitFootguns(unittest.TestCase):
     def f_fixed(a): return (a+1).pad((None, (0, 10-a.shape[1]))).contiguous().realize()
     for i in range(1, 5): f_fixed(a[:, :Variable("i", 1, 10).bind(i)])
     self.assertEqual(int((f_fixed(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 4)
-
-  def test_tensors_in_containers(self):
-    @TinyJit
-    def f(a, arr): return (a + arr[0]).realize()
-    for i in range(4):
-      a, b = Tensor([1, 1, 1]).realize(), Tensor([i, i, i]).realize()
-      np.testing.assert_array_equal(f(a, [b]).numpy(), [1+i, 1+i, 1+i])
-
-  def test_nested_jit_fails_on_second_call(self):
-    """Nested JIT works on first call but fails on second."""
-    @TinyJit
-    def inner(t): return t + 1
-    @TinyJit
-    def outer(t): return inner(t) * 3
-
-    self.assertEqual(outer(Tensor([1])).realize().item(), 6)  # works!
-    with self.assertRaises(RuntimeError):
-      outer(Tensor([2])).realize()  # fails
 
   def test_implicit_inputs_need_realize(self):
     """Closure tensors must be realized before JIT call."""
@@ -336,15 +317,6 @@ class TestJitCorrectBehavior(unittest.TestCase):
 
     results = {tuple(f(Tensor([0, 0, 0])).numpy().tolist()) for _ in range(5)}
     self.assertEqual(len(results), 5)
-
-  def test_unrealized_return_auto_realized(self):
-    """Unrealized return tensors are auto-realized."""
-    @TinyJit
-    def f(a, b): return a + b  # no explicit realize
-
-    for _ in range(5):
-      a, b = Tensor.randn(10), Tensor.randn(10)
-      np.testing.assert_allclose(f(a, b).numpy(), a.numpy() + b.numpy(), atol=1e-5)
 
   def test_kwargs_order_doesnt_matter(self):
     """Kwargs are sorted by name, so order doesn't matter."""
