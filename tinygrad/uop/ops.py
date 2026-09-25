@@ -1273,13 +1273,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       from the global counter): outputs of different calls never alias. like PARAM, the arg only stores the concrete
       max size: a shape is a view (RESHAPE/SHRINK/UNSHARD) on the flat storage"""
       # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
-      shp = None if (oshape:=o._shape) is None else tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True)
-                                                          if isinstance(s, UOp) else s for s in oshape)
-      assert shp is not None
+      shp = tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in oshape)
       dev = o.device if o.device is not None else default_dev
       axis = o.axis if isinstance(o.device, tuple) else None
       # multi-device values have a per-shard sized storage: the sharding lives in the graph, not the arg
-      if shp and isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
+      if isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
       ret = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), o.dtype, prod(to_max_shape(shp)), device=dev))
       return ret.reshape(()) if not shp else ret.view_as(shp, axis)
     rets = tuple(mint(o) for o in values)
