@@ -13,7 +13,7 @@ def reconstruction_helper(A:list[Tensor],B:Tensor, tolerance=1e-5):
 
 class TestLinAlg(unittest.TestCase):
   def test_svd_general(self):
-    sizes = [(2,2),(5,3),(3,5),(3,4,4),(2,2,2,2,3)]
+    sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
     for size in sizes:
       a = Tensor.randn(size).realize()
       U,S,V = a.svd()

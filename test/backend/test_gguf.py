@@ -265,9 +265,13 @@ class TestGGUF(unittest.TestCase):
 
     reader = GGUFReader(fp)
 
+    # realize the whole model at once so same-shape dequants fuse into few kernels
+    flats = {name: t.flatten() for name, t in tensors.items()}
+    Tensor.realize(*flats.values())
+
     for rt in reader.tensors:
       # Check every value, dequantizing both implementations in bounded, block-aligned chunks.
-      t = tensors[rt.name].flatten()
+      t = flats[rt.name]
       block_size, type_size = GGML_QUANT_SIZES[rt.tensor_type]
       data = rt.data.view(np.uint8).reshape(-1)
       chunk = (8 << 20) // t.dtype.itemsize
