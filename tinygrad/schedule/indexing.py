@@ -114,34 +114,23 @@ def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   new_ranges = list(ctx.range_map[x][0][:x.arg[1]])
   return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
 
+def _stack_select(r0:UOp, srcs:list[UOp], lo:int, hi:int) -> UOp:
+  # Bound lookup depth for large constant tables, rather than building a linear chain of thousands of WHEREs.
+  if hi-lo <= 8:
+    ret = srcs[hi-1]
+    for k in range(hi-2, lo-1, -1): ret = r0.eq(k).where(srcs[k], ret)
+    return ret
+  mid = (lo+hi)//2
+  return (r0 < mid).where(_stack_select(r0, srcs, lo, mid), _stack_select(r0, srcs, mid, hi))
+
 def convert_stack_to_where(ctx:IndexingContext, x:UOp):
   # only data STACKs: shape tuple STACKs aren't in range_map, the empty shape tuple is void
   if x not in ctx.range_map or x.dtype == dtypes.void: return None
   # use the src list directly, a transient STACK of mid-rangeify srcs violates the spec shape rule
   srcs = create_bufferize_and_index_srcs(ctx, x)
   r0 = ctx.range_map[x][1][0]
-  # Bound lookup depth for large constant tables, rather than building a linear chain of thousands of WHEREs.
-  # NOTE: build the tree iteratively, a recursive closure here creates a reference cycle that pins the whole graph (gc test)
-  if len(srcs) <= 8:
-    ret = srcs[-1]
-    for k in range(len(srcs)-2, -1, -1): ret = r0.eq(k).where(srcs[k], ret)
-    return ret
-  # leaves are linear chains of up to 8 srcs covering [lo, hi), merged pairwise bottom-up with a r0 < hi guard
-  level = []
-  for lo in range(0, len(srcs), 8):
-    hi = min(lo+8, len(srcs))
-    ret = srcs[hi-1]
-    for k in range(hi-2, lo-1, -1): ret = r0.eq(k).where(srcs[k], ret)
-    level.append((lo, hi, ret))
-  while len(level) > 1:
-    nxt = []
-    for i in range(0, len(level)-1, 2):
-      (lo1, hi1, v1), (_, hi2, v2) = level[i], level[i+1]
-      nxt.append((lo1, hi2, (r0 < hi1).where(v1, v2)))
-    if len(level) % 2: nxt.append(level[-1])
-    level = nxt
-  # out of range below 0 is the last element, matching the linear chain
-  return (r0 < 0).where(srcs[-1], level[0][2])
+  ret = _stack_select(r0, srcs, 0, len(srcs))
+  return (r0 < 0).where(srcs[-1], ret) if len(srcs) > 8 else ret
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]

@@ -12,12 +12,6 @@ from extra.datasets import fetch_mnist
 np.random.seed(1337)
 Tensor.manual_seed(1337)
 
-def get_mnist():
-  global X_train, Y_train, X_test, Y_test
-  try: return X_train, Y_train, X_test, Y_test
-  except NameError: X_train, Y_train, X_test, Y_test = fetch_mnist()
-  return X_train, Y_train, X_test, Y_test
-
 class TinyBobNet:
   def __init__(self):
     self.l1 = Tensor.scaled_uniform(784, 128)
@@ -30,7 +24,7 @@ class TinyBobNet:
     return x.dot(self.l1).relu().dot(self.l2).log_softmax()
 
 def lr_scheduler_training(sched_fn=None, args=None):
-  X_train, Y_train, X_test, Y_test = get_mnist()
+  X_train, Y_train, X_test, Y_test = fetch_mnist()
   model = TinyBobNet()
   optim = Adam(model.parameters(), lr=0.01)
   if sched_fn is not None: sched = sched_fn(optim, **args)
