@@ -1865,6 +1865,9 @@ def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
   return r.after(stores[0]) if r.unsharded_base.op is Ops.PARAM else stores[0].src[1]
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+# a store's storage keeps the views and drops AFTERs (they only sequence stores)
+pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
+
 def gate_kernel_sink(x:UOp) -> bool:
   if x.op is Ops.LINEAR: return False
   if x.op is Ops.SINK and isinstance(x.arg, KernelInfo): return False

@@ -1,9 +1,10 @@
 import itertools
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, rewrite_group, Ops, PatternMatcher, ParamArg, UPat, graph_rewrite, GroupOp, _broadcast_shape, AxisType
-from tinygrad.uop.ops import remove_all_tags
+from tinygrad.uop.ops import remove_all_tags, KernelInfo, pm_drop_after
 from tinygrad.helpers import pluralize, prod, all_same, panic, all_int, VIZ, Context
 from tinygrad.schedule.indexing import apply_movement_op
+from tinygrad.uop.movement import mop_cleanup
 
 # ************************** CANONICALIZE **************************
 
@@ -13,7 +14,7 @@ def expand_broadcast(x:UOp):
   shape = _broadcast_shape(*shapes)
   return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
-pm_canonicalize = PatternMatcher([
+pm_canonicalize = mop_cleanup+PatternMatcher([
   # expand broadcasts first
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   # move movement ops and INDEX after AFTER
@@ -35,7 +36,7 @@ def stage_to_anon_store(x:UOp, stg:UOp):
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 
-pm_prepare = PatternMatcher([
+pm_copy_and_stage_to_store = PatternMatcher([
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
 
@@ -148,10 +149,20 @@ pm_gather = PatternMatcher([
 def split_kernel(x:UOp):
   nodes: dict[UOp, UOp] = {}
   src = graph_rewrite(UOp.sink(*x.src), pm_gather, ctx=nodes, name="gather", bottom_up=True).src
-  return UOp(Ops.CALL, src=(x.replace(src=src),)+tuple(nodes.keys()))
+  body = x.replace(src=src)
+
+  # rangeify (TODO: this should be in codegen?)
+  if body.op == Ops.STORE:
+    body = graph_rewrite(body, pm_range_creation+pm_range_migration, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
+    body = body.sink(arg=KernelInfo())
+  return body.call(*nodes.keys())
 
 pm_split = PatternMatcher([
   (UPat((Ops.STAGE, Ops.STORE, Ops.COPY), name="x"), split_kernel),
+])
+
+pm_alloc_to_buffer = PatternMatcher([
+  (UPat(Ops.ALLOC, name="x"), lambda x: UOp.new_buffer(x.device, x.max_numel(), x.dtype))
 ])
 
 @rewrite_group(lambda _,ret: f"Schedule2 {pluralize('Kernel', len(ret[0].src))}")
@@ -185,14 +196,20 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   # add stages
   sink = graph_rewrite(sink.substitute(realize), remove_all_tags, name="untag")
 
+  # convert to stores (should happen later)
+  sink = graph_rewrite(sink, pm_canonicalize+pm_copy_and_stage_to_store, name="copy and stage to store")
+
   # split into calls
   sink = graph_rewrite(sink, pm_split, name="split kernels", bottom_up=True)
 
-  # prepare, convert to stores
-  sink = graph_rewrite(sink, pm_prepare, name="prepare")
-
-  # simple rangeify
-  sink = graph_rewrite(sink, pm_range_creation+pm_range_migration, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
-
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Rangeify")
-  return UOp(Ops.LINEAR), {}
+
+  lin = []
+  for u in sink.toposort():
+    if u.op == Ops.CALL:
+      lin.append(u)
+  sink = UOp(Ops.LINEAR, src=tuple(lin))
+  sink = graph_rewrite(sink, pm_alloc_to_buffer+pm_drop_after, name="Drop After + ALLOC")
+
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output")
+  return sink, {}
