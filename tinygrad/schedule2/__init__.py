@@ -5,13 +5,23 @@ from tinygrad.uop.ops import remove_all_tags
 from tinygrad.helpers import pluralize, prod, all_same, panic, all_int, VIZ, Context
 from tinygrad.schedule.indexing import apply_movement_op
 
-# ************************** PREPARE **************************
+# ************************** CANONICALIZE **************************
 
 def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
   if any(s is None for s in shapes) or all_same(shapes): return None
   shape = _broadcast_shape(*shapes)
   return x.replace(src=tuple([u.expand(shape) for u in x.src]))
+
+pm_canonicalize = PatternMatcher([
+  # expand broadcasts first
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
+  # move movement ops and INDEX after AFTER
+  (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
+    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
+])
+
+# ************************** PREPARE **************************
 
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
@@ -31,9 +41,6 @@ pm_prepare = PatternMatcher([
 
   # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
   (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
-
-  # expand broadcasts first
-  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
 ])
 
 # ************************** RANGEIFY **************************
@@ -130,6 +137,9 @@ debug_tag_factor = PatternMatcher([
 def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
 
+  # canonicalize
+  sink = graph_rewrite(sink, pm_canonicalize, name="canonicalize")
+
   # add safe STAGEs to never duplicate compute
   # we compute the number of times a buffer is consumed. if > 1, we realize
   realize = {}
@@ -154,6 +164,9 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
   # add stages
   sink = graph_rewrite(sink.substitute(realize), remove_all_tags, name="untag")
 
+  # split into calls
+
+  # prepare, convert to stores
   sink = graph_rewrite(sink, pm_prepare, name="prepare")
 
   # simple rangeify
