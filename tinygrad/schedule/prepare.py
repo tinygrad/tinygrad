@@ -164,12 +164,15 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
-  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
+  # the buffer takes the DEVICE range from the copy (no-op for single device copies)
+  buf = UOp(Ops.ALLOC, src=copy.src[1:],
+            arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=UOp.rng_src(x.device),
+            arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 
@@ -209,14 +212,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** copy rules **
 
   # a copy to the same device as the source is not allowed: it is a no-op, STAGE materializes on the same device
-  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat.var("x"),), allow_any_len=True, name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
   # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
-  (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
+  (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), allow_any_len=True, name="cpy"))),
    lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
 
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
-  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
+  (UPat(Ops.COPY, src=(UPat.var("x"),), allow_any_len=True, name="copy"), copy_to_anon_store),
 
   # ** stage rules **
 
