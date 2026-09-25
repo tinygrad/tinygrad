@@ -467,7 +467,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
-    if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION and self.body.src: return ()
+    if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION: return ()
     if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE)
     if self.op is Ops.BACKEDGE: return self.src[1:2]  # the condition's other ranges remain live
     if self.op in range_start: return self.src[range_start[self.op]:]
@@ -515,7 +515,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, symbolic, bpm=pm_simplify_control, name="simplify")
   def ssimplify(self) -> UOp|ConstType:
     if (ret := self.simplify()).op is Ops.CAST and ret.src[0].op is Ops.CONST: return ret.dtype.const(ret.src[0].val)
     return ret.val if ret.op is Ops.CONST else ret
@@ -1733,6 +1733,13 @@ if TRACK_MATCH_STATS or PROFILE:
 # A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
+
+def gate_control_range(x:UOp):
+  # Once control flow is attached, a range is a symbolic variable. Its ordering dependencies are not part of its value.
+  if len(x.src) > 1: raise BottomUpGate
+
+pm_simplify_control = PatternMatcher([(UPat(Ops.RANGE, name="x"), gate_control_range)])
+
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm

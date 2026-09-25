@@ -74,6 +74,11 @@ def _mop_index(r:UOp, idx:UOp):
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="stk"), UPat.cvar("i")), allow_any_len=True, name="idx"),
+   lambda stk,i,idx: stk.src[i.val].index(*idx.src[2:]) if len(idx.src) > 2 else stk.src[i.val]),
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, src=(UPat(Ops.STACK, name="stk"),), allow_any_len=True, name="a"), UPat.cvar("i")),
+        allow_any_len=True, name="idx"),
+   lambda stk,a,i,idx: stk.src[i.val].after(*a.src[1:]).index(*idx.src[2:]) if len(idx.src) > 2 else stk.src[i.val].after(*a.src[1:])),
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # move movement ops and INDEX after AFTER
@@ -124,8 +129,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # reduce original axes, then split
   return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
-def resolve_function(c:UOp) -> UOp|None:
-  if not c.is_inline_call: return None
+def bind_call_args(c:UOp) -> dict[UOp, UOp]:
   nodes = c.body.toposort(enter_calls=False)
   # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
   args = c.src[1:]
@@ -145,6 +149,12 @@ def resolve_function(c:UOp) -> UOp|None:
     elif a.shape != ():
       raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  return dict_map
+
+def resolve_function(c:UOp) -> UOp|None:
+  if not c.is_inline_call: return None
+  dict_map = bind_call_args(c)
+  nodes = c.body.toposort(enter_calls=False)
   # Inlining removes the call scope, so its local allocations need fresh identities.
   dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
   return c.body.substitute(dict_map, walk=True)

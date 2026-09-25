@@ -7,6 +7,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
+from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -22,11 +23,11 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops
+from tinygrad.schedule.prepare import pm_mops, resolve_function, bind_call_args
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, argsort, partition
+from tinygrad.helpers import all_same, all_int, argsort, partition, to_function_name
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -200,13 +201,14 @@ def merge_reduce_ends(sink:UOp):
   return sink.substitute(subs) if subs else None
 
 def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
-  acc = UOp.placeholder_like(r, next(ctx), AddrSpace.REG)
+  acc = UOp.placeholder(r.max_shard_shape, r.dtype, next(ctx), AddrSpace.REG,
+                        tag=r.tag if isinstance(r.tag, str) else f"acc_{r.arg[0].name.lower()}")
   input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
-  return acc.after(acc_out)
+  return acc.after(acc_out).reshape(r.max_shard_shape)
 
 def expand_horizontal_reduce(r:UOp):
   inp = r.src[0]
@@ -232,7 +234,8 @@ def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_add_loads = PatternMatcher([
   (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA,Ops.STACK}, name="x"),
-   lambda x: None if is_shape_changing_bitcast(x) else x.replace(src=tuple(map(maybe_load, x.src)))),
+   lambda x: None if is_shape_changing_bitcast(x) or (x.op is Ops.STACK and x.tag == "call_args")
+   else x.replace(src=tuple(map(maybe_load, x.src)))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
@@ -277,10 +280,90 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+def lower_call_linear(ctx, linear:UOp) -> UOp|None:
+  if not linear.src or not all(c.is_inline_call for c in linear.src): return None
+  prev = UOp.sink()
+  for call in linear.src:
+    body = call.body.substitute({r:r.replace(arg=(next(ctx), *r.arg[1:])) for r in call.body.toposort() if r.op is Ops.RANGE})
+    resolved = resolve_function(call.replace(src=(body, *(a.after(prev) for a in call.src[1:]))))
+    assert resolved is not None
+    prev = UOp.sink(prev, resolved)
+  return prev
+
+pm_inline_scope = PatternMatcher([(UPat(Ops.SINK, name="s"), lambda s: s.replace(op=Ops.GROUP))])
+
+def lower_inline_call(ctx, call:UOp) -> UOp|None:
+  if not call.is_inline_call: return None
+  body = call.body.substitute({r:r.replace(arg=(next(ctx), *r.arg[1:])) for r in call.body.toposort() if r.op is Ops.RANGE})
+  # An inlined body belongs to its caller's loop scope, not a new kernel scope.
+  body = graph_rewrite(body, pm_inline_scope)
+  resolved = resolve_function(call.replace(src=(body.replace(op=Ops.SINK), *call.src[1:])))
+  return resolved.replace(op=Ops.GROUP) if resolved is not None and resolved.op is Ops.SINK else resolved
+
+pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear), (UPat(Ops.CALL, name="call"), lower_inline_call)])
+
+def outline_call(ctx:tuple[ClangRenderer, dict[tuple[str, UOp], tuple[str, list[UOp]]]], call:UOp) -> UOp|None:
+  if not call.is_inline_call: return None
+  ren, cache = ctx
+  bindings = bind_call_args(call)
+  if not any(a.addrspace is AddrSpace.REG or a.base.op is Ops.STACK for a in bindings.values()): return None
+  params = list(bindings)
+  args:list[UOp] = []
+  formal, groups = {}, {}
+  arg_groups:dict[int, tuple[str, int]] = {}
+  for p in params:
+    actual = call.src[p.arg.slot+1]
+    stack = actual.without_after
+    if stack.op is Ops.STACK and all(s.addrspace is not AddrSpace.ALU for s in stack.src):
+      members = []
+      slots = []
+      for j, a in enumerate(stack.src):
+        slot = len(args)
+        slots.append(slot)
+        members.append(UOp.param(slot, p.dtype, a.shape, name=f"{p.arg.name}_{j}", addrspace=AddrSpace.GLOBAL))
+        args.append(a.after(*actual.src[1:]) if actual.op is Ops.AFTER else a)
+        arg_groups[slot] = (p.arg.name or f"data{p.arg.slot}", j)
+      formal[p] = UOp.stack(*members).reshape(p.shape)
+      groups[slots[0]] = slots
+    else:
+      formal[p] = UOp.param(len(args), p.dtype, p.shape, addrspace=AddrSpace.GLOBAL if p.shape else AddrSpace.ALU, name=p.arg.name)
+      args.append(bindings[p])
+  name = to_function_name(call.arg.name or "call")
+  if name in {p.arg.name for p in params}: name += "_call"
+  body = call.body.substitute(formal, walk=True)
+  key = (name, call.body)
+  if key in cache: name, uops = cache[key]
+  else:
+    if name in ren.call_functions: name += f"_{sum(n == name for n,_ in cache)}"
+    renderer = ClangRenderer(ren.target)
+    lowered = full_rewrite_to_sink(body.replace(arg=KernelInfo(name=name)), renderer, optimize=False)
+    uops = line_rewrite(linearize(lowered), pm_linearize_cleanups)
+    ren.call_functions.update(renderer.call_functions)
+    ren.call_arg_groups.update(renderer.call_arg_groups)
+    ren.call_functions[name] = uops
+    ren.call_arg_groups[name] = arg_groups
+    cache[key] = (name, uops)
+  call_args, emitted = [], set()
+  for p in uops:
+    if p.op is not Ops.PARAM or p.arg.slot in emitted: continue
+    slots = next((g for g in groups.values() if p.arg.slot in g), [p.arg.slot])
+    emitted.update(slots)
+    call_args.append(UOp.stack(*(args[i] for i in slots)).rtag("call_args") if len(slots) > 1 else args[slots[0]])
+  return UOp.custom_function(name).call(*call_args, name=call.arg.name)
+
+pm_outline_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), outline_call)])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
+
+  if isinstance(ren, ClangRenderer):
+    ren.call_functions = {}
+    ren.call_arg_groups = {}
+    ast = graph_rewrite(ast, pm_outline_calls, ctx=(ren, {}), name="outline calls")
+  ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
+                      name="lower calls")
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")

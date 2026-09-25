@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, PROFILE, colored
+from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -351,10 +351,10 @@ class _Ctx:
     lane = self.range()
     if self.wave_size <= 32:
       bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
-      result = bit.reduce(lane, arg=Ops.ADD)
+      result = bit.reduce(lane, arg=Ops.ADD, tag="lane_mask")
     else:
       bit = get_lane_bit(lane).cast(dtypes.uint64) << lane.cast(dtypes.uint64)
-      result = bit.reduce(lane, arg=Ops.ADD)
+      result = bit.reduce(lane, arg=Ops.ADD, tag="lane_mask")
     return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:
@@ -438,14 +438,14 @@ class _Ctx:
     """Set/clear bit `lane` of the mask at `reg` from val for exec-active lanes, preserving memory for inactive lanes"""
     active, bit = _lane_active(exec_mask, lane), _to_u32(val)
     if self.wave_size <= 32:
-      old = self.rsgpr_dyn(reg)
+      old = self.sgpr.after(lane).index(reg).load()
       mask = _c(1) << lane.cast(dtypes.uint32)
       return [self.wsgpr_dyn(reg, active.where((old & (mask ^ _c(MASK32))) | (bit << lane.cast(dtypes.uint32)), old))]
     off = (lane & _c(31, dtypes.int)).cast(dtypes.uint32)
     mask = _c(1) << off
     def half(old: UOp, sel: UOp) -> UOp: return sel.where(active.where((old & (mask ^ _c(MASK32))) | (bit << off), old), old)
-    return [self.wsgpr_dyn(reg, half(self.rsgpr_dyn(reg), lane < _c(32, dtypes.int))),
-            self.wsgpr_dyn(reg + _c(1), half(self.rsgpr_dyn(reg + _c(1)), _c(32, dtypes.int) <= lane))]
+    return [self.wsgpr_dyn(reg, half(self.sgpr.after(lane).index(reg).load(), lane < _c(32, dtypes.int))),
+            self.wsgpr_dyn(reg + _c(1), half(self.sgpr.after(lane).index(reg + _c(1)).load(), _c(32, dtypes.int) <= lane))]
 
   def rmask(self, reg: UOp) -> UOp:
     """Read a lane mask (VCC/EXEC). Combines lo/hi for wave64."""
@@ -454,8 +454,8 @@ class _Ctx:
 
   def rvgpr_dyn(self, reg: UOp, lane: UOp, valid: UOp | None = None) -> UOp:
     """Read VGPR with dynamic register index."""
-    idx = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
-    return self.vgpr.index(idx.valid(valid)).load() if valid is not None else self.vgpr.index(idx).load()
+    lane = lane.cast(dtypes.int)
+    return self.vgpr.reshape((256, self.wave_size)).index(reg.cast(dtypes.int), lane.valid(valid) if valid is not None else lane).load()
 
   def wvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write VGPR with dynamic register index."""
@@ -465,8 +465,8 @@ class _Ctx:
 
   def raccvgpr_dyn(self, reg: UOp, lane: UOp, valid: UOp | None = None) -> UOp:
     """Read ACCVGPR with dynamic register index (CDNA only)."""
-    idx = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
-    return self.accvgpr.index(idx.valid(valid)).load() if valid is not None else self.accvgpr.index(idx).load()
+    lane = lane.cast(dtypes.int)
+    return self.accvgpr.reshape((256, self.wave_size)).index(reg.cast(dtypes.int), lane.valid(valid) if valid is not None else lane).load()
 
   def waccvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write ACCVGPR with dynamic register index (CDNA only)."""
@@ -595,10 +595,9 @@ class _Ctx:
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rmask(_c(vcc_reg))
     srcs.update(self.base_srcs(exec_mask, lane), VDST=vdst_reg, MAX_FLOAT_F32=UOp.const(3.4028234663852886e38, dtypes.float32))
-    # f32 min/max/median ops flush denormal inputs to signed zero (select-style ops: results propagate inputs bitwise)
-    # (RDNA4 calls them _NUM_: V_MIN_NUM_F32 etc.)
-    if any(p in op.name for p in ('MIN_F32', 'MAX_F32', 'MIN3_F32', 'MAX3_F32', 'MED3_F32', 'MIN_NUM_F32', 'MAX_NUM_F32')):
-      srcs = {k: _ftz_f32(v) if k in ('S0', 'S1', 'S2') and isinstance(v, UOp) else v for k, v in srcs.items()}
+    # Express the default f32 mode at instruction boundaries, including when C folds constant operands.
+    f32_srcs = set(re.findall(r'\b(S[012]|D0)\.f32\b', pcode))
+    srcs = {k: _ftz_f32(v) if k in f32_srcs and isinstance(v, UOp) else v for k, v in srcs.items()}
     _, assigns = parse_pcode(pcode, srcs)
 
     # For integer ops with clamp, pre-compute the saturated result; floats clamp to [0,1] at write time
@@ -615,6 +614,7 @@ class _Ctx:
         lane_stores.append(self.vgpr.index(val[0].valid(active)).store(new_val))
       elif 'D0' in dest and '[laneId]' in dest: continue  # per-lane mask bits are written via VCC/EXEC assigns instead
       elif dest.startswith('D0'):
+        if val.dtype == dtypes.float32: val = _ftz_f32(val)
         if (dest_suffix := re.match(r'D0\.(\w+)', dest)) is not None:
           target_dt = {'u16': dtypes.uint16, 'i16': dtypes.int16, 'f16': dtypes.half}.get(dest_suffix.group(1))
           if target_dt is not None and val.dtype != target_dt: val = val.cast(target_dt)
@@ -1957,6 +1957,19 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
+  call_render, call_exec = getenv("ASM_CALL_RENDER"), getenv("ASM_CALL")
+  if call_render or call_exec:
+    from test.mockgpu.amd.call import render_call
+    words = user_data or [args_ptr & 0xffffffff, args_ptr >> 32]
+    prg = render_call(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(words))
+    if call_exec:
+      runtime = get_runtime("CPU", prg)
+      data = (ctypes.c_uint32 * len(words))(*words)
+      bufs = {2:0, 6:ctypes.addressof(data)}
+      with _MXCSRContext():
+        runtime(*[bufs[g] for g in prg.arg.globals])
+      return 0
+
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz

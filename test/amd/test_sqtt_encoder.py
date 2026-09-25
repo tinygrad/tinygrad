@@ -4,7 +4,7 @@
 Run with: DEV=MOCK+AMD python -m pytest test/amd/test_sqtt_encoder.py -v
 """
 import ctypes, unittest
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, getenv
 from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 
@@ -20,6 +20,7 @@ def _run_kernel(instructions: list, lx=1, ly=1, lz=1, gx=1, gy=1, gz=1, args_ptr
   assert len(sqtt_traces) == 1, f"expected 1 trace, got {len(sqtt_traces)}"
   return sqtt_traces.pop()
 
+@unittest.skipIf(getenv("ASM_CALL"), "SQTT is not supported by ASM_CALL")
 class TestSQTTEncoder(unittest.TestCase):
 
   def test_simple_salu(self):

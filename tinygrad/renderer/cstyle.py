@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.uop.weak import commit_weak_consts
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape, to_function_name
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
 from tinygrad.renderer import Renderer
 
@@ -51,8 +51,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
   (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var('idx'), UPat.cvar().cast()), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
   (UPat(Ops.STACK, name="x"),
-   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_type(x))}" + \
-                 f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
+   lambda ctx,x: ctx.render_stack(x)),
 
   # load/store
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"({ctx.render_access(bidx)})"),
@@ -65,6 +64,8 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(), name="fn"),), allow_any_len=True, name="x"),
+   lambda ctx,x,fn: f"{fn.arg}({', '.join(ctx[y] for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
   # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(name="fptr"),)),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
    f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
@@ -154,6 +155,16 @@ class CStyleLanguage(Renderer):
     buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
                        self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
+    grouped = []
+    seen = set()
+    for (name, typ), (_, (u, _)) in zip(buftypes, bufs):
+      if u.arg.slot in self.arg_groups:
+        name = self.arg_groups[u.arg.slot][0]
+        if name in seen: continue
+        seen.add(name)
+        typ += "*"
+      grouped.append((name, typ))
+    buftypes = grouped
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -187,7 +198,17 @@ class CStyleLanguage(Renderer):
     return prefix + self.type_map.get(dtype, dtype.name) + suffix
 
   def render_type(self, u:UOp):
+    if self.is_pointer_stack(u): return self.render_dtype(u.dtype)+"**"
     return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape, override_ptr=u.op is Ops.INDEX and u.addrspace is AddrSpace.REG)
+  arg_groups:dict[int, tuple[str, int]] = {}
+
+  def is_pointer_stack(self, u:UOp) -> bool:
+    return u.op is Ops.STACK and u.tag == "call_args"
+
+  def render_stack(self, x:UOp) -> str:
+    if self.is_pointer_stack(x): return f"({self.render_dtype(x.dtype)}*[]){{{', '.join(self[y] for y in x.src)}}}"
+    assert self.float4 is not None
+    return f"{self.float4.replace('float4', self.render_type(x))}{self.float4_style[0]}{','.join(self[y] for y in x.src)}{self.float4_style[1]}"
   def render_ptr(self, u:UOp):
     # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
@@ -226,13 +247,20 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.PARAM:
         r[u] = (u.arg.name.replace(":", "_") if u.arg.name is not None else f"data{u.arg.slot}") + \
           "_" + '_'.join([str(x) for x in u.shape])
+        if u.arg.slot in self.arg_groups:
+          group, index = self.arg_groups[u.arg.slot]
+          r[u] = f"{group}[{index}]"
         bufs[u] = (r[u], (u, u in writable_params))
         continue
 
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
-      elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.axis_type]}idx"+range_str(u)
+      elif u.op is Ops.RANGE:
+        r[u] = (to_function_name(u.tag)+"_idx" if isinstance(u.tag, str) else f"{axis_letters[u.axis_type]}idx")+range_str(u)
+      elif u.op is Ops.BUFFER and u.arg.name is not None:
+        prefix = u.arg.name.replace(":", "_")
+        r[u] = prefix if c[prefix] == 0 else f"{prefix}_{c[prefix]}"
       else:
         prefix = {Ops.WMMA: "wmma", Ops.BUFFER: "buf", Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.STACK: "cast",
                   Ops.INDEX: "bidx", Ops.LOAD: "val"}.get(u.op, "alu")
@@ -244,7 +272,6 @@ class CStyleLanguage(Renderer):
       if u.op in {Ops.ENDIF, Ops.END, Ops.BACKEDGE}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and ((u.op is Ops.CAST and u.src[0].op is Ops.CONST) or \
         u.op in {Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
-        (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op in {Ops.CAST, Ops.BITCAST} and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
@@ -306,8 +333,21 @@ class ClangRenderer(CStyleLanguage):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
 
+  def render(self, uops:list[UOp]) -> str:
+    if not self.call_functions: return super().render(uops)
+    functions = ClangRenderer(self.target)
+    functions.kernel_typedef = "static void"
+    functions.buffer_suffix = ""  # operands of an instruction may alias
+    sources = []
+    for name, body in self.call_functions.items():
+      functions.arg_groups = self.call_arg_groups.get(name, {})
+      sources.append(functions.render(body).strip())
+    return '\n\n'.join([*sources, super().render(uops)])
+
   def __init__(self, target:Target):
     super().__init__(target)
+    self.call_functions:dict[str, list[UOp]] = {}
+    self.call_arg_groups:dict[str, dict[int, tuple[str, int]]] = {}
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
 

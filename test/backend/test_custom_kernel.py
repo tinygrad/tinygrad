@@ -503,7 +503,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
-  @unittest.expectedFailure
   def test_call_in_kernel(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       dst = UOp.param(0, dtypes.float, (4,))
