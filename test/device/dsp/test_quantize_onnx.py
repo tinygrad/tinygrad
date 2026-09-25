@@ -1,9 +1,8 @@
 # ruff: noqa: E501
 import numpy as np
 import tempfile, unittest
-from tinygrad import Tensor, Context, Device, dtypes, UOp
+from tinygrad import Tensor, Device, dtypes, UOp
 from tinygrad.uop.ops import Ops, AxisType
-from tinygrad.dtype import AddrSpace
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -65,24 +64,6 @@ def get_quantized_model(sz):
                   activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
                   extra_options={"ActivationSymmetric": False})
   return out_file
-
-@unittest.skip("this is broken")
-@unittest.skipIf(Device.DEFAULT != "CPU", "only tests for CPU")
-class TestQuantizeOnnxCPU(unittest.TestCase):
-  def test_quant_128(self, sz=128):
-    try:
-      import onnx # noqa: F401 # pylint: disable=unused-import
-    except ImportError:
-      raise unittest.SkipTest()
-    from tinygrad.nn.onnx import OnnxRunner
-    out_file = get_quantized_model(sz)
-    run_onnx = OnnxRunner(out_file)
-    inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
-    with Context(QUANTIZE=1):
-      linear = run_onnx({"input":inp})["output"].schedule_linear()
-      prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
-      daccs = [u for u in tuple(prg.src[1].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
-      assert all(u.dtype is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):

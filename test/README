@@ -1,5 +1,6 @@
-Three groups of tests run in CI
-
-backend -- tests that run on each backend
+runtime -- shared tests that run on each backend
 null -- tests that don't require any backend
-unit -- tests that only run on a single backend in CI
+device/<device> -- device-specific tests, run by the corresponding backend CI
+
+Device directory names are lowercase (cpu, amd, metal, cl, qcom, dsp, webgpu, python).
+NV and CUDA both run device/nv, which contains their shared PTX tests.

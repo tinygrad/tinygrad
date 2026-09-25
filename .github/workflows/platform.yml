@@ -43,7 +43,7 @@ jobs:
     - name: Test Beam Search
       run: DEV=METAL IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     - name: Test Device Specific
-      run: DEV=METAL python3 -m pytest test/device/test_metal.py
+      run: DEV=METAL python3 -m pytest -n=auto test/device/metal
     #- name: Fuzz Test linearizer
     #  run: DEV=METAL DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     - name: Run process replay tests
@@ -61,6 +61,7 @@ jobs:
       with:
         key: unittest-macos-mock
         deps: testing_unit
+        llvm: 'true'
         amd: 'true'
         ocelot: 'true'
     - name: Run NULL backend tests
@@ -71,7 +72,7 @@ jobs:
         HCQ_RUNTIME_DEV: PYTHON
         FORWARD_ONLY: 1
       run: |
-        python3 -m pytest -n=auto test/null/test_hcq2.py test/runtime/test_hcq2.py test/test_tiny.py --durations=20
+        python3 -m pytest -n=auto test/null/test_hcq2.py test/runtime/test_hcq2.py test/test_tiny.py test/device/amd --durations=20
     - name: Run pytest (ptx)
       env:
         DEV: "MOCK+NV:PTX"
@@ -80,7 +81,7 @@ jobs:
         # TODO: failing due to library loading error
         CAPTURE_PROCESS_REPLAY: 0
       run: |
-        python3 -m pytest -n=auto test/null/test_hcq2.py test/runtime/test_hcq2.py test/test_tiny.py \
+        python3 -m pytest -n=auto test/null/test_hcq2.py test/runtime/test_hcq2.py test/test_tiny.py test/device/nv \
           test/testextra/test_hevc.py::TestHevc::test_hevc_decode_compile --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
@@ -108,7 +109,7 @@ jobs:
         python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run runtime tests
-      run: python -m pytest -n=auto test/runtime --durations=20 --splits 2 --group ${{ matrix.group }}
+      run: python -m pytest -n=auto test/runtime test/device/metal --durations=20 --splits 2 --group ${{ matrix.group }}
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -141,8 +142,8 @@ jobs:
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
-    - name: Run test_tiny
-      run: python -m pytest -n=auto test/test_tiny.py --durations=20
+    - name: Run test_tiny and device tests
+      run: python -m pytest -n=auto test/test_tiny.py test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -178,6 +179,6 @@ jobs:
         run: |
           python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
           DEBUG=4 python test/test_tiny.py TestTiny.test_plus
-      - name: Run test_tiny
+      - name: Run test_tiny and device tests
         shell: bash
-        run: python -m pytest -n=auto test/test_tiny.py --durations=20
+        run: python -m pytest -n=auto test/test_tiny.py test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20

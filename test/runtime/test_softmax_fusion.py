@@ -126,14 +126,6 @@ class TestFuse(unittest.TestCase):
     c = (a.sum(axis=1) + b.sum(axis=1))
     self.assertListEqual(c.tolist(), [30]*16)
 
-  @unittest.skipUnless(Device.DEFAULT == "METAL", "METAL TC")
-  def test_fuse_and_tc_opt(self):
-    A = Tensor.randn(8, 8).realize()
-    B = Tensor.randn(8, 8).realize()
-    C = Tensor.ones(1, 8, 8).pad(((1,1), None, None),).sum(0)
-    out = (C + (A @ B))
-    out.realize()
-
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
