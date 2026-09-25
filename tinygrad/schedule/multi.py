@@ -190,10 +190,9 @@ def index_multi(root:UOp, multi:UOp):
     from tinygrad.schedule.prepare import _mop_index
     if (ret := _mop_index(multi, root)) is not None: return ret
   if not multi.sharding: return None
-  # INDEX on UNSHARD: resolve each sharded axis into this range's own shard.
-  # Two ownership patterns are supported:
-  #   contiguous: idx = rng*shard_sz + local   (thread rng owns [rng*shard_sz, ...))
-  #   strided:    idx = rng + ir*shard_sz      (thread rng owns {rng, rng+shard_sz, ...})
+  # INDEX on UNSHARD: resolve each sharded axis into this range's own shard (contiguous ownership:
+  # idx = rng*shard_sz + local, thread rng owns [rng*shard_sz, ...)). Strided ownership is an explicit
+  # PERMUTE/RESHAPE layout and is resolved by _mop_index above.
   idxs = list(root.src[1:])
   remaining = []
   for ax, rng in multi.sharding:
@@ -205,13 +204,6 @@ def index_multi(root:UOp, multi:UOp):
     if local.vmin >= 0 and local.vmax < shard_sz:
       idxs[ax] = local
       continue
-    # strided ownership: idx ≡ rng (mod shard_sz), intra-shard position is (idx - rng) // shard_sz
-    diff = (idxs[ax] - rng).simplify()
-    if (mod:=(diff % shard_sz).simplify()).op is Ops.CONST and mod.val == 0:
-      local = (diff // shard_sz).simplify()
-      if local.vmin >= 0 and local.vmax < shard_sz:
-        idxs[ax] = local
-        continue
     raise RuntimeError(f"index_multi: cannot shard index {idxs[ax]} for UNSHARD axis {ax} with shard size {shard_sz}")
   ret = multi.shard_view.index(*idxs)
   return ret if not remaining else ret.unshard(tuple(a for a,_ in remaining), tuple(r for _,r in remaining))

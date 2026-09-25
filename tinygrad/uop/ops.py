@@ -90,6 +90,16 @@ def broadcast_axes(src_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tu
   return tuple(range(nleft)) + tuple(nleft+i for i,s in enumerate(src_shape) if resolve(s == 1, default=False) and resolve(out_shape[nleft+i] != 1))
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
+
+def _reshape_shard_axis(src_shape:tuple[sint, ...], shape:tuple[sint, ...], src_axis:int, count:int) -> int:
+  """map src_axis of src_shape through a reshape to shape: the axis boundary must survive intact (new_axis is the
+  last one that preserves prod(prior to new_axis)) and the new axis must stay divisible by the shard count"""
+  acc = [ssimplify(x) for x in itertools.accumulate(shape, operator.mul, initial=1)]
+  target = ssimplify(prod(src_shape[:src_axis]))
+  new_axis = len(acc) - acc[::-1].index(target) - 1 if target in acc else len(acc)
+  if new_axis >= len(shape) or shape[new_axis] % count != 0:
+    raise RuntimeError(f"reshape {src_shape} -> {shape} moved items between shards")
+  return new_axis
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 def range_str(u:UOp, color=False) -> str:
@@ -710,16 +720,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op not in {Ops.RESHAPE, Ops.PERMUTE}: return ()
     sharding = self.src[0].sharding
     if self.op is Ops.PERMUTE: return tuple(sorted((self.marg.index(a), r) for a,r in sharding))
-    acc = [ssimplify(x) for x in itertools.accumulate(self.shape, operator.mul, initial=1)]
-    ret = []
-    for ax, rng in sharding:
-      target = ssimplify(prod(self.src[0].shape[:ax]))
-      if target not in acc: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
-      new_ax = len(acc) - acc[::-1].index(target) - 1
-      if new_ax == len(self.shape) or self.shape[new_ax] % (int(rng.vmax)+1) != 0:
-        raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
-      ret.append((new_ax, rng))
-    return tuple(ret)
+    return tuple((_reshape_shard_axis(self.src[0].shape, self.shape, ax, int(rng.vmax)+1), rng) for ax, rng in sharding)
 
   @functools.cached_property
   def shard_view(self) -> UOp:
@@ -732,8 +733,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       counts = {a:int(r.vmax)+1 for a,r in self.sharding}
       shape = tuple(s//counts.get(i, 1) for i,s in enumerate(self.shape))
       if self.op is Ops.PERMUTE:
-        # Moving singleton shard axes does not permute local storage.
-        non_one = [i for i,s in enumerate(local.shape) if s != 1]
+        # the local view stays free of movement ops so callers can inspect shard_view.op (e.g. the ALLREDUCE_CAST
+        # check in reduce_multi): a PERMUTE that only moves singleton shard axes is a no-op on the local storage.
+        non_one = [i for i,s in enumerate(local.shape) if resolve(s != 1, True)]
         if [i for i in self.marg if i in non_one] != non_one: return local.permute(self.marg)
     while local.op is Ops.RESHAPE: local = local.src[0]
     return local.reshape(shape)
@@ -765,15 +767,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return src_axis - self.arg[1]
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
-      arg_acc:list[sint] = [ssimplify(x) for x in itertools.accumulate(self.marg, operator.mul, initial=1)]
-      # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
-      target = ssimplify(prod(self.src[0].shape[:src_axis]))
-      if target not in arg_acc: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
-      new_axis = len(arg_acc) - arg_acc[::-1].index(target) - 1
       dcount = len(self.device) if isinstance(self.device, tuple) else \
         int(next(u.src[1] for u in self.src[0].toposort() if u.op is Ops.UNSHARD).vmax)+1
-      if self.shape[new_axis] % dcount != 0: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
-      return new_axis
+      return _reshape_shard_axis(self.src[0].shape, self.shape, src_axis, dcount)
     if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     if self.op is Ops.EXPAND: return src_axis + len(self.marg) if src_axis is not None else None
     return src_axis
@@ -1022,7 +1018,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.arg.buffer
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
-    if self.op is Ops.UNSHARD: return self.src[0].realized
+    if self.op is Ops.UNSHARD: return self.src[0].base.realized
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LOCAL/REG scratch buffers are never realized, and Variables (ALU) have no real storage
