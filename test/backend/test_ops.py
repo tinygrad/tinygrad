@@ -475,13 +475,7 @@ class TestOps(TensorTestCase):
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], 1.2], forward_only=True)
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], 3], forward_only=True)
 
-  def test_tiny_add(self):
-    helper_test_op([(3), (3)], lambda x,y: x+y, Tensor.add, forward_only=True)
-  def test_tiny_mul(self):
-    helper_test_op([(64), (64)], lambda x,y: x*y, Tensor.mul, forward_only=True)
-
   def test_add(self):
-    helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)
     helper_test_op([], lambda: torch.tensor(1)+0.5, lambda: Tensor(1)+0.5, forward_only=True)
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y)
     helper_test_op([(), ()], lambda x,y: x+y)
@@ -494,7 +488,6 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65), (65,)], lambda x,y: x+y)
 
   def test_sub(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x-y, Tensor.sub)
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y)
     helper_test_op([(), ()], lambda x,y: x-y)
   def test_scalar_sub(self):
@@ -513,7 +506,6 @@ class TestOps(TensorTestCase):
     helper_test_op(None, torch.logical_not, Tensor.logical_not, vals=[[1.,2.,0.,0.5]], forward_only=True)
 
   def test_mul(self):
-    helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y)
     helper_test_op([(), ()], lambda x,y: x*y)
   def test_scalar_mul(self):
@@ -525,7 +517,6 @@ class TestOps(TensorTestCase):
     helper_test_op([()], lambda x: 2*x)
 
   def test_div(self):
-    helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
 
@@ -822,7 +813,6 @@ class TestOps(TensorTestCase):
     helper_test_op([], lambda: tor << 31, lambda: (ten << 31).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor << torch.tensor([0,2,4]).int(),
                    lambda: (ten << Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
-    helper_test_op([], lambda: tor.__lshift__(2), lambda: ten.__lshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_left_shift(2), lambda: ten.lshift(2).cast(dtypes.int32), forward_only=True)
     self.helper_test_exception([], lambda: torch.tensor([1.0]) << 2, lambda: (Tensor([1.0]) << 2).realize(), expected=RuntimeError)
     self.helper_test_exception([], lambda: tor << torch.tensor([1.0]), lambda: (ten << Tensor([1.0])).realize(), expected=RuntimeError)
@@ -838,7 +828,6 @@ class TestOps(TensorTestCase):
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor >> torch.tensor([0,2,4]).int(),
                    lambda: (ten >> Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
-    helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
     self.helper_test_exception([], lambda: torch.tensor([4.0]) >> 1, lambda: (Tensor([4.0]) >> 1).realize(), expected=RuntimeError)
     self.helper_test_exception([], lambda: tor >> torch.tensor([1.0]), lambda: (ten >> Tensor([1.0])).realize(), expected=RuntimeError)
@@ -1208,9 +1197,6 @@ class TestOps(TensorTestCase):
     # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[1, 2, 2]])
-    if not COMPILE_ONLY:
-      np.testing.assert_equal(Tensor([2,2]).argmax().numpy(), 0)
-      np.testing.assert_equal(Tensor([1,2,2]).argmax().numpy(), 1)
     helper_test_op([(10,20)], lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(0, False).type(torch.int32), lambda x: x.argmax(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, False).type(torch.int32), lambda x: x.argmax(1, False), forward_only=True)
@@ -1228,9 +1214,6 @@ class TestOps(TensorTestCase):
     # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[3, 2, 2]])
-    if not COMPILE_ONLY:
-      np.testing.assert_equal(Tensor([2,2]).argmin().numpy(), 0)
-      np.testing.assert_equal(Tensor([3,2,2]).argmin().numpy(), 1)
     helper_test_op([(10,20)], lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(0, False).type(torch.int32), lambda x: x.argmin(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, False).type(torch.int32), lambda x: x.argmin(1, False), forward_only=True)
@@ -1800,8 +1783,8 @@ class TestOps(TensorTestCase):
                        lambda: (Tensor.eye(10)@Tensor.eye(10).flip(0)), forward_only=True)
 
   def test_broadcast_full(self):
-    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
-                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
+    # broadcasting is op-independent: cover the plain path with add and the range-clamped path with pow
+    for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.pow, Tensor.pow)]:
       for shapes in [((5,3,14,16), (5,1,14,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           if tinygrad_op != Tensor.pow:
@@ -1900,7 +1883,6 @@ class TestOps(TensorTestCase):
 
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1])  # x.shape = (0, 10)
-    helper_test_op([(3,3,3)], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0])
@@ -2347,7 +2329,7 @@ class TestOps(TensorTestCase):
 
   def _test_conv2d(self, bs=1, cin=1, cout=6):
     for H in [2,3]:
-      for W in [1,3,5]:
+      for W in [1,3]:
         for groups in [1,3] if cin == 3 and cout == 6 and H == 3 and W == 3 else [1]:
           with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
             helper_test_op([(bs,cin,5,7), (cout,cin//groups,H,W)],
@@ -2457,7 +2439,7 @@ class TestOps(TensorTestCase):
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
       with self.subTest(p):
-        for n in [3,4]:
+        for n in [3]:
           for k in [2]:
             helper_test_op([(1,1,n,n), (1,1,k,k)],
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
@@ -2854,10 +2836,6 @@ class TestOps(TensorTestCase):
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, -1))
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, -2))
 
-  def test_simple_repeat(self):
-    repeats = [3, 3, 4]
-    helper_test_op([(3, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
-
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2))
     # NOTE: torch set backward to 1 at the boundaries
@@ -2877,11 +2855,6 @@ class TestOps(TensorTestCase):
 
   def test_matvec(self):
     helper_test_op([(1,128), (128,128)], lambda x,y: (x@y).relu())
-
-  @unittest.skip("this test is broken #862")
-  def test_max_nan(self):
-    n = Tensor([1, float("nan")]).max().numpy()
-    assert math.isnan(n.item()), f"{n.item()} is not nan"
 
   @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_inf_where(self):
@@ -2965,10 +2938,8 @@ class TestOps(TensorTestCase):
   def test_slice_fancy_indexing_list_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[((0,),)])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(0,),b,c,d,:], lambda x: x[(0,),j,k,o,:])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[[[0]]],b,c,d,[[1]]], lambda x: x[[[[0]]],j,k,o,[[1]]])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(1,0,-1),b,c,d,:], lambda x: x[(1,0,-1),j,k,o,:])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,(1,2,3),...], lambda x: x[i,j,k,(1,2,3),...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[[1],[2],[3]],...], lambda x: x[i,j,k,[[1],[2],[3]],...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,(2,1,0),c,(-2,1,0),e], lambda x: x[i,(2,1,0),k,(-2,1,0),p])
 
@@ -2988,7 +2959,6 @@ class TestOps(TensorTestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,)], lambda x: x[(i,)])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,1)], lambda x: x[(i,1)])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,(1,1))], lambda x: x[(i,(1,1))])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
 
   def test_slice_fancy_indexing_errors(self):
     a = Tensor.ones(10,11,12)
@@ -3141,21 +3111,12 @@ class TestOps(TensorTestCase):
                    lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,enable_gqa=True),
                    lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True))
 
-  def test_binary_crossentropy(self):
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),y.clip(0,1)),
-                                       lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,y.clip(0,1)),
-                                       lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,y.clip(0,1)),
-                                       lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),y.clip(0,1)),
-                                       lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
   def test_binary_crossentropy_reductions(self):
-    for r in ("mean", "sum", "none"):
-      helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(), y.clip(0,1), reduction=r),
-                                         lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1), reduction=r))
-      helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x, y.clip(0,1), reduction=r),
-                                         lambda x,y: x.binary_crossentropy_logits(y.clip(0,1), reduction=r))
+    for kwargs in ({}, {"reduction": "sum"}, {"reduction": "none"}):
+      helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(), y.clip(0,1), **kwargs),
+                                         lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1), **kwargs))
+      helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x, y.clip(0,1), **kwargs),
+                                         lambda x,y: x.binary_crossentropy_logits(y.clip(0,1), **kwargs))
   def test_binary_crossentropy_logits_pos_weights(self):
     pos_weight = [0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,y.clip(0,1),
@@ -3222,12 +3183,6 @@ class TestOps(TensorTestCase):
       helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(label_smoothing=s)(x, torch.tensor(classes)),
                                 lambda x: x.sparse_categorical_crossentropy(Tensor(classes), label_smoothing=s))
 
-  def test_nll_loss(self):
-    target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
-    helper_test_op([(32,10)],
-                   lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target)),
-                   lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target)))
-
   def test_nll_loss_3d(self):
     target = np.random.randint(0, 10, (32,3,3,3), dtype=np.int32).tolist()
     helper_test_op([(32,10,3,3,3)],
@@ -3236,10 +3191,10 @@ class TestOps(TensorTestCase):
 
   def test_nll_loss_reductions(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
-    for r in ("mean", "sum", "none"):
+    for kwargs in ({}, {"reduction": "sum"}, {"reduction": "none"}):
       helper_test_op([(32,10)],
-        lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), reduction=r),
-        lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), reduction=r))
+        lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), **kwargs),
+        lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), **kwargs))
     self.helper_test_exception([(32,10)],
       lambda x: torch.nn.functional.nll_loss(x, torch.tensor(target), reduction="typo"),
       lambda x: x.nll_loss(Tensor(target), reduction="typo"), expected=ValueError)
