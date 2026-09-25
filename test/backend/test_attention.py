@@ -262,6 +262,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3)
 
   def test_varied_chunk_sizes_match_decode(self):
+    # full prefill is proven equivalent to decode by test_gatedeltanet_reference_and_reset (delta rule) and
+    # test_kda_prefill_matches_decode (kda), so use it as the baseline and only exercise multi-chunk handoffs here
     for kda in (False, True):
       ssm = SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda)
       config = self._make_config(ssm=ssm)
@@ -271,9 +273,9 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
           p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
       else: block = self._make_block(config)
       x = self._tensor_linspace(-0.5, 0.5, (1, 4, config.dim))
-      decode = np.concatenate([self._run_attention(block, x[:, i:i+1], i) for i in range(4)], axis=1)
+      decode = self._run_attention(block, x, 0)
       decode_conv, decode_recurrent = self._cache_views(block)
-      for chunking in ([4], [2, 2], [1, 3]):
+      for chunking in ([2, 2], [1, 3]):
         self._reset_state(block)
         outs, start = [], 0
         for size in chunking:
