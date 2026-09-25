@@ -1764,12 +1764,12 @@ class RewriteContext:
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
         # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
-        if n.op is Ops.CALL and not self.enter_calls: self.replace[n.body] = n.body
-        for x in reversed(n.src):
+        for x in reversed(n.src[1:] if n.op is Ops.CALL and not self.enter_calls else n.src):
           if x not in self.replace: stack.append((x, False))
       else:
         # rebuild node with rewritten srcs
-        new_src = tuple(self.replace.get(x, x) for x in n.src)
+        skip = int(n.op is Ops.CALL and not self.enter_calls)
+        new_src = n.src[:skip] + tuple(self.replace.get(x, x) for x in n.src[skip:])
         new_n = UOp(n.op, new_src, n.arg, n.tag) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
         if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
@@ -1803,14 +1803,13 @@ class RewriteContext:
         stack.append((n, 1, new_n))
         # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite,
         # rewrites that need them pass enter_calls=True
-        if new_n.op is Ops.CALL and not self.enter_calls: self.replace[new_n.body] = new_n.body
-        for x in reversed(new_n.src):
+        for x in reversed(new_n.src[1:] if new_n.op is Ops.CALL and not self.enter_calls else new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        tmp = []
-        for x in new_n.src:
+        tmp = list(new_n.src[:1]) if new_n.op is Ops.CALL and not self.enter_calls else []
+        for x in new_n.src[len(tmp):]:
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))

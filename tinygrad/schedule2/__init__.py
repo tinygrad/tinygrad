@@ -135,10 +135,12 @@ debug_tag_factor = PatternMatcher([
 
 # ***** split ****
 
-def gather_param(ctx:dict[UOp, UOp], x:UOp):
-  if x in ctx: return ctx[x]
-  ret = x.param_like(len(ctx))
-  ctx[x] = ret
+def gather_param(ctx:tuple[UOp, dict[UOp, UOp]], x:UOp):
+  root, nodes = ctx
+  if x is root: return None
+  if x in nodes: return nodes[x]
+  ret = x.param_like(len(nodes))
+  nodes[x] = ret
   return ret
 
 pm_gather = PatternMatcher([
@@ -146,9 +148,9 @@ pm_gather = PatternMatcher([
 ])
 
 def split_kernel(x:UOp):
-  ctx = {}
-  x = graph_rewrite(x, pm_gather, ctx=ctx, name="gather", bottom_up=True)
-  return UOp(Ops.CALL, src=(x,)+tuple(ctx.keys()))
+  nodes = {}
+  x = graph_rewrite(x, pm_gather, ctx=(x, nodes), name="gather", bottom_up=True)
+  return UOp(Ops.CALL, src=(x,)+tuple(nodes.keys()))
 
 pm_split = PatternMatcher([
   (UPat((Ops.STAGE, Ops.STORE, Ops.COPY), name="x"), split_kernel),

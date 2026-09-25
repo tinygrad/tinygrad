@@ -183,6 +183,36 @@ class TestRecurse(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
 
+class TestCallRewrite(unittest.TestCase):
+  def test_wrap_node_in_call(self):
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
+    call = UOp(Ops.CALL, src=(a,))
+    for walk in (False, True):
+      for bottom_up in (False, True):
+        with self.subTest(walk=walk, bottom_up=bottom_up):
+          self.assertIs(graph_rewrite(a.sink(), _substitute, {a:call}, walk=walk, bottom_up=bottom_up), call.sink())
+
+  def test_body_shared_with_argument(self):
+    a, b = UOp.const(3), UOp.const(4)
+    call = UOp(Ops.CALL, src=(a, a))
+    for walk in (False, True):
+      for bottom_up in (False, True):
+        for enter_calls in (False, True):
+          with self.subTest(walk=walk, bottom_up=bottom_up, enter_calls=enter_calls):
+            ret = graph_rewrite(call, _substitute, {a:b}, walk=walk, bottom_up=bottom_up, enter_calls=enter_calls)
+            self.assertIs(ret, UOp(Ops.CALL, src=(b if enter_calls else a, b)))
+
+  def test_body_shared_with_sibling(self):
+    a, b = UOp.const(3), UOp.const(4)
+    call = UOp(Ops.CALL, src=(a,))
+    for walk in (False, True):
+      for bottom_up in (False, True):
+        for call_first in (False, True):
+          with self.subTest(walk=walk, bottom_up=bottom_up, call_first=call_first):
+            root = UOp.sink(call, a) if call_first else UOp.sink(a, call)
+            expected = UOp.sink(call, b) if call_first else UOp.sink(b, call)
+            self.assertIs(graph_rewrite(root, _substitute, {a:b}, walk=walk, bottom_up=bottom_up), expected)
+
 def bidir_append(ctx, x, b): ctx.append((x.val if x.op is Ops.CONST else "+", b))
 class TestBidirectional(unittest.TestCase):
   def test_simple(self):
