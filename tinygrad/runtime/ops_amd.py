@@ -828,7 +828,8 @@ class USBIface(PCIIface):
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
     # everything, even host-style signals, lives in vram: gpu writes into the bridge's own memory collide with an armed 0xF2 read stream
-    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access or host, contiguous=contiguous, force_devmem=True, **kwargs)
+    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access or host or (size <= 65536 and size % 4 == 0),
+                         contiguous=contiguous, force_devmem=True, **kwargs)
 
   def sleep(self, timeout): pass
 
