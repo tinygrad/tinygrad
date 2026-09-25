@@ -250,7 +250,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, everything else (the stack pointer) by byte
-  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
+  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.AFTER} else 1
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
     return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale))
   if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale))
@@ -259,7 +259,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x))
 def is_address(x:UOp):
-  if x.op is Ops.BUFFER or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL) \
+  if x.op in {Ops.BUFFER, Ops.ALLOC} or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL) \
     or (x.op is Ops.INS and x.arg[0] in {X86Ops.LEA, X86Ops.DEFINE}): return True
   if x.op is Ops.INS and x.arg[0] is X86Ops.MOV: return (len(x.src) == 1 or x.src[0] is stack_pointer) and is_address(x.src[0])
   return x.op is Ops.INS and x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])
@@ -280,7 +280,7 @@ GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTS
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
 
 def _is_vec_xmm(y: UOp) -> bool:
-  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
+  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
 
 def _xmm_sz(x: UOp) -> X86Ops:
   bits = x.max_numel() * x.dtype.itemsize
@@ -309,7 +309,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
-  if x.op is Ops.BUFFER: return x.replace(src=tuple(s.rtag() for s in x.src), tag=tuple(defs))
+  if x.op in {Ops.BUFFER, Ops.ALLOC}: return x.replace(src=tuple(s.rtag() for s in x.src), tag=tuple(defs))
   return x.replace(tag=tuple(defs))
 
 isel_matcher = PatternMatcher([
@@ -448,7 +448,7 @@ isel_matcher = PatternMatcher([
    x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****

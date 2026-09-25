@@ -1179,6 +1179,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
+  def alloc(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None):
+    return UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(shape),
+                                     addrspace=addrspace, device=device)).reshape(shape or (1,))
+  def alloc_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
+    assert all_int(self.shape), "no alloc-like on symbolic shape"
+    return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
+
+  @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, volatile=False, tag=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
