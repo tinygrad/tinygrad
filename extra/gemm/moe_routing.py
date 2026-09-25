@@ -128,7 +128,9 @@ def _gscatter_bwd(gradient:UOp, kernel:UOp) -> tuple:
     assert k == 4
     return None, gather_sum(Tensor(gradient), Tensor(idx_u)).uop, None
   sel = grouped_gather_rows(Tensor(gradient, device=dev), Tensor(idx_u, device=dev), G)
-  return (None, sel.reshape(G, T_l, k, D).sum(2).cast(src_u.dtype).uop, None)
+  # FP8 dispatch carries BF16 gradients back to the quantizer, not FP8-rounded gradients.
+  grad_dtype = dtypes.bfloat16 if src_u.dtype == dtypes.fp8e4m3 else src_u.dtype
+  return (None, sel.reshape(G, T_l, k, D).sum(2).cast(grad_dtype).uop, None)
 
 def grouped_scatter_rows(src:Tensor, idx:Tensor, m_l:int) -> Tensor:
   G, T_l, D = src.shape
@@ -186,6 +188,11 @@ def route_topk(weights:Tensor, topi:Tensor, n_experts:int) -> Routing:
 def dispatch(x:Tensor, r:Routing) -> Tensor:
   G, D = r.n_groups, x.shape[-1]
   return grouped_scatter_rows(x.reshape(G, r.t_local, D), r.dest_row, r.m_l).reshape(G * r.m_l, D)
+
+def dispatch_fp8(x:Tensor, r:Routing) -> tuple[Tensor, Tensor]:
+  from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
+  q, e8 = quantize_mxfp8_fused_qe8(x)
+  return dispatch(q, r), dispatch(e8, r)
 
 def combine(y:Tensor, r:Routing, n_tokens:int, experts_per_tok:int) -> Tensor:
   G, D, k = r.n_groups, y.shape[-1], experts_per_tok

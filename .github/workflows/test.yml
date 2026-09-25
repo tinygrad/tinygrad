@@ -22,7 +22,7 @@ concurrency:
 jobs:
   docs:
     name: Docs
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
@@ -61,7 +61,7 @@ jobs:
 
   torchbackend:
     name: Torch Backend Tests
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -85,7 +85,7 @@ jobs:
 
   torchbackendtrain:
     name: Torch Backend Training
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -102,7 +102,7 @@ jobs:
 
   bepython:
     name: Python Backend
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -141,7 +141,7 @@ jobs:
 
   linter:
     name: Linters
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 10
 
     steps:
@@ -172,7 +172,7 @@ jobs:
 
   nulltest:
     name: Null Tests
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
 
     steps:
@@ -205,8 +205,8 @@ jobs:
     #  run: DEV=NULL python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
 
   unittest:
-    name: Unit Tests
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    name: Backend Tests (CPU)
+    runs-on: *linux
     timeout-minutes: 15
 
     steps:
@@ -224,10 +224,10 @@ jobs:
       run: SKIP=ruff,mypy,tests pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
-    - name: Run unit tests
+    - name: Run backend tests
       run: |
         DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
-        DEV=CPU python -m pytest -n=auto test/unit/ --durations=20
+        DEV=CPU python -m pytest -n=auto test/backend/ --durations=20
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
@@ -243,7 +243,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: SPEC=2 (${{ matrix.group }})
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -255,11 +255,11 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/unit test/backend test/opt --ignore test/backend/test_custom_kernel.py --ignore test/unit/test_hashing.py --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/backend test/opt --ignore test/backend/test_custom_kernel.py --ignore test/backend/test_hashing.py --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 10
     steps:
     - name: Checkout Code
@@ -275,7 +275,7 @@ jobs:
 
   testopenclimage:
     name: CL IMAGE Tests
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -297,7 +297,7 @@ jobs:
     name: openpilot compile tests
     env:
       LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -340,7 +340,7 @@ jobs:
 
   testonnxcpu:
     name: ONNX (CPU) Tests
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 20
 
     steps:
@@ -359,7 +359,7 @@ jobs:
 
   testoptim:
     name: Optimization Tests
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -391,7 +391,7 @@ jobs:
 
   testllm:
     name: Test LLM
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     env:
       CHECK_OOB: 0
@@ -418,7 +418,7 @@ jobs:
 
   testmodels:
     name: Models
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -438,7 +438,7 @@ jobs:
 
   testdsp:
     name: Linux (DSP)
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -466,7 +466,7 @@ jobs:
           - 'WEBGPU'
 
     name: Linux (DEV=${{ matrix.dev }})
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -492,7 +492,7 @@ jobs:
 
   testamdasm:
     name: AMD ASM IDE
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 20
     env:
       DEV: MOCKKFD+AMD
@@ -539,7 +539,7 @@ jobs:
 
   testmockam:
     name: Linux (am)
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     env:
       DEV: MOCKPCI+AMD
@@ -556,13 +556,13 @@ jobs:
           deps: testing_unit
           amd: 'true'
       - name: Run tests on MOCKAM
-        run: python -m pytest test/test_tiny.py test/unit/test_jit.py
+        run: python -m pytest test/test_tiny.py test/backend/test_jit.py
       - name: Run test_tiny on MOCKUSB
         run: CHECK_OOB=0 HCQ_RUNTIME_DEV=CPU GMMU=0 DEV=MOCKUSB+AMD python -m pytest test/test_tiny.py test/backend/test_hcq2.py
       - name: Run test_hcq2 on MOCKPCI
         run: python -m pytest test/null/test_hcq2.py test/backend/test_hcq2.py
       - name: Run disk copy tests on MOCKPCI
-        run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
+        run: python -m pytest test/backend/test_disk_tensor.py -k test_copy_from_disk
 
   testamd:
     strategy:
@@ -572,7 +572,7 @@ jobs:
         arch: [gfx1100, gfx1201, gfx950]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
@@ -602,7 +602,7 @@ jobs:
       - name: Run opt tests
         run: python -m pytest -n=auto test/opt --durations=20
       - name: Run disk copy tests
-        run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
+        run: python -m pytest test/backend/test_disk_tensor.py -k test_copy_from_disk
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -615,7 +615,7 @@ jobs:
         backend: [ptx, nv]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 20
     env:
       FORWARD_ONLY: 1
@@ -654,7 +654,7 @@ jobs:
           - 'NULL:QCOMCL:a630'
           - 'NULL:NAK:sm_120'
     name: Compile-only (DEV=${{ matrix.dev }})
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: *linux
     timeout-minutes: 15
     env:
       NULL_ALLOW_COPYOUT: 1
