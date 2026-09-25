@@ -8,8 +8,7 @@ from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist
 
-# load the mnist dataset
-X_train, Y_train, X_test, Y_test = fetch_mnist()
+# load the mnist dataset lazily: every pytest worker imports this module, and the test classes below are @slow
 
 # create a model
 class TinyBobNet:
@@ -51,6 +50,11 @@ class TinyConvNet:
 
 @slow
 class TestMNIST(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    global X_train, Y_train, X_test, Y_test
+    X_train, Y_train, X_test, Y_test = fetch_mnist()
+
   def test_sgd_onestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
