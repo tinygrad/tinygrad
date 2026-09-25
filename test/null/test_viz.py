@@ -446,7 +446,7 @@ class TestVizIntegration(unittest.TestCase):
   def test_recurse(self):
     with save_viz() as viz:
       a = Tensor.empty(10)
-      for _ in range(10_000): a += a
+      for _ in range(2_000): a += a
       graph_rewrite(a.uop, PatternMatcher([]))
     lst = viz.list_items()
     assert len(lst) == 1

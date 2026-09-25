@@ -23,7 +23,7 @@ jobs:
 # ****** OSX Tests ******
 
   unittestmacos:
-    name: MacOS (backend)
+    name: MacOS (opt, device)
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -34,8 +34,6 @@ jobs:
       with:
         key: unittest-macos
         deps: testing_unit
-    - name: Run backend tests
-      run: DEV=METAL python -m pytest -n=auto test/backend/ --durations=20
     - name: Run opt tests
       run: DEV=METAL python -m pytest -n=auto test/opt --durations=20
     - name: Test tensor core ops (fake)

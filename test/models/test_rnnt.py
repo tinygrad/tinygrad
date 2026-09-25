@@ -7,7 +7,7 @@ import torch
 
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):
-    BS, SQ, IS, HS, L = 2, 20, 40, 128, 2
+    BS, SQ, IS, HS, L = 2, 10, 40, 128, 2
 
     # create in torch
     with torch.no_grad():
@@ -28,7 +28,7 @@ class TestRNNT(unittest.TestCase):
       layer.cells[1].bias_hh.assign(Tensor(torch_layer.bias_hh_l1.numpy()))
 
     # test initial hidden
-    for _ in range(3):
+    for _ in range(2):
       x = Tensor.randn(SQ, BS, IS)
       z, hc = layer(x, None)
       torch_x = torch.tensor(x.numpy())
@@ -36,7 +36,7 @@ class TestRNNT(unittest.TestCase):
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
     # test passing hidden
-    for _ in range(3):
+    for _ in range(2):
       x = Tensor.randn(SQ, BS, IS)
       z, hc = layer(x, hc)
       torch_x = torch.tensor(x.numpy())

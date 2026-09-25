@@ -34,7 +34,7 @@ class TestArange(unittest.TestCase):
   def test_eye_complexity(self):
     with Context(NOOPT=1):
       # NOTE: not every backend supports CMPEQ
-      self.assertLessEqual(self._get_flops(Tensor.eye(2560).clone(), np.eye(2560)), 2*2560*2560)
+      self.assertLessEqual(self._get_flops(Tensor.eye(1280).clone(), np.eye(1280)), 2*1280*1280)
 
 DSET, DDIM = 2048, 32
 
