@@ -1,4 +1,4 @@
-import unittest, tarfile, io, os, pathlib, tempfile
+import unittest, tarfile, io, os, tempfile
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.nn.state import tar_extract
@@ -31,27 +31,13 @@ class TestTarExtractFile(unittest.TestCase):
     os.remove(self.invalid_tar_path)
     os.rmdir(self.test_dir)
 
-  def test_tar_extract_returns_dict(self):
-    result = tar_extract(self.tar_path)
-    self.assertIsInstance(result, dict)
-
-  def test_tar_extract_correct_keys(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(set(result.keys()), set(self.test_files.keys()))
-
-  def test_tar_extract_content_size(self):
-    result = tar_extract(self.tar_path)
-    for filename, content in self.test_files.items():
-      self.assertEqual(len(result[filename]), len(content))
-
   def test_tar_extract_content_values(self):
     result = tar_extract(self.tar_path)
+    self.assertIsInstance(result, dict)
+    self.assertEqual(set(result.keys()), set(self.test_files.keys()))
     for filename, content in self.test_files.items():
+      self.assertEqual(len(result[filename]), len(content))
       np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
-
-  def test_tar_extract_empty_file(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(len(result['empty_file.txt']), 0)
 
   def test_tar_extract_non_existent_file(self):
     with self.assertRaises(FileNotFoundError):
@@ -95,32 +81,15 @@ class TestTarExtractPAX(unittest.TestCase):
           tar.addfile(link_info)
     return Tensor(fobj.getvalue())
 
-  def test_tar_extract_returns_dict(self):
-    result = tar_extract(self.create_tar_tensor())
-    self.assertIsInstance(result, dict)
-
-  def test_tar_extract_correct_keys(self):
-    result = tar_extract(self.create_tar_tensor())
-    self.assertEqual(set(result.keys()), set(self.test_files.keys()))
-
-  def test_tar_extract_content_size(self):
-    result = tar_extract(self.create_tar_tensor())
-    for filename, content in self.test_files.items():
-      self.assertEqual(len(result[filename]), len(content))
-
   def test_tar_extract_content_values(self):
     result = tar_extract(self.create_tar_tensor())
+    self.assertIsInstance(result, dict)
+    self.assertEqual(set(result.keys()), set(self.test_files.keys()))
     for filename, content in self.test_files.items():
+      self.assertEqual(len(result[filename]), len(content))
       np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
 
-  def test_tar_extract_empty_file(self):
-    result = tar_extract(self.create_tar_tensor())
-    self.assertEqual(len(result['empty_file.txt']), 0)
-
-  def test_tar_extract_non_existent_file(self):
-    with self.assertRaises(FileNotFoundError):
-      tar_extract(Tensor(pathlib.Path('non_existent_file.tar')))
-
+class TestTarExtractTensorErrors(unittest.TestCase):
   def test_tar_extract_invalid_file(self):
     with self.assertRaises(tarfile.ReadError):
       tar_extract(Tensor(b'This is not a valid tar file'))

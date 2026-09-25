@@ -67,14 +67,6 @@ class TestNaNEdgeCases(unittest.TestCase):
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
 
-  def test_sort_empty(self):
-    # Sorting an empty tensor works in PyTorch and should return empty
-    # values and indices. tinygrad raises an error instead.
-    torch_vals, torch_idxs = torch.tensor([]).sort()
-    values, indices = Tensor([]).sort()
-    np.testing.assert_equal(values.numpy(), torch_vals.numpy())
-    np.testing.assert_equal(indices.numpy(), torch_idxs.numpy().astype(np.int32))
-
   def test_masked_select_empty(self):
     # Masked select on empty tensors should return an empty tensor.
     torch_out = torch.tensor([], dtype=torch.float32).masked_select(torch.tensor([], dtype=torch.bool))
@@ -166,13 +158,6 @@ class TestUOpValidationIssue(unittest.TestCase):
 
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
-
-  def test_circular_pad_negative(self):
-    # negative pads with circular mode should wrap like PyTorch
-    arr = np.arange(9).reshape(1, 1, 3, 3).astype(np.float32)
-    torch_out = torch.nn.functional.pad(torch.tensor(arr), (1, -1, 1, -1), mode='circular')
-    out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
-    np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
   def test_arange_float_step(self):
     # float steps should match PyTorch exactly

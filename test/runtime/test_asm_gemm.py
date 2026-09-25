@@ -199,7 +199,6 @@ class TestGemmLlama(unittest.TestCase):
   def test_gemm4(self): verify_asm_gemm(8, 4096, 14336, 4096, dtype=self.dtype, gpus=8)
   def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, dtype=self.dtype, gpus=8)
   def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, dtype=self.dtype, gpus=8)
-  def test_gemm7(self): verify_asm_gemm(1, 8192, 128256, 4096, dtype=self.dtype)
   def test_gemm8(self): verify_asm_gemm(1, 4096, 14336, 8192, dtype=self.dtype)
   def test_gemm9(self): verify_asm_gemm(8, 4096, 14336, 8192, dtype=self.dtype, gpus=8)
   def test_gemm10(self): verify_asm_gemm(1, 4096, 8192, 4096, dtype=self.dtype)
@@ -223,7 +222,6 @@ class TestGemmLlama(unittest.TestCase):
   def test_tp_k_sharded_w2(self): verify_asm_gemm_k_sharded_3d(1, 8192, 4096, 14336, dtype=self.dtype, gpus=8)
 
   # more shapes: vary M, N, K independently
-  def test_shape_small_square(self): verify_asm_gemm(1, 256, 256, 256, dtype=self.dtype)
   def test_shape_small_rect_m(self): verify_asm_gemm(1, 512, 256, 256, dtype=self.dtype)
   def test_shape_small_rect_n(self): verify_asm_gemm(1, 256, 512, 256, dtype=self.dtype)
   def test_shape_small_rect_k(self): verify_asm_gemm(1, 256, 256, 512, dtype=self.dtype)
@@ -234,8 +232,6 @@ class TestGemmLlama(unittest.TestCase):
   def test_shape_batched_small(self): verify_asm_gemm(2, 256, 256, 256, dtype=self.dtype)
   def test_shape_batched_rect(self): verify_asm_gemm(2, 512, 1024, 256, dtype=self.dtype)
   # K edge cases: change iters to exercise different loop paths, k big enough for hk kernel
-  def test_shape_k256(self): verify_asm_gemm(1, 256, 256, 256, dtype=self.dtype)
-  def test_shape_k512(self): verify_asm_gemm(1, 256, 256, 512, dtype=self.dtype)
   def test_shape_k768(self): verify_asm_gemm(1, 256, 256, 768, dtype=self.dtype)
 
   def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096, dtype=self.dtype)

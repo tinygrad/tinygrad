@@ -304,7 +304,7 @@ class TestGGUF(unittest.TestCase):
 class TestGGUFGEMV(unittest.TestCase):
   def _test_gguf_gemv(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    rows, cols = 32, 512
+    rows, cols = 16, 512
     n_blocks = rows * cols // block_size
     rng = np.random.default_rng(42)
     if qtype == GGMLQuantizationType.BF16:

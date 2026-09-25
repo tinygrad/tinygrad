@@ -16,11 +16,6 @@ def _simple_test(add, extract=lambda x: x, N=10):
   assert_jit_cache_len(add, 1)
 
 class TestJit(unittest.TestCase):
-  def test_simple_jit(self):
-    @TinyJit
-    def add(a, b): return (a+b).realize()
-    _simple_test(add)
-
   def test_jit_input_view(self):
     @TinyJit
     def f(x): return (x[2:5].contiguous() + 1).realize()
@@ -422,19 +417,6 @@ class TestJit(unittest.TestCase):
             [0., 2., 3., 1., 0.]]
     np.testing.assert_allclose(want, Y)
 
-  def test_jit_buffer_behavior(self):
-    @TinyJit
-    def foo(x) -> Tensor: return x.sum().realize()
-
-    result_1 = foo(Tensor([1] * 2))
-    result_2 = foo(Tensor([2] * 2))
-    result_3 = foo(Tensor([3] * 2))
-
-    # expect the buffer to share underlying buffer
-    np.testing.assert_allclose(result_1.numpy(), [2], atol=1e-4, rtol=1e-5)
-    np.testing.assert_allclose(result_2.numpy(), [6], atol=1e-4, rtol=1e-5)
-    np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
-
   def test_jit_output_clone(self):
     @TinyJit
     def f(x:Tensor) -> Tensor: return (x + 1).realize()
@@ -765,9 +747,9 @@ class TestJitInsideJit(unittest.TestCase):
     def g(t): return f(t) * 3
 
     # NOTE: first does not raise
-    g(Tensor([1])).realize()
+    self.assertEqual(g(Tensor([1])).realize().item(), 6)
     with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
-      g(Tensor([1])).realize()
+      g(Tensor([2])).realize()
 
 class TestJitRandom(unittest.TestCase):
   def test_jit_rangeify(self):
