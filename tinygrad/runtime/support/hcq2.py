@@ -335,11 +335,6 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 # *****************
 # 3. encode
 
-@dataclass
-class EncodeCtx:
-  devs:tuple[str, ...]
-  lt_patches:list[UOp] = field(default_factory=list)
-
 class HWQueue:
   q_rewrite = PatternMatcher([
     # rewrites from calls
@@ -362,8 +357,8 @@ class HWQueue:
     (UPat(Ops.END, src=(UPat(Ops.LINEAR, name="body"), UPat(Ops.RANGE, name="r"))), lambda ctx, body, r: ctx.loop(body, r)),
   ])
 
-  def __init__(self, ctx:EncodeCtx, submit:UOp):
-    self.ctx, self.lin = ctx, submit.src[0]
+  def __init__(self, submit:UOp):
+    self.lin = submit.src[0]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
@@ -395,13 +390,14 @@ class HWQueue:
 # *****************
 # 3.1. hcq special functions
 
-def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
-  lasts, sigs = f.src[:len(ctx.devs)], f.src[len(ctx.devs):]
+def hcq_fence(f:UOp) -> UOp:
+  devs = dedup(to_tuple(s.device)[0] for s in f.src)
+  lasts, sigs = f.src[:len(devs)], f.src[len(devs):]
   last:tuple[UOp, ...] = ()
 
   # wait for prev schedule to not collide
   # TODO: timeout?
-  for i, dev in enumerate(ctx.devs):
+  for i, dev in enumerate(devs):
     slots, off = unwrap_view(lasts[i])
     slots = patch(slots, [], bytes(slots.max_numel() * slots.dtype.itemsize)) # zeroed at link
     target = slots.after(*last, tv:=timeline_value((dev,))).index(off // slots.dtype.itemsize).load()
@@ -435,10 +431,10 @@ def _is_link_patch(w:UOp) -> bool:
   if w.op in {Ops.LOAD, Ops.AFTER} or w.is_variable: return False
   return all(_is_link_patch(s) for s in w.src)
 
-def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
+def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
   links, rest = partition(a.src[1:], lambda s: s.op in (Ops.STORE, Ops.END) and _is_link_patch(s))
   if not links: return None
-  ctx.lt_patches.extend(links)
+  ctx.extend(links)
   return a.src[0].after(*rest)
 
 pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
@@ -456,7 +452,7 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
     stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
   return buf.after(*dep, *stores)
 
-def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
+def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   stream, patches = bytes(hq.blob), hq.patches
   nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
@@ -465,7 +461,7 @@ def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   for lname, ls in itertools.groupby(sorted(nested, key=lambda l: l.arg), key=lambda l: l.arg):
     hq.blob, hq.patches = bytearray(), []
     offs = {l: (hq.q(UOp(Ops.BINARY, arg=bytes(-len(hq.blob) % 128))), hq.q(*l.src)) for l in ls}
-    bufs.append((offs, bufferize_linear(hq, lname, hq.devs)))
+    bufs.append((offs, bufferize_cmdbuf(hq, lname, hq.devs)))
   views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
 
   buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device, tag=to_name(name, hq.queue))
@@ -474,7 +470,7 @@ def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
 
 def encode_submit(hq:HWQueue) -> UOp:
   for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
-  return hq.submit(bufferize_linear(hq, "cmdbuf", hq.devs))
+  return hq.submit(bufferize_cmdbuf(hq, "cmdbuf", hq.devs))
 
 # *****************
 # 4. lower call
@@ -501,11 +497,12 @@ def lower_call(call:UOp) -> UOp|None:
 
   # encode bodies
   from tinygrad.runtime.ops_rdma import pm_rdma_encode
-  ctx = EncodeCtx(call.arg.aux.device)
-  devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
+  lt_patches:list[UOp] = []
+  devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
   body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
-                       ctx=ctx, bpm=pm_patches, name="encode")
-  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
+                       ctx=lt_patches, bpm=pm_patches, name="encode")
+  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])),
+                       ctx=lt_patches, bpm=pm_patches, name="lower")
 
   # unwrap to base and byte offset. drops afters (an address has no deps) and merges views into one slot
   def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes.uint8)[v[1]:v[0].nbytes()].getaddr(to_tuple(g.arg)[0])
@@ -513,10 +510,10 @@ def lower_call(call:UOp) -> UOp|None:
 
   # runtime addrs load from a table: inputs filled per call, the rest at link
   input_addrs, link_addrs = partition(rt_addrs:=dedup(normalized.values()), _is_input_addr)
-  table = UOp.placeholder((len(rt_addrs),), dtypes.uint64, device=Device[ctx.devs[0]].host, tag="inputs")
+  table = UOp.placeholder((len(rt_addrs),), dtypes.uint64, device=Device[call.arg.aux.device[0]].host, tag="inputs")
   slot_of = {g: i for i, g in enumerate(input_addrs + link_addrs)}
   body = body.substitute({g: table.index(slot_of[n]).load() for g, n in normalized.items()})
-  ctx.lt_patches += patch(table, [(8 * slot_of[g], g) for g in link_addrs]).src[1:]
+  lt_patches += patch(table, [(8 * slot_of[g], g) for g in link_addrs]).src[1:]
 
   # combine placeholders into one and replace with views
   words = [u for u in body.toposort() if u.op is Ops.PARAM and u.tag not in (None, "program") and u.arg.slot]
@@ -527,7 +524,7 @@ def lower_call(call:UOp) -> UOp|None:
   merged = {g[0]: g[0].replace(arg=replace(g[0].arg, size=offs[g[0]][-1])) for g in groups if len(g) > 1}
   views = {u: merged[g[0]][o:o + u.max_numel()] for g in groups if len(g) > 1 for u, o in zip(g, offs[g[0]])}
   body = body.substitute(views, extra_pm=pm_mops+pm_views, enter_calls=True)
-  patches = UOp.sink(*dedup(ctx.lt_patches)).substitute(views).src
+  patches = UOp.sink(*dedup(lt_patches)).substitute(views).src
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
   bufs, alus = partition([u for u in body.toposort() if u.op is Ops.PARAM], lambda u: u.tag is not None)
