@@ -151,18 +151,18 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp, full_grp = full_grp[:length], full_grp[length:]
-        if length == 1: continue
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid)
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length)))
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length))) if length > 1 else buf.index(offset)
         if op == Ops.STORE:
           assert all(len(offsets[g]) == 1 for g in grp), "attempting multiple stores"
-          store = idx.store(UOp.stack(*[offsets[g][0].src[1] for g in grp]))
+          datas = [offsets[g][0].src[1] for g in grp]
+          store = idx.store(UOp.stack(*datas) if length > 1 else datas[0])
           for g in grp: replacements[offsets[g][0]] = store
         else:
           ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
-            for oo in offsets[g]: replacements[oo] = ld.index(i)
+            for oo in offsets[g]: replacements[oo] = ld.index(i) if length > 1 else ld
 
   # apply
   return sink.substitute(replacements, name="memory coalescing")
