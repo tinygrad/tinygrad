@@ -194,8 +194,8 @@ def merge_reduce_ends(sink:UOp):
       for e in group: subs[e] = merged
   return sink.substitute(subs) if subs else None
 
-def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
-  acc = UOp.alloc_like(r, next(ctx), AddrSpace.REG)
+def reduce_ranges_to_acc(r:UOp):
+  acc = UOp.alloc_like(r, addrspace=AddrSpace.REG)
   input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
@@ -231,8 +231,8 @@ pm_add_loads = PatternMatcher([
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
-def add_local_buffer(ctx, x:UOp):
-  buf = UOp.alloc(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
+def add_local_buffer(x:UOp):
+  buf = UOp.alloc(x.max_shape, x.dtype, addrspace=x.arg.addrspace)
   return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
 
 pm_add_local_buffers = PatternMatcher([
@@ -307,13 +307,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
-  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op in {Ops.BUFFER, Ops.ALLOC}], default=0))
-
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, name="remove reduces")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_local_buffers, name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
