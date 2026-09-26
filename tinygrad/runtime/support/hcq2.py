@@ -545,6 +545,9 @@ def lower_call(call:UOp) -> UOp|None:
   return call.replace(src=(sink, *bufs), arg=replace(call.arg, aux=info)).after(*patches)
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
+# *****************
+# 5. compile
+
 hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
@@ -563,7 +566,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
   return final_linear
 
 # *****************
-# 5. link
+# 6. link
 
 @dataclass
 class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
