@@ -128,8 +128,8 @@ class NVQueue(HWQueue):
     return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32))
 
 class NVComputeQueue(NVQueue):
-  def __init__(self, ctx, submit):
-    super().__init__(ctx, submit)
+  def __init__(self, submit):
+    super().__init__(submit)
 
     progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
     self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
@@ -560,10 +560,10 @@ class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda ctx, submit: encode_submit(NVComputeQueue(ctx, submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec", name="submit"), lambda ctx, submit: encode_submit(NVEncDecQueue(ctx, submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw", name="submit"), lambda ctx, submit: encode_submit(NVQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda submit: encode_submit(NVComputeQueue(submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda submit: encode_submit(NVCopyQueue(submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec", name="submit"), lambda submit: encode_submit(NVEncDecQueue(submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw", name="submit"), lambda submit: encode_submit(NVQueue(submit))),
   ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)

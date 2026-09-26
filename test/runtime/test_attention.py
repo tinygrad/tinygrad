@@ -226,7 +226,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block.ssm_a = Tensor([[-1.], [-1.]])
     block._attention(x, x.shape[1]).realize()
     alpha = np.exp(-self._softplus_np(np.array([[1, 2, 3, 4], [2, 1, 3, 5]])).reshape(2, 2, 2)).prod(0)
-    np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[..., None], rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[:, None, :], rtol=1e-5, atol=1e-5)
 
   def test_kda_prefill_matches_decode(self):
     config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True))
