@@ -1035,7 +1035,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.replace(arg=replace(self.arg, val=uval.val))
   def unbound(self) -> Variable:
     assert self.is_variable, f"op is {self.op}, need Variable"
-    return self.replace(arg=replace(self.arg, val=None))
+    # strip the tag too: tags are kernel-graph processing state, the unbound Variable is the canonical node
+    return self.replace(arg=replace(self.arg, val=None), tag=None)
   def unbind(self) -> tuple[Variable, int]:
     assert self.is_bound_var, f"can't unbind {self}"
     return self.unbound(), self.arg.val

@@ -331,7 +331,8 @@ to_define_global = PatternMatcher([
 ])
 
 pm_add_param_range_tags = PatternMatcher([
-  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: x.rtag(())),
+  # Variables keep no tag: their nodes are shared outside the kernel graph (call args), and tags are part of node identity
+  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: None if x.is_variable else x.rtag(())),
 ])
 
 def split_store(x:UOp) -> UOp|None:
