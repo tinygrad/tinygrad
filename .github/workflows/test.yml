@@ -677,6 +677,9 @@ jobs:
         shell: bash
         if: contains(matrix.dev, 'a630')
         run: DEBUG=7 python3 test/runtime/test_ops.py TestOps.test_gemm | grep isam
+      - name: Run qcom device tests
+        if: contains(matrix.dev, 'a630')
+        run: python -m pytest -n=auto test/device/qcom
       - name: Run test_ops
         shell: bash
         run: |
