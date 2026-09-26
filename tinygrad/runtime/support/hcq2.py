@@ -497,10 +497,9 @@ def lower_call(call:UOp) -> UOp|None:
 
   # encode bodies
   from tinygrad.runtime.ops_rdma import pm_rdma_encode
-  lt_patches:list[UOp] = []
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
   body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
-                       ctx=lt_patches, bpm=pm_patches, name="encode")
+                       ctx=(lt_patches:=list[UOp]()), bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])),
                        ctx=lt_patches, bpm=pm_patches, name="lower")
 
