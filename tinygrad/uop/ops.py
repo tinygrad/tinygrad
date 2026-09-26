@@ -1068,7 +1068,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
-    if self.op in GroupOp.Defines and self.arg.multiple_of is not None:
+    # NOTE: multiple_of=1 is excluded so it falls through like a generic value: 1%v==0 only for v=+-1, where the
+    # self//v result builds structurally different MUL terms that break gcd's factor counting
+    if self.op in GroupOp.Defines and self.arg.multiple_of is not None and self.arg.multiple_of > 1:
       return self // v if self.arg.multiple_of%v == 0 else None
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
