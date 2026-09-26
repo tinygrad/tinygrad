@@ -774,12 +774,12 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   updates, stores = [], []
   for row_idx,row in enumerate(rows):
     previous = tuple(current.after(token)[row_idx*key_dim//32+i].load() for i in range(key_dim//32))
-    av, bv = alpha[bh, token, row if alpha_dim > 1 else 0].load(), beta[bh, token].load()
-    state_k = warp_reduce(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
-    state_q = warp_reduce(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
-    delta = (v[bh, token, row].load() - state_k*av) * bv
-    updates += [x*av + delta*y for x,y in zip(previous, keys)]
-    stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q*av + delta*kq[bh, token]))
+    decayed, bv = tuple(x * alpha[bh, token, col if alpha_dim > 1 else 0].load() for x,col in zip(previous, cols)), beta[bh, token].load()
+    state_k = warp_reduce(sum((x*y for x,y in zip(decayed, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
+    state_q = warp_reduce(sum((x*y for x,y in zip(decayed, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
+    delta = (v[bh, token, row].load() - state_k) * bv
+    updates += [x + delta*y for x,y in zip(decayed, keys)]
+    stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q + delta*kq[bh, token]))
   step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
   state_stores = (state[bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
@@ -789,7 +789,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   batch, heads, tokens, key_dim = q.shape
   value_dim = v.shape[-1]
   assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens) and state.shape == (batch, heads, value_dim, key_dim)
-  assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, value_dim))
+  assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, key_dim))
   assert key_dim % 32 == 0 and value_dim % 4 == 0
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"

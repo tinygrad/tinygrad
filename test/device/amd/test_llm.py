@@ -225,14 +225,14 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     beta[:, :, -1] = 0  # padded step must leave the recurrent state unchanged
     initial = rng.normal(0, 0.1, (1, 2, 8, 32)).astype(np.float32)
     for per_channel in (False, True):
-      alpha = rng.uniform(0.8, 1, (1, 2, 4, 8) if per_channel else (1, 2, 4)).astype(np.float32)
+      alpha = rng.uniform(0.8, 1, (1, 2, 4, 32) if per_channel else (1, 2, 4)).astype(np.float32)
       alpha[:, :, -1] = 1
       for start in (0, 3):
         with self.subTest(per_channel=per_channel, start=start):
           expected_state = np.zeros_like(initial) if start == 0 else initial.copy()
           outputs = []
           for t in range(4):
-            decay = alpha[:, :, t, :, None] if per_channel else alpha[:, :, t, None, None]
+            decay = alpha[:, :, t, None, :] if per_channel else alpha[:, :, t, None, None]
             expected_state *= decay
             delta = (v[:, :, t] - (expected_state*k[:, :, t, None]).sum(-1)) * beta[:, :, t, None]
             expected_state += delta[..., None]*k[:, :, t, None]
