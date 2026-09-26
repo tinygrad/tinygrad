@@ -68,7 +68,8 @@ class Linear(nn.Linear):
     if self.in_features % GGML_BLOCK_SIZE: return
     packed_sizes = {typ: decoded.numel() // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
-    raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
+    raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.MSTACK, Ops.BITCAST) and u.dtype == dtypes.uint8
+                and prod(u.shape) in packed_sizes.values()), None)
     if raw is None: return
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
@@ -84,10 +85,11 @@ class Linear(nn.Linear):
     else: return
     # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
     word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
-    raw_offset = raw.contiguous_view_offset()
-    if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return
+    storage = raw.src[0] if raw.op is Ops.BITCAST else raw
+    if any((off:=u.contiguous_view_offset()) is None or off*u.dtype.itemsize % word_dtype.itemsize or
+           u.buf_uop.dtype not in (dtypes.uint8, word_dtype) for u in (storage.src if storage.op is Ops.MSTACK else (storage,))): return
     self.ggml_type = ggml_type
-    self.weight = Tensor(raw).bitcast(word_dtype).contiguous()
+    self.weight = Tensor(storage) if storage.dtype == word_dtype else Tensor(raw).bitcast(word_dtype).contiguous()
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
@@ -156,7 +158,7 @@ def _iq4_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp]:
   scale = ((low >> (4*(subgroup%2)).cast(dtypes.uint32)) & 15) | ((((raw[base] >> 16) >> (2*subgroup).cast(dtypes.uint32)) & 3) << 4)
   return _half(raw[base] & 0xffff), (scale.cast(dtypes.uint8).bitcast(dtypes.int8)-32).float()
 
-def iq4_half_lut(device:str) -> Tensor:
+def iq4_half_lut(device:str|tuple[str, ...]|None) -> Tensor:
   from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
   return Tensor.const(tuple(x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i], kvalues_iq4nl[j])),
                       dtypes.float16).to(device, force=True).bitcast(dtypes.uint32)
@@ -447,7 +449,7 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   extra = (_iq_grid(str(x.device), layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   if tokens % 16 == 0 and out_features % 16 == 0:
     if layer.ggml_type == IQ4_XS:
-      fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(str(x.device)),)
+      fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
