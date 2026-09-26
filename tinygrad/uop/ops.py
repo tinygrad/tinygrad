@@ -36,9 +36,11 @@ class ParamArg:
   # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
   buffer: Buffer|MultiBuffer|None = None
   bind_on_realize: bool = False
+  # the bound value of a Variable (an ALU PARAM with a value range); None means unbound
+  val: PyConst|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
-              ("volatile", False), ("image", None), ("bind_on_realize", False))
+              ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None))
     args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
@@ -1007,42 +1009,44 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1, param:bool=False) -> UOp:
-    # a Variable is a 0-d BUFFER in the ALU addrspace; binding it is storing a CONST into it
-    # param=True creates the kernel-side form directly: an ALU PARAM (what the BUFFER becomes inside kernels)
-    arg = ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU)
-    return UOp(Ops.PARAM if param else Ops.BUFFER, arg=arg)
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
+    # a Variable is a scalar ALU PARAM with a name and a value range; binding it sets the val payload on the arg
+    return UOp(Ops.PARAM, arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of,
+                                       addrspace=AddrSpace.ALU))
   @property
   def is_variable(self) -> bool:
-    # a Variable is a 0-d BUFFER in the ALU addrspace that carries a value range (it becomes a PARAM inside kernels)
-    return self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and \
+    # a Variable is a scalar ALU PARAM that carries a value range
+    return self.op is Ops.PARAM and isinstance(self.arg, ParamArg) and \
            self.arg.vmin_vmax is not None and self.arg.addrspace is AddrSpace.ALU and self._shape == ()
   @property
   def is_bound_var(self) -> bool:
-    # a bound Variable is bind()'s AFTER(var, STORE(var, CONST))
-    return self.op is Ops.AFTER and self.src[0].is_variable and self.src[1].op is Ops.STORE and \
-           self.src[1].src[0] is self.src[0] and self.src[1].src[1].op is Ops.CONST and len(self.src) == 2
+    # a bound Variable is a Variable with the val payload set
+    return self.is_variable and self.arg.val is not None
   @property
   def expr(self) -> str:
     assert self.op in {Ops.PARAM, Ops.BUFFER}
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
-    assert self.is_variable, f"op is {self.op}, need Variable"
-    # the Variable states the width, so the bound value stays bare: is_bound_var tests for a CONST there, unbind reads .val
+    assert self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
     uval = UOp.const(val) if isinstance(val, int) else val
+    assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
-    return self.after(self.store(uval))
+    return self.replace(arg=replace(self.arg, val=uval.val))
+  def unbound(self) -> Variable:
+    assert self.is_variable, f"op is {self.op}, need Variable"
+    # strip the tag too: tags are kernel-graph processing state, the unbound Variable is the canonical node
+    return self.replace(arg=replace(self.arg, val=None), tag=None)
   def unbind(self) -> tuple[Variable, int]:
     assert self.is_bound_var, f"can't unbind {self}"
-    return self.src[0], self.src[1].src[1].val
+    return self.unbound(), self.arg.val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
-    ret:dict[Variable, int] = {}
-    return graph_rewrite(self, pm_unbind, ctx=ret), ret
+    bound = {x: x.unbound() for x in self.backward_slice_with_self if x.is_bound_var}
+    return self.substitute(bound, walk=True), {v: cast(int, x.arg.val) for x, v in bound.items()}
   def variables(self) -> list[Variable]:
-    return sorted({x if x.op in {Ops.PARAM, Ops.BUFFER} else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype, param=True)
+    return sorted({x.unbound() if x.is_variable else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype)
                    for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or
-                   (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU) or x.is_variable}, key=lambda v: v.expr)
+                   x.is_variable}, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
 
@@ -1065,7 +1069,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
-    if self.op in GroupOp.Defines and self.arg.multiple_of is not None:
+    # NOTE: multiple_of=1 is excluded so it falls through like a generic value: 1%v==0 only for v=+-1, where the
+    # self//v result builds structurally different MUL terms that break gcd's factor counting
+    if self.op in GroupOp.Defines and self.arg.multiple_of is not None and self.arg.multiple_of > 1:
       return self // v if self.arg.multiple_of%v == 0 else None
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
@@ -1222,10 +1228,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int):
-    # Variables become ALU params in the call body; the stored value (if bound) stays in the call args
-    if self.is_bound_var or self.is_variable:
-      b = self.src[0] if self.op is Ops.AFTER else self
-      return UOp(Ops.PARAM, arg=replace(b.arg, slot=slot, name=f"p{slot}"))
+    # Variables are already PARAMs: rename and strip the bound value so schedule cache keys are value-independent
+    if self.is_variable: return UOp(Ops.PARAM, arg=replace(self.arg, slot=slot, name=f"p{slot}", val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
@@ -1870,11 +1874,6 @@ def gate_kernel_sink(x:UOp) -> bool:
   if x.op is Ops.SINK and isinstance(x.arg, KernelInfo): return False
   return True
 
-def do_unbind(ctx:dict[Variable, int], x:UOp):
-  v,i = x.unbind()
-  ctx[v] = i
-  return v
-pm_unbind = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda ctx,x: do_unbind(ctx,x) if x.is_bound_var else None)])
 
 def contiguous_bitcast_index(ctx:UOp, b:UOp, idx:UOp):
   if len(idx.src)-1 != len(b.shape): return None

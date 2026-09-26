@@ -164,7 +164,7 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.val, 3.0)
 
   def test_depth_2_fold(self):
-    v = UOp.variable("v", 0, 1, dtypes.float, param=True)
+    v = UOp.variable("v", 0, 1, dtypes.float)
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
@@ -258,7 +258,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 1)
 
   def test_depth_2_const_fold(self):
-    v = UOp.variable("tmp", 0, 1, dtypes.int, param=True)
+    v = UOp.variable("tmp", 0, 1, dtypes.int)
     c2 = UOp.const(2)
     c4 = UOp.const(4)
     vc = v+c2
