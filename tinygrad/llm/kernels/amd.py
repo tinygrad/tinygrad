@@ -240,14 +240,14 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   if ggml_type in (IQ3_S, IQ3_XXS):
     index = byte(2+subgroup*8+i)
     if ggml_type == IQ3_S:
-      index |= ((byte(66+subgroup) >> i) & 1) << 8
+      index += ((byte(66+subgroup) >> i) & 1) << 8  
       signs = byte(74+subgroup*4+i//2)
     else: signs = _iq_even_signs((word(66+subgroup*4) >> (7*(i//2))) & 127)
   elif ggml_type == IQ2_XS:
     packed = raw[base+1+subgroup*4+i//2].cast(dtypes.uint32)
     index, signs = packed & 511, _iq_even_signs(packed >> 9)
   else:
-    index = byte(2+subgroup*4+i//2) | (((byte(66+subgroup) >> (2*(i//2))) & 3) << 8)
+    index = byte(2+subgroup*4+i//2) + (((byte(66+subgroup) >> (2*(i//2))) & 3) << 8)  
     signs = byte(34+subgroup*4+i//2)
   return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)))
 
