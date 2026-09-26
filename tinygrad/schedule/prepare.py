@@ -64,6 +64,8 @@ pm_fold_moved_after = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
   idxs = idx.src[1:]
+  # Movement index math assumes scalar coordinates. Wait for tensor indices to be indexed into first.
+  if any(i.shape for i in idxs): return None
   if len(idxs) == len(r.shape):
     return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), arg=idx.arg)
   if r.op is Ops.RESHAPE:

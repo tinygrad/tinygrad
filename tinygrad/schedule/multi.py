@@ -185,6 +185,8 @@ def stack_multi(root:UOp):
   return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, multis[0].sharding[0][1])
 
 def index_multi(root:UOp, multi:UOp):
+  # Full tensor indices are scalarized by the devectorizer before resolving ownership, including strided layouts.
+  if len(root.src)-1 == len(multi.shape) and any(i.shape for i in root.src[1:]): return None
   # Resolve explicit layouts before matching the range indices, including strided fragment layouts.
   if multi.op in GroupOp.Movement and multi.base.op is Ops.UNSHARD:
     from tinygrad.schedule.prepare import _mop_index
@@ -194,10 +196,11 @@ def index_multi(root:UOp, multi:UOp):
   # idx = rng*shard_sz + local, thread rng owns [rng*shard_sz, ...)). Strided ownership is an explicit
   # PERMUTE/RESHAPE layout and is resolved by _mop_index above.
   idxs = list(root.src[1:])
+  index_rank = sum(len(idx.shape) for idx in idxs)
   remaining = []
   for ax, rng in multi.sharding:
     if ax >= len(idxs):
-      remaining.append((ax-len(idxs), rng))
+      remaining.append((ax-len(idxs)+index_rank, rng))
       continue
     shard_sz = multi.shard_view.shape[ax]
     local = (idxs[ax] - rng*shard_sz).simplify()
@@ -267,9 +270,10 @@ def rewrite_into_function(call:UOp):
 
 # PERMUTE and RESHAPE carry the layout of an UNSHARD view.
 multi_pat = UPat((Ops.UNSHARD, Ops.PERMUTE, Ops.RESHAPE), name="multi")
+pm_index_multi = PatternMatcher([(UPat(Ops.INDEX, src=(multi_pat,), name="root", allow_any_len=True), index_multi)])
 
 # NOTE: this is the same pattern as unrolled ranges
-multi_pm = PatternMatcher([
+multi_pm = pm_index_multi+PatternMatcher([
   (UPat(GroupOp.ALU, name="root"), alu_multi),
   (UPat(Ops.REDUCE, src=(multi_pat, ), name="root"), reduce_multi),
   (UPat(Ops.EXPAND, src=(multi_pat, UPat()), name="root"), expand_multi),
@@ -277,7 +281,6 @@ multi_pm = PatternMatcher([
   (UPat(Ops.SHRINK, src=(multi_pat, UPat(), UPat()), name="root"), shrink_multi),
   (UPat(Ops.FLIP, src=(multi_pat, ), name="root"), flip_multi),
   (UPat(Ops.STACK, name="root"), stack_multi),
-  (UPat(Ops.INDEX, src=(multi_pat,), name="root", allow_any_len=True), index_multi),
   # a COPY of a sharded value copies every shard to the target device
   (UPat(Ops.COPY, src=(multi_pat,), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg) if multi.sharding else None),
   (UPat(Ops.ALLREDUCE, src=(multi_pat,), name="red"),

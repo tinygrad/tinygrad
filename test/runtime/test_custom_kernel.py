@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, prod
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
@@ -603,6 +603,58 @@ class TestUnshardIndex(unittest.TestCase):
           frag = frag.after(frag.store(3.0))
           return C.store(frag+1).end(*ranges).sink(arg=KernelInfo(name="multi_singleton_frag", opts_to_apply=()))
         np.testing.assert_array_equal(self._run(kernel, shape), np.full(shape, 4.0))
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_partial_tensor_fragment_index(self):
+    for index_shapes in (((),), ((2,),), ((2, 3),), ((2,), ()), ((), (2,)), ((2,), (3,))):
+      with self.subTest(index_shapes=index_shapes):
+        def kernel(C:UOp) -> UOp:
+          t = UOp.range(2, 0, AxisType.LOCAL)
+          local = UOp.placeholder((2,)*len(index_shapes)+(1,), dtypes.float32, 0, AddrSpace.REG)
+          i = UOp.range(local.numel(), 1, AxisType.UPCAST)
+          init = local.flatten()[i].store((i*2+t).cast(dtypes.float32)).end(i)
+          frag = local.after(init).unshard(len(index_shapes), t)
+          idxs = tuple(UOp(Ops.STACK, src=tuple(UOp.const(i%2) for i in range(prod(shape)))).reshape(shape) for shape in index_shapes)
+          return C.store(frag.index(*idxs)).end(t).sink(arg=KernelInfo(name="partial_tensor_frag", opts_to_apply=()))
+        expected = np.arange(2**(len(index_shapes)+1)).reshape((2,)*(len(index_shapes)+1))
+        axis = 0
+        for shape in index_shapes:
+          expected = np.take(expected, (np.arange(prod(shape))%2).reshape(shape), axis=axis)
+          axis += len(shape)
+        np.testing.assert_array_equal(self._run(kernel, expected.shape), expected)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_full_tensor_fragment_index(self):
+    for strided in (False, True):
+      for row_shape in ((3,), (1, 3)):
+        with self.subTest(strided=strided, row_shape=row_shape):
+          def kernel(C:UOp) -> UOp:
+            t = UOp.range(2, 0, AxisType.LOCAL)
+            i = UOp.range(8, 1, AxisType.UPCAST)
+            local = UOp.placeholder((4, 2), dtypes.float32, 0, AddrSpace.REG)
+            local = local.after(local.flatten()[i].store((i//2*4+t*2+i%2).cast(dtypes.float32)).end(i))
+            frag = UOp(Ops.UNSHARD, src=(local, t)).permute(1, 0, 2).reshape(8, 2) if strided else local.unshard(1, t)
+            rows = UOp(Ops.STACK, src=tuple(UOp.const(i) for i in (0, 2, 3))).reshape(row_shape)
+            cols = UOp(Ops.STACK, src=(UOp.const(0), UOp.const(1)))
+            value = frag.index(t+2*rows, cols) if strided else frag.index(rows, t*2+cols)
+            return C[t].store(value.reshape(1, 6)).end(t).sink(arg=KernelInfo(name="full_tensor_frag", opts_to_apply=()))
+          if strided:
+            expected = np.stack([np.arange(16).reshape(8, 2)[np.array([0, 2, 3])*2+t].reshape(1, 6) for t in range(2)])
+          else:
+            expected = np.arange(16).reshape(4, 4)[[0, 2, 3]]
+            expected = np.stack([expected[:, :2].reshape(1, 6), expected[:, 2:].reshape(1, 6)])
+          np.testing.assert_array_equal(self._run(kernel, (2, 1, 6)), expected)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_strided_tensor_index_cannot_shard(self):
+    def kernel(C:UOp) -> UOp:
+      t = UOp.range(2, 0, AxisType.LOCAL)
+      local = UOp.placeholder((4, 1), dtypes.float32, 0, AddrSpace.REG)
+      frag = UOp(Ops.UNSHARD, src=(local, t)).permute(1, 0, 2).reshape(8, 1)
+      rows = UOp(Ops.STACK, src=tuple(UOp.const(i) for i in (0, 2, 4)))  # thread 1 does not own these rows
+      return C[t].store(frag.index(rows, 0)).end(t).sink(arg=KernelInfo(name="bad_tensor_frag", opts_to_apply=()))
+    with self.assertRaisesRegex(RuntimeError, "cannot shard index"):
+      self._run(kernel, (2, 3))
 
   def test_fragment_index_cannot_shard(self):
     # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows -- this matches neither

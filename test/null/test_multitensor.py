@@ -1,6 +1,7 @@
 import gc, unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, UOp
-from tinygrad.uop.ops import Ops, AxisType
+from tinygrad.uop.ops import Ops, AxisType, graph_rewrite
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.helpers import Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from test.helpers import not_support_multi_device, needs_second_gpu
@@ -247,6 +248,46 @@ class TestMultiAxis(unittest.TestCase):
         self.assertEqual(x.shard_view.shape, local.shape)
         perm = axes[::-1]
         self.assertEqual(x.permute(perm).sharding, tuple((i, ranges[a]) for i, a in enumerate(perm)))
+
+  def test_unshard_partial_tensor_index(self):
+    for index_shapes in (((),), ((2,),), ((2, 3),), ((2,), ()), ((), (2,)), ((2,), (3,))):
+      for counts in ((2,), (2, 3)):
+        with self.subTest(index_shapes=index_shapes, counts=counts):
+          idxs = tuple(UOp.const(0).expand(shape) for shape in index_shapes)
+          ranges = tuple(UOp.range(n, i, AxisType.LOCAL) for i, n in enumerate(counts))
+          axes = tuple(range(len(idxs), len(idxs)+len(counts)))
+          local = UOp.placeholder((2,)*len(idxs)+(1,)*len(counts), dtypes.float32, 0)
+          indexed = local.unshard(axes, ranges).index(*idxs)
+          ret = graph_rewrite(indexed, multi_pm)
+          rank = sum(len(shape) for shape in index_shapes)
+          self.assertEqual(ret.shape, indexed.shape)
+          self.assertEqual(ret.sharding, tuple((rank+i, rng) for i, rng in enumerate(ranges)))
+          self.assertEqual(ret.shard_view.shape, tuple(s for shape in index_shapes for s in shape)+(1,)*len(counts))
+
+  def test_unshard_full_tensor_index(self):
+    rng = UOp.range(2, 0, AxisType.LOCAL)
+    rows = UOp(Ops.STACK, src=tuple(UOp.const(i) for i in (0, 2, 3)))
+    for row_shape in ((3,), (1, 3)):
+      for local_cols in (1, 2):
+        with self.subTest(row_shape=row_shape, local_cols=local_cols):
+          local = UOp.placeholder((4, local_cols), dtypes.float32, 0)
+          cols = rng if local_cols == 1 else rng*2 + UOp(Ops.STACK, src=(UOp.const(0), UOp.const(1)))
+          indexed = local.unshard(1, rng).index(rows.reshape(row_shape), cols)
+          ret = graph_rewrite(indexed, multi_pm)
+          self.assertEqual(ret.shape, indexed.shape)
+          self.assertEqual(ret.sharding, ())
+          reshaped = indexed.reshape(1, indexed.numel())
+          self.assertEqual(graph_rewrite(reshaped, multi_pm).shape, reshaped.shape)
+
+  def test_unshard_strided_tensor_index(self):
+    rng = UOp.range(2, 0, AxisType.LOCAL)
+    local = UOp.placeholder((4, 1), dtypes.float32, 0)
+    fragment = UOp(Ops.UNSHARD, src=(local, rng)).permute(1, 0, 2).reshape(8, 1)
+    rows = rng + 2*UOp(Ops.STACK, src=tuple(UOp.const(i) for i in (0, 2, 3)))
+    indexed = fragment.index(rows, 0)
+    # Preserve the tensor index until its elements are scalarized; this layout has no contiguous sharding axis.
+    self.assertIs(graph_rewrite(indexed, multi_pm), indexed)
+    self.assertEqual(graph_rewrite(indexed.reshape(1, 3), multi_pm).shape, (1, 3))
 
   def test_uop_shard_axis_none(self):
     devices = ("NULL:0", "NULL:1")
