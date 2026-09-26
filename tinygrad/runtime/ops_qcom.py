@@ -225,7 +225,9 @@ class QCOMProgramData:
       self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=mesa.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
                        qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0] * self.samp_cnt
 
-      self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
+      # descriptors go after the consts, a6xx compute has 4096 bytes of them (256 vec4)
+      off = max(2048, round_up(imm_off + len(imm_vals), 0x40))
+      self.tex_off, self.ibo_off, self.samp_off = off, off + 0x40 * self.tex_cnt, off + 0x40 * (self.tex_cnt + self.ibo_cnt)
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
     else: self._parse_lib(obj.lib)
 
@@ -234,7 +236,7 @@ class QCOMProgramData:
     self.hw_stack_offset: int = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
     self.shared_size: int = max(1, (self.shmem - 1) // 1024)
     self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
-    self.kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + len(self.samplers) * 4, 0x100)
+    self.kernargs_alloc_size = round_up(self.samp_off + len(self.samplers) * 4, 0x100)
 
   def _parse_lib(self, lib):
     # Extract image binary
