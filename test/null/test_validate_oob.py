@@ -191,7 +191,7 @@ class TestValidateOOB(unittest.TestCase):
   def test_gated_local(self):
     with Context(CHECK_OOB=1, SPEC=2):
       gbuf = UOp.param(0, dtypes.uint, 400)
-      sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
+      sbuf = UOp.alloc((8,), dtypes.uint, addrspace=AddrSpace.LOCAL)
       gidx = UOp(Ops.SPECIAL, src=(UOp.const(416),), arg="gidx0")
       lidx = UOp(Ops.SPECIAL, src=(UOp.const(10),), arg="lidx0")
       store = sbuf.index(lidx.valid(lidx < 8)).store(UOp.const(1))

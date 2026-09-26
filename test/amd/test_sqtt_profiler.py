@@ -90,7 +90,7 @@ def custom_asm_rdna(A:UOp):
   return custom_asm(A, insts+[rdna3.s_endpgm()], WAVE_SIZE*2)
 
 def custom_asm(A, insts, num_threads, lds_size=0) -> UOp:
-  lds = UOp.placeholder((lds_size,), dtypes.uint8, addrspace=AddrSpace.LOCAL) if lds_size else None
+  lds = UOp.alloc((lds_size,), dtypes.uint8, addrspace=AddrSpace.LOCAL) if lds_size else None
   return UOp(Ops.PROGRAM, src=(UOp.sink(A, lds, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
       UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
 

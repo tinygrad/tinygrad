@@ -92,7 +92,7 @@ class TestLowerIndexDtype(unittest.TestCase):
     self.assertEqual(sh.src[1].dtype, dtypes.long)
 
   def test_reg_buffer_size_lowers(self):
-    reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
+    reg = UOp.alloc((4,), dtypes.float, addrspace=AddrSpace.REG)
     self.assertEqual(reg.arg.size, 4)
     lowered = graph_rewrite(reg.sink(), pm_lower_weak)
     self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),

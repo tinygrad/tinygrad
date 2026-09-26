@@ -11,7 +11,7 @@ def wait_loop_kernel(C:UOp, N=10) -> UOp:
   # the compare and conditional backedge are expanded by the renderers from RANGE/BACKEDGE
   l = UOp.loop(0)
 
-  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
 
   # i = 0
   i = i.after(i[0].store(0))
@@ -30,7 +30,7 @@ def nested_loop_kernel(C:UOp) -> UOp:
   r = UOp.range(4, 0)
   l = UOp.loop(1)
 
-  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
   i = i.after(i[0].store(0))
 
   inc = i.after(l, r)[0].load() + 1
@@ -45,7 +45,7 @@ def pressure_loop_kernel(C:UOp, n=13) -> UOp:
   vs = [C[j+1].load() for j in range(n)]
   l = UOp.loop(0)
 
-  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
   i = i.after(i[0].store(0))
 
   inc = i.after(l)[0].load() + 1
@@ -65,7 +65,7 @@ def two_loops_kernel(C:UOp) -> UOp:
   # two sequential loops on the same counter: ++ until 10, then ++ until 25
   l1, l2 = UOp.loop(0), UOp.loop(1)
 
-  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
   i = i.after(i[0].store(0))
 
   inc1 = i.after(l1)[0].load() + 1
@@ -80,7 +80,7 @@ def loop_in_loop_kernel(C:UOp) -> UOp:
   # outer loop while i < 12, inner loop increments until i % 4 == 0 -> 12
   l1, l2 = UOp.loop(0), UOp.loop(1)
 
-  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
   i = i.after(i[0].store(0))
 
   inc = i.after(l1, l2)[0].load() + 1

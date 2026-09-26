@@ -397,7 +397,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp.param(0, dtypes.int, 16)
-    smem = UOp.placeholder((18,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+    smem = UOp.alloc((18,), dtypes.int, addrspace=AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0")
     st = smem.index(lidx).store(glbl0.index(lidx).load())
     barrier = st.barrier()
@@ -538,47 +538,47 @@ class TestUOpTags(unittest.TestCase):
     assert g.ssimplify() == 6
 
 class TestUOpGetItem(unittest.TestCase):
-  def _placeholder(self, shape, dtype=dtypes.half):
-    return UOp.placeholder(shape, dtype, slot=0, addrspace=AddrSpace.LOCAL)
+  def _alloc(self, shape, dtype=dtypes.half):
+    return UOp.alloc(shape, dtype, addrspace=AddrSpace.LOCAL)
 
   # full slices (no shrink)
   def test_full_slice(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     self.assertEqual(p[:, :].shape, (64, 64))
   def test_full_slice_explicit(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     self.assertEqual(p[0:64, 0:64].shape, (64, 64))
 
   # partial slices (shrink)
   def test_shrink_cols(self):
-    p = self._placeholder((64, 80))
+    p = self._alloc((64, 80))
     self.assertEqual(p[:, :64].shape, (64, 64))
   def test_shrink_rows(self):
-    p = self._placeholder((80, 64))
+    p = self._alloc((80, 64))
     self.assertEqual(p[:64, :].shape, (64, 64))
   def test_shrink_both(self):
-    p = self._placeholder((80, 80))
+    p = self._alloc((80, 80))
     self.assertEqual(p[:64, :64].shape, (64, 64))
   def test_shrink_start(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     self.assertEqual(p[8:, :].shape, (56, 64))
   def test_shrink_start_and_end(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     self.assertEqual(p[8:56, 4:60].shape, (48, 56))
 
   # mixed slice and index
   def test_index_and_slice(self):
-    p = self._placeholder((64, 80))
+    p = self._alloc((64, 80))
     r = UOp.range(64, 100)
     result = p[r, :64]
     self.assertEqual(result.shape, (64,))
   def test_slice_and_index(self):
-    p = self._placeholder((80, 64))
+    p = self._alloc((80, 64))
     r = UOp.range(64, 100)
     result = p[:64, r]
     self.assertEqual(result.shape, (64,))
   def test_shrink_then_index(self):
-    p = self._placeholder((64, 80))
+    p = self._alloc((64, 80))
     s = p[:, :64]
     r = UOp.range(64, 100)
     result = s[r]
@@ -586,30 +586,30 @@ class TestUOpGetItem(unittest.TestCase):
 
   # integer index (no slice)
   def test_int_index(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     result = p[0]
     self.assertEqual(result.shape, (64,))
 
   # ellipsis
   def test_ellipsis_all_slices(self):
-    p = self._placeholder((64, 80))
+    p = self._alloc((64, 80))
     self.assertEqual(p[..., :64].shape, (64, 64))
   def test_ellipsis_with_int(self):
-    p = self._placeholder((64, 80))
+    p = self._alloc((64, 80))
     r = UOp.range(64, 100)
     result = p[..., r]
     self.assertEqual(result.op, Ops.INDEX)
   def test_ellipsis_only(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     self.assertEqual(p[...].shape, (64, 64))
 
   # all slices should not create a bare INDEX
   def test_all_slices_no_index(self):
-    p = self._placeholder((64, 80))
+    p = self._alloc((64, 80))
     result = p[:, :64]
     self.assertNotEqual(result.op, Ops.INDEX)
   def test_all_full_slices_no_index(self):
-    p = self._placeholder((64, 64))
+    p = self._alloc((64, 64))
     result = p[:, :]
     self.assertNotEqual(result.op, Ops.INDEX)
 

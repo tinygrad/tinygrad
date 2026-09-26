@@ -49,7 +49,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0, dtype=dtypes.int)
   slice_src = src[G, :]
-  reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
+  reg = UOp.alloc((1,), dest.dtype, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
   R = UOp.range(src.shape[1], 1, AxisType.REDUCE)
   reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
@@ -65,12 +65,12 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
   j = UOp.range(N, 2, axis_type=AxisType.REDUCE)
 
   k_inner = UOp.range(d, 3, axis_type=AxisType.REDUCE)
-  qk_acc = UOp.placeholder((1,), Q.dtype, 0, addrspace=AddrSpace.REG)
+  qk_acc = UOp.alloc((1,), Q.dtype, addrspace=AddrSpace.REG)
   qk_acc = qk_acc.after(i, j)[0].set(0.0)
   qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
   qk_score = qk_acc[0] / (d ** 0.5)
 
-  out_acc = UOp.placeholder((1,), Q.dtype, 1, addrspace=AddrSpace.REG)
+  out_acc = UOp.alloc((1,), Q.dtype, addrspace=AddrSpace.REG)
   out_acc = out_acc.after(i, d_out)[0].set(0.0)
   out_acc = out_acc[0].set(out_acc.after(j)[0] + qk_score * V[j, d_out], end=j)
 
@@ -273,7 +273,7 @@ class TestCustomKernel(unittest.TestCase):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
     def kernel(C:UOp, A:UOp) -> UOp:
       r, l = UOp.range(4, 0), UOp.loop(1)
-      cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
+      cnt = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
       cnt = cnt.after(r)[0].set(0)
       cnt = cnt.after(cnt[0].store(nxt:=cnt.after(l)[0] + 1).backedge(l, nxt < 3))
       return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
@@ -376,7 +376,7 @@ class TestCustomKernel(unittest.TestCase):
     # TODO: broken now, the valid is dropped. the valid on one index of the 2d LOCAL tmp gates the whole store, only j == 0 writes tmp[i, 0]
     def kernel(C:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.REDUCE)
-      tmp = UOp.placeholder((4, 4), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      tmp = UOp.alloc((4, 4), dtypes.float, addrspace=AddrSpace.LOCAL)
       st = tmp[i.valid(j.eq(0)), 0].store((j+1).cast(dtypes.float)).end(j)
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), fxn=kernel)[0].tolist(), [1.]*4)
@@ -564,7 +564,7 @@ class TestUnshardIndex(unittest.TestCase):
       ir = UOp.range(8, 1, AxisType.LOOP)
       j = UOp.range(8, 2, AxisType.LOOP)
       # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows [ty*8, ty*8+8).
-      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      frag = UOp.alloc((8, 8), dtypes.float32, addrspace=AddrSpace.REG).unshard((0,), (ty,))
       return C[ty*8 + ir, j].store(frag[ty*8 + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="contig_frag"))
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)
@@ -580,7 +580,7 @@ class TestUnshardIndex(unittest.TestCase):
       ir = UOp.range(8, 1, AxisType.LOOP)
       j = UOp.range(8, 2, AxisType.LOOP)
       # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows {ty, ty+8, ..., ty+56}.
-      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      frag = UOp.alloc((8, 8), dtypes.float32, addrspace=AddrSpace.REG).unshard((0,), (ty,))
       return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)
@@ -592,7 +592,7 @@ class TestUnshardIndex(unittest.TestCase):
       ty = UOp.range(8, 0, AxisType.LOCAL)
       ir = UOp.range(8, 1, AxisType.LOOP)
       j = UOp.range(8, 2, AxisType.LOOP)
-      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      frag = UOp.alloc((8, 8), dtypes.float32, addrspace=AddrSpace.REG).unshard((0,), (ty,))
       return C[ty + ir, j].store(frag[ty + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="bad_frag"))
     with self.assertRaisesRegex(RuntimeError, "cannot shard index"):
       self._run(kernel, (64, 8))
@@ -620,7 +620,7 @@ class TestUnshardAlu(unittest.TestCase):
     def kernel(C:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
       # 8 values per thread, 8 threads -> 64-value full view
-      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
+      frag = UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.LOCAL).unshard((0,), (ty,))
       v = frag.after(frag.store(1.5)) * 2.0
       return C.store(v).end(ty).sink(arg=KernelInfo(name="alu_scalar", opts_to_apply=()))
     out = _run_fragment_kernel(self, kernel, (64,))
@@ -631,7 +631,7 @@ class TestUnshardAlu(unittest.TestCase):
     # UNSHARD + whole unsharded same-shape value: each shard adds its own sub-view of A.
     def kernel(C:UOp, A:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
-      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
+      frag = UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.LOCAL).unshard((0,), (ty,))
       v = frag.after(frag.store(0.0)) + A
       return C.store(v).end(ty).sink(arg=KernelInfo(name="alu_subview", opts_to_apply=()))
     a = Tensor(np.arange(64, dtype=np.float32))
@@ -648,7 +648,7 @@ class TestUnshardStore(unittest.TestCase):
     # single-axis: 8 threads each own 8 values of the 64-value output tile
     def kernel(C:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
-      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
+      frag = UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.LOCAL).unshard((0,), (ty,))
       v = frag.after(frag.store(0.0)) + 2.5
       return C.store(v).end(ty).sink(arg=KernelInfo(name="store_unshard", opts_to_apply=()))
     out = _run_fragment_kernel(self, kernel, (64,))
@@ -661,7 +661,7 @@ class TestUnshardStore(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       ty = UOp.range(4, 0, AxisType.LOCAL)
       tx = UOp.range(2, 1, AxisType.LOCAL)
-      frag = UOp.placeholder((2, 1, 1, 2), dtypes.float32, 0, AddrSpace.REG).unshard((1, 2), (ty, tx))
+      frag = UOp.alloc((2, 1, 1, 2), dtypes.float32, addrspace=AddrSpace.REG).unshard((1, 2), (ty, tx))
       v = frag.after(frag.store(0.0)) + A
       return C.store(v).end(tx, ty).sink(arg=KernelInfo(name="store_unshard_2axis", opts_to_apply=()))
     a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
