@@ -148,6 +148,32 @@ class TestRecurse(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
 
+  def test_self_referential_replacement(self):
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float).sin()
+    for bottom_up in (False, True):
+      with self.subTest(bottom_up=bottom_up):
+        with self.assertRaisesRegex(RuntimeError, "graph_rewrite stalled: unresolved rewrite dependencies") as cm:
+          graph_rewrite(a.sink(), _substitute, {a:a.sqrt()}, bottom_up=bottom_up)
+        self.assertIn("SIN@", str(cm.exception))
+        self.assertIn("SQRT@", str(cm.exception))
+        self.assertIn("waits for", str(cm.exception))
+
+  def test_self_referential_call_argument(self):
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
+    pm = PatternMatcher([(UPat(Ops.STAGE, name="x"), lambda x: UOp(Ops.CALL, src=(x.param_like(0), x)))])
+    with self.assertRaisesRegex(RuntimeError, "unresolved rewrite dependencies") as cm:
+      graph_rewrite(a.sink(), pm, bottom_up=True)
+    self.assertIn("STAGE@", str(cm.exception))
+    self.assertIn("CALL@", str(cm.exception))
+
+  def test_indirect_rewrite_dependency_cycle(self):
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
+    b = UOp.variable('b', 0, 10, dtype=dtypes.float)
+    with self.assertRaisesRegex(RuntimeError, "unresolved rewrite dependencies") as cm:
+      graph_rewrite(a.sink(), _substitute, {a:b.sqrt(), b:a.sin()}, bottom_up=True)
+    self.assertIn("SQRT@", str(cm.exception))
+    self.assertIn("SIN@", str(cm.exception))
+
   def test_inf_loop_bottom_up(self):
     a = UOp.const(3)
     pm = PatternMatcher([
@@ -156,6 +182,36 @@ class TestRecurse(unittest.TestCase):
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
+
+class TestCallRewrite(unittest.TestCase):
+  def test_wrap_node_in_call(self):
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
+    call = UOp(Ops.CALL, src=(a,))
+    for walk in (False, True):
+      for bottom_up in (False, True):
+        with self.subTest(walk=walk, bottom_up=bottom_up):
+          self.assertIs(graph_rewrite(a.sink(), _substitute, {a:call}, walk=walk, bottom_up=bottom_up), call.sink())
+
+  def test_body_shared_with_argument(self):
+    a, b = UOp.const(3), UOp.const(4)
+    call = UOp(Ops.CALL, src=(a, a))
+    for walk in (False, True):
+      for bottom_up in (False, True):
+        for enter_calls in (False, True):
+          with self.subTest(walk=walk, bottom_up=bottom_up, enter_calls=enter_calls):
+            ret = graph_rewrite(call, _substitute, {a:b}, walk=walk, bottom_up=bottom_up, enter_calls=enter_calls)
+            self.assertIs(ret, UOp(Ops.CALL, src=(b if enter_calls else a, b)))
+
+  def test_body_shared_with_sibling(self):
+    a, b = UOp.const(3), UOp.const(4)
+    call = UOp(Ops.CALL, src=(a,))
+    for walk in (False, True):
+      for bottom_up in (False, True):
+        for call_first in (False, True):
+          with self.subTest(walk=walk, bottom_up=bottom_up, call_first=call_first):
+            root = UOp.sink(call, a) if call_first else UOp.sink(a, call)
+            expected = UOp.sink(call, b) if call_first else UOp.sink(b, call)
+            self.assertIs(graph_rewrite(root, _substitute, {a:b}, walk=walk, bottom_up=bottom_up), expected)
 
 def bidir_append(ctx, x, b): ctx.append((x.val if x.op is Ops.CONST else "+", b))
 class TestBidirectional(unittest.TestCase):
