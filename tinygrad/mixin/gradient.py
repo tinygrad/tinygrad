@@ -88,7 +88,9 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
-  (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
+  (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret:
+    ((ctx.copy_to_device(ret.device) if isinstance(ret.device, tuple) else ctx)
+      .shrink(tuple((r, r+1) for r in ret.src[1:]) + (None,)*len(ret.src[0].shape)).reshape(ret.src[0].shape),) + (None,)*(len(ret.src)-1)),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
     (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),

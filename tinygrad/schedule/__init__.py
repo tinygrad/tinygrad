@@ -199,9 +199,11 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
   if buf.op is Ops.UNSHARD:
     if isinstance(c.device, str): return None
-    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
-    view = contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])
-    return None if view is None else view.unshard(unshard.arg, unshard.src[1:])
+    if not (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).sharding: return None
+    view = contiguous_mops_to_view(ctx, unshard.shard_view, unshard.shard_view)
+    if view is None: return None
+    view = view.unshard(tuple(a for a,_ in unshard.sharding), tuple(r for _,r in unshard.sharding))
+    return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
   if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
   buf, offset = cv
