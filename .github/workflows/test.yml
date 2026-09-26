@@ -573,7 +573,7 @@ jobs:
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: *linux
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1

@@ -1096,7 +1096,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
       if self.op is Ops.SUB: return s0_vmin-s1_vmax, s0_vmax-s1_vmin
       if self.op is Ops.AND and dtypes.is_int(self.dtype) and s1_vmin == s1_vmax >= 0:
-        return 0, s1_vmax if s0_vmin < 0 else min(s0_vmax, s1_vmax)
+        return 0, s1_vmax if s0_vmin < 0 else min(s0_vmax, int(s1_vmax) & ((1 << int(s0_vmax).bit_length()) - 1))
       if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
