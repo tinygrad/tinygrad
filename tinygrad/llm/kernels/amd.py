@@ -774,13 +774,12 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   updates, stores = [], []
   for row_idx,row in enumerate(rows):
     previous = tuple(current.after(token)[row_idx*key_dim//32+i].load() for i in range(key_dim//32))
-    if alpha_dim > 1: previous = tuple(x * alpha[bh, token, col].load() for x,col in zip(previous, cols))
-    av, bv = 1 if alpha_dim > 1 else alpha[bh, token, 0].load(), beta[bh, token].load()
-    state_k = warp_reduce(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
-    state_q = warp_reduce(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
-    delta = (v[bh, token, row].load() - state_k*av) * bv
-    updates += [x*av + delta*y for x,y in zip(previous, keys)]
-    stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q*av + delta*kq[bh, token]))
+    decayed, bv = tuple(x * alpha[bh, token, col if alpha_dim > 1 else 0].load() for x,col in zip(previous, cols)), beta[bh, token].load()
+    state_k = warp_reduce(sum((x*y for x,y in zip(decayed, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
+    state_q = warp_reduce(sum((x*y for x,y in zip(decayed, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
+    delta = (v[bh, token, row].load() - state_k) * bv
+    updates += [x + delta*y for x,y in zip(decayed, keys)]
+    stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q + delta*kq[bh, token]))
   step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
   state_stores = (state[bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
