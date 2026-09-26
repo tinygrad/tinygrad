@@ -1,6 +1,6 @@
 import gc, unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, UOp
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, AxisType
 from tinygrad.helpers import Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from test.helpers import not_support_multi_device, needs_second_gpu
@@ -214,6 +214,26 @@ class TestMultiAxis(unittest.TestCase):
     t = Tensor.ones(4, 8).shard(devices, axis=0)
     self.assertEqual(t.reshape(2, 16).uop.axis, 0)
     self.assertEqual(t.reshape(2, 2, 8).uop.axis, 0)
+
+  def test_shard_empty_dimensions(self):
+    for shape in ((0,), (0, 4), (4, 0), (0, 4, 8), (0, 4, 0), (2, 0, 4), (0, 0, 4)):
+      for axis in range(len(shape)):
+        with self.subTest(shape=shape, axis=axis):
+          x = Tensor.empty(*shape).shard(("NULL:0", "NULL:1"), axis=axis)
+          self.assertEqual(x.uop.axis, axis)
+          self.assertEqual(tuple(a for a, _ in x.uop.sharding), (axis,))
+          self.assertEqual(x.uop.shard_view.shape, tuple(s//2 if i == axis else s for i, s in enumerate(shape)))
+          self.assertEqual((x+1).realize().shape, shape)
+
+  def test_unshard_singleton_range(self):
+    rng = UOp.range(1, 0, AxisType.LOCAL)
+    for shape, axis in (((1,), 0), ((4, 1), 1)):
+      with self.subTest(shape=shape, axis=axis):
+        local = UOp.placeholder(shape, dtypes.float32, 0)
+        x = local.unshard(axis, rng)
+        self.assertEqual(x.axis, axis)
+        self.assertEqual(x.sharding, ((axis, rng),))
+        self.assertEqual(x.shard_view.shape, shape)
 
   def test_uop_shard_axis_none(self):
     devices = ("NULL:0", "NULL:1")

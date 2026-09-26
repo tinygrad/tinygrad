@@ -584,6 +584,15 @@ class TestUnshardIndex(unittest.TestCase):
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_singleton_fragment(self):
+    def kernel(C:UOp) -> UOp:
+      t = UOp.range(1, 0, AxisType.LOCAL)
+      frag = UOp.placeholder((1,), dtypes.float32, 0, AddrSpace.REG).unshard(0, t)
+      frag = frag.after(frag.store(3.0))
+      return C.store(frag+1).end(t).sink(arg=KernelInfo(name="singleton_frag", opts_to_apply=()))
+    np.testing.assert_array_equal(self._run(kernel, (1,)), [4.0])
+
   def test_fragment_index_cannot_shard(self):
     # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows -- this matches neither
     # the contiguous nor the strided ownership pattern, so index_multi must raise.

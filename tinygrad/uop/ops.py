@@ -94,8 +94,15 @@ def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def _reshape_shard_axis(src_shape:tuple[sint, ...], shape:tuple[sint, ...], src_axis:int, count:int) -> int:
   """map src_axis of src_shape through a reshape to shape: the axis boundary must survive intact (new_axis is the
   last one that preserves prod(prior to new_axis)) and the new axis must stay divisible by the shard count"""
-  acc = [ssimplify(x) for x in itertools.accumulate(shape, operator.mul, initial=1)]
-  target = ssimplify(prod(src_shape[:src_axis]))
+  def boundaries(dims:tuple[sint, ...]):
+    zeros, size = 0, 1
+    for dim in dims:
+      yield zeros, size
+      # Keep boundaries after different empty dimensions distinct instead of collapsing every prefix to zero.
+      if resolve(dim == 0, False): zeros, size = zeros+1, 1
+      else: size = ssimplify(size*dim)
+  acc = list(boundaries(shape))
+  target = list(boundaries(src_shape))[src_axis]
   new_axis = len(acc) - acc[::-1].index(target) - 1 if target in acc else len(acc)
   if new_axis >= len(shape) or shape[new_axis] % count != 0:
     raise RuntimeError(f"reshape {src_shape} -> {shape} moved items between shards")
