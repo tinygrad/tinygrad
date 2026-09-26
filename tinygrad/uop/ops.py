@@ -91,9 +91,9 @@ def broadcast_axes(src_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tu
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 
-def _reshape_shard_axis(src_shape:tuple[sint, ...], shape:tuple[sint, ...], src_axis:int, count:int) -> int:
+def _reshape_shard_axis(src_shape:tuple[sint, ...], shape:tuple[sint, ...], src_axis:int, count:int, end_axis:int|None=None) -> int:
   """map src_axis of src_shape through a reshape to shape: the axis boundary must survive intact (new_axis is the
-  last one that preserves prod(prior to new_axis)) and the new axis must stay divisible by the shard count"""
+  last one before end_axis that preserves prod(prior to new_axis)) and the new axis must stay divisible by the shard count"""
   def boundaries(dims:tuple[sint, ...]):
     zeros, size = 0, 1
     for dim in dims:
@@ -101,10 +101,10 @@ def _reshape_shard_axis(src_shape:tuple[sint, ...], shape:tuple[sint, ...], src_
       # Keep boundaries after different empty dimensions distinct instead of collapsing every prefix to zero.
       if resolve(dim == 0, False): zeros, size = zeros+1, 1
       else: size = ssimplify(size*dim)
-  acc = list(boundaries(shape))
+  acc = list(boundaries(shape))[:end_axis]
   target = list(boundaries(src_shape))[src_axis]
   new_axis = len(acc) - acc[::-1].index(target) - 1 if target in acc else len(acc)
-  if new_axis >= len(shape) or shape[new_axis] % count != 0:
+  if new_axis >= len(acc) or shape[new_axis] % count != 0:
     raise RuntimeError(f"reshape {src_shape} -> {shape} moved items between shards")
   return new_axis
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
@@ -727,7 +727,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op not in {Ops.RESHAPE, Ops.PERMUTE}: return ()
     sharding = self.src[0].sharding
     if self.op is Ops.PERMUTE: return tuple(sorted((self.marg.index(a), r) for a,r in sharding))
-    return tuple((_reshape_shard_axis(self.src[0].shape, self.shape, ax, int(rng.vmax)+1), rng) for ax, rng in sharding)
+    # Map right-to-left so singleton ranges with the same prefix cannot claim the same output axis.
+    ret:list[tuple[int, UOp]] = []
+    for ax, rng in reversed(sharding):
+      ret.append((_reshape_shard_axis(self.src[0].shape, self.shape, ax, int(rng.vmax)+1, ret[-1][0] if ret else None), rng))
+    return tuple(reversed(ret))
 
   @functools.cached_property
   def shard_view(self) -> UOp:

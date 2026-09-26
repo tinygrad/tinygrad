@@ -235,6 +235,19 @@ class TestMultiAxis(unittest.TestCase):
         self.assertEqual(x.sharding, ((axis, rng),))
         self.assertEqual(x.shard_view.shape, shape)
 
+  def test_unshard_multi_singleton_ranges(self):
+    for counts in ((1, 2), (2, 1), (1, 1), (1, 1, 2), (1, 2, 1), (1, 1, 1)):
+      with self.subTest(counts=counts):
+        axes = tuple(range(len(counts)))
+        ranges = tuple(UOp.range(n, i, AxisType.LOCAL) for i, n in enumerate(counts))
+        local = UOp.placeholder((1,)*len(counts), dtypes.float32, 0)
+        x = local.unshard(axes, ranges)
+        self.assertEqual(x.shape, counts)
+        self.assertEqual(x.sharding, tuple(zip(axes, ranges)))
+        self.assertEqual(x.shard_view.shape, local.shape)
+        perm = axes[::-1]
+        self.assertEqual(x.permute(perm).sharding, tuple((i, ranges[a]) for i, a in enumerate(perm)))
+
   def test_uop_shard_axis_none(self):
     devices = ("NULL:0", "NULL:1")
     u = Tensor.ones(8).contiguous().realize().uop

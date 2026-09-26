@@ -593,6 +593,17 @@ class TestUnshardIndex(unittest.TestCase):
       return C.store(frag+1).end(t).sink(arg=KernelInfo(name="singleton_frag", opts_to_apply=()))
     np.testing.assert_array_equal(self._run(kernel, (1,)), [4.0])
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_multi_singleton_fragment(self):
+    for shape in ((1, 2), (2, 1), (1, 1), (1, 1, 2)):
+      with self.subTest(shape=shape):
+        def kernel(C:UOp) -> UOp:
+          ranges = tuple(UOp.range(n, i, AxisType.LOCAL) for i, n in enumerate(shape))
+          frag = UOp.placeholder((1,)*len(shape), dtypes.float32, 0, AddrSpace.REG).unshard(tuple(range(len(shape))), ranges)
+          frag = frag.after(frag.store(3.0))
+          return C.store(frag+1).end(*ranges).sink(arg=KernelInfo(name="multi_singleton_frag", opts_to_apply=()))
+        np.testing.assert_array_equal(self._run(kernel, shape), np.full(shape, 4.0))
+
   def test_fragment_index_cannot_shard(self):
     # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows -- this matches neither
     # the contiguous nor the strided ownership pattern, so index_multi must raise.
