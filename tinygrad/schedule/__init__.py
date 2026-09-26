@@ -107,7 +107,7 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
-           **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
+           **{f"p{i}":x.unbound() for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
@@ -211,7 +211,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def is_store_after(u:UOp) -> bool:
-  return u.op is Ops.AFTER and not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
+  return u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
 
 def collect_stores(ctx:CallifyCtx, u:UOp):
   if is_store_after(u): ctx.stores.append(u)
@@ -245,12 +245,12 @@ def replace_input_buffer(ctx:CallifyCtx, b:UOp):
   return b.param_like(len(ctx.replacements)-1)
 
 pm_replace_buf = PatternMatcher([
-  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
+  # replace GLOBAL BUFFERs with PARAMs for cache key normalization (Variables are ALU PARAMs, they don't match this)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
-  # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
-  (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
+  # replace bound Variables with renamed value-stripped PARAMs for cache key normalization, so different values hit same cache
+  (UPat(Ops.PARAM, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
 def transform_to_call(big_sink:UOp) -> UOp:
@@ -282,8 +282,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
     if b.is_bound_var:
-      v, val = b.unbind()
-      nm = v.expr
+      nm, val = b.expr, b.arg.val
       if nm not in used_vars: continue
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val

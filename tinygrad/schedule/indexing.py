@@ -67,8 +67,6 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.RANGE, Ops.SPECIAL}: return ()
-  # the store of a bound Variable only carries the input value, it has no data srcs
-  if op is Ops.STORE and src[0].is_variable: return ()
   if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END, Ops.BACKEDGE}: return src[:1]
   return src
 

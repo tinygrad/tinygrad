@@ -28,9 +28,9 @@ class TestCallShape(unittest.TestCase):
     def f(x:Tensor) -> Tensor: return x * 2
     sz = UOp.variable("sz", 1, 8)
     shape = f(Tensor.empty(8)[:sz.bind(5)]).shape
-    # the PARAM should be gone, replaced with the BIND from the call arg
+    # the inner param should be gone, replaced with the bound Variable from the call arg
     self.assertIsInstance(shape[0], UOp)
-    self.assertNotEqual(shape[0].op, Ops.PARAM)
+    self.assertTrue(shape[0].is_bound_var)
     self.assertEqual(shape[0], sz.bind(5))
 
   def test_call_shape_expr_substitution(self):
@@ -40,7 +40,7 @@ class TestCallShape(unittest.TestCase):
     sz = UOp.variable("sz", 1, 10)
     shape = f(Tensor.empty(10, 4)[:sz.bind(3)]).shape
     self.assertIsInstance(shape[0], UOp)
-    self.assertNotEqual(shape[0].op, Ops.PARAM)
+    self.assertTrue(shape[0].is_bound_var)
     self.assertEqual(shape[1], 4)
 
   def test_call_shape_no_param_passthrough(self):
@@ -79,10 +79,10 @@ class TestArgOrder(unittest.TestCase):
     value = p1.reshape(x.shape).shrink_to((p2,))
     bound = sz.bind(5)
     outs = UOp.call_with_outputs((value,), x.uop, bound, output_pos=(0,))
-    # the minted output's shape substituted PARAM(2) with the bind arg from position 2 in the arg list
+    # the minted output's shape substituted PARAM(2) with the bound Variable from position 2 in the arg list
     shp = outs[0].shape[0]
     self.assertIsInstance(shp, UOp)
-    self.assertNotEqual(shp.op, Ops.PARAM)
+    self.assertTrue(shp.is_bound_var)
     self.assertEqual(shp, bound)
 
   def test_output_pos_must_be_ascending(self):

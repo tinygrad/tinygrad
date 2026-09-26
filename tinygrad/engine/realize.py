@@ -14,7 +14,8 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_bound_var)
 def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
-  bound = {s.src[0].expr: s.src[1].src[1] for s in call.src[1:] if s.is_bound_var}
+  # a bound value is a bare CONST: the Variable states the width
+  bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
   return [bound.get(v.expr, v) for v in prg.arg.vars]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
