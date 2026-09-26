@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, patch, layout_args
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, ccall, patch, layout_args
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
@@ -102,8 +102,8 @@ def mtl_poll(tl:UOp) -> UOp: return mtl_msg(tl, mtl_sel(tl.device, "event"), "si
 
 class MetalQueue(HWQueue):
   dev:MetalDevice
-  def __init__(self, ctx:EncodeCtx, submit:UOp):
-    super().__init__(ctx, submit)
+  def __init__(self, submit:UOp):
+    super().__init__(submit)
     self.rows, self.cmds, self.sizes, self.stamps, self.nbytes = list[tuple[int, UOp]](), list[tuple](), list[tuple[int, int]](), list[UOp](), 0
 
   def exec(self, call:UOp, prg:UOp):
@@ -187,7 +187,7 @@ class MetalAllocator(Allocator['MetalDevice']):
 class MetalDevice(Compiled):
   has_copy_queue = False
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_metal_compute", name="submit"), lambda ctx, submit: encode_submit(MetalQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_metal_compute", name="submit"), lambda submit: encode_submit(MetalQueue(submit))),
   ])
   pm_lower = PatternMatcher([
     (UPat.var("tl").index(UPat(Ops.CONST, arg=0)).load(), lambda tl: mtl_poll(tl) if tl.without_after.tag == "timeline" else None),
