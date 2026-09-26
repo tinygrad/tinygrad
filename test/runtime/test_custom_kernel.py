@@ -263,7 +263,7 @@ class TestCustomKernel(unittest.TestCase):
     # the accumulator of the reduce does not reuse the slot of a REG placeholder in the kernel
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.REDUCE)
-      reg = UOp.placeholder((1,), dtypes.float, 0, addrspace=AddrSpace.REG)
+      reg = UOp.alloc((1,), dtypes.float, addrspace=AddrSpace.REG)
       reg = reg.after(i)[0].set(A[i, 0])
       return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
