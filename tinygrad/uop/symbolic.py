@@ -1,6 +1,6 @@
 # all of symbolic lives here now
 import math
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype
 from tinygrad.dtype import PyConst, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
@@ -206,6 +206,12 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
     return unwrap(UOp.usum(*np).divides(d))<(c//d)
   return None
 
+def lt_cancel(a:UOp, b:UOp) -> UOp|None:
+  # a+z<b+z -> a<b
+  ta, tb = Counter(a.split_uop(Ops.ADD)), Counter(b.split_uop(Ops.ADD))
+  if not (common:=ta&tb): return None
+  return a.const_like(0).usum(*(ta-common).elements()) < b.const_like(0).usum(*(tb-common).elements())
+
 def canonicalize_simplex(X:UOp) -> UOp|None:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
@@ -296,6 +302,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val) if 0 < c.val else None),
   (UPat.var("x", dtypes.weakint)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  (UPat.var("a", dtypes.weakint) < UPat.var("b"), lt_cancel),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
   ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range

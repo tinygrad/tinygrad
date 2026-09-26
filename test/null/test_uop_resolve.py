@@ -101,10 +101,8 @@ class TestUOpResolve(unittest.TestCase):
 
   def test_x_lt_xp1(self):
     x = UOp.variable("i", 1, 10)
-    u = x < (x+1)
-    # TODO: improve
-    with self.assertRaises(ValueError):
-      bool(u)
+    self.assertTrue(x < (x+1))
+    self.assertFalse((x+1) < x)
 
   def test_and_true(self):
     u = UOp.variable("b", False, True, dtypes.bool) & True

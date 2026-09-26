@@ -66,6 +66,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 5) < Variable("b", 5, 6), 0, 1, "(a<b)")
     self.helper_test_variable(Variable("a", 5, 6) < Variable("b", 3, 5), 0, 0, "False")
     self.helper_test_variable(Variable("a", 3, 4) < Variable("a", 3, 4), 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 8) < Variable("a", 3, 8)+1, 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 8) < Variable("a", 3, 8)+Variable("b", 0, 5), 0, 1, "(0<b)")
+    self.helper_test_variable(Variable("a", 3, 8)+Variable("b", 0, 5) < Variable("a", 3, 8), 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 8)+Variable("b", 0, 5)+Variable("c", 0, 5) < Variable("a", 3, 8)+Variable("c", 0, 5)+2, 0, 1, "(b<2)")
 
   def test_lt_divides(self):
     expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
