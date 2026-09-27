@@ -99,7 +99,8 @@ pm_gradient = PatternMatcher([
    lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="dest"), UPat())))), lambda ctx,dest: (None, ctx)),
-  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))), partial_store_gradient),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))),
+   lambda ctx, dest, view: partial_store_gradient(ctx, dest, view)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
