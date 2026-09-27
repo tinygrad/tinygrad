@@ -1179,11 +1179,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
-  def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None):
-    ret = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(to_max_shape(shape)),
-                                      addrspace=addrspace, device=device))
+  def alloc(shape:tuple[sint, ...], dtype:DType, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None):
+    ret = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), strong_dtype(dtype), prod(to_max_shape(shape)), addrspace=addrspace, device=device))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
-  def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
+  def alloc_like(self, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, addrspace)
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, volatile=False, tag=None):

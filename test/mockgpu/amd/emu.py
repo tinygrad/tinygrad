@@ -1242,7 +1242,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   n_a_elems = n_grps * M * K if M == 4 else M * K
   n_b_elems = n_grps * N * K if M == 4 else N * K
   # Use a uint32 temp array: the optimizer folds bitcast(uint32->f32) chains on float arrays, losing conversions.
-  tmp = UOp.alloc((n_a_elems + n_b_elems,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  tmp = UOp.alloc((n_a_elems + n_b_elems,), dtypes.uint32, AddrSpace.LOCAL)
 
   def cvt_elem(raw: UOp, sub_idx: int, fp8_fmt: str) -> UOp:
     if is_i8:  # extract i8, sign-extend to i32

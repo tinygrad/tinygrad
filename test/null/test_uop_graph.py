@@ -397,7 +397,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp.param(0, dtypes.int, 16)
-    smem = UOp.alloc((18,), dtypes.int, addrspace=AddrSpace.LOCAL)
+    smem = UOp.alloc((18,), dtypes.int, AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0")
     st = smem.index(lidx).store(glbl0.index(lidx).load())
     barrier = st.barrier()
@@ -539,7 +539,7 @@ class TestUOpTags(unittest.TestCase):
 
 class TestUOpGetItem(unittest.TestCase):
   def _alloc(self, shape, dtype=dtypes.half):
-    return UOp.alloc(shape, dtype, addrspace=AddrSpace.LOCAL)
+    return UOp.alloc(shape, dtype, AddrSpace.LOCAL)
 
   # full slices (no shrink)
   def test_full_slice(self):
