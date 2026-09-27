@@ -85,6 +85,16 @@ class TestArgOrder(unittest.TestCase):
     self.assertTrue(shp.is_bound_var)
     self.assertEqual(shp, bound)
 
+  def test_output_pos_free_variable_shape(self):
+    x = Tensor.empty(8).realize()
+    sz = UOp.variable('sz', 1, 8)
+    p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
+    for dim in (sz, sz.bind(5)):
+      with self.subTest(bound=dim.is_bound_var):
+        # Free Variables have slot -1, not a positional slot into the call args.
+        out, = UOp.call_with_outputs((p1.shrink_to((dim,)),), x.uop, output_pos=(0,))
+        self.assertEqual(out.shape, (dim,))
+
   def test_output_pos_must_be_ascending(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
