@@ -327,38 +327,6 @@ class HostAllocator(Allocator):
     return BufferStorage(buf.host.addr)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
-class DepsTracker:
-  def __init__(self):
-    # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = defaultdict(list)
-    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = defaultdict(list)
-
-  @staticmethod
-  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
-
-  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
-    wait_nodes = []
-    for i,buf in enumerate(bufs):
-      key, s, e = self._key(buf)
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i,buf in enumerate(bufs):
-      key, s, e = self._key(buf)
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for entry in dmap[key]:
-            st, en, dep = entry
-            if st == en: continue
-            if en <= s or e <= st: kept.append(entry)
-            else:
-              if st < s: kept.append((st, s, dep))
-              if e < en: kept.append((e, en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
-
 # **************** for Compiled Devices ****************
 
 class CompileError(Exception): pass

@@ -528,9 +528,10 @@ def system(cmd:str, **kwargs) -> str:
   return ret
 
 def cpu_objdump(lib, objdump_tool='objdump'):
-  with tempfile.NamedTemporaryFile(delete=True) as f:
-    pathlib.Path(f.name).write_bytes(lib)
-    print(system(f"{objdump_tool} -d {f.name}"))
+  with tempfile.TemporaryDirectory() as tmpdir:
+    path = pathlib.Path(tmpdir) / "kernel.o"
+    path.write_bytes(lib)
+    print(system(f"{objdump_tool} -d {path}"))
 
 def capstone_flatdump(lib: bytes, arch:str):
   try: import capstone

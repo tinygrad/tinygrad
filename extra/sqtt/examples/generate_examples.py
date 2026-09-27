@@ -6,7 +6,7 @@ EXAMPLES_DIR = Path(__file__).parent
 PROFILE_PATH = Path(temp("profile.pkl", append_user=True))
 
 EXAMPLES = {
-  "empty":"test/backend/test_custom_kernel.py TestCustomKernel.test_empty",
+  "empty":"test/runtime/test_custom_kernel.py TestCustomKernel.test_empty",
   "plus":"test/test_tiny.py TestTiny.test_plus",
   "gemm":"-c \"from tinygrad import Tensor; (Tensor.empty(N:=32, N)@Tensor.empty(N, N)).realize()\"",
   "sync":"test/amd/test_asm_kernel.py TestAsmKernel.test_lds_sync",

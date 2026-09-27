@@ -3,7 +3,7 @@ from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, bufferize_linear, to_name, patch, unwrap_view, layout_args
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, bufferize_cmdbuf, to_name, patch, unwrap_view, layout_args
 from tinygrad.runtime.support.hcq2 import pack_args
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
@@ -69,8 +69,8 @@ def dispatch_packet(data:AMDProgramData, info:ProgramInfo, kernel_object:UOp=UOp
 class AMDComputeQueue(HWQueue):
   dev:AMDDevice
 
-  def __init__(self, ctx, submit):
-    super().__init__(ctx, submit)
+  def __init__(self, submit):
+    super().__init__(submit)
     self.pm4, self.gc, self.soc, self.nbio, self.target = self.dev.pm4, self.dev.gc, self.dev.soc, self.dev.nbio, self.dev.target
     self.profiled:list[UOp] = []
     if self.dev.pmc_enabled: self.pmc_start()
@@ -428,8 +428,8 @@ class AMDComputeQueue(HWQueue):
     return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag)
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
-  def __init__(self, ctx, submit):
-    super().__init__(ctx, submit)
+  def __init__(self, submit):
+    super().__init__(submit)
     self.cmd_addr = UOp.variable("cmdbuf", 0, 2**48, dtypes.uint64) # the packets point into the cmdbuf, its address binds at submit
     self.pkts:list[UOp] = []
     self.run_start = 0
@@ -462,7 +462,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     base, off = unwrap_view(cmdbuf)
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
-    return self.push(self.prof_bump(cmdbuf), bufferize_linear(self, "aql", self.dev.host), self.dev.compute_queue, unit=64, doorbell_lag=1)
+    return self.push(self.prof_bump(cmdbuf), bufferize_cmdbuf(self, "aql", self.dev.host), self.dev.compute_queue, unit=64, doorbell_lag=1)
 
 # *****************
 # SDMA
@@ -470,8 +470,8 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
 class AMDSDMAQueue(HWQueue):
   dev:AMDDevice
 
-  def __init__(self, ctx, submit):
-    super().__init__(ctx, submit)
+  def __init__(self, submit):
+    super().__init__(submit)
     self.sdma, self.target, self.max_copy_size = self.dev.sdma, self.dev.target, self.dev.max_copy_size
 
   def copy(self, dst:UOp, src:UOp, sz:int):
@@ -519,8 +519,8 @@ class AMDSDMAQueue(HWQueue):
     w = wptr.after(copy).index(0).store(next_put)
     return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
 
-def amd_compute_queue(ctx, submit:UOp) -> HWQueue:
-  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[0].arg[0][0]]).is_aql else AMDComputeQueue)(ctx, submit)
+def amd_compute_queue(submit:UOp) -> HWQueue:
+  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[0].arg[0][0]]).is_aql else AMDComputeQueue)(submit)
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -839,8 +839,8 @@ class AMDDevice(Compiled):
   sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda ctx, submit: encode_submit(amd_compute_queue(ctx, submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda ctx, submit: encode_submit(AMDSDMAQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda submit: encode_submit(amd_compute_queue(submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda submit: encode_submit(AMDSDMAQueue(submit))),
   ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]

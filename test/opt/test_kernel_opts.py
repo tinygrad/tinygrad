@@ -5,7 +5,7 @@ from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
 
 # TODO: write a clean version of this
-from test.backend.test_linearizer import helper_linearizer_opt
+from test.runtime.test_linearizer import helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
   def test_opt_without_axis(self):

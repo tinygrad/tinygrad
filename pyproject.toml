@@ -135,7 +135,7 @@ do_not_mutate = [
   "tinygrad/mixin/gradient.py",
   "tinygrad/tensor.py",
 ]
-tests_dir = ["test/test_tiny.py", "test/backend/test_ops.py"]
+tests_dir = ["test/test_tiny.py", "test/runtime/test_ops.py"]
 debug = true
 
 

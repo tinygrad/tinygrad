@@ -107,7 +107,7 @@ class DLL(ctypes.CDLL):
           for base in ([f"lib{p}.dylib", f"{p}.dylib", str(p)] if OSX else [f"{p}.dll"]):
             if (l:=pre / base).is_file() or (OSX and 'framework' in str(l) and l.is_symlink()): return str(l)
         else:
-          for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so\\.?[0-9]*", l.name)):
+          for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so[.0-9]*", l.name)):
             # filter out linker scripts
             with open(l, 'rb') as f:
               if f.read(4) == b'\x7FELF': return str(l)

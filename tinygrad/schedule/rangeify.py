@@ -281,8 +281,6 @@ class LocalAddBufferContext:
   range:int = 0
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
-  if buf.is_variable: return buf.replace(op=Ops.PARAM)
   param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(buf.max_shape), addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
@@ -313,18 +311,13 @@ def check_buf_states(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
-  (UPat(Ops.PARAM, name="v"), lambda v:
-   v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
-
-  # this renumbers the params
+  # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
-   None if buf.tag != () or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
+   None if buf.tag != () or buf.addrspace is AddrSpace.ALU or buf._shape is None else debuf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
-  # bound Variables are stores into Variable buffers: strip the store, the buffer becomes an ALU param via debuf
-  (UPat(Ops.AFTER, name="b"), lambda b: b.src[0] if b.is_bound_var else None),
   (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
@@ -335,15 +328,13 @@ to_define_global = PatternMatcher([
 ])
 
 pm_add_param_range_tags = PatternMatcher([
-  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: x.rtag(())),
+  # Scalar parameters keep their identity across the call boundary.
+  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: None if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU else x.rtag(())),
 ])
 
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
   if any(r.axis_type is not AxisType.DEVICE for r in x.ranges): return None
-  # the store of a bound Variable is an input value, not a kernel
-  st = x.src[0] if x.op is Ops.END else x
-  if st.op is Ops.STORE and st.src[0].is_variable: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()

@@ -193,7 +193,7 @@ class QCOMComputeQueue(HWQueue):
 
   def submit(self, cmdbuf:UOp) -> UOp:
     ib, ib_off = unwrap_view(cmdbuf)
-    fd, ctxid = [UOp.variable(n, 0, 2**31 - 1, dtypes.int32, param=True) for n in ("kgsl_fd", "kgsl_ctx")]
+    fd, ctxid = [UOp.variable(n, 0, 2**31 - 1, dtypes.int32) for n in ("kgsl_fd", "kgsl_ctx")]
     obj = cstruct(kgsl.struct_kgsl_command_object, gpuaddr=ib.getaddr(self.devs) + ib_off, size=cmdbuf.max_numel(), flags=kgsl.KGSL_CMDLIST_IB)
     req = cstruct(kgsl.struct_kgsl_gpu_command, cmdlist=obj.getaddr(HCQ_RUNTIME_DEV.value), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
                   numcmds=1, context_id=ctxid)
@@ -305,7 +305,7 @@ def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, 
 class QCOMDevice(Compiled):
   timestamp_divider = 19.2
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_qcom_compute", name="submit"), lambda ctx, submit: encode_submit(QCOMComputeQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_qcom_compute", name="submit"), lambda submit: encode_submit(QCOMComputeQueue(submit))),
   ])
 
   @property

@@ -2,8 +2,9 @@ import collections, time
 from typing import Any, cast
 from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey, unwrap
 from extra.hcq1.hcq import HCQBuffer, HCQCompiled, HCQAllocator, HCQSignal, HWQueue, HCQArgsState
+from tinygrad.runtime.support.hcq2 import DepsTracker
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
-from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent, DepsTracker
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
 from tinygrad.engine.realize import estimate_uop, get_runtime, unwrap_multi, resolve_params, get_call_arg_uops

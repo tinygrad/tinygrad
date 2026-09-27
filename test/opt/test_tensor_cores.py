@@ -16,7 +16,7 @@ from tinygrad.renderer.tc import amd_cdna_1616128
 from tinygrad.renderer.llvmir import LLVMRenderer, AMDLLVMRenderer
 
 # TODO: write a clean version of this
-from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
+from test.runtime.test_linearizer import helper_realized_ast, helper_linearizer_opt
 
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 

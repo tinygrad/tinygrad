@@ -49,10 +49,13 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 15)
 
-    # TODO: this can be improved
     uop = x & 32
     self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 20) # shoud be 0
+    self.assertEqual(uop.vmax, 0)
+
+    uop = x & 48
+    self.assertEqual(uop.vmin, 0)
+    self.assertEqual(uop.vmax, 16)
 
   def test_vmin_vmax_and_with_negative_variable(self):
     # when mask doesn't have sign bit set, result is always non-negative

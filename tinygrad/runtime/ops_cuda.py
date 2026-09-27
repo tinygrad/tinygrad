@@ -10,7 +10,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx
 from tinygrad.runtime.support.c import init_c_var
-from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, layout_args, pack_args
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, ccall, layout_args, pack_args
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if DEV.target("CUDA").interface == "MOCK": import test.mockgpu.cuda.cuda  # noqa: F401  # pylint: disable=unused-import
 
@@ -27,8 +27,8 @@ def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.value, 1
 
 class CUDAQueue(HWQueue):
   dev:CUDADevice
-  def __init__(self, ctx:EncodeCtx, submit:UOp):
-    super().__init__(ctx, submit)
+  def __init__(self, submit:UOp):
+    super().__init__(submit)
     self.rt_vars = UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag="cuda") # [context, compute stream, copy stream, status]
     self.kernargs = UOp.placeholder((8,), dtypes.uint8, device=self.devs)
     self.h = ccall(cuda.cuCtxSetCurrent, self.rt_vars.index(0).load())
@@ -96,8 +96,8 @@ class CUDAAllocator(Allocator['CUDADevice']):
 
 class CUDADevice(Compiled):
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_compute", name="submit"), lambda ctx, submit: encode_submit(CUDAQueue(ctx, submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_copy", name="submit"), lambda ctx, submit: encode_submit(CUDAQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_compute", name="submit"), lambda submit: encode_submit(CUDAQueue(submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_copy", name="submit"), lambda submit: encode_submit(CUDAQueue(submit))),
   ])
 
   def __init__(self, device:str=""):

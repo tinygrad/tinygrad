@@ -63,10 +63,15 @@ class CapturedJit(Generic[ReturnType]):
   def _written_uops(self) -> set[UOp]:
     return {b for call in self.linear.toposort() if call.op is Ops.CALL for b in get_call_written_bufs(call)}
 
+  @functools.cached_property
+  def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
+    return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
+
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
     run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
+    for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
   def free_intermediates(self):

@@ -134,11 +134,6 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-ew_devectorizer = PatternMatcher([
-  # unpack broadcasting
-  (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
-])
-
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
@@ -147,10 +142,10 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
-  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s")), name="x"),
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="b"), UPat(Ops.STACK, name="s")), name="x"),
    lambda b,s,x: UOp.stack(*[x.replace(src=(b,u)) for u in s.src])),
   # INDEX into RESHAPE moves the RESHAPE
-  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.RESHAPE, name="s"))),
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="b"), UPat(Ops.RESHAPE, name="s"))),
    lambda b,s: b.index(s.src[0]).reshape(s.shape)),
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
@@ -199,8 +194,8 @@ def merge_reduce_ends(sink:UOp):
       for e in group: subs[e] = merged
   return sink.substitute(subs) if subs else None
 
-def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
-  acc = UOp.placeholder_like(r, next(ctx), AddrSpace.REG)
+def reduce_ranges_to_acc(r:UOp):
+  acc = UOp.alloc_like(r, addrspace=AddrSpace.REG)
   input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
@@ -236,8 +231,8 @@ pm_add_loads = PatternMatcher([
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
-def add_local_buffer(ctx, x:UOp):
-  buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
+def add_local_buffer(x:UOp):
+  buf = UOp.alloc(x.max_shape, x.dtype, addrspace=x.arg.addrspace)
   return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
 
 pm_add_local_buffers = PatternMatcher([
@@ -312,13 +307,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
-  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.BUFFER], default=0))
-
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, name="remove reduces")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_local_buffers, name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
@@ -335,8 +328,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image,
-                       name="add images", ctx=({}, ren), bottom_up=True)
+  sink = graph_rewrite(sink, symbolic_simple+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies
@@ -409,6 +401,9 @@ pm_linearize_cleanups = PatternMatcher([
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 
+pm_renumber_bufs = PatternMatcher([(UPat((Ops.BUFFER, Ops.ALLOC), name="x"),
+                                    lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),])
+
 # requires lst be toposorted. like graph rewrite, but for lines
 def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   newlst = []
@@ -422,7 +417,8 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
+  lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_renumber_bufs, ctx=itertools.count())
+  prg = prg.replace(src=(lst[-1],))
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     lin_ctx = ctx.linear_ctx_type(ctx)

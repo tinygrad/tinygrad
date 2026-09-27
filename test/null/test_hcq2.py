@@ -84,10 +84,20 @@ def rotations(batch:UOp) -> list[list]: return [(qs:=list(queues(batch)))[i:] + 
 def orders(batch:UOp) -> set[tuple[int, ...]]: return {tuple(x for x in run(batch, prio=p)[0] if isinstance(x, int)) for p in rotations(batch)}
 
 class TestHCQ2Deps(unittest.TestCase):
+  def test_buffer_views(self):
+    b = Buffer("NULL", 16, dtypes.uint8)
+    for write in ([], [0]):
+      tracker = hcq2.DepsTracker()
+      tracker.access_resources([b], write, 0)
+      self.assertEqual(tracker.access_resources([b.view(4, dtypes.uint16, 4)], [0], 1), [0])
+      self.assertEqual(tracker.access_resources([b.view(4, dtypes.uint8, 0)], [0], 2), [0])
+      self.assertEqual(tracker.access_resources([b.view(4, dtypes.uint8, 12)], [0], 3), [0])
+      self.assertEqual(tracker.access_resources([b.view(8, dtypes.uint8, 4)], [], 4), [1])
+
   def test_dependencies_through_selected_slices(self):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
     for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
-      tracker = hcq2.HCQDepsTracker()
+      tracker = hcq2.DepsTracker()
       tracker.access_resources([view], [0], 0)
       self.assertEqual(tracker.access_resources([b.mselect(1)], [], 1), [])
       self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((16, 24),))], [], 2), [])
@@ -96,7 +106,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for write in ([], [0]):
-      tracker = hcq2.HCQDepsTracker()
+      tracker = hcq2.DepsTracker()
       tracker.access_resources([b.shrink(((0, 4),))], write, 0)
       self.assertEqual(tracker.access_resources([b.shrink(((4, 8),))], [0], 1), [])
       self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
@@ -104,12 +114,28 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_partial_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for write in ([], [0]):
-      tracker = hcq2.HCQDepsTracker()
+      tracker = hcq2.DepsTracker()
       tracker.access_resources([b], write, 0)
       self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 1), [0])
       self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
       self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
       self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
+
+  def test_write_waits_for_all_readers(self):
+    b = UOp.param(0, dtypes.uint8, 16, device="NULL")
+    tracker = hcq2.DepsTracker()
+    self.assertEqual(tracker.access_resources([b], [], 0), [])
+    self.assertEqual(tracker.access_resources([b], [], 1), [])
+    self.assertEqual(tracker.access_resources([b], [0], 2), [0, 1])
+    self.assertEqual(tracker.access_resources([b], [], 3), [2])
+
+  def test_aliases_do_not_wait_on_themselves(self):
+    b = UOp.param(0, dtypes.uint8, 16, device="NULL")
+    for write in ([0], [1], [0, 1]):
+      tracker = hcq2.DepsTracker()
+      tracker.access_resources([b], [0], 0)
+      self.assertEqual(tracker.access_resources([b, b.shrink(((4, 12),))], write, 1), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 2), [1])
 
 class TestHCQ2Schedule(unittest.TestCase):
   def setUp(self):
