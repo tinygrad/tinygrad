@@ -53,7 +53,7 @@ class NullAllocator(HostAllocator):
 
 class NullDevice(Compiled):
   pm_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg=f"submit_null_{q}", name="submit"),
-                               lambda ctx, submit: encode_submit(NullQueue(ctx, submit))) for q in ("compute", "copy")])
+                               lambda submit: encode_submit(NullQueue(submit))) for q in ("compute", "copy")])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))
 
