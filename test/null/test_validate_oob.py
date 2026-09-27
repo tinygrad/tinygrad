@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType
 from tinygrad.uop.validate import validate_index_with_z3
 from test.helpers import to_uops_list
 
-def Variable(name, nmin, nmax): return UOp.variable(name, nmin, nmax, param=True)
+def Variable(name, nmin, nmax): return UOp.variable(name, nmin, nmax)
 
 class TestValidateOOB(unittest.TestCase):
   """Test z3 validation of index bounds for different ALU ops and patterns."""
@@ -124,7 +124,7 @@ class TestValidateOOB(unittest.TestCase):
       i = (r.cast(dtypes.float) * 0.68).trunc().cast(dtypes.int)
       to_uops_list([buf.index(i.valid((i >= 0) & (i < 16))).load()])
       # a float entirely out of the int range has no value, not an empty one
-      f = UOp.variable("f", 3e9, 4e9, dtypes.float32, param=True).cast(dtypes.int)
+      f = UOp.variable("f", 3e9, 4e9, dtypes.float32).cast(dtypes.int)
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(f).load()])
 
@@ -240,7 +240,7 @@ class TestShiftBounds(unittest.TestCase):
         self._check_max_index((UOp.const(-9, dtype) >> n) + 9, 7)
 
   def test_lowered_shift_count(self):
-    n = UOp.variable("n", 0, 63, dtypes.uint32, param=True)
+    n = UOp.variable("n", 0, 63, dtypes.uint32)
     self._check_max_index(UOp.const(65535, dtypes.uint64).alu(Ops.SHR, n), 65535)
 
   def test_weak_shifts_beyond_64_bits(self):

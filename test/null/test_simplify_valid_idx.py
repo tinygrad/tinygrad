@@ -22,7 +22,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
   return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
 
 def Special(expr, nmax): return UOp.special(nmax, expr)
-def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax, param=True)
+def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
 class TestValidIdxSimplification(unittest.TestCase):
