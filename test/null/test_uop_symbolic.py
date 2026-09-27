@@ -106,6 +106,24 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), uconst(5))
     self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), uconst(1))
 
+  def test_multiple_of_cancellation(self):
+    for multiple in (1, 2, 3, 4, 8):
+      var = UOp.variable("n", multiple, 8*multiple, multiple_of=multiple)
+      for n in (var, var.bind(2*multiple)):
+        for factor in (-multiple, -1, 2, multiple, multiple+1):
+          with self.subTest(multiple=multiple, bound=n.is_bound_var, factor=factor):
+            self.assertEqual((n*factor//n).ssimplify(), factor)
+            self.assertEqual((n*factor%n).ssimplify(), 0)
+            self.assertEqual(((-n*factor)//(-n)).ssimplify(), factor)
+            self.assertIs(UOp.gcd(n*factor, n).simplify(), n)
+
+  def test_gcd_multiple_of_without_shared_factors(self):
+    n = UOp.variable("n", 6, 60, multiple_of=6)
+    m = UOp.variable("m", 4, 40, multiple_of=4)
+    self.assertEqual(UOp.gcd(n, m).ssimplify(), 2)
+    self.assertEqual((n%3).ssimplify(), 0)
+    self.assertEqual((m%2).ssimplify(), 0)
+
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
     b = Variable("b", 1, 8)
