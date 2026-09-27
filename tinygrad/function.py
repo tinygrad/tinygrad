@@ -20,7 +20,8 @@ pm_ctx = PatternMatcher([
   # Capture caller-owned storage, not allocations created while tracing this function.
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.PARAM), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
   (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
-   not x.op_in_backward_slice_with_self(Ops.PARAM) and any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
+   not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
+   any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:

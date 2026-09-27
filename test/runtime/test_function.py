@@ -75,6 +75,21 @@ class TestFunction(unittest.TestCase):
 
     np.testing.assert_equal(f(Tensor([10,20,30])).numpy(), [15,27,39])
 
+  def test_implicit_symbolic_assign(self):
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        buf = Tensor([1, 2, 3]).realize()
+        buf.assign(buf + Tensor(UOp.variable("n", 1, 4).bind(2)))
+        @function(allow_implicit=True, precompile=precompile)
+        def f(x:Tensor) -> Tensor: return x + buf
+
+        x = Tensor([10, 20, 30]).realize()
+        y, z = f(x), f(x)
+        Tensor.realize(y, z)
+        np.testing.assert_equal(y.numpy(), [13, 24, 35])
+        np.testing.assert_equal(z.numpy(), [13, 24, 35])
+        np.testing.assert_equal(buf.numpy(), [3, 4, 5])
+
   def test_detach(self):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor: return a.detach() + b
@@ -112,6 +127,18 @@ class TestFunction(unittest.TestCase):
     na, nb = a.numpy(), b.numpy()
     np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
+
+  def test_grad_symbolic_output_slice(self):
+    for precompile, precompile_backward in ((False, False), (False, True), (True, False), (True, True)):
+      @function(precompile=precompile, precompile_backward=precompile_backward)
+      def f(x:Tensor) -> Tensor: return x * x
+
+      for size, expected in ((2, [4., 6., 2., 2.]), (3, [5., 7., 9., 3.])):
+        with self.subTest(precompile=precompile, precompile_backward=precompile_backward, size=size):
+          x = Tensor([1., 2., 3., 4.]).realize()
+          n = UOp.variable("n", 1, 4).bind(size)
+          loss = f(x)[:n].sum() + x.sum() * Tensor(n)
+          np.testing.assert_equal(loss.gradient(x)[0].numpy(), expected)
 
   def test_grad_implicit(self):
     w = Tensor([1., 2., 3.])
