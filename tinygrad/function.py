@@ -13,7 +13,7 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 def is_implicit_storage(ctx, x:UOp) -> bool:
-  # Variables are caller-provided values (slot -1); renamed variable params (slot >= 0) are already captured
+  # Variables are caller-provided values (slot -1); positional scalar params (slot >= 0) are already captured
   return (x.is_variable and x.arg.slot == -1) or x.op is Ops.BUFFER or (x.op is Ops.ALLOC and x.arg.bind_on_realize and x.arg.slot < ctx[2])
 
 pm_ctx = PatternMatcher([

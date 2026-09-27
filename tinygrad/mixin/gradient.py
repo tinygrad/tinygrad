@@ -43,7 +43,8 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # Compact this scope's PARAMs, capturing free Variables as inputs.
   used = sorted((p for p in bwd_body.toposort(enter_calls=False) if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
   bwd_args = [p if p.arg.slot < 0 else args[p.arg.slot] for p in used]
-  bwd_body = bwd_body.substitute({p:p.param_like(i) for i,p in enumerate(used)}, walk=True)
+  bwd_body = bwd_body.substitute({p:p.replace(arg=dataclasses.replace(p.arg, slot=i, name=None, val=None))
+                                  for i,p in enumerate(used)}, walk=True)
   bwd_outs = dict(zip(grad_bodies, UOp.call_with_outputs(bwd_body.src, *bwd_args,
                                                        name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)))
   return (None,) + tuple(bwd_outs.get(i) for i in range(len(k.src)-1))

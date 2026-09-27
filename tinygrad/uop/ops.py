@@ -1050,7 +1050,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         ret.add(x.unbound() if x.is_variable else x)
       elif x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE:
         ret.add(UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype))
-    return sorted(ret, key=lambda v: v.expr)
+    return sorted(ret, key=lambda v: (v.arg.name or "", v.arg.slot))
 
   # *** uop symbolic stuff ***
 
@@ -1232,8 +1232,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int):
-    # Variables are already PARAMs: rename and strip the bound value so schedule cache keys are value-independent
-    if self.is_variable: return UOp(Ops.PARAM, arg=replace(self.arg, slot=slot, name=f"p{slot}", val=None))
+    # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
+    if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU:
+      return UOp(Ops.PARAM, arg=replace(self.arg, slot=slot, name=None, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
@@ -1283,20 +1284,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     it = iter(srcs)
     for i in range(len(param_map)):
       if i not in pos: param_map[i] = next(it)
-    def mint(o:UOp) -> UOp:
-      """mint an ALLOC for storage this call writes and returns: its identity is unique (minted
-      from the global counter): outputs of different calls never alias. like PARAM, the arg only stores the concrete
-      max size: a shape is a view (RESHAPE/SHRINK/UNSHARD) on the flat storage"""
-      # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
-      shp = tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shape)
+    def mint(o:UOp, p:int) -> tuple[UOp, UOp]:
+      # Declare output storage in the callee's shape, then bind its shape in the caller's scope.
       dev = o.device if o.device is not None else default_dev
       axis = o.axis if isinstance(o.device, tuple) else None
-      # multi-device values have a per-shard sized storage: the sharding lives in the graph, not the arg
-      if isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
-      return UOp.alloc(shp, o.dtype, device=dev, axis=axis)
-    rets = tuple(mint(o) for o in values)
-    # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
-    body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
+      buf = UOp.alloc(o.shard_shape, o.dtype, device=dev, axis=axis)
+      shp = tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shard_shape)
+      return UOp.alloc(shp, o.dtype, slot=buf.buf_uop.arg.slot, device=dev, axis=axis), buf.param_like(p)
+    outputs = tuple(mint(o, p) for o, p in zip(values, pos))
+    rets = tuple(r for r, _ in outputs)
+    body = UOp.sink(*[p.store(v) for v, (_, p) in zip(values, outputs)])
     args: list[UOp|None] = [None] * (len(srcs) + len(values))
     for p, r in zip(pos, rets): args[p] = r
     it = iter(x.contiguous() if precompile else x for x in srcs)

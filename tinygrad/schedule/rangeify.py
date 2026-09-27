@@ -311,12 +311,9 @@ def check_buf_states(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
-  (UPat(Ops.PARAM, name="v"), lambda v:
-   v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
-
-  # this renumbers the params
+  # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
-   None if buf.tag != () or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
+   None if buf.tag != () or buf.addrspace is AddrSpace.ALU or buf._shape is None else debuf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
@@ -331,8 +328,8 @@ to_define_global = PatternMatcher([
 ])
 
 pm_add_param_range_tags = PatternMatcher([
-  # Variables keep no tag: their nodes are shared outside the kernel graph (call args), and tags are part of node identity
-  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: None if x.is_variable else x.rtag(())),
+  # Scalar parameters keep their identity across the call boundary.
+  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: None if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU else x.rtag(())),
 ])
 
 def split_store(x:UOp) -> UOp|None:

@@ -5,7 +5,7 @@ from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops
-from tinygrad.schedule import transform_to_call
+from tinygrad.schedule import transform_to_call, resolve_linear_call
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
 
@@ -67,6 +67,20 @@ class TestCallSchedule(unittest.TestCase):
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
 
+  def test_scalar_names_and_values_do_not_affect_cache_key(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return x * 2
+    x = Tensor.empty(8)
+    left = UOp.variable("left", 1, 8).bind(2)
+    right = UOp.variable("right", 1, 8).bind(3)
+    a, b = f(x[:left]), f(x[:right])
+    self.assertEqual(a.shape, (left,))
+    self.assertEqual(b.shape, (right,))
+    self.assertEqual(sched_key(a), sched_key(b))
+    for v in a.uop.src[1].body.variables():
+      self.assertIsNone(v.arg.name)
+      self.assertGreaterEqual(v.arg.slot, 0)
+
 class TestArgOrder(unittest.TestCase):
   def _dev(self, x): return x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
 
@@ -102,6 +116,18 @@ class TestArgOrder(unittest.TestCase):
       UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
 
 class TestCallCodegen(unittest.TestCase):
+  def test_compiled_scalar_slots_are_not_call_slots(self):
+    out = UOp.new_buffer("CPU", 1, dtypes.int)
+    p = out.param_like(0)
+    v = UOp.variable("external", 1, 8, dtype=dtypes.int)
+    prg = to_program(p.index(0).store(v).sink(arg=KernelInfo("scalar")),
+                     ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
+    self.assertEqual(prg.arg.vars[0].arg.slot, 1)
+    linear = UOp(Ops.LINEAR, src=(prg.call(p, v.bind(2)),))
+    # Slot 1 in the enclosing call must not rewrite the already-compiled program's ABI slot 1.
+    resolved = resolve_linear_call(linear.call(out, UOp.variable("other", 1, 8, dtype=dtypes.int).bind(3)))
+    self.assertIs(resolved.src[0].body, prg)
+
   def test_call_stack_pointer(self):
     slot = UOp.placeholder((1,), dtypes.uint32, addrspace=AddrSpace.REG)
     call = UOp.custom_function("callback", UOp.const(0, dtypes.uint64)).call(slot[0], ret_dtype=dtypes.void)

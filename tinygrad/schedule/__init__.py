@@ -96,21 +96,23 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   return ret
 
 pm_post_sched_cache = PatternMatcher([
-  # only resolve buffer PARAMs (slot>=0); ALU/shape vars use slot=-1 and must not be swapped for call args
+  # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
   # bind ALLOCs to fresh BUFFERs for this invocation
   (UPat(Ops.ALLOC, src=(), name="b"), create_new_buffer),
 ])
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
   linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
-           **{f"p{i}":x.unbound() for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
+           **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
+              if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU}}
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
-    subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
+    if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
+    subs = {v:binds[v.arg.slot] for v in si.variables() if v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
