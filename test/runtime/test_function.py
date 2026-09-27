@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
-from tinygrad.dtype import Invalid
+from tinygrad.dtype import AddrSpace, Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.codegen import to_program
 from test.helpers import assert_kernel_count, KernelCountException
@@ -166,6 +166,17 @@ class TestFunction(unittest.TestCase):
     sz = UOp.variable("sz", 1, 3)
     slic = table[:sz.bind(2)]
     np.testing.assert_equal(f(slic)[:2].numpy(), [20,40])
+
+  def test_scalar_param_without_bounds(self):
+    x = Tensor([1, 2, 3]).realize()
+    p = x.uop.param_like(0)
+    scalar = UOp.param(1, x.dtype, name="p1", addrspace=AddrSpace.ALU)
+    for precompile in (False, True):
+      for value in (2, 3):
+        with self.subTest(precompile=precompile, value=value):
+          bound = UOp.variable("v", 1, 8, dtype=x.dtype).bind(value)
+          out, = UOp.call_with_outputs((p*scalar,), x.uop, bound, precompile=precompile)
+          self.assertEqual(Tensor(out).tolist(), [value, 2*value, 3*value])
 
   def test_nested_calls(self):
     w = Tensor([10., 20., 30.])

@@ -1044,9 +1044,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     bound = {x: x.unbound() for x in self.backward_slice_with_self if x.is_bound_var}
     return self.substitute(bound, walk=True), {v: cast(int, x.arg.val) for x, v in bound.items()}
   def variables(self) -> list[Variable]:
-    return sorted({x.unbound() if x.is_variable else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype)
-                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or
-                   x.is_variable}, key=lambda v: v.expr)
+    ret = set()
+    for x in self.backward_slice_with_self:
+      if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU:
+        ret.add(x.unbound() if x.is_variable else x)
+      elif x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE:
+        ret.add(UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype))
+    return sorted(ret, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
 
