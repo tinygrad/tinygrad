@@ -85,7 +85,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 pm_device_to_var = PatternMatcher([
   # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like SPECIAL for devices)
   (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype, param=True) if r.axis_type is AxisType.DEVICE else None),
+   lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype) if r.axis_type is AxisType.DEVICE else None),
   # ENDs that closed a DEVICE range no longer close it
   (UPat(Ops.END, name="e"), lambda e: e.replace(src=(e.src[0],)+tuple(s for s in e.src[1:] if s.op is not Ops.PARAM))
    if any(s.op is Ops.PARAM and s.arg.name == '_device_num' for s in e.src[1:]) else None),

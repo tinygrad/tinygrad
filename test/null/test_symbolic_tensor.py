@@ -65,6 +65,13 @@ class TestSymbolicReshape(unittest.TestCase):
       ret = ret.reshape((vi, 2, 3))
       assert ret.shape == (vi, 2, 3)
 
+  def test_reshape_infer_multiple_of(self):
+    for multiple in (1, 2, 3, 4, 8):
+      var = Variable("n", multiple, 8*multiple, multiple_of=multiple)
+      for n in (var, var.bind(2*multiple)):
+        with self.subTest(multiple=multiple, bound=n.is_bound_var):
+          self.assertEqual(Tensor.empty(8*multiple, 4)[:n].reshape(n, -1).shape, (n, 4))
+
   def test_two_symbol_reshape(self):
     t = Tensor.rand(5, 5)
     for i in range(1, 6):

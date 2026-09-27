@@ -1,8 +1,8 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor, GlobalCounters, Device
-from tinygrad.dtype import Invalid
+from tinygrad import Tensor, TinyJit, GlobalCounters, Device
+from tinygrad.dtype import AddrSpace, Invalid, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.codegen import to_program
 from test.helpers import assert_kernel_count, KernelCountException
@@ -75,6 +75,21 @@ class TestFunction(unittest.TestCase):
 
     np.testing.assert_equal(f(Tensor([10,20,30])).numpy(), [15,27,39])
 
+  def test_implicit_symbolic_assign(self):
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        buf = Tensor([1, 2, 3]).realize()
+        buf.assign(buf + Tensor(UOp.variable("n", 1, 4).bind(2)))
+        @function(allow_implicit=True, precompile=precompile)
+        def f(x:Tensor) -> Tensor: return x + buf
+
+        x = Tensor([10, 20, 30]).realize()
+        y, z = f(x), f(x)
+        Tensor.realize(y, z)
+        np.testing.assert_equal(y.numpy(), [13, 24, 35])
+        np.testing.assert_equal(z.numpy(), [13, 24, 35])
+        np.testing.assert_equal(buf.numpy(), [3, 4, 5])
+
   def test_detach(self):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor: return a.detach() + b
@@ -113,6 +128,18 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
 
+  def test_grad_symbolic_output_slice(self):
+    for precompile, precompile_backward in ((False, False), (False, True), (True, False), (True, True)):
+      @function(precompile=precompile, precompile_backward=precompile_backward)
+      def f(x:Tensor) -> Tensor: return x * x
+
+      for size, expected in ((2, [4., 6., 2., 2.]), (3, [5., 7., 9., 3.])):
+        with self.subTest(precompile=precompile, precompile_backward=precompile_backward, size=size):
+          x = Tensor([1., 2., 3., 4.]).realize()
+          n = UOp.variable("n", 1, 4).bind(size)
+          loss = f(x)[:n].sum() + x.sum() * Tensor(n)
+          np.testing.assert_equal(loss.gradient(x)[0].numpy(), expected)
+
   def test_grad_implicit(self):
     w = Tensor([1., 2., 3.])
     w.realize() # TODO: this is required
@@ -139,6 +166,58 @@ class TestFunction(unittest.TestCase):
     sz = UOp.variable("sz", 1, 3)
     slic = table[:sz.bind(2)]
     np.testing.assert_equal(f(slic)[:2].numpy(), [20,40])
+
+  def test_return_variable(self):
+    for precompile in (False, True):
+      @function(precompile=precompile)
+      def f(v:UOp) -> Tensor: return Tensor(v)
+
+      for value in (2, 3):
+        with self.subTest(precompile=precompile, value=value):
+          self.assertEqual(f(UOp.variable("v", 1, 8, dtype=dtypes.int32).bind(value)).item(), value)
+
+  def test_scalar_param_without_bounds(self):
+    x = Tensor([1, 2, 3]).realize()
+    p = x.uop.param_like(0)
+    scalar = UOp.param(1, x.dtype, addrspace=AddrSpace.ALU)
+    for precompile in (False, True):
+      for value in (2, 3):
+        with self.subTest(precompile=precompile, value=value):
+          bound = UOp.variable("v", 1, 8, dtype=x.dtype).bind(value)
+          out, = UOp.call_with_outputs((p*scalar,), x.uop, bound, precompile=precompile)
+          self.assertEqual(Tensor(out).tolist(), [value, 2*value, 3*value])
+
+  def test_grad_scalar_param_without_bounds(self):
+    x = Tensor([1., 2., 3.]).realize()
+    p = x.uop.param_like(0)
+    scalar = UOp.param(1, dtypes.int32, name="scalar_value", addrspace=AddrSpace.ALU)
+    for precompile, precompile_backward in ((False, False), (False, True), (True, False), (True, True)):
+      for value in (2, 3):
+        with self.subTest(precompile=precompile, precompile_backward=precompile_backward, value=value):
+          bound = UOp.variable("v", 1, 8, dtype=dtypes.int32).bind(value)
+          out, = UOp.call_with_outputs((p*scalar,), x.uop, bound, precompile=precompile, precompile_backward=precompile_backward)
+          self.assertEqual(Tensor(out).sum().gradient(x)[0].tolist(), [float(value)]*3)
+
+  def test_unbound_scalar_argument(self):
+    @function(precompile=True)
+    def f(x:Tensor, n:UOp) -> Tensor: return x * Tensor(n)
+    with self.assertRaisesRegex(RuntimeError, "unbound Variable 'n'"):
+      f(Tensor([1, 2, 3]), UOp.variable("n", 1, 8)).realize()
+
+  def test_nested_scalar_slots_jit(self):
+    @function(precompile=True)
+    def inner(x:Tensor, a:UOp, b:UOp) -> Tensor: return x * Tensor(a) + Tensor(b)
+    @function(precompile=True)
+    def outer(x:Tensor, a:UOp, b:UOp) -> Tensor: return x * Tensor(a) + inner(x, b, a)
+    @TinyJit
+    def run(x, a, b): return outer(x, a, b).realize()
+
+    x = Tensor([1, 2, 3]).realize()
+    for a, b in ((2, 3), (5, 1), (3, 4), (1, 2)):
+      # The inner call reverses the scalar slots; a user name resembling a slot must not affect binding.
+      av = UOp.variable("p1", 1, 8, dtype=dtypes.int32).bind(a)
+      bv = UOp.variable("other", 1, 8, dtype=dtypes.int32).bind(b)
+      self.assertEqual(run(x, av, bv).tolist(), [i*(a+b)+a for i in (1, 2, 3)])
 
   def test_nested_calls(self):
     w = Tensor([10., 20., 30.])
