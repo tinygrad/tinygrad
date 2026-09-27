@@ -390,6 +390,28 @@ class HWQueue:
 # *****************
 # 3.1. hcq special functions
 
+def _is_input_addr(g:UOp) -> bool: return (base:=unwrap_lane(g.src[0])[0]).op is Ops.PARAM and base.tag is None
+
+def _is_link_patch(w:UOp) -> bool:
+  if w.op is Ops.GETADDR: return not _is_input_addr(w)
+  if w.op is Ops.PARAM: return w.tag is not None
+  if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
+  if w.op in {Ops.LOAD, Ops.AFTER} or w.is_variable: return False
+  return all(_is_link_patch(s) for s in w.src)
+
+def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
+  # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
+  keys = [(w.dtype, (o if isinstance(o, int) else o.vmin) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
+  groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
+
+  dep = [buf.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
+  base, stores = buf.after(*dep), [] # keep buf.after to be sure that link applies patches after the blob
+  for (dt, phase, _, rngs), grp in groups:
+    view = base[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
+    offs = [UOp.const(i) if isinstance(i:=(o - phase) // dt.itemsize, int) else i for o, _ in grp]
+    stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
+  return buf.after(*dep, *stores)
+
 def hcq_fence(f:UOp) -> UOp:
   devs = dedup(to_tuple(s.device)[0] for s in f.src)
   lasts, sigs = f.src[:len(devs)], f.src[len(devs):]
@@ -422,15 +444,6 @@ pm_hcq_encode = PatternMatcher([
 # *****************
 # 3.2. split
 
-def _is_input_addr(g:UOp) -> bool: return (base:=unwrap_lane(g.src[0])[0]).op is Ops.PARAM and base.tag is None
-
-def _is_link_patch(w:UOp) -> bool:
-  if w.op is Ops.GETADDR: return not _is_input_addr(w)
-  if w.op is Ops.PARAM: return w.tag is not None
-  if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
-  if w.op in {Ops.LOAD, Ops.AFTER} or w.is_variable: return False
-  return all(_is_link_patch(s) for s in w.src)
-
 def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
   links, rest = partition(a.src[1:], lambda s: s.op in (Ops.STORE, Ops.END) and _is_link_patch(s))
   if not links: return None
@@ -438,19 +451,6 @@ def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
   return a.src[0].after(*rest)
 
 pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
-
-def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
-  # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, (o if isinstance(o, int) else o.vmin) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
-  groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
-
-  dep = [buf.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
-  base, stores = buf.after(*dep), [] # keep buf.after to be sure that link applies patches after the blob
-  for (dt, phase, _, rngs), grp in groups:
-    view = base[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
-    offs = [UOp.const(i) if isinstance(i:=(o - phase) // dt.itemsize, int) else i for o, _ in grp]
-    stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
-  return buf.after(*dep, *stores)
 
 def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   stream, patches = bytes(hq.blob), hq.patches

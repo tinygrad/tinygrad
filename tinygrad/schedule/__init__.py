@@ -238,7 +238,8 @@ def canonicalize_call_body(c:UOp):
   return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, ctx=CallifyCtx(), bottom_up=True),)+c.src[1:])
 
 pm_canonicalize_alloc = PatternMatcher([
-  (UPat(Ops.CALL, name="c"), canonicalize_call_body),
+  # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc
+  (UPat(Ops.CALL, name="c"), lambda c: canonicalize_call_body(c)),
   (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
 ])
 
