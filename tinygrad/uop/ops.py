@@ -1289,7 +1289,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       axis = o.axis if isinstance(o.device, tuple) else None
       buf = UOp.alloc(o.shard_shape, o.dtype, device=dev, axis=axis)
       shp = tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shard_shape)
-      return UOp.alloc(shp, o.dtype, slot=buf.buf_uop.arg.slot, device=dev, axis=axis), buf.param_like(p)
+      return UOp.alloc(shp, o.dtype, device=dev, axis=axis), buf.param_like(p)
     outputs = tuple(mint(o, p) for o, p in zip(values, pos))
     rets = tuple(r for r, _ in outputs)
     body = UOp.sink(*[p.store(v) for v, (_, p) in zip(values, outputs)])
