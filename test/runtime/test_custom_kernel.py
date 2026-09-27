@@ -44,7 +44,7 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
 def custom_ignore_first_var_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   # A is unused so the buffers are slots 0 and 2. n has no slot yet and must be numbered after 2, not into it
   C, B = C.flatten(), B.flatten()
-  n = UOp.variable("n", 0, 100, dtype=dtypes.int, param=True)
+  n = UOp.variable("n", 0, 100, dtype=dtypes.int)
   i = UOp.range(C.numel(), 0)
   return C[i].store(B[i] + n).end(i).sink(arg=KernelInfo(name=f"ignore_first_var_{C.numel()}"))
 
