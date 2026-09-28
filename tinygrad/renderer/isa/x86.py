@@ -146,7 +146,7 @@ def flag_gate(m:UOp) -> UOp|None:
 
 def lower_binary(ctx, x:UOp):
   buf = UOp.alloc(x.shape, x.dtype, slot=next(ctx), addrspace=AddrSpace.REG)
-  return buf.after(*(buf.index(UOp.const(i, dtypes.int)).store(v) for i,v in enumerate(x.arg)))
+  return buf.after(*[buf.index(UOp.const(i, dtypes.int)).store(v) for i,v in enumerate(x.arg)])
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([

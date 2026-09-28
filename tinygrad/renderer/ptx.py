@@ -132,9 +132,9 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat(Ops.BINARY, name="x"),
-   lambda ctx,x: [f".local .b8 {ctx.r[x][1:]}_data[{len(x.arg)}];", f"mov.u64 {ctx.r[x]}, {ctx.r[x][1:]}_data;", "{", ".reg .b16 %init;",
-                  *[f"mov.b16 %init, {v}; st.local.u8 [{ctx.r[x]}+{i}], %init;" for i,v in enumerate(x.arg)], "}"]),
+  (UPat(Ops.BINARY, name="x"), lambda ctx,x: [
+    f".local .b8 {ctx.r[x][1:]}_data[{len(x.arg)}];", f"mov.u64 {ctx.r[x]}, {ctx.r[x][1:]}_data;",
+    "{", ".reg .b16 %init;", *[f"mov.b16 %init, {v}; st.local.u8 [{ctx.r[x]}+{i}], %init;" for i,v in enumerate(x.arg)], "}"]),
 ])
 
 class PTXRenderer(Renderer):
