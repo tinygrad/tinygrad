@@ -10,13 +10,15 @@ def lift(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz:
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
-  calls = []
+  states: dict[UOp, UOp] = {}
   for inst in insts.values():
+    if str(inst) == "s_code_end()": continue
     ctx = _Ctx(inst.size(), _wave_size(arch))
     sink = _get_handler(inst)(inst, ctx)
     bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
     body = sink.substitute({b:b.param_like(i) for i,b in enumerate(bufs)})
-    calls.append(body.call(*bufs))
-  linear = UOp(Ops.LINEAR, src=tuple(calls))
-  graph_rewrite(linear, pm_lift, name="pm_lift")
+    args = [states.get(b, b) for b in bufs]
+    call = body.call(*args)
+    states.update((b, arg.after(call)) for b, arg in zip(bufs, args))
+  graph_rewrite(UOp.sink(*states.values()), pm_lift, name="pm_lift")
   return 0
