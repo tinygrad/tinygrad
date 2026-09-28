@@ -141,10 +141,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
-  (UPat(Ops.BINARY, name="x"), lambda ctx,x:
-   f'  {ctx[x]}_data = alloca [{len(x.arg)} x i8]\n'
-   f'  store [{len(x.arg)} x i8] c"' + ''.join(f'\\{b:02X}' for b in x.arg) + f'", [{len(x.arg)} x i8]* {ctx[x]}_data\n'
-   f'  {ctx[x]} = bitcast [{len(x.arg)} x i8]* {ctx[x]}_data to i8*'),
 ])
 
 class LLVMRenderer(Renderer):
@@ -191,6 +187,18 @@ class LLVMRenderer(Renderer):
           kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
+      elif u.op is Ops.BINARY:
+        # constant byte data lives in a module-level constant global, indexed through a generic pointer
+        vc += 1
+        r[u] = f"%binary_{vc}"
+        cst = f'[{len(u.arg)} x i8] c"' + ''.join(f'\\{b:02X}' for b in u.arg) + '"'
+        if self.has_local:  # amdgcn constant data is in addrspace(4)
+          local_args.append(f"@binary_{vc} = private unnamed_addr addrspace(4) constant {cst}")
+          kernel.append(f"  %binary_{vc}_gen = addrspacecast [{len(u.arg)} x i8] addrspace(4)* @binary_{vc} to [{len(u.arg)} x i8]*")
+          kernel.append(f"  {r[u]} = bitcast [{len(u.arg)} x i8]* %binary_{vc}_gen to i8*")
+        else:
+          local_args.append(f"@binary_{vc} = private unnamed_addr constant {cst}")
+          kernel.append(f"  {r[u]} = bitcast [{len(u.arg)} x i8]* @binary_{vc} to i8*")
       elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
