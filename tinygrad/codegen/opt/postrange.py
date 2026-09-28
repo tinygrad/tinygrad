@@ -9,7 +9,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, merg
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
-from tinygrad.renderer import Renderer, TensorCore
+from tinygrad.renderer import Renderer
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK), AxisType.UNROLL: (AxisType.REDUCE, AxisType.LOCAL),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK, AxisType.REDUCE)}
@@ -18,7 +18,6 @@ class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
-    self.tensor_core:TensorCore|None = None
     self.opt_range = count(start=max([x.arg[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
   @property
@@ -36,7 +35,6 @@ class Scheduler:
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
     ret.applied_opts = self.applied_opts[:]
-    ret.tensor_core = self.tensor_core
     return ret
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
@@ -240,7 +238,6 @@ class Scheduler:
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in [ne[c] for c in ne if c[0] == "k"]]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, src=(tc_uop,)+tuple(reduce_ranges), arg=(Ops.ADD, 0))
             self.ast = self.ast.substitute({reduceop: tc_uop})
-          self.tensor_core = tc
           return axes
     return None
 

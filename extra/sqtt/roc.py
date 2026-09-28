@@ -130,7 +130,7 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[int, dict[int, Inst]]) 
 
 def main() -> None:
   from tabulate import tabulate
-  from tinygrad.viz.serve import amd_decode
+  from tinygrad.viz.serve import amd_decode, get_arch, get_elf_section
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
@@ -153,7 +153,8 @@ def main() -> None:
   target = f"gfx{dev.props['gfx_target_version']//1000}"
   sqtt = [p for p in profile if isinstance(p, ProfileSQTTEvent) and p.kern == prg.tag]
 
-  pc_to_inst = {addr+prg.base:inst for addr,inst in amd_decode(prg.lib, target).items()}
+  decoded = amd_decode((text:=get_elf_section(prg.lib, ".text")).content, get_arch(target), text.header.sh_addr)
+  pc_to_inst = {addr+prg.base:inst for addr,inst in decoded.items()}
   rctx = decode(sqtt, {prg.tag:pc_to_inst})
   waves = sorted(itertools.chain.from_iterable(rctx.inst_execs.values()), key=lambda w:(w.se, w.cu, w.simd, w.wave_id, w.begin_time))
   if not waves: raise RuntimeError(f"no instruction traces for {args.kernel}")
