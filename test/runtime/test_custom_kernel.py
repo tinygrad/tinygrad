@@ -493,7 +493,10 @@ class TestCustomKernel(unittest.TestCase):
     def call_add_sum(C:UOp, A:UOp) -> UOp:
       tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
       add_call = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG), A.param_like(1)).sink().call(tmp, A, name="add")
-      sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp.after(add_call), name="sum")
+      tmp2 = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      add_call2 = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG),
+                          UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(tmp2, tmp.after(add_call), name="add2")
+      sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp2.after(add_call2), name="sum")
       return sum_call.sink(arg=KernelInfo(name="call_in_kernel"))
 
     N = getenv("N", 4)
@@ -502,7 +505,7 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), out, fxn=lambda C,A: call_sum(C, A).sink(arg=KernelInfo(name="sum")))[0]
     self.assertEqual(out.tolist(), [N*(N+1)//2])
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), a, fxn=call_add_sum)[0]
-    self.assertEqual(out.tolist(), [N*(N+1)//2])
+    self.assertEqual(out.tolist(), [N*(N+3)//2])
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

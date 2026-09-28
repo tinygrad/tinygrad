@@ -70,6 +70,9 @@ base_rewrite = PatternMatcher([
    f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
+   f"{x.arg.name}({', '.join(ctx[x.src[p.arg.slot+1]] for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u: u.arg.slot))});"),
+
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
 ])
@@ -120,6 +123,7 @@ class CStyleLanguage(Renderer):
   abi: str = ""
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
+  reg_prefix: str = ""
   buffer_suffix: str = ""
   smem_align: str = ""
   smem_prefix: str = ""
@@ -259,7 +263,16 @@ class CStyleLanguage(Renderer):
 
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
-  def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
+  def render(self, uops:list[UOp]) -> str:
+    prefix, helper_uops = [], []
+    for body,name in dedup((u.body, u.arg.name) for u in UOp.sink(*uops).toposort() if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
+      lst = list(body.src)
+      _, kernel, bufs = self._render(lst)
+      params = ', '.join((self.reg_prefix if p.addrspace == AddrSpace.REG else "") +
+                        f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
+      prefix.append(f"static inline void {name}({params}) {{\n" + '\n'.join(kernel) + "\n}")
+      helper_uops.extend(lst)
+    return self.render_kernel(*self._render(uops), helper_uops+uops, prefix)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -289,6 +302,7 @@ class ClangRenderer(CStyleLanguage):
   if sys.platform == 'win32':
     abi = "__attribute__((ms_abi)) "
     kernel_typedef = abi + "void"
+
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
     alignment = 2**int(math.log2(dt.itemsize * count)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
@@ -354,6 +368,7 @@ class MetalRenderer(CStyleLanguage):
   # language options
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
+  reg_prefix = "thread "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
   var_prefix = "constant "
   var_suffix = "&"
@@ -380,7 +395,7 @@ class MetalRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    prefix = ["#include <metal_stdlib>","using namespace metal;"]
+    prefix = ["#include <metal_stdlib>","using namespace metal;"] + (prefix or [])
     for name, _, dtype_in, dtype_out, _ in wmma_args(uops):
       dstr_out, dstr_in = self._render_dtype(dtype_out, 2, AddrSpace.REG), self._render_dtype(dtype_in, 2, AddrSpace.REG)
       prefix.append(
