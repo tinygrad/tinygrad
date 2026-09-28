@@ -1150,9 +1150,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # a load from a constant table is one of its values
-    if self.op is Ops.LOAD and (view:=self.src[0].src[0]).op in (Ops.BINARY, Ops.BITCAST) and \
-       (table:=view.src[0] if view.op is Ops.BITCAST else view).op is Ops.BINARY:
-      return min(entries:=memoryview(table.arg).cast(unwrap(view.dtype.fmt)).tolist()), max(entries)
+    if self.op is Ops.LOAD and (t:=self.src[0].buf_uop).op is Ops.BINARY:
+      return min(e:=memoryview(t.arg).cast(unwrap(self.dtype.fmt)).tolist()), max(e)
     # a NAN is outside every interval
     if self.op is Ops.CONST and self.val is not Invalid and not (isinstance(self.val, float) and math.isnan(self.val)): return self.val, self.val
     if self.op is Ops.PAD: return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)  # PAD adds zeros
