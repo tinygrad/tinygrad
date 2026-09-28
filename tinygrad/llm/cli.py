@@ -155,6 +155,7 @@ def main():
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--mmproj", default=None, help="Path to a mmproj GGUF file to enable image input")
   parser.add_argument("--vision_device", default=None, help="Device for the vision tower (e.g. AMD:1 to offload from the LLM's GPU)")
+  parser.add_argument("--vision_max_tokens", type=int, default=None, help="Max tokens per image (default: 4096 with --vision_device, 512 when sharing the LLM's GPU)")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
@@ -174,7 +175,8 @@ def main():
   vision = None
   if (mmproj := args.mmproj or mmprojs.get(args.model)) is not None:
     with Context(DEBUG=max(DEBUG.value, 2 if args.serve else 0)):
-      vision = Qwen3VLTower.from_gguf(str(fetch(mmproj)), device=args.vision_device)
+      vision = Qwen3VLTower.from_gguf(str(fetch(mmproj)), device=args.vision_device,
+                                      max_tokens=args.vision_max_tokens or (4096 if args.vision_device else 512))
     print(f"using vision tower with {sum(x.numel() for x in nn.state.get_parameters(vision)):,} params")
 
   # get tokenizer
@@ -196,7 +198,9 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
+    with Context(DEBUG=max(DEBUG.value, 1)):
+      model.warmup()
+      if vision is not None: vision.warmup()
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, vision).serve_forever()

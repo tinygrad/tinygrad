@@ -20,11 +20,12 @@ class TestSmartResize(unittest.TestCase):
 class TestMRopePositions(unittest.TestCase):
   def test_text_only(self):
     pos, cursor = mrope_positions(10, [])
-    np.testing.assert_array_equal(pos[:, 0], np.arange(10))
+    np.testing.assert_array_equal(np.array(pos)[:, 0], np.arange(10))
     self.assertEqual(cursor, 10)
   def test_image_block(self):
     # 3 text tokens, 2x3 image grid (6 tokens), 2 text tokens
     pos, cursor = mrope_positions(11, [ImageEmbed(3, Tensor.zeros(6, 8), 2, 3)])
+    pos = np.array(pos)
     np.testing.assert_array_equal(pos[:3, 0], [0, 1, 2])
     # image tokens: t constant, h = row, w = col
     np.testing.assert_array_equal(pos[3:9, 0], [3] * 6)
