@@ -1,21 +1,19 @@
 import unittest
 
-from tinygrad import UOp, dtypes
-from tinygrad.codegen.opt.postrange import Scheduler
-from tinygrad.codegen.opt.search import _try_compile
-from tinygrad.helpers import Target
-from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.uop.ops import AxisType, KernelInfo
+from tinygrad import Tensor, UOp
+from tinygrad.engine.realize import compile_linear
+from tinygrad.helpers import Context
+from tinygrad.uop.ops import Ops
 
 
 class TestSearch(unittest.TestCase):
-  def test_compile_symbolic_kernel_candidate(self):
-    out = UOp.param(0, dtypes.int, (4,))
-    size = UOp.variable("size", 1, 4, dtype=dtypes.int)
-    rng = UOp.range(4, 0, AxisType.LOOP, dtype=dtypes.int)
-    ast = out.index(rng).store((rng < size).cast(dtypes.int)).end(rng).sink(arg=KernelInfo())
-    _, compiled = _try_compile((0, Scheduler(ast, ClangRenderer(Target("CPU", arch="x86_64,x86-64")))))
-    self.assertIsNotNone(compiled)
+  def test_beam_symbolic_kernel(self):
+    size = UOp.variable("size", 1, 8)
+    out = Tensor.empty(8, 8, device="CPU")[:size.bind(4)] + 1
+    linear, _ = out.linear_with_vars()
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0): compiled = compile_linear(linear, beam=1)
+    program = next(u for u in compiled.toposort(enter_calls=True) if u.op is Ops.PROGRAM)
+    self.assertNotEqual(program.src[0].arg.applied_opts, ())
 
 
 if __name__ == "__main__":
