@@ -262,6 +262,15 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [1, 0, 1, 0]}
     self.helper_test_single_op("MaxUnpool", inputs, attributes, ["y"])
 
+  def test_maxpool_indices(self):
+    x = np.arange(12, dtype=np.float32).reshape(1, 2, 2, 3)
+    self.helper_test_single_op("MaxPool", {"x": x}, {"kernel_shape": [2, 2]}, ["y", "i"])
+    self.helper_test_single_op("MaxPool", {"x": x}, {"kernel_shape": [2, 2], "storage_order": 1}, ["y", "i"])
+
+  def test_maxunpool_indices(self):
+    inputs = {"x": np.array([[[5], [7]]], np.float32), "i": np.array([[[1], [2]]], np.int64)}
+    self.helper_test_single_op("MaxUnpool", inputs, {"kernel_shape": [2]}, ["y"])
+
   def test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-13
     inputs = {"x": np.random.randn(1, 1, 32, 32, 32).astype(np.float32)}
