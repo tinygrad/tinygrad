@@ -312,7 +312,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
      UOp.const(y.val) if y.op is Ops.CONST else y.cast(dtypes.int)).cast(u.dtype)
     if dtypes.long in (x.dtype, y.dtype) and not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
-  # only RANGE/IF/STORE/KERNEL have side effects
+  # an AFTER waits only on the effect ops listed here, any other dep is replaced by its srcs
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
     tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.BARRIER, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE}
                         else y.src for y in x.src[1:]]))))),

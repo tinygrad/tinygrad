@@ -191,10 +191,8 @@ class LLVMRenderer(Renderer):
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
-        # if it's an assign target, it's already preallocated
-        if u not in r:
-          vc += 1
-          r[u] = f"%v{vc}"
+        vc += 1
+        r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
         l: str|None = self.string_rewrite.rewrite(u, ctx=r)
