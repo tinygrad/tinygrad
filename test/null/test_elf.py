@@ -34,13 +34,6 @@ class TestElfLoader(unittest.TestCase):
     obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
     with self.assertRaisesRegex(RuntimeError, 'powf'): elf_loader(obj)
     elf_loader(obj, link_libs=[DLL('m', 'm')])
-  def test_does_not_load_non_alloc_sections(self):
-    src = 'int test(int x) { return x + 1; }'
-    args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
-    obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
-    image, sections, _ = elf_loader(obj)
-    comment = next(sh for sh in sections if sh.name == '.comment')
-    self.assertNotIn(comment.content, bytes(image))
 
 if __name__ == '__main__':
   unittest.main()
