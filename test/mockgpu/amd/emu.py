@@ -1807,6 +1807,14 @@ _COMMON_HANDLERS: list[tuple[Callable[..., UOp], tuple[str, ...]]] = [
 _INST_HANDLERS: dict[type, Callable[..., UOp]] = {t: h for h, names in _COMMON_HANDLERS for t in _inst_kinds(*names)}
 _INST_HANDLERS[irc.MUBUF] = _compile_mubuf  # CDNA only (rdna3 also has a MUBUF class, intentionally unhandled)
 
+def _get_handler(inst: Inst) -> Callable[..., UOp]:
+  # Look up handler by type, falling back to base classes for _LIT variants
+  handler = _INST_HANDLERS.get(type(inst))
+  if handler is not None: return handler
+  for cls in type(inst).__mro__:
+    if cls in _INST_HANDLERS: return _INST_HANDLERS[cls]
+  raise RuntimeError(f"[emu] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1824,17 +1832,8 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   for inst_type, base, mask, size, entry in _canonical_runner_cache:
     if type(inst) is inst_type and inst_size == size and (inst_int & mask) == base: return entry
 
-  # Look up handler by type, falling back to base classes for _LIT variants
-  handler = _INST_HANDLERS.get(type(inst))
-  if handler is None:
-    for cls in type(inst).__mro__:
-      if cls in _INST_HANDLERS:
-        handler = _INST_HANDLERS[cls]
-        break
-  if handler is None: raise RuntimeError(f"[emu] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-
   ctx = _Ctx(inst_size, _wave_size(arch))
-  sink = handler(inst, ctx)
+  sink = _get_handler(inst)(inst, ctx)
   base, mask, size = ctx.canonical_mask(inst_bytes)
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
