@@ -7,6 +7,7 @@ from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.cstyle import CStyleLanguage
 from test.helpers import assert_kernel_count
 from test.null.test_custom_kernel import custom_elementwise_add_kernel, custom_elementwise_addmul_kernel, custom_gemm
 
@@ -504,6 +505,16 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(out.tolist(), [N*(N+1)//2])
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), a, fxn=call_add_sum)[0]
     self.assertEqual(out.tolist(), [N*(N+1)//2])
+
+  @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
+                       Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
+  def test_binary(self):
+    payload = bytes(range(256))
+    def kernel(out:UOp):
+      i = UOp.range(len(payload), 0)
+      data = UOp(Ops.BINARY, arg=payload)
+      return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
+    self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
