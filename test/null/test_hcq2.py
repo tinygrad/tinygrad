@@ -169,7 +169,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertEqual(orders(b), {(0, 1)})
 
   def test_a_host_kernel_splits_the_batch(self):
-    self.assertEqual(len(self.scheduled(((self.x + 1).contiguous().to("CPU") + 2).contiguous().to("NULL") + 3)), 2)
+    self.assertEqual(len(self.scheduled(((self.x + 1).contiguous().to("PYTHON") + 2).contiguous().to("NULL") + 3)), 2)
 
   def test_batches_of_real_workloads_are_well_formed(self):
     t = Tensor.ones(6).contiguous().realize().shard(("NULL", "NULL:1", "NULL:2"), axis=0)

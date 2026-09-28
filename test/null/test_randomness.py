@@ -72,7 +72,7 @@ class TestRandomness(unittest.TestCase):
     assert rand.device == empty.device
 
   def test_randn_device(self):
-    self.assertEqual(Tensor.randn(3,3,device="CPU").device, "CPU")
+    self.assertEqual(Tensor.randn(3,3,device="NULL").device, "NULL")
 
 if __name__ == '__main__':
   unittest.main()

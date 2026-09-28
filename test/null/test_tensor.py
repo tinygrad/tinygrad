@@ -253,7 +253,7 @@ class TestTinygrad(unittest.TestCase):
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_rand_like_device(self):
-    a = Tensor.ones(3, 3, device="CPU")
+    a = Tensor.ones(3, 3, device="NULL")
     b = Tensor.rand_like(a)
     self.assertEqual(b.device, a.device)
 

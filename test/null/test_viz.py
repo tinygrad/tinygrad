@@ -503,7 +503,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
-    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
+    x = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=custom_binary)[0]
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
