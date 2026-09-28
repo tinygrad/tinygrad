@@ -144,8 +144,8 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
 def flag_gate(m:UOp) -> UOp|None:
   return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
 
-def lower_binary(x:UOp):
-  buf = UOp.alloc(x.shape, x.dtype, addrspace=AddrSpace.REG)
+def lower_binary(ctx, x:UOp):
+  buf = UOp.alloc(x.shape, x.dtype, slot=next(ctx), addrspace=AddrSpace.REG)
   return buf.after(*(buf.index(UOp.const(i, dtypes.int)).store(v) for i,v in enumerate(x.arg)))
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
