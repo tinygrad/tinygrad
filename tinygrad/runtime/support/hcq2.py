@@ -412,8 +412,6 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
     stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
   return buf.after(*dep, *stores)
 
-def consts(vals:Sequence[int]) -> UOp: return UOp(Ops.BINARY, arg=struct.pack(f"<{len(vals)}I", *vals)).bitcast(dtypes.uint32)
-
 def hcq_fence(f:UOp) -> UOp:
   devs = dedup(to_tuple(s.device)[0] for s in f.src)
   lasts, sigs = f.src[:len(devs)], f.src[len(devs):]
@@ -461,11 +459,10 @@ def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   for o, w in patches:
     if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w): uses[w].append(o)
   looped = {w: at for w, at in uses.items() if len(at) > 1 or w.ranges}
-  patches = [(o, w) for o, w in patches if w not in looped]
-  for w, at in looped.items():
-    r = next(iter(w.ranges)) if w.ranges else UOp.range(len(at), next(UOp.unique_num))
-    off = consts(at).index(r).load()
-    patches += [(off + 4 * k, (w >> 32 * k).cast(dtypes.uint32)) for k in range(w.dtype.itemsize // 4)]
+  rngs = [next(iter(w.ranges)) if w.ranges else UOp.range(len(at), next(UOp.unique_num)) for w, at in looped.items()]
+  loads = [UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.uint32).index(r).load() for at, r in zip(looped.values(), rngs)]
+  dwords = [(off + 4 * k, (w >> 32 * k).cast(dtypes.uint32)) for w, off in zip(looped, loads) for k in range(w.dtype.itemsize // 4)]
+  patches = [(o, w) for o, w in patches if w not in looped] + dwords
   nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream

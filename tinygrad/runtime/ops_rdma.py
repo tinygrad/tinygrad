@@ -7,7 +7,7 @@ from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
-from tinygrad.runtime.support.hcq2 import unwrap_view, to_name, consts
+from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.runtime.support.system import filter_visible_devices
@@ -122,7 +122,8 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
   # next slot and psn persist in nic memory. read once per submit and own it
   bumps = [seq.index(0).store(seq.index(0).load() + wqes)] + ([] if is_recv else [psn.index(0).store(psn.index(0).load() + packets)])
   n0, p0 = seq.after(*bumps).index(0).load() - wqes, psn.after(*bumps).index(0).load() - packets
-  i, psns = UOp.range(wqes, next(UOp.unique_num), dtype=dtypes.uint64), consts(list(itertools.accumulate(chunks, initial=0)))
+  i = UOp.range(wqes, next(UOp.unique_num), dtype=dtypes.uint64)
+  psns = UOp(Ops.BINARY, arg=struct.pack(f"<{wqes + 1}I", *itertools.accumulate(chunks, initial=0))).bitcast(dtypes.uint32)
   n, p, p_next = n0 + i, p0 + psns.index(i).load(), p0 + psns.index(i + 1).load()
 
   ring_addr, cq_addr = ring.getaddr(devs), cq.getaddr(devs)
