@@ -26,7 +26,7 @@ def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[U
   return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
 # NULL never runs a batch, so the scheduler is tested on the commands it hands each queue, run by a small executor with symbolic
-# signals and timelines. CPU execution tests live in test/runtime/test_hcq2.py.
+# signals and timelines. CPU execution tests live in test/device/cpu/test_hcq2.py.
 
 def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   batches, orig = list[UOp](), hcq2.sched_batches
@@ -168,6 +168,9 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertTrue(all(c.body.op is Ops.PROGRAM for c in calls(b)))
     self.assertEqual(orders(b), {(0, 1)})
 
+  def test_a_host_kernel_splits_the_batch(self):
+    self.assertEqual(len(self.scheduled(((self.x + 1).contiguous().to("PYTHON") + 2).contiguous().to("NULL") + 3)), 2)
+
   def test_batches_of_real_workloads_are_well_formed(self):
     t = Tensor.ones(6).contiguous().realize().shard(("NULL", "NULL:1", "NULL:2"), axis=0)
     self.scheduled((t + 1).sum(0).contiguous())
@@ -213,8 +216,7 @@ class TestHCQ2Link(unittest.TestCase):
     _, linear, inputs = compiled_chain(2)
     linked = link_linear(linear, input_uops=inputs)
     for graph in (linear, linked):
-      for u in graph.toposort():
-        self.assertTrue(all(d is None or d.split(":")[0] in {"NULL", "PYTHON"} for d in to_tuple(u.device)), f"{u.op}: {u.device}")
+      self.assertLessEqual({d for u in graph.toposort() for d in to_tuple(u.device)}, {None, "NULL", "PYTHON"})
 
 if __name__ == "__main__":
   unittest.main()

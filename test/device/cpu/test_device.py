@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, os, subprocess
+import unittest, os, subprocess, sys
 from unittest.mock import patch
 from tinygrad.device import Device, enumerate_devices_str
 from tinygrad.helpers import Context, WIN, OSX
@@ -28,12 +28,9 @@ class TestDevice(unittest.TestCase):
 
     imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import ClangCompiler; "
                "from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler")
-    subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-                      shell=True, check=True, env={**os.environ, "DEV": "CPU:LLVM"})
-    subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangCompiler)"'],
-                      shell=True, check=True, env={**os.environ, "DEV": "CPU"})
-    subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangCompiler)"'],
-                      shell=True, check=True, env={**os.environ, "DEV": "CPU:CLANG"})
+    for device, compiler in [("CPU:LLVM", "CPULLVMCompiler"), ("CPU", "ClangCompiler"), ("CPU:CLANG", "ClangCompiler")]:
+      subprocess.run([sys.executable, '-c', f"{imports}; assert isinstance(Device[Device.DEFAULT].compiler, {compiler})"],
+                     check=True, env={**os.environ, "DEV": device})
 
   @unittest.skipIf(WIN, "skipping windows test")
   def test_env_online(self):
@@ -58,9 +55,9 @@ class TestDevice(unittest.TestCase):
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
 
     dev = Device["CPU"]
-    dev.cached_renderer.clear()
-    with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
-      self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
+    with Context(DEV="CPU"), patch.dict(dev.cached_renderer, clear=True):
+      with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
+        self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
 
 @unittest.skip("this test is broken if you have tinymesa installed")
 @unittest.skipIf(OSX and 'libclang' in DLL._loaded_, "MTLCompiler can't be loaded after libclang on OSX")

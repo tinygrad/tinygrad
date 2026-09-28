@@ -4,9 +4,6 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from test.helpers import full_rewrite, to_uops_list
-from tinygrad.codegen import full_rewrite_to_sink
-from tinygrad.helpers import Target
-from tinygrad.renderer import Renderer
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.weakint), lambda x: UOp.const(1.0) + UOp.const(2.0)),
@@ -466,7 +463,7 @@ class TestReduceCollapse(unittest.TestCase):
     out = UOp.param(0, dtypes.float, 1)
     red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UNROLL), arg=(Ops.ADD, 0))
     ast = UOp.sink(out.index(UOp.const(0)).store(red)).replace(arg=KernelInfo())
-    uops = full_rewrite_to_sink(ast, Renderer(Target()), optimize=False).toposort()
+    uops = full_rewrite(ast).toposort()
     self.assertNotIn(Ops.REDUCE, [u.op for u in uops])
     self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
 

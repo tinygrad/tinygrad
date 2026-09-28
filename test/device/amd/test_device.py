@@ -1,6 +1,7 @@
-import unittest, os, subprocess
+import unittest, os, subprocess, sys
+from dataclasses import replace
 from tinygrad.device import Device
-from tinygrad.helpers import WIN
+from tinygrad.helpers import DEV, WIN
 
 @unittest.skipIf(Device.DEFAULT != "AMD", "only run on AMD")
 class TestDevice(unittest.TestCase):
@@ -25,12 +26,10 @@ class TestDevice(unittest.TestCase):
 
     imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler; "
                "from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler")
-    subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
-                      shell=True, check=True, env={**os.environ, "DEV": "AMD:LLVM"})
-    subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-                      shell=True, check=True, env={**os.environ, "DEV": "AMD"})
-    subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-                      shell=True, check=True, env={**os.environ, "DEV": "AMD:HIP"})
+    for renderer, compiler in [("LLVM", "AMDLLVMCompiler"), ("", "HIPCompiler"), ("HIP", "HIPCompiler")]:
+      target = replace(DEV.target("AMD"), renderer=renderer)
+      subprocess.run([sys.executable, '-c', f"{imports}; assert isinstance(Device[Device.DEFAULT].compiler, {compiler})"],
+                     check=True, env={**os.environ, "DEV": str(target)})
 
 if __name__ == "__main__":
   unittest.main()

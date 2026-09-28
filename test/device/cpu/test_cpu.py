@@ -1,13 +1,23 @@
 import unittest, io
 from contextlib import redirect_stdout
-from tinygrad import Tensor, Device
-from tinygrad.helpers import Target
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.helpers import Target, OSX
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.codegen import to_program
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
+  @unittest.skipUnless(OSX, "m series cpus support fp16 arithmetic")
+  def test_float16_alu(self):
+    c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
+    s = c.schedule_linear().src[-1]
+    renderer = type(Device.default.renderer)(Target("CPU", arch="arm64,apple-m1"))
+    p = to_program(s.src[0], renderer)
+    out = io.StringIO()
+    with redirect_stdout(out): renderer.compiler.disassemble(p.src[3].arg)
+    assert "fcvt" not in out.getvalue()
+
   def test_arch_feats(self):
     ast = (Tensor.empty(16) + Tensor.empty(16)).schedule_linear().src[-1].src[0]
     for ren in Device[Device.DEFAULT].renderers:

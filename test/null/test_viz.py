@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import patch
 import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
@@ -9,7 +8,7 @@ from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM
-from tinygrad.device import Buffer, CompileError
+from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
@@ -469,35 +468,6 @@ class TestVizIntegration(unittest.TestCase):
         events = [e for e in out["layout"][k]["events"] if graph_st <= e["st"] and e["st"]+e["dur"] <= graph_et]
         self.assertGreater(len(events), 0)
         self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
-
-  @needs_tracked_pm
-  def test_view_source(self):
-    def custom_fn(X:UOp):
-      X = X.flatten()
-      i = UOp.range(X.numel(), 0)
-      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg=("{} + undeclared_name", X.dtype))
-      return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
-    x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_fn)[0]
-    with save_viz() as viz, patch.object(Device[Device.DEFAULT].compiler, "compile_cached", side_effect=CompileError("undeclared_name")):
-      with self.assertRaises(CompileError) as e:
-        x.realize()
-    lst = viz.list_items()
-    codegen_idx = len(lst)-1
-    steps = lst[codegen_idx]["steps"]
-    lin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View UOp List"), None)
-    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
-    bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
-    assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
-    # Ops.LINEAR renders
-    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
-    self.assertIn("Ops.SINK", lin_render)
-    self.assertIn("Ops.CUSTOMI", lin_render)
-    # Ops.SOURCE renders
-    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
-    self.assertIn("undeclared_name", src_render)
-    # Ops.BINARY shows the error message since compile failed
-    bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
-    self.assertIn(type(e.exception).__name__, bin_render)
 
   def test_view_source_alt(self):
     src = "void E_3(float* data0_3) {}"

@@ -226,7 +226,7 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run runtime tests
       run: |
-        DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
+        DEV=CPU python test/device/cpu/test_device.py TestRunAsModule.test_module_runs
         DEV=CPU python -m pytest -n=auto test/runtime/ test/device/cpu --durations=20
     - name: Run GC tests
       run: python test/external/external_uop_gc.py

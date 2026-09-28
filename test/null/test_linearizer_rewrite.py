@@ -1,7 +1,5 @@
 import unittest
-from tinygrad import Tensor, Context
-from tinygrad.helpers import Target
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad import Tensor, Context, Device
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import KernelInfo, AxisType
@@ -16,7 +14,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       opts_to_apply.append(Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)))
       opts_to_apply.append(Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)))
       ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-      prg = to_program(ast, ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
+      prg = to_program(ast, Device.default.renderer)
       print(prg.src[2].arg)
 
   def test_arange(self):
@@ -26,7 +24,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       opts_to_apply = []
       opts_to_apply.append(Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)))
       ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-      prg = to_program(ast, ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
+      prg = to_program(ast, Device.default.renderer)
       print(prg.src[2].arg)
 
   def test_kernel_info(self):
@@ -34,12 +32,9 @@ class TestLinearizerRewrite(unittest.TestCase):
     si = out.schedule_linear().src[-1]
 
     ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=()))
-    renderer = ClangRenderer(Target("CPU", arch="x86_64,x86-64"))
+    renderer = Device.default.renderer
     prg = to_program(ast, renderer)
     assert prg.src[0].arg.applied_opts == (), f"expected no opts, got {prg}"
-
-    #prg = to_program(ast.replace(arg=KernelInfo()), renderer)
-    #assert prg.src[0].arg.applied_opts != (), f"expected opts to apply, got {prg.src[0].arg.applied_opts}"
 
     prg = to_program(ast.replace(arg=KernelInfo(name="custom")), renderer)
     self.assertEqual(prg.src[0].arg.name, "custom")
