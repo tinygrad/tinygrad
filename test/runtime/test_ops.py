@@ -1,7 +1,7 @@
 import time, math, unittest, functools, platform, warnings, sys
 import numpy as np
 import torch
-from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context
+from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context, to_tuple
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.renderer.nir import NIRRenderer
 from test.helpers import TensorTestCase, prepare_test_op
@@ -34,12 +34,13 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     for t in tst: t.to_(mt)
 
   st = time.monotonic()
-  ret = tinygrad_fxn(*tst).realize()
+  ret = to_tuple(tinygrad_fxn(*tst))
+  Tensor.realize(*ret)
   tinygrad_fp = time.monotonic() - st
 
   def compare(s, tinygrad_output, torch_output, atol, rtol):
     if COMPILE_ONLY: return
-    if PRINT_TENSORS: print(s, tinygrad_output, torch_output)
+    if PRINT_TENSORS or DEBUG >= 6: print(s, tinygrad_output, torch_output)
     try:
       assert tinygrad_output.shape == torch_output.shape, f"shape mismatch: tinygrad={tinygrad_output.shape} | torch={torch_output.shape}"
       assert tinygrad_output.dtype == torch_output.dtype, f"dtype mismatch: tinygrad={tinygrad_output.dtype} | torch={torch_output.dtype}"
@@ -50,11 +51,9 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     except Exception as e:
       raise Exception(f"{s} failed shape {tinygrad_output.shape}: {e}")
 
-  if DEBUG >= 6:
-    np.set_printoptions(linewidth=200, suppress=True)
-    print(ret.numpy())
-    print(out.detach().cpu().numpy())
-  compare("forward pass", ret.numpy(), out.detach().cpu().numpy(), atol=atol, rtol=rtol)
+  if DEBUG >= 6: np.set_printoptions(linewidth=200, suppress=True)
+  for i, (t, torch_out) in enumerate(zip(ret, to_tuple(out), strict=True)):
+    compare(f"forward pass tensor {i}", t.numpy(), torch_out.detach().cpu().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY and ts and tst:
@@ -1226,46 +1225,50 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
   def test_sort(self):
+    def torch_sort(x, dim=-1, descending=False):
+      values, indices = x.sort(dim=dim, descending=descending, stable=True)
+      return values, indices.int()
+
     for shape in [(0,), (0,5), (1,), (1,5)]:
-      helper_test_op([shape], lambda x: x.sort(0).values, lambda x: x.sort(0)[0], forward_only=True)
-      helper_test_op([shape], lambda x: x.sort(0).indices.type(torch.int32), lambda x: x.sort(0)[1], forward_only=True)
+      helper_test_op([shape], lambda x: torch_sort(x, 0), lambda x: x.sort(0), forward_only=True)
     for dim in [-1, 0, 1]:
       for descending in [True, False]:
-        helper_test_op([(8,8,6)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
-        helper_test_op([(8,8,6)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
-                       forward_only=True)
+        helper_test_op([(8,8,6)], lambda x: torch_sort(x, dim, descending), lambda x: x.sort(dim, descending), forward_only=True)
     # repeated values
-    helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
-    helper_test_op(None, lambda x: x.sort(stable=True).indices.type(torch.int32), lambda x: x.sort()[1], forward_only=True, vals=[[0, 1] * 9])
-    helper_test_op(None, lambda x: x.sort(stable=True, descending=True).values,
-                   lambda x: x.sort(descending=True)[0], forward_only=True, vals=[[0, 1] * 9])
-    helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),
-                   lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
+    for descending in [True, False]:
+      helper_test_op(None, lambda x: torch_sort(x, descending=descending), lambda x: x.sort(descending=descending),
+                     forward_only=True, vals=[[0, 1] * 9])
+
+  def test_sort_independent_outputs(self):
+    for output in [0, 1]:
+      helper_test_op(None, lambda x: x.sort(stable=True).values if output == 0 else x.sort(stable=True).indices.int(),
+                     lambda x: x.sort()[output], forward_only=True, vals=[[3., 1., 3., 2.]])
 
   def test_argsort(self):
     helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=1, descending=True, stable=True).type(torch.int32),
                               lambda x: x.argsort(1, True), forward_only=True)
 
   def test_topk(self):
-    helper_test_op([(8)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
-    helper_test_op([(8)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
+    def torch_topk(x, k, dim=-1, largest=True):
+      values, indices = x.topk(k, dim, largest)
+      return values, indices.int()
+
+    helper_test_op([(8,)], lambda x: torch_topk(x, 3), lambda x: x.topk(3), forward_only=True)
     for dim, largest in [(0, True), (1, False)]:
-      for sorted_ in [True]: # TODO support False
-        helper_test_op([(5,5,4)],
-                        lambda x: x.topk(4, dim, largest, sorted_).values,
-                        lambda x: x.topk(4, dim, largest, sorted_)[0], forward_only=True)
-        helper_test_op([(5,5,4)],
-                        lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
-                        lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
+      helper_test_op([(5,5,4)], lambda x: torch_topk(x, 4, dim, largest), lambda x: x.topk(4, dim, largest), forward_only=True)
     # repeated values
     if not COMPILE_ONLY:
-      value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
-      np.testing.assert_equal(value.numpy(), [1, 1, 1])
-      np.testing.assert_equal(indices.numpy(), [0, 1, 3])
-      value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False)
-      np.testing.assert_equal(value.numpy(), [0, 0, 0])
-      np.testing.assert_equal(indices.numpy(), [2, 4, 6])
+      for largest, expected_values, expected_indices in [(True, [1, 1, 1], [0, 1, 3]), (False, [0, 0, 0], [2, 4, 6])]:
+        values, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=largest)
+        Tensor.realize(values, indices)
+        np.testing.assert_equal(values.numpy(), expected_values)
+        np.testing.assert_equal(indices.numpy(), expected_indices)
     self.helper_test_exception([(4)], lambda x: x.topk(5), expected=(RuntimeError, ValueError))
+
+  def test_topk_independent_outputs(self):
+    for output in [0, 1]:
+      helper_test_op(None, lambda x: x.topk(2).values if output == 0 else x.topk(2).indices.int(),
+                     lambda x: x.topk(2)[output], forward_only=True, vals=[[3., 1., 4., 2.]])
 
   @slow_test
   def test_einsum(self):
