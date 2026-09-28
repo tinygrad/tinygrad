@@ -76,7 +76,7 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 
 base_rewrite = PatternMatcher([
   # memory load/store
-  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.BINARY)),), allow_any_len=True, name="x"), lambda ctx,x:
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda ctx,buf,c,x:
@@ -187,18 +187,6 @@ class LLVMRenderer(Renderer):
           kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
-      elif u.op is Ops.BINARY:
-        # constant byte data lives in a module-level constant global, indexed through a generic pointer
-        vc += 1
-        r[u] = f"%binary_{vc}"
-        cst = f'[{len(u.arg)} x i8] c"' + ''.join(f'\\{b:02X}' for b in u.arg) + '"'
-        if self.has_local:  # amdgcn constant data is in addrspace(4)
-          local_args.append(f"@binary_{vc} = private unnamed_addr addrspace(4) constant {cst}")
-          kernel.append(f"  %binary_{vc}_gen = addrspacecast [{len(u.arg)} x i8] addrspace(4)* @binary_{vc} to [{len(u.arg)} x i8]*")
-          kernel.append(f"  {r[u]} = bitcast [{len(u.arg)} x i8]* %binary_{vc}_gen to i8*")
-        else:
-          local_args.append(f"@binary_{vc} = private unnamed_addr constant {cst}")
-          kernel.append(f"  {r[u]} = bitcast [{len(u.arg)} x i8]* @binary_{vc} to i8*")
       elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
