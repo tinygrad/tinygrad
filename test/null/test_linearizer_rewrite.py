@@ -6,7 +6,7 @@ from tinygrad.uop.ops import KernelInfo, AxisType
 
 class TestLinearizerRewrite(unittest.TestCase):
   def test_reduction(self):
-    t = Tensor.ones((64,64)).contiguous().realize()
+    t = Tensor.ones((64,64), device="NULL").contiguous().realize()
     out = (t*2).sum(axis=1)
     with Context(SPLIT_REDUCEOP=0):
       si = out.schedule_linear().src[-1]
@@ -18,7 +18,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src[2].arg)
 
   def test_arange(self):
-    out = Tensor.arange(32).clone()
+    out = Tensor.arange(32).clone("NULL")
     with Context(SPLIT_REDUCEOP=0):
       si = out.schedule_linear().src[-1]
       opts_to_apply = []
@@ -28,15 +28,14 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src[2].arg)
 
   def test_kernel_info(self):
-    out = Tensor.arange(4).clone()
+    out = Tensor.arange(4).clone("NULL")
     si = out.schedule_linear().src[-1]
 
     ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=()))
-    renderer = Device.default.renderer
-    prg = to_program(ast, renderer)
+    prg = to_program(ast, Device.default.renderer)
     assert prg.src[0].arg.applied_opts == (), f"expected no opts, got {prg}"
 
-    prg = to_program(ast.replace(arg=KernelInfo(name="custom")), renderer)
+    prg = to_program(ast.replace(arg=KernelInfo(name="custom")), Device.default.renderer)
     self.assertEqual(prg.src[0].arg.name, "custom")
 
 if __name__ == '__main__':

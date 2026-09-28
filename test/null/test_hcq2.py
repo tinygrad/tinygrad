@@ -26,7 +26,7 @@ def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[U
   return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
 # NULL never runs a batch, so the scheduler is tested on the commands it hands each queue, run by a small executor with symbolic
-# signals and timelines. CPU execution tests live in test/device/cpu/test_hcq2.py.
+# signals and timelines. the fence and the ffi are tested by running them on CPU, see test/runtime/test_hcq2.py.
 
 def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   batches, orig = list[UOp](), hcq2.sched_batches
@@ -210,13 +210,6 @@ class TestHCQ2Link(unittest.TestCase):
     self.assertNotIn(cast(Buffer, a.uop.base.buffer)._buf, words)
 
   def test_eager_templates_compile_once(self): self.assertIs(compiled_chain(3)[1], compiled_chain(3)[1])
-
-  @unittest.skipUnless(Device.DEFAULT == "NULL", "requires NULL default")
-  def test_no_cpu_uops(self):
-    _, linear, inputs = compiled_chain(2)
-    linked = link_linear(linear, input_uops=inputs)
-    for graph in (linear, linked):
-      self.assertLessEqual({d for u in graph.toposort() for d in to_tuple(u.device)}, {None, "NULL", "PYTHON"})
 
 if __name__ == "__main__":
   unittest.main()

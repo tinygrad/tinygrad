@@ -469,6 +469,35 @@ class TestVizIntegration(unittest.TestCase):
         self.assertGreater(len(events), 0)
         self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
 
+  @needs_tracked_pm
+  def test_view_source(self):
+    def custom_fn(X:UOp):
+      X = X.flatten()
+      i = UOp.range(X.numel(), 0)
+      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg=("{} + undeclared_name", X.dtype))
+      return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
+    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
+    with save_viz() as viz:
+      with self.assertRaises(Exception) as e:
+        x.realize()
+    lst = viz.list_items()
+    codegen_idx = len(lst)-1
+    steps = lst[codegen_idx]["steps"]
+    lin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View UOp List"), None)
+    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
+    bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
+    assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
+    # Ops.LINEAR renders
+    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
+    self.assertIn("Ops.SINK", lin_render)
+    self.assertIn("Ops.CUSTOMI", lin_render)
+    # Ops.SOURCE renders
+    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
+    self.assertIn("undeclared_name", src_render)
+    # Ops.BINARY shows the error message since compile failed
+    bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
+    self.assertIn(type(e.exception).__name__, bin_render)
+
   def test_view_source_alt(self):
     src = "void E_3(float* data0_3) {}"
     def custom_binary(X:UOp):
