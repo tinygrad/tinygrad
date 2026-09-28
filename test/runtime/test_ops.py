@@ -2121,6 +2121,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(2, 0, 3)], lambda x: x.roll(1))
     self.helper_test_exception([(2, 4)], lambda x: x.roll((1, 2)), expected=RuntimeError)
     helper_test_op([(2, 4)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 4)], lambda x: x.roll((1, 2), (1, 1)))
     helper_test_op([(2, 4)], lambda x: x.roll(-1, 0))
     helper_test_op([(2, 4)], lambda x: x.roll(shifts=(2, 1), dims=(0, 1)))
     helper_test_op([(2, 4, 6)], lambda x: x.roll(1, 0))
