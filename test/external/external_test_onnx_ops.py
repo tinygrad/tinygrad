@@ -57,6 +57,8 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {}
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
+    self.helper_test_single_op("Squeeze", {"data": np.zeros((1, 2, 1), np.float32), "axes": np.array([-1, -3])}, {}, outputs)
+    self.helper_test_single_op("Unsqueeze", {"data": np.zeros(2, np.float32), "axes": np.array([-1, -2])}, {}, ["expanded"])
 
   def test_mean_variance_normalization_axes(self):
     inputs = {"x": np.random.randn(2, 3, 4, 5).astype(np.float32)}
@@ -180,6 +182,12 @@ class TestMainOnnxOps(TestOnnxOps):
 
   def test_if_different_shapes_not_broadcastable(self):
     self._test_if(np.array([[1, 2, 3], [4, 5, 6]]).astype(np.float32), np.array([[6, 5, 4, 3, 2, 1]]).astype(np.float32))
+
+  def test_if_subgraph_opset(self):
+    value = onnx.numpy_helper.from_array(np.arange(24, dtype=np.float32).reshape(2, 3, 4))
+    nodes = [onnx.helper.make_node("Constant", [], ["x"], value=value), onnx.helper.make_node("Softmax", ["x"], ["res"])]
+    body = onnx.helper.make_graph(nodes, "body", [], [onnx.helper.make_tensor_value_info("res", onnx.TensorProto.FLOAT, (2, 3, 4))])
+    self.helper_test_single_op("If", {"cond": np.array(True)}, {"then_branch": body, "else_branch": body}, ["res"])
 
   def test_if_jit_different_shapes(self):
     # When shapes differ, Python selection evaluates condition at graph build time, breaking JIT
@@ -392,6 +400,10 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_argmin_int(self):
     self.helper_test_single_op("ArgMin", {"data": np.array([1, 0], dtype=np.uint8)}, {}, ["reduced"])
     self.helper_test_single_op("ArgMin", {"data": np.array([5, np.iinfo(np.int32).min, 3], dtype=np.int32)}, {}, ["reduced"])
+
+  def test_eyelike_k(self):
+    self.helper_test_single_op("EyeLike", {"x": np.zeros((3, 3), dtype=np.float32)}, {"k": 1}, ["y"])
+    self.helper_test_single_op("EyeLike", {"x": np.zeros((3, 2), dtype=np.float32)}, {"k": -1}, ["y"])
 
   def test_same_device_as_input(self):
     from tinygrad.nn.onnx import onnx_ops

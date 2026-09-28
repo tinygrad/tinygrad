@@ -150,18 +150,16 @@ class OnnxPBParser:
     """Entry point for parsing the ONNX model."""
     obj: dict[str, Any] = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len):
+      if fid == 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
+      else: self.reader.skip_field(wire_type)
+    self.opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
+    self.reader.seek(0)
+    for fid, wire_type in self._parse_message(self.reader.len):
       match fid:
         case 4: obj["domain"] = self.reader.read_string()
         case 5: obj["model_version"] = self.reader.read_int64()
         case 7: obj["graph"] = self._parse_GraphProto()
-        case 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
         case _: self.reader.skip_field(wire_type)
-
-    # update opset version
-    opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
-    for n in obj["graph"]["node"]:
-      n_ = n["parsed_node"]
-      n["parsed_node"] = OnnxNode(n_.op, OpSetId(n_.opset_id.domain, opset_imports.get(n_.opset_id.domain, 1)), n_.inputs, n_.outputs, n_.opts)
     return obj
 
   def _parse_GraphProto(self) -> dict:
@@ -191,7 +189,7 @@ class OnnxPBParser:
 
     # parse node
     attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in obj["attribute"]}
-    opset_id = OpSetId(Domain.from_onnx(obj.get('domain')), 1)  # default version, to be updated later in _parse_ModelProto
+    opset_id = OpSetId(domain:=Domain.from_onnx(obj.get('domain')), self.opset_imports.get(domain, 1))
     obj["parsed_node"] = OnnxNode(obj["op_type"], opset_id, tuple(obj["input"]), tuple(obj["output"]), attributes)
     return obj
 
@@ -584,8 +582,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)
-    return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
+    (n, m), a, b = cast(tuple[int, int], x.shape), max(k, 0), max(-k, 0)
+    return Tensor.eye(n+a, m+b, dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)[a:, b:]
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
   def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
@@ -683,8 +681,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
   def Squeeze(data:Tensor, axes:Sequence[int]|None=None):
-    return data.squeeze() if axes is None else functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
-  def Unsqueeze(data:Tensor, axes:Sequence[int]): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
+    if axes is None: return data.squeeze()
+    return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(map(data._resolve_dim, axes), reverse=True), data)
+  def Unsqueeze(data:Tensor, axes:Sequence[int]):
+    return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(data._resolve_dim(a, extra=len(axes)) for a in axes), data)
 
   def Tile(x:Tensor, repeats:list[int]): return x.repeat(repeats)
   def Concat(*xs:Tensor, axis:int): return Tensor.cat(*xs, dim=axis)
