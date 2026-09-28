@@ -287,7 +287,8 @@ multi_pm = pm_index_multi+PatternMatcher([
     lambda multi,red: unshard_like(multi.shard_view.allreduce(*red.arg), multi) if multi.sharding else None),
 
   # rewrite value-producing calls explicitly for UNSHARD
-  (UPat(Ops.CALL, name="call"), rewrite_into_function),
+  # NOTE: lambda for late binding, rewrite_into_function references multi_pm
+  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call)),
   (UPat((Ops.CALL, Ops.AFTER), src=(multi_pat, ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root"), lambda root:

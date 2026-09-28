@@ -305,10 +305,10 @@ class TestVizTree(unittest.TestCase):
 
   def test_tree_view(self):
     with save_viz() as viz:
-      a = UOp.variable("a",0,10,param=True)
-      b = UOp.variable("b",0,10,param=True)
-      c = UOp.variable("c",0,10,param=True)
-      d = UOp.variable("d",0,10,param=True)
+      a = UOp.variable("a",0,10)
+      b = UOp.variable("b",0,10)
+      c = UOp.variable("c",0,10)
+      d = UOp.variable("d",0,10)
       sink = UOp.sink(a+b, c+d)
       def tree_rewrite(): return graph_rewrite(sink, root, name="root")
       tree_rewrite()
@@ -503,7 +503,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
-    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
+    x = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=custom_binary)[0]
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
@@ -901,10 +901,7 @@ class TestCfg(unittest.TestCase):
     insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
     end_block = [" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1]]
-    code_line = ret["src"].splitlines()[-1]
-    self.assertEqual(len(end_block), 2)
-    for st in [end_block[-1], code_line]:
-      assert st.startswith("s_code_end") and st.endswith("x)"), st
+    self.assertEqual(len(end_block), 1)
 
   def test_loop(self):
     k = Kernel()

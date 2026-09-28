@@ -1,10 +1,9 @@
 import unittest, pytest, weakref
-from tinygrad import dtypes, Variable, Device
+from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from test.helpers import full_rewrite, to_uops_list
-from tinygrad.codegen import full_rewrite_to_sink
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.weakint), lambda x: UOp.const(1.0) + UOp.const(2.0)),
@@ -164,7 +163,7 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.val, 3.0)
 
   def test_depth_2_fold(self):
-    v = UOp.variable("v", 0, 1, dtypes.float, param=True)
+    v = UOp.variable("v", 0, 1, dtypes.float)
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
@@ -258,7 +257,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 1)
 
   def test_depth_2_const_fold(self):
-    v = UOp.variable("tmp", 0, 1, dtypes.int, param=True)
+    v = UOp.variable("tmp", 0, 1, dtypes.int)
     c2 = UOp.const(2)
     c4 = UOp.const(4)
     vc = v+c2
@@ -464,7 +463,7 @@ class TestReduceCollapse(unittest.TestCase):
     out = UOp.param(0, dtypes.float, 1)
     red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UNROLL), arg=(Ops.ADD, 0))
     ast = UOp.sink(out.index(UOp.const(0)).store(red)).replace(arg=KernelInfo())
-    uops = full_rewrite_to_sink(ast, Device["CPU"].renderer, optimize=False).toposort()
+    uops = full_rewrite(ast).toposort()
     self.assertNotIn(Ops.REDUCE, [u.op for u in uops])
     self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
 
@@ -498,7 +497,7 @@ class TestConstBufferize(unittest.TestCase):
     from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(42.0)
     r1 = UOp.range(3, 0)
-    bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device="CPU"))
+    bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device=None))
     self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
 
     result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
@@ -513,7 +512,7 @@ class TestConstBufferize(unittest.TestCase):
     c = UOp.const(3.14)
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)
-    bufferize_with_ranges = c.bufferize(r1, r2, arg=BufferizeOpts(device="CPU"))
+    bufferize_with_ranges = c.bufferize(r1, r2, arg=BufferizeOpts(device=None))
     self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
 
     result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')
