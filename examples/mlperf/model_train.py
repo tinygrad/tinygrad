@@ -1510,14 +1510,14 @@ def train_llama3():
     if getenv("FAKEDATA", 0):
       return fake_data(BS, SAMPLES)
     else:
-      from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
+      from examples.mlperf.dataloader import iterate_llama3_dataset
+      return iterate_llama3_dataset(train_dataset, BS)
 
-  if getenv("FAKEDATA", 0):
-    eval_dataset = None
-  else:
-    from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+  train_dataset = eval_dataset = None
+  if not getenv("FAKEDATA", 0):
+    from examples.mlperf.dataloader import get_llama3_datasets
+    train_dataset, eval_dataset = get_llama3_datasets(SAMPLES, EVAL_SAMPLES, SEQLEN, BASEDIR, DATA_SEED,
+                                                     train_on_val=bool(TRAIN_ON_VAL), small=bool(SMALL))
 
   def get_eval_iter():
     if eval_dataset is None:
@@ -1826,14 +1826,14 @@ def train_gptoss():
     if getenv("FAKEDATA", 0):
       return fake_data(BS, SAMPLES)
     else:
-      from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=True)
+      from examples.mlperf.dataloader import iterate_llama3_dataset
+      return iterate_llama3_dataset(train_dataset, BS)
 
-  if getenv("FAKEDATA", 0):
-    eval_dataset = None
-  else:
-    from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=True)
+  train_dataset = eval_dataset = None
+  if not getenv("FAKEDATA", 0):
+    from examples.mlperf.dataloader import get_llama3_datasets
+    train_dataset, eval_dataset = get_llama3_datasets(SAMPLES, EVAL_SAMPLES, SEQLEN, BASEDIR, DATA_SEED,
+                                                     train_on_val=bool(TRAIN_ON_VAL), small=True)
 
   def get_eval_iter():
     if eval_dataset is None:

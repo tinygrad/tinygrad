@@ -1,4 +1,5 @@
-import os, random, pickle, queue, struct, math, functools, hashlib, time
+import os, random, pickle, queue, struct, math, functools, hashlib, time, tempfile
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock
@@ -6,7 +7,6 @@ from multiprocessing import Queue, Process, shared_memory, connection, Lock
 import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX, CPU_COUNT
-from tinygrad.nn.state import TensorIO
 
 ### ResNet
 
@@ -534,33 +534,19 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
 
 class BinIdxDataset:
   def __init__(self, base_path:Path):
-    self.idx_t = Tensor(base_path.with_name(f"{base_path.name}.idx"))
-    self.idx = TensorIO(self.idx_t)
-
-    # parse idx file
-    magic = self.idx.read(9)
-    assert magic == b"MMIDIDX\x00\x00", "invalid index file format"
-    version, = struct.unpack("<Q", self.idx.read(8))
+    self.idx = np.memmap(base_path.with_name(f"{base_path.name}.idx"), mode="r", dtype=np.uint8)
+    assert self.idx[:9].tobytes() == b"MMIDIDX\x00\x00", "invalid index file format"
+    version, dtype_code, self.count, doc_count = struct.unpack_from("<QBQQ", self.idx, 9)
     assert version == 1, "unsupported index version"
-    dtype_code, = struct.unpack("<B", self.idx.read(1))
-    self.dtype = {1:np.dtype(np.uint8), 2:np.dtype(np.int8), 3:np.dtype(np.int16), 4:np.dtype(np.int32), 5:np.dtype(np.int64), 6:np.dtype(np.float64), 7:np.dtype(np.double), 8:np.dtype(np.uint16)}[dtype_code]
-    self.count, = struct.unpack("<Q", self.idx.read(8))
-    doc_count, = struct.unpack("<Q", self.idx.read(8))
-
-    start = self.idx.tell()
-    end = start + self.count * dtypes.int32.itemsize
-    self.sizes = self.idx_t[start:end].bitcast(dtypes.int32).numpy()
-
-    start = end
-    end = start + self.count * dtypes.int64.itemsize
-    self.pointers = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
-
-    start = end
-    end = start + doc_count * dtypes.int64.itemsize
-    self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
-
-    # bin file
-    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin")).numpy()
+    self.dtype = {1:np.dtype(np.uint8), 2:np.dtype(np.int8), 3:np.dtype(np.int16), 4:np.dtype(np.int32), 5:np.dtype(np.int64),
+                  6:np.dtype(np.float64), 7:np.dtype(np.double), 8:np.dtype(np.uint16)}[dtype_code]
+    offset = 34
+    self.sizes = np.frombuffer(self.idx, dtype="<i4", count=self.count, offset=offset)
+    offset += self.count * 4
+    self.pointers = np.frombuffer(self.idx, dtype="<i8", count=self.count, offset=offset)
+    offset += self.count * 8
+    self.doc_idx = np.frombuffer(self.idx, dtype="<i8", count=doc_count, offset=offset)
+    self.bin_t = np.memmap(base_path.with_name(f"{base_path.name}.bin"), mode="r", dtype=np.uint8)
 
   def _index(self, idx) -> tuple[int, int]:
     return int(self.pointers[idx]), int(self.sizes[idx])
@@ -570,6 +556,26 @@ class BinIdxDataset:
     if length is None: length = size - offset
     ptr += offset * self.dtype.itemsize
     return self.bin_t[ptr:ptr+length*self.dtype.itemsize].view(self.dtype)
+
+def _load_llama3_cache(cache_path:Path, names:tuple[str, ...], build):
+  paths = [cache_path.with_name(f"{cache_path.name}.{name}.npy") for name in names]
+  if not all(path.exists() for path in paths):
+    if cache_path.exists():
+      print(f"converting {cache_path} to memory-mapped arrays...")
+      with open(cache_path, "rb") as f: arrays = pickle.load(f)
+    else:
+      print(f"cache not found, building {cache_path.name}...")
+      arrays = build()
+    for path, array in zip(paths, arrays):
+      # Publish each complete array atomically, including when two jobs populate the same cache.
+      with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
+        tmp = Path(f.name)
+        try:
+          np.save(f, array, allow_pickle=False)
+          f.close()
+          tmp.replace(path)
+        finally: tmp.unlink(missing_ok=True)
+  return tuple(np.load(path, mmap_mode="r", allow_pickle=False) for path in paths)
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
@@ -583,19 +589,12 @@ class GPTDataset:
     # check for cache
     cache_hash = hashlib.sha256(f"{samples}:{seqlen}:{seed}:{shuffle}".encode()).hexdigest()
     cache_path = base_path.with_name(f"{base_path.name}.{cache_hash}.index_cache")
-    print(f"try loading GPTDataset from {cache_path}...")
-    if cache_path.exists():
-      print("cache found, loading...")
-      with open(cache_path, "rb") as f:
-        self.doc_idx, self.sample_idx, self.shuffle_idx = pickle.load(f)
-    else:
-      print("cache not found, building index...")
-      self.doc_idx = self._build_doc_idx()
-      self.sample_idx = self._build_sample_idx()
-      self.shuffle_idx = self._build_shuffle_idx()
-      # save cache
-      with open(cache_path, "wb") as f:
-        pickle.dump((self.doc_idx, self.sample_idx, self.shuffle_idx), f)
+    self.doc_idx, self.sample_idx, self.shuffle_idx = _load_llama3_cache(
+      cache_path, ("doc_idx", "sample_idx", "shuffle_idx"), self._build_indices)
+
+  def _build_indices(self):
+    self.doc_idx = self._build_doc_idx()
+    return self.doc_idx, self._build_sample_idx(), self._build_shuffle_idx()
 
   def __getitem__(self, idx):
     if idx is None:
@@ -717,17 +716,8 @@ class BlendedGPTDataset:
     # check for cache
     cache_hash = hashlib.sha256(f"{samples}:{seqlen}:{seed}:{shuffle}".encode()).hexdigest()
     cache_path = paths[0].with_name(f"{paths[0].name}.{cache_hash}.blend_cache")
-    print(f"try loading BlendedGPTDataset from {cache_path}...")
-    if cache_path.exists():
-      print("cache found, loading...")
-      with open(cache_path, "rb") as f:
-        self.dataset_idx, self.dataset_sample_idx = pickle.load(f)
-    else:
-      print("cache not found, building index...")
-      self.dataset_idx, self.dataset_sample_idx = self._build_blend_idx()
-      # save cache
-      with open(cache_path, "wb") as f:
-        pickle.dump((self.dataset_idx, self.dataset_sample_idx), f)
+    self.dataset_idx, self.dataset_sample_idx = _load_llama3_cache(
+      cache_path, ("dataset_idx", "dataset_sample_idx"), self._build_blend_idx)
 
   def get(self, idx:int):
     tokens = self.datasets[self.dataset_idx[idx]][self.dataset_sample_idx[idx]]
@@ -767,6 +757,12 @@ def get_llama3_dataset(samples:int, seqlen:int, base_dir:Path, seed:int=0, val:b
       [base_dir / "validation" / "c4-validationn-91205-samples.en_text_document"], [1.0], samples, seqlen, seed, shuffle=False)
   return BlendedGPTDataset(
     [base_dir / "c4-train.en_6_text_document", base_dir / "c4-train.en_7_text_document"], [1.0, 1.0], samples, seqlen, seed, shuffle=True)
+
+def get_llama3_datasets(samples:int, eval_samples:int, seqlen:int, base_dir:Path, seed:int=0, train_on_val:bool=False, small:bool=False):
+  with ThreadPoolExecutor(max_workers=2) as pool:
+    train = pool.submit(get_llama3_dataset, samples, seqlen, base_dir, seed, train_on_val, small)
+    evaluation = pool.submit(get_llama3_dataset, eval_samples, seqlen, base_dir, 0, True, small)
+    return train.result(), evaluation.result()
 
 def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
   for b in range(math.ceil(dataset.samples / bs)):
