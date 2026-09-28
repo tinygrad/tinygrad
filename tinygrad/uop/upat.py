@@ -6,6 +6,8 @@ from tinygrad.dtype import dtypes
 
 class UPatCompileError(Exception): pass
 
+def flatands(x:UOp) -> list[UOp]: return [x] if x.op is not Ops.AND else [y for s in x.src for y in flatands(s)]
+
 # **** UPat compiled ****
 # This file builds an IR of match predicates and compiles them to Python source.
 # Ops used: CUSTOM (format-string predicate over operands), CUSTOMI (inline string fragment),
@@ -48,7 +50,14 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
       it = UOp(Ops.CUSTOMI, arg=(f"ituop{depth}", dtypes.void))
       match = _get_clause(next(self.src[0]), it, depth+1)
-      and_clause.append(UOp(Ops.CUSTOM, src=(match, it, base), arg=("all([{0} for {1} in {2}.src])", dtypes.void)))
+      # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
+      stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
+      for st in stores:
+        first = st.src[1].substitute({it: base.index(0)})
+        pred.append(UOp(Ops.CUSTOM, src=(st.src[1], first), arg=("{0} is {1}", dtypes.void)))
+        and_clause.append(UOp(Ops.STORE, src=(st.src[0], first)))
+      if len(stores): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src) != 0", dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(UOp(Ops.AND, src=tuple(pred)), it, base), arg=("all([{0} for {1} in {2}.src])", dtypes.void)))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
@@ -129,39 +138,24 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   # if the whole clause collapsed to a single predicate (no binds), rewrap it
   if x.op is Ops.CUSTOMI: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
-  and_pieces: list[str] = []
-  bound: dict[str, str] = {}  # rebinding a name renders an identity compare (setdefault semantics in the interpreter)
+  and_pieces, store_pieces = [], []
   or_pieces: list[str] = []
-  def bind(nm:str, path:str):
-    if nm in bound: and_pieces.append(f"{bound[nm]} is {path}")
-    else: bound[nm] = path
   for s in x.src:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
       assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.CUSTOMI
-      bind(s.src[0].arg[0], s.src[1].arg[0])
-    # repeat with named binds: binds come from the first src, and every element must be identical to it (setdefault semantics)
-    elif s.op is Ops.CUSTOM and s.src[0].op is Ops.AND and all(y.op in (Ops.CUSTOMI, Ops.STORE) for y in s.src[0].src):
-      stores, pred = partition(s.src[0].src, lambda x: x.op is Ops.STORE)
-      it, base = s.src[1].arg[0], s.src[2].arg[0]
-      for st in stores:
-        # st.src[1] is the path this name binds, written as {it}.src[...]; rebase it on the first src
-        first = f"{base}.src[0]{st.src[1].arg[0].removeprefix(it)}"
-        pred.append(UOp(Ops.CUSTOMI, arg=(f"{st.src[1].arg[0]} is {first}", dtypes.void)))
-        bind(st.src[0].arg[0], first)
-      and_pieces.append(f"all([{' and '.join(y.arg[0] for y in pred)} for {it} in {base}.src])")
-      if len(stores): and_pieces.append(f"len({base}.src) != 0")
+      store_pieces.append(f"{s.src[0].arg[0]}={s.src[1].arg[0]}")
     elif s.op is Ops.CUSTOMI: and_pieces.append(s.arg[0])
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
-    assert len(bound) == 0
+    assert len(store_pieces) == 0
     and_clause = ' and '.join(and_pieces)
     return [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"] + or_pieces
   # if we don't, this is a final return
-  store_clause = ', '.join((["ctx=ctx"] if has_ctx else [])+[f"{k}={v}" for k,v in bound.items()])
+  store_clause = ', '.join((["ctx=ctx"] if has_ctx else [])+store_pieces)
   and_clause = ' and '.join(and_pieces + [f"(_ret:=_fxn({store_clause})) is not None"])
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
