@@ -93,7 +93,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
   to_upcast: list[int] = []
-  where_gate_rngs = {r for u in k.ast.backward_slice if u.op is Ops.WHERE for r in u.src[0].ranges}
+  where_gate_rngs = {r for u in k.ast.backward_slice_without_call if u.op is Ops.WHERE for r in u.src[0].ranges}
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates

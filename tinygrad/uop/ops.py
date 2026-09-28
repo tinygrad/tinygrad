@@ -280,6 +280,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     res.pop(self)
     return res
 
+  # TODO: this should probably be the default in backward_slice
+  @functools.cached_property
+  def backward_slice_without_call(self:UOp) -> dict[UOp, None]:
+    res: dict[UOp, None] = self.toposort(enter_calls=False)
+    res.pop(self)
+    return res
+
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
