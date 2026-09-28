@@ -370,9 +370,10 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
   return uop
 
-def _valid_priority(v: UOp, valids:list[UOp]) -> int:
-  # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  return 0 if (res:=parse_valid(v)) is None else sum(-1 for other in valids if res[0] in other.backward_slice_with_self)
+def _valid_priority(v: UOp, valids:list[UOp]) -> tuple[int, int]:
+  # prioritize dependencies, then tighter bounds, so weaker clauses don't hide useful simplifications
+  return (0, 0) if (res:=parse_valid(v)) is None else (
+    sum(-1 for other in valids if res[0] is other or res[0] in other.backward_slice), res[2] if res[1] else -res[2])
 
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
