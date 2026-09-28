@@ -13,7 +13,10 @@ def lift(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz:
   calls = []
   for inst in insts.values():
     ctx = _Ctx(inst.size(), _wave_size(arch))
-    calls.append(_get_handler(inst)(inst, ctx).call())
+    sink = _get_handler(inst)(inst, ctx)
+    bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
+    body = sink.substitute({b:b.param_like(i) for i,b in enumerate(bufs)})
+    calls.append(body.call(*bufs))
   linear = UOp(Ops.LINEAR, src=tuple(calls))
   graph_rewrite(linear, pm_lift, name="pm_lift")
   return 0
