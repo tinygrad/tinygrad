@@ -86,6 +86,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
+  (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
+
   # GROUP combines void effects, not values.
   (UPat(Ops.GROUP, dtypes.void, src=UPat(dtype=dtypes.void)), lambda: True),
 
@@ -185,7 +187,6 @@ spec_tensor = PatternMatcher([
   # codegen: PROGRAM with progressive sources through the pipeline (SINK, LINEAR?, SOURCE?, BINARY?)
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK),)), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),

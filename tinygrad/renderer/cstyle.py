@@ -11,6 +11,7 @@ from tinygrad.renderer import Renderer
 base_rewrite = PatternMatcher([
   # local/reg buffers
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: ctx.render_buffer(x)),
+  (UPat(Ops.BINARY, name="x"), lambda ctx,x: f'const unsigned char {ctx[x]}[] = "' + ''.join(f'\\x{b:02x}' for b in x.arg) + '";'),
 
   # range/loop/if/endif
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda ctx,x: "for (;;) {"),
@@ -249,7 +250,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op not in {Ops.RANGE, Ops.BUFFER} and u.dtype != dtypes.void:
+        if u.op not in {Ops.RANGE, Ops.BUFFER, Ops.BINARY} and u.dtype != dtypes.void:
           l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         elif u.op is Ops.CAST: l += ";"  # a discarded value renders as a bare statement
         kernel.append("\n".join("  "*depth + line for line in l.split("\n")))

@@ -913,6 +913,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
       return self.src[0].addrspace
+    if self.op is Ops.BINARY: return AddrSpace.REG
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op in {Ops.STACK, Ops.WMMA, Ops.GROUP} or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
