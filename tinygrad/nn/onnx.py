@@ -483,6 +483,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     n = len(pads) // 2
     return tuple(x for i in range(n-1, -1, -1) for x in (pads[i], pads[i+n]))
 
+  def _flat_offset(idx:Tensor, spatial_sz:sint) -> Tensor:
+    return Tensor.arange(0, prod(idx.shape[:2])*spatial_sz, spatial_sz, dtype=dtypes.int64).reshape(*idx.shape[:2], *[1]*(idx.ndim-2))
+
   AUTO_PAD_OPTIONS = Literal["NOTSET", "SAME_UPPER", "SAME_LOWER", "VALID"]
   # (padding_height, padding_width) -> (padding_top, padding_left, padding_bottom, padding_right)
   def _auto_pad(pads, auto_pad: AUTO_PAD_OPTIONS):
@@ -728,7 +731,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     pool_pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
     out = X.max_pool2d(tuple(kernel_shape), strides, dilations, pool_pads, ceil_mode=ceil_mode, return_indices=True)
     ret, idx = cast(tuple[Tensor, Tensor], out)
-    return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
+    spatial_shape = cast(tuple[int, ...], X.shape[2:])
+    if storage_order: idx = Tensor.usum(*(idx // prod(spatial_shape[i+1:]) % s * prod(spatial_shape[:i]) for i, s in enumerate(spatial_shape)))
+    return ret, idx + _flat_offset(idx, prod(spatial_shape))
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:tuple[int, ...]|int=1, group:int=1,
           kernel_shape:tuple[int, ...]|None=None, pads:tuple[int, ...]|int=0, strides:tuple[int, ...]|int=1):
@@ -751,11 +756,12 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     pads = _onnx_pads_to_tiny_pads(pads)
     return X.conv_transpose2d(W, B, group, strides_, dilations_, pads, output_padding_)
 
-  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:Sequence[int]|None=None, pads:tuple[int, ...]|int=0,
+  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Sequence[sint]|None=None, kernel_shape:Sequence[int]=(), pads:tuple[int, ...]|int=0,
                 strides:tuple[int, ...]|int=1):
-    if kernel_shape is None: kernel_shape = []
-    pads_: int | tuple[int, ...] = pads if isinstance(pads, int) else _onnx_pads_to_tiny_pads(pads)
-    return Tensor.max_unpool2d(xT, xI, tuple(kernel_shape), strides, 1, pads_, outshape if outshape is None else tuple(outshape))
+    if outshape is None:
+      s_, p_ = make_tuple(strides, n := len(kernel_shape)), make_tuple(pads, 2*n)
+      outshape = [*xT.shape[:2], *((i-1)*s - pb - pe + k for i,k,s,pb,pe in zip(xT.shape[2:], kernel_shape, s_, p_[:n], p_[n:]))]
+    return xT.max_unpool2d(xI - _flat_offset(xI, prod(outshape[2:])), output_size=outshape).reshape(outshape)
 
   def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
   def GlobalMaxPool(X:Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
