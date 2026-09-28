@@ -10,7 +10,7 @@ from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInt
 
 def filter_visible_devices(devs, device):
   assert (v:=getenv("HCQ_VISIBLE_DEVICES", "")) == "", f"HCQ_VISIBLE_DEVICES={v} is deprecated, use DEV={DEV.target(device, indices=v)} instead"
-  if '-' in (idstr:=DEV.target(device).indices): ids = list(range(int(idstr.split('-')[0]), int(idstr.split('-')[1])+1))
+  if '-' in (idstr:=DEV.target(device).indices)[1:]: ids = list(range(int(idstr.split('-')[0]), int(idstr.split('-')[1])+1))
   else: ids = [int(x) for x in idstr.split(',') if x.strip()]
   assert all(x < len(devs) for x in ids), f"invalid visibility filter: {ids} ({pluralize('device', len(devs))} available)"
   return [devs[x] for x in ids] if ids else devs
