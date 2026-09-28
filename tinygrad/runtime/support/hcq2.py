@@ -454,14 +454,13 @@ pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
 
 def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   stream, patches = bytes(hq.blob), hq.patches
-  # a runtime word at many offsets is one loop over them, a ranged word stores trip r at its r-th use
-  uses = defaultdict[UOp, list[int]](list)
-  for o, w in patches:
-    if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w): uses[w].append(o)
-  looped = {w: at for w, at in uses.items() if len(at) > 1 or w.ranges}
-  rngs = [next(iter(w.ranges)) if w.ranges else UOp.range(len(at), next(UOp.unique_num)) for w, at in looped.items()]
-  loads = [UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.uint32).index(r).load() for at, r in zip(looped.values(), rngs)]
-  dwords = [(off + 4 * k, (w >> 32 * k).cast(dtypes.uint32)) for w, off in zip(looped, loads) for k in range(w.dtype.itemsize // 4)]
+
+  # loop over pathes with the same value
+  rt = [(o, w) for o, w in patches if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w)]
+  uses = {w: [o for o, _ in grp] for w, grp in itertools.groupby(sorted(rt, key=lambda p: p[1].key), key=lambda p: p[1])}
+  looped = {w: (at, [*w.ranges][0] if w.ranges else UOp.range(len(at), next(UOp.unique_num))) for w, at in uses.items() if len(at) > 1 or w.ranges}
+  dwords = [(UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.uint32).index(r).load() + 4 * k, (w >> 32 * k).cast(dtypes.uint32))
+            for w, (at, r) in looped.items() for k in range(w.dtype.itemsize // 4)]
   patches = [(o, w) for o, w in patches if w not in looped] + dwords
   nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
