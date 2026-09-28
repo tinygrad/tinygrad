@@ -22,8 +22,8 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   and_clause:list[UOp] = []
   if self.op is not None:
     if len(self.op) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(int(x) for x in self.op))), arg=("{0}.op in {1}", dtypes.void)))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("{0}.op == "+str(self.op[0].value), dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=frozenset(self.op))), arg=("{0}.op in {1}", dtypes.void)))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.op[0])), arg=("{0}.op is {1}", dtypes.void)))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("{0}.arg == "+str(int(self.arg)), dtypes.void)))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.arg)), arg=("{0}.arg == {1}", dtypes.void)))
@@ -33,14 +33,14 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.CUSTOMI, arg=(self.name, dtypes.void)), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_dtype))),
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype))),
                             arg=("{0}.dtype in {1}", dtypes.void)))
     else:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])),
-                            arg=("{0}.dtype == {1}", dtypes.void)))
+                            arg=("{0}.dtype is {1}", dtypes.void)))
   if self.match_tag is not None:
     if len(self.match_tag) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_tag))), arg=("{0}.tag in {1}", dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_tag))), arg=("{0}.tag in {1}", dtypes.void)))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_tag[0])), arg=("{0}.tag == {1}", dtypes.void)))
   if self.src is not None:
     # single match
