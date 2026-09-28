@@ -85,6 +85,13 @@ class TestValidIdxSimplification(unittest.TestCase):
     for v in itertools.permutations([v0,v1,v2,v3]):
       self.assertEqual(simplify_valid(v[0]&v[1]&v[2]&v[3]).render(), "False")
 
+  def test_valid_stronger_bound_first(self):
+    # A weaker bound on the whole sum must not hide the tighter bound on r5 (CL IMAGE replay).
+    r3, r5 = Range(3, 2), Range(5, 8)
+    for clauses in itertools.permutations([r5<7, r3*7+r5<8, r3*7+r5<7]):
+      valid = graph_rewrite(UOp.uprod(*clauses), sym)
+      self.assertEqual(set(valid.split_uop(Ops.AND)), {r5<7, r3<1})
+
   def test_simplify_valid_from_div(self):
     x = Variable("x", -100, 100)
     valid = ((x<0)&((100%x).cast(dtypes.bool)))
