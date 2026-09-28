@@ -5,6 +5,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo, CallInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
+from tinygrad.helpers import diskcache_get, diskcache_put, colored
 from tinygrad.schedule.allreduce import is_allreduce_linear_output
 
 # **** schedule linearizer
@@ -224,8 +225,13 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   param_map = {pmap[x.arg.slot]:x.arg.slot for x in params}
   buffer_map = {cast(int, bmap[x.arg.slot]):x.arg for x in bufs}
   cache_key = canonical.key
-  sc_ret = None
-  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+  # SCACHE >= 2 also persists the schedule and its slot mappings to disk.
+  sc_ret, disk_hit = schedule_cache.get(cache_key, None) if SCACHE else None, False
+  if sc_ret is None and SCACHE >= 2:
+    if (cached:=diskcache_get("schedule_cache_canonical", {"key": cache_key})) is not None:
+      sc_ret, schedule_cache_param_maps[cache_key], schedule_cache_buffer_maps[cache_key] = cached
+      disk_hit = True
+  if sc_ret is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(prepare_rangeify(function)))
@@ -233,9 +239,10 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
       schedule_cache[cache_key] = linear
       schedule_cache_param_maps[cache_key] = param_map
       schedule_cache_buffer_maps[cache_key] = buffer_map
+    if SCACHE >= 2: diskcache_put("schedule_cache_canonical", {"key": cache_key}, (linear, param_map, buffer_map))
   else:
-    # schedule cache hit
-    linear = sc_ret
+    # schedule cache hit (memory or disk)
+    linear = schedule_cache[cache_key] = sc_ret
     old_map = schedule_cache_param_maps[cache_key]
     assert old_map.keys() == param_map.keys(), "canonical schedule cache hit has mismatched parameters"
     remap = {old_slot:param_map[canonical_slot] for canonical_slot,old_slot in old_map.items()}
@@ -251,7 +258,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
     else:
       frm = None
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
+          f" | {colored(' cache hit', 'yellow') if disk_hit else (' cache hit' if sc_ret is not None else 'CACHE MISS')} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return call.replace(src=(linear,)+call.src[1:])
 
