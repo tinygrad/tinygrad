@@ -147,10 +147,12 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
     elif s.op is Ops.CUSTOM and s.src[0].op is Ops.AND and all(y.op in (Ops.CUSTOMI, Ops.STORE) for y in s.src[0].src):
       stores, pred = partition(s.src[0].src, lambda x: x.op is Ops.STORE)
       it, base = s.src[1].arg[0], s.src[2].arg[0]
-      lifted = {st.src[0].arg[0]: f"{base}.src[0]{st.src[1].arg[0][len(it):]}" for st in stores}
-      piece = ' and '.join([y.arg[0] for y in pred]+[f"{st.src[1].arg[0]} is {lifted[st.src[0].arg[0]]}" for st in stores])
-      and_pieces += [f"all([{piece} for {it} in {base}.src])"] + ([f"len({base}.src) != 0"] if stores else [])
-      for nm, path in lifted.items(): bind(nm, path)
+      for st in stores:
+        first = f"{base}.src[0]{st.src[1].arg[0][len(it):]}"  # the path this name binds in the first src
+        pred.append(UOp(Ops.CUSTOMI, arg=(f"{st.src[1].arg[0]} is {first}", dtypes.void)))
+        bind(st.src[0].arg[0], first)
+      and_pieces.append(f"all([{' and '.join(y.arg[0] for y in pred)} for {it} in {base}.src])")
+      if len(stores): and_pieces.append(f"len({base}.src) != 0")
     elif s.op is Ops.CUSTOMI: and_pieces.append(s.arg[0])
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
