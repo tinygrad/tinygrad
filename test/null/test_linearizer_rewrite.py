@@ -8,7 +8,7 @@ from tinygrad.uop.ops import KernelInfo, AxisType
 
 class TestLinearizerRewrite(unittest.TestCase):
   def test_reduction(self):
-    t = Tensor.ones((64,64), device="NULL").contiguous().realize()
+    t = Tensor.ones((64,64)).contiguous().realize()
     out = (t*2).sum(axis=1)
     with Context(SPLIT_REDUCEOP=0):
       si = out.schedule_linear().src[-1]
@@ -20,7 +20,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src[2].arg)
 
   def test_arange(self):
-    out = Tensor.arange(32).clone("NULL")
+    out = Tensor.arange(32).clone()
     with Context(SPLIT_REDUCEOP=0):
       si = out.schedule_linear().src[-1]
       opts_to_apply = []
@@ -30,7 +30,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src[2].arg)
 
   def test_kernel_info(self):
-    out = Tensor.arange(4).clone("NULL")
+    out = Tensor.arange(4).clone()
     si = out.schedule_linear().src[-1]
 
     ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=()))

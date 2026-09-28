@@ -93,7 +93,7 @@ class TestCompiler(unittest.TestCase):
   def test_device_compile(self):
     getenv.cache_clear()
     with Context(CCACHE=0):
-      a = Tensor([0.,1.], device=Device.DEFAULT).realize()
+      a = Tensor([0.,1.]).realize()
       (a + 1).realize()
 
 if __name__ == "__main__":
