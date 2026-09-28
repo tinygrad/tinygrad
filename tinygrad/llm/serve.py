@@ -147,7 +147,7 @@ class Handler(VizHandler):
         except (RuntimeError, ValueError) as e:
           return self.send_data(json.dumps({"error":{"message":str(e), "type":"invalid_request_error",
                                                      "param":"messages", "code":"unsupported_image"}}).encode(), status_code=400)
-        stderr_log(f"images:{len(images)} (+{sum(i.embeds.shape[0] for i in images)} tokens)  {colored('--', 'BLACK')}  ")
+        stderr_log(f"images:{len(images)} (+{sum(i.n_tokens for i in images)} tokens)  {colored('--', 'BLACK')}  ")
       if len(ids) >= self.server.model.max_context:
         stderr_log(f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
         return self.send_data(json.dumps({"error":{"message":f"prompt has {len(ids)} tokens, but the model context is "
