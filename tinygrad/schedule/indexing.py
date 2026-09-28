@@ -67,7 +67,7 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.RANGE, Ops.SPECIAL}: return ()
-  if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END, Ops.BACKEDGE}: return src[:1]
+  if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END, Ops.BACKEDGE, Ops.COPY}: return src[:1]
   return src
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:

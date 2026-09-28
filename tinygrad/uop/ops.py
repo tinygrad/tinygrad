@@ -773,7 +773,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert arg is None or isinstance(self.device, tuple)
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
     if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
-    return UOp(Ops.COPY, src=(inp,), arg=device)
+    # multi-device COPYs carry the DEVICE range as src[1] (like UNSHARD's sharding ranges)
+    return UOp(Ops.COPY, src=(inp, *UOp.device_range_src(device)), arg=device)
   def store_call(self, src:UOp) -> UOp:
     """Executable bulk transfer into this buffer."""
     return self.param_like(0).store(src.param_like(1)).call(self, src)
@@ -854,16 +855,21 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
                                     Ops.MSTACK, Ops.MSELECT, Ops.PARAM, Ops.LINEAR}: return self
     return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
+  def device_range_src(device:str|tuple[str, ...]|None) -> tuple[UOp, ...]:
+    # BUFFER/ALLOC/COPY carry a DEVICE range when targeting multiple devices
+    return (UOp.range(len(device), -1, AxisType.DEVICE),) if isinstance(device, tuple) else ()
+  @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     slot = next(UOp.unique_num) if num is None else num
     buf = MultiBuffer(device, size, dtype) if isinstance(device, tuple) else Buffer(device, size, dtype)
-    return UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
+    return UOp(Ops.BUFFER, src=UOp.device_range_src(device), arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
     # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
-    return UOp(Ops.BUFFER, arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
+    return UOp(Ops.BUFFER, src=UOp.device_range_src(device or opaque.device),
+               arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -914,6 +920,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
+    if self.op is Ops.BINARY: return AddrSpace.GLOBAL
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
       return self.src[0].addrspace
@@ -1193,8 +1200,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None):
-    ret = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(to_max_shape(shape)),
-                                      addrspace=addrspace, device=device))
+    ret = UOp(Ops.ALLOC, src=UOp.device_range_src(device),
+              arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(to_max_shape(shape)),
+                           addrspace=addrspace, device=device))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 

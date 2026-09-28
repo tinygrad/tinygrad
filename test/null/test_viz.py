@@ -503,7 +503,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
-    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
+    x = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=custom_binary)[0]
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
@@ -842,7 +842,7 @@ class TestVizMemoryLayout(unittest.TestCase):
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
-                                                    s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
+                                                    s_cmp_eq_u64, s_code_end, s_endpgm, s_getpc_b64, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
 
 @needs_tracked_pm
@@ -871,6 +871,15 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
+
+  def test_operands(self):
+    k = Kernel()
+    k.emit(s_getpc_b64(s[2:3]))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("getpc", k)["data"]
+    tokens = next(iter(cfg["pc_tokens"].values()))
+    self.assertEqual(len(tokens), 2)
 
   def test_diamond(self):
     k = Kernel()
