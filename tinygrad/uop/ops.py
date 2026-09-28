@@ -1825,8 +1825,9 @@ class RewriteContext:
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        tmp = list(new_n.src[:1]) if new_n.op is Ops.CALL and not self.enter_calls else []
-        for x in new_n.src[len(tmp):]:
+        skip = int(new_n.op is Ops.CALL and not self.enter_calls)
+        tmp = list(new_n.src[:skip])
+        for x in new_n.src[skip:]:
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))
