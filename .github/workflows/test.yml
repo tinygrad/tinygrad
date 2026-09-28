@@ -131,12 +131,12 @@ jobs:
               'DEV=PYTHON::sm_75 HALF=1' 'DEV=PYTHON::sm_80 HALF=1' 'DEV=PYTHON::sm_80 ALLOW_TF32=1'
     - name: Run additional tensor core tests
       run: |
-        DEV=PYTHON::METAL python3 -m pytest -nauto test/opt/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
-        DEV=PYTHON::gfx1100 python3 -m pytest -nauto test/opt/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
-        DEV=PYTHON::gfx942 python3 -m pytest -nauto test/opt/test_tensor_cores.py
-        DEV=PYTHON::gfx950 python3 -m pytest -nauto test/opt/test_tensor_cores.py
-        DEV=PYTHON::gfx1201 python3 -m pytest -nauto test/opt/test_tensor_cores.py
-        ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/opt/test_tensor_cores.py
+        DEV=PYTHON::METAL python3 -m pytest -nauto test/runtime/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
+        DEV=PYTHON::gfx1100 python3 -m pytest -nauto test/runtime/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
+        DEV=PYTHON::gfx942 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
+        DEV=PYTHON::gfx950 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
+        DEV=PYTHON::gfx1201 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
+        ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
         DEBUG=2 DEV=PYTHON::sm_80 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
 
   linter:
@@ -255,7 +255,7 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/opt test/device/cpu --ignore test/runtime/test_custom_kernel.py --ignore test/runtime/test_hashing.py --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --ignore test/runtime/test_custom_kernel.py --ignore test/runtime/test_hashing.py --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -600,7 +600,7 @@ jobs:
       - name: Run pytest (amd)
         run: python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd --durations=20
       - name: Run opt tests
-        run: python -m pytest -n=auto test/opt --durations=20
+        run: python -m pytest -n=auto test/runtime/test_kernel_opts.py test/runtime/test_tensor_cores.py test/runtime/test_search.py --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/runtime/test_disk_tensor.py -k test_copy_from_disk
       - name: Run TRANSCENDENTAL math
