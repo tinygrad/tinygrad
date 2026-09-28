@@ -1,10 +1,11 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
+from tinygrad.llm.vision import Qwen3VLTower, extract_message_images, prepare_prompt
 if TYPE_CHECKING:
   import jinja2
 
@@ -103,6 +104,11 @@ models = {
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
 }
 
+# vision towers for models with image support (auto-loaded, override with --mmproj)
+mmprojs = {
+  "qwen3.8:27b": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/b62a80264f8b0c1bb849ee1c9c487415ebeca194/mmproj-F16.gguf",
+}
+
 class FallbackTemplate:
   # minimal jinja2.Template-compatible chat template without jinja2, no tool calling support
   def __init__(self, tok:SimpleTokenizer): self.tok = tok
@@ -132,16 +138,23 @@ class FallbackTemplate:
       elif isinstance(content, list):
         for c in content:
           if c["type"] == "text": out += c["text"]
+          elif c["type"] in ("image", "image_url"):
+            if "<|image_pad|>" not in self.tok._special_tokens: raise RuntimeError("images are not supported by this model")
+            out += "<|vision_start|><|image_pad|><|vision_end|>"
           else: raise RuntimeError(f"unhandled type: {c['type']}")
       elif content is not None: raise RuntimeError(f"unknown content type: {type(content)}")
       out += self.end_turn()
     return out + self.role("assistant") if add_generation_prompt else out
+
+def image_pad_id(tok:SimpleTokenizer) -> int|None: return tok._special_tokens.get('<|image_pad|>')
 
 from tinygrad.llm.serve import LLMServer
 
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
+  parser.add_argument("--mmproj", default=None, help="Path to a mmproj GGUF file to enable image input")
+  parser.add_argument("--vision_device", default=None, help="Device for the vision tower (e.g. AMD:1 to offload from the LLM's GPU)")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
@@ -156,6 +169,13 @@ def main():
   file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
+
+  # load the vision tower if provided or known for this model
+  vision = None
+  if (mmproj := args.mmproj or mmprojs.get(args.model)) is not None:
+    with Context(DEBUG=max(DEBUG.value, 2 if args.serve else 0)):
+      vision = Qwen3VLTower.from_gguf(str(fetch(mmproj)), device=args.vision_device)
+    print(f"using vision tower with {sum(x.numel() for x in nn.state.get_parameters(vision)):,} params")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -179,7 +199,7 @@ def main():
     with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, vision).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
@@ -199,11 +219,23 @@ def main():
   # interactive chat
   messages: list[dict] = []
   while 1:
-    try: messages.append({"role":"user", "content":input('>>> ')})
+    try: user_input = input('>>> ')
     except EOFError: break
+    # attach whitespace-separated image file paths as images
+    image_paths, text = [], []
+    if vision is not None:
+      for word in user_input.split():
+        if pathlib.Path(word).is_file() and word.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")):
+          image_paths.append(word)
+        else: text.append(word)
+    content: str|list[dict] = " ".join(text) if image_paths else user_input
+    if image_paths: content = [{"type":"image_url", "image_url":{"url":p}} for p in image_paths] + [{"type":"text", "text":" ".join(text)}]
+    messages.append({"role":"user", "content":content})
     ids = tok.encode(template.render(messages=messages, add_generation_prompt=True))
+    # the whole conversation is re-rendered each turn, so collect images from all messages
+    ids, img_embeds = prepare_prompt(ids, extract_message_images(messages), vision, image_pad_id(tok))
     reply, dec = "", tok.stream_decoder()
-    for next_id in model.generate(ids):
+    for next_id in model.generate(ids, images=img_embeds or None):
       if tok.is_end(next_id):
         sys.stdout.write(dec() + "\n\n")
         break

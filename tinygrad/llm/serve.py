@@ -3,9 +3,11 @@ import json, pathlib, re, time, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
+from tinygrad.llm.vision import extract_message_images, prepare_prompt
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
   from tinygrad.llm.model import Transformer
+  from tinygrad.llm.vision import Qwen3VLTower
 
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
@@ -73,10 +75,10 @@ class Handler(VizHandler):
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False):
+                reasoning:bool=False, images:list|None=None):
     model, tok = self.server.model, self.server.tok
     prompt_tokens = len(ids)
-    cache_start_pos = model.get_start_pos(ids)
+    cache_start_pos = 0 if images else model.get_start_pos(ids)
     stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
@@ -93,7 +95,7 @@ class Handler(VizHandler):
     completed = False
     try:
       yield chunk({"role":"assistant", "content":""})
-      for next_id in model.generate(ids, temperature=temperature):
+      for next_id in model.generate(ids, temperature=temperature, images=images):
         if len(out) == 0:
           stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
         if tok.is_end(next_id): break
@@ -137,6 +139,15 @@ class Handler(VizHandler):
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
       ids: list[int] = self.server.tok.encode(rendered)
       stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
+      # expand image placeholders into vision tokens
+      images = None
+      if (raw_images := extract_message_images(body["messages"])):
+        try:
+          ids, images = prepare_prompt(ids, raw_images, self.server.vision, self.server.tok._special_tokens.get('<|image_pad|>'))
+        except (RuntimeError, ValueError) as e:
+          return self.send_data(json.dumps({"error":{"message":str(e), "type":"invalid_request_error",
+                                                     "param":"messages", "code":"unsupported_image"}}).encode(), status_code=400)
+        stderr_log(f"images:{len(images)} (+{sum(i.embeds.shape[0] for i in images)} tokens)  {colored('--', 'BLACK')}  ")
       if len(ids) >= self.server.model.max_context:
         stderr_log(f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
         return self.send_data(json.dumps({"error":{"message":f"prompt has {len(ids)} tokens, but the model context is "
@@ -147,7 +158,7 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+                              reasoning=rendered.rstrip().endswith("<think>"), images=images)
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
@@ -168,6 +179,7 @@ class Handler(VizHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
-    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any,
+               vision:Qwen3VLTower|None=None):
+    self.model, self.model_name, self.tok, self.template, self.vision = model, model_name, tok, template, vision
     super().__init__(server_address, Handler)

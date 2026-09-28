@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
+from tinygrad.llm.vision import ImageEmbed, mrope_positions, imrope_freqs_cis
 from tinygrad.uop.ops import resolve
 
 class ExpertGating(enum.IntEnum):
@@ -110,6 +111,7 @@ class TransformerConfig:
   swiglu_up_bias: float = 0.0
   sliding_window: int = 0
   sliding_window_pattern: int = 0
+  mrope_sections: tuple[int, ...] = ()
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -171,16 +173,16 @@ class FFNBlock:
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
   def _init_state(self, x:Tensor): raise NotImplementedError
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
+  def _attention(self, x:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor: raise NotImplementedError
 
-  def __call__(self, x: Tensor, start_pos: int|UOp):
+  def __call__(self, x: Tensor, start_pos: int|UOp, freqs:Tensor|None=None):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp):
-      h =     x + self._attention(self.attn_norm(x), start_pos)
+    def _run(x:Tensor, start_pos:int|UOp, freqs:Tensor|None=None):
+      h =     x + self._attention(self.attn_norm(x), start_pos, freqs)
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
-    return _run(x, start_pos)
+    return _run(x, start_pos, freqs)
 
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -197,7 +199,7 @@ class TransformerBlock(FFNBlock):
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
     if config.attn_sinks: self.attn_sinks = {"weight": Tensor.zeros(config.n_heads)}
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor:
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
@@ -210,8 +212,9 @@ class TransformerBlock(FFNBlock):
     v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
-    k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
+    rope_freqs = self.freqs_cis[start_pos:start_pos+T] if freqs is None else freqs
+    q = apply_rope(q[..., :self.config.rope_dim], rope_freqs).cat(q[..., self.config.rope_dim:], dim=-1)
+    k = apply_rope(k[..., :self.config.rope_dim], rope_freqs).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     store = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(self.cache_kv.dtype).uop)
@@ -267,19 +270,21 @@ class MLATransformerBlock(FFNBlock):
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.ssm or not self.config.ssm.kda:
+      q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T] if freqs is None else freqs)
     q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.ssm or not self.config.ssm.kda:
+      k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T] if freqs is None else freqs)
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
@@ -319,7 +324,7 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
     # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
@@ -412,14 +417,26 @@ class Transformer:
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
+    # ... and again for the image path (custom embeddings and mrope frequencies as extra inputs)
+    self.media_prefill_jit = TinyJit(self.forward_media)
+    self.media_rollout_jit = TinyJit(self.forward_media)
+    self.config = config
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    x = self.token_embd(tokens).float()                   # (B, T, D)
-    for block in self.blk: x = block(x, start_pos)
+  def _sample(self, x:Tensor, temperature:Tensor) -> Tensor:
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+    x = self.token_embd(tokens).float()                   # (B, T, D)
+    for block in self.blk: x = block(x, start_pos)
+    return self._sample(x, temperature)
+
+  def forward_media(self, embd:Tensor, start_pos:int|UOp, temperature:Tensor, freqs:Tensor) -> Tensor:
+    x = embd.float()                                      # (B, T, D) precomputed embeddings (image tokens spliced in)
+    for block in self.blk: x = block(x, start_pos, freqs)
+    return self._sample(x, temperature)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
@@ -508,7 +525,8 @@ class Transformer:
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_clamp_exp=7.0 if arch == 'gpt-oss' else None,
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0))
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0),
+      mrope_sections=tuple(kv.get(f'{arch}.rope.dimension_sections', ())))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
@@ -528,21 +546,59 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+  @property
+  def freqs_cis(self) -> Tensor:  # all attention blocks share the same cached rope table
+    return next(b.freqs_cis for b in self.blk if hasattr(b, 'freqs_cis'))
+
+  def _build_media_inputs(self, tokens:list[int], images:list[ImageEmbed]) -> tuple[Tensor, Tensor, int]:
+    """Returns ((1, L, D) embeddings with image embeds spliced in, (L, rope_dim) mrope freqs, position shift)."""
+    embd = self.token_embd(Tensor(tokens, dtype='int32').reshape(1, -1)).float()  # (1, L, D)
+    ar = Tensor.arange(len(tokens))
+    for img in images:
+      n = int(img.embeds.shape[0])
+      sel = (ar - img.start).clip(0, n - 1)
+      mask = ((ar >= img.start) & (ar < img.start + n)).reshape(1, -1, 1)
+      embd = mask.where(img.embeds.float()[sel].unsqueeze(0), embd)
+    positions, cursor = mrope_positions(len(tokens), images)
+    freqs = imrope_freqs_cis(Tensor(positions), self.config.rope_dim, self.config.rope_theta, self.config.mrope_sections)
+    # pad to max_context so the JIT input views have a static shape, like the token buffer
+    # (half precision to halve the buffer size; forward_media upcasts to float)
+    embd = embd.half().pad(((0, 0), (0, self.max_context - len(tokens)), (0, 0))).contiguous()
+    freqs = freqs.pad(((0, self.max_context - len(tokens)), (0, 0))).contiguous()
+    return embd.realize(), freqs.to(self.token_embd.weight.device).realize(), cursor - len(tokens)
+
+  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0, images:list[ImageEmbed]|None=None):
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
+    v_rope_pos = UOp.variable("rope_pos", 0, self.max_context-1)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
+    embd: Tensor|None = None
+    freqs: Tensor|None = None
+    shift = 0
+    if images:
+      if not self.config.mrope_sections: raise RuntimeError("model has no mrope sections, image support requires a VL model")
+      embd, freqs, shift = self._build_media_inputs(tokens, images)
     # recompute start_pos from what's currently valid in the caches
-    start_pos = self.get_start_pos(tokens)
+    # NOTE: image requests always prefill from scratch, cached KV can't be validated against the image content
+    start_pos = 0 if images else self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
-      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
+      if embd is not None and start_pos < prompt_len:
+        assert freqs is not None
+        out = self.media_prefill_jit(embd[:, sp:sp+nt], sp, temp, freqs[sp:sp+nt]).realize()
+      elif embd is not None:
+        assert out is not None
+        # rollout with shifted mrope positions: text after an image uses positions shifted by `shift`
+        rp = v_rope_pos.bind(start_pos + shift)
+        out = self.media_rollout_jit(self.token_embd(out).realize(), sp, temp, self.freqs_cis[rp:rp + 1]).realize()
+      else:
+        out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
