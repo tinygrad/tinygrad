@@ -125,26 +125,46 @@ pm_renderer = PatternMatcher([
    lambda x,c,g: x.replace(arg=(x.arg[0]+f".src[{c.val}]", dtypes.void)))
 ], compiled=False)
 
+def predstr(x:UOp) -> str:  # render a match clause to a predicate string
+  if x.op is Ops.CUSTOMI: return x.arg[0]
+  if x.op is Ops.AND: return f"({' and '.join(predstr(y) for y in x.src)})"
+  if x.op is Ops.OR: return f"({' or '.join(predstr(y) for y in x.src)})"
+  if x.op is Ops.CUSTOM and x.src[0].op is Ops.AND:  # nested repeat
+    return f"all([{' and '.join(predstr(y) for y in x.src[0].src)} for {x.src[1].arg[0]} in {x.src[2].arg[0]}.src])"
+  raise UPatCompileError(f"can't compile this {x}")
+
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   assert x.op is Ops.AND
-  and_pieces, store_pieces = [], []
+  and_pieces: list[str] = []
+  bound: dict[str, str] = {}  # rebinding a name renders an identity compare (setdefault semantics in the interpreter)
   or_pieces: list[str] = []
+  def bind(nm:str, path:str):
+    if nm in bound: and_pieces.append(f"{bound[nm]} is {path}")
+    else: bound[nm] = path
   for s in x.src:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
       assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.CUSTOMI
-      store_pieces.append(f"{s.src[0].arg[0]}={s.src[1].arg[0]}")
+      bind(s.src[0].arg[0], s.src[1].arg[0])
+    # repeat: named binds come from the first src, and every element must be identical to it (setdefault semantics)
+    elif s.op is Ops.CUSTOM and s.src[0].op is Ops.AND:
+      stores, pred = partition(s.src[0].src, lambda x: x.op is Ops.STORE)
+      it, base = s.src[1].arg[0], s.src[2].arg[0]
+      lifted = {st.src[0].arg[0]: f"{base}.src[0]{st.src[1].arg[0][len(it):]}" for st in stores}
+      piece = ' and '.join([predstr(y) for y in pred]+[f"{st.src[1].arg[0]} is {lifted[st.src[0].arg[0]]}" for st in stores])
+      and_pieces += [f"all([{piece} for {it} in {base}.src])"] + ([f"len({base}.src) != 0"] if stores else [])
+      for nm, path in lifted.items(): bind(nm, path)
     elif s.op is Ops.CUSTOMI: and_pieces.append(s.arg[0])
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
-    assert len(store_pieces) == 0
+    assert len(bound) == 0
     and_clause = ' and '.join(and_pieces)
     return [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"] + or_pieces
   # if we don't, this is a final return
-  store_clause = ', '.join((["ctx=ctx"] if has_ctx else [])+store_pieces)
+  store_clause = ', '.join((["ctx=ctx"] if has_ctx else [])+[f"{k}={v}" for k,v in bound.items()])
   and_clause = ' and '.join(and_pieces + [f"(_ret:=_fxn({store_clause})) is not None"])
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
@@ -163,10 +183,10 @@ def _get_code(self:UPat, has_ctx:bool):
   return '\n'.join([f"# match for {self.location}", "def compiled_match(uop, ctx):"] + rendered + ["  return None"]), dyn_lookup
 
 @functools.cache
-def upat_compile(self:UPat, fxn) -> Callable|None:
+def upat_compile(self:UPat, fxn) -> Callable:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
   code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
-  if code is None: return None
+  if code is None: raise UPatCompileError(f"can't compile pattern defined at {self.location[0]}:{self.location[1]}")
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()
   globs["_fxn"] = real_fxn
