@@ -10,6 +10,7 @@ from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
+import test.null.test_hcq2 as null_hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
 from test.null.test_hcq2 import chain, chain_input, compiled_chain
 
@@ -90,6 +91,14 @@ class TestHCQ2Schedule(unittest.TestCase):
     for u in f.captured.linear.toposort():
       if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and (buf:=u.buffer).device == dev.device:
         self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
+
+class TestHCQ2HostSchedule(unittest.TestCase):
+  def test_a_host_kernel_splits_the_batch(self):
+    with Context(DEV="NULL"):
+      x = Tensor.ones(4).contiguous().realize()
+      batches = null_hcq2.scheduled(((x + 1).contiguous().to("CPU") + 2).contiguous().to("NULL") + 3)
+    for batch in batches: null_hcq2.TestHCQ2Schedule.check(self, batch)
+    self.assertEqual(len(batches), 2)
 
 # the fence and the ffi run on the CPU runtime, which is always available
 @unittest.skipIf(isinstance(Device["CPU"].renderer, NIRRenderer), "segfaults compiling the fence loop with LVP")

@@ -117,7 +117,7 @@ class TestArgOrder(unittest.TestCase):
 
 class TestCallCodegen(unittest.TestCase):
   def test_compiled_scalar_slots_are_not_call_slots(self):
-    out = UOp.new_buffer("CPU", 1, dtypes.int)
+    out = UOp.new_buffer("NULL", 1, dtypes.int)
     p = out.param_like(0)
     v = UOp.variable("external", 1, 8, dtype=dtypes.int)
     prg = to_program(p.index(0).store(v).sink(arg=KernelInfo("scalar")),
