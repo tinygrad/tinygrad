@@ -272,7 +272,7 @@ class CStyleLanguage(Renderer):
                         f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
       prefix.append(f"static inline void {name}({params}) {{\n" + '\n'.join(kernel) + "\n}")
       helper_uops.extend(lst)
-    return self.render_kernel(*self._render(uops), helper_uops+uops, prefix)
+    return self.render_kernel(*self._render(uops), helper_uops+list(uops), prefix)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
