@@ -351,14 +351,14 @@ jobs:
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "METAL" ]]; then
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           DEBUG=2 SHOULD_USE_TC=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 HALF=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 BFLOAT16=1 python3 extra/gemm/simple_matmul.py
           M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
         elif [[ "${{ matrix.dev }}" == "NV" ]]; then
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-          DEV=NV:PTX ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+          DEV=NV:PTX ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
           DEV=CUDA SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
@@ -369,9 +369,9 @@ jobs:
           # M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
           # DEV=NV:PTX M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
         else
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           # TODO: this is flaky
-          # DEV=AMD:LLVM python3 test/opt/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/runtime/test_tensor_cores.py
           SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
           # TODO: AMD compiler bug causes this to fail
@@ -590,12 +590,12 @@ jobs:
       run: |
         if [[ "${{ matrix.dev }}" == "AMD" ]]; then
           # Fails on 9070
-          # python3 test/test_linearizer.py test/opt/test_tensor_cores.py
-          # DEV=AMD:LLVM python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+          # python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
           # SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
         else
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
         fi
     - name: Test DISK copy time
       run: TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py

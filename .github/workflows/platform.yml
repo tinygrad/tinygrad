@@ -35,7 +35,7 @@ jobs:
         key: unittest-macos
         deps: testing_unit
     - name: Run opt tests
-      run: DEV=METAL python -m pytest -n=auto test/opt --durations=20
+      run: DEV=METAL python -m pytest -n=auto test/runtime/test_kernel_opts.py test/runtime/test_tensor_cores.py test/runtime/test_search.py --durations=20
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/runtime/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
