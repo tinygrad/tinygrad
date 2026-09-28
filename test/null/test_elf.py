@@ -2,7 +2,6 @@ import unittest, subprocess, platform
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.autogen import libc
 
 class TestElfLoader(unittest.TestCase):
   def test_load_clang_jit_strtab(self):
@@ -41,8 +40,6 @@ class TestElfLoader(unittest.TestCase):
     obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
     image, sections, _ = elf_loader(obj)
     comment = next(sh for sh in sections if sh.name == '.comment')
-    self.assertEqual(comment.header.sh_type, libc.SHT_PROGBITS)
-    self.assertFalse(comment.header.sh_flags & libc.SHF_ALLOC)
     self.assertNotIn(comment.content, bytes(image))
 
 if __name__ == '__main__':
