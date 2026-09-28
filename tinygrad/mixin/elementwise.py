@@ -896,6 +896,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
     ```
     """
+    if not self.is_floating_point(): return self
     return ((self > 0).eq((b := self.trunc() / 2.0).trunc().eq(b))).where((self - 0.5).ceil(), (self + 0.5).floor())
 
   def sign(self) -> Self:
@@ -985,7 +986,7 @@ class ElementwiseMixin(CreationMixin):
     """
     return alpha * (self / alpha).elu()
 
-  def selu(self, alpha=1.67326, gamma=1.0507) -> Self:
+  def selu(self, alpha=1.6732632423543772, gamma=1.0507009873554805) -> Self:
     """
     Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
 
