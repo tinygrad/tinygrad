@@ -353,24 +353,17 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   all_candidates = []
   for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
-    # try checking the whole clause
     all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
 
-    if try_simplex:
-      # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
-      candidates = [[all_candidates[-1]]]
-      if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
-        # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-        candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
-
-      for candidate in candidates:
-        # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-        if any(X not in uop.backward_slice_with_self for X,_ in candidate): continue  # skip if a branch var isn't in uop
-        newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
-        if all_same(newuops): uop = newuops[0]
-        elif uop.op is Ops.STACK and len(uop.src) == 2:
-          if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-          if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+    if try_simplex and expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
+      # For X0 + X1 + ... > 0, check whether every Xi > 0 gives the same simplified output.
+      candidate = [(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)]
+      if any(X not in uop.backward_slice_with_self for X,_ in candidate): continue
+      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
+      if all_same(newuops): uop = newuops[0]
+      elif uop.op is Ops.STACK and len(uop.src) == 2:
+        if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
+        if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
 
   # try all the valids together (but only the whole expressions)
   if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
