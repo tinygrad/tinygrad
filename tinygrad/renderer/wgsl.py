@@ -90,6 +90,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v: f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
+    (UPat(Ops.BINARY, name="x"), lambda ctx,x: f"var {ctx[x]} = array<u32,{len(x.arg)}>({','.join(f'{b}u' for b in x.arg)});"),
   ]) + base_rewrite
 
   def render_cast(self, u:UOp, val: str) -> str:

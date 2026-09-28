@@ -76,7 +76,7 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 
 base_rewrite = PatternMatcher([
   # memory load/store
-  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.BINARY)),), allow_any_len=True, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda ctx,buf,c,x:
@@ -140,7 +140,11 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 
-  (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst")
+  (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
+  (UPat(Ops.BINARY, name="x"), lambda ctx,x:
+   f'  {ctx[x]}_data = alloca [{len(x.arg)} x i8]\n'
+   f'  store [{len(x.arg)} x i8] c"' + ''.join(f'\\{b:02X}' for b in x.arg) + f'", [{len(x.arg)} x i8]* {ctx[x]}_data\n'
+   f'  {ctx[x]} = bitcast [{len(x.arg)} x i8]* {ctx[x]}_data to i8*'),
 ])
 
 class LLVMRenderer(Renderer):
