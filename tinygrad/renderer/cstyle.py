@@ -302,7 +302,6 @@ class ClangRenderer(CStyleLanguage):
   if sys.platform == 'win32':
     abi = "__attribute__((ms_abi)) "
     kernel_typedef = abi + "void"
-
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
     alignment = 2**int(math.log2(dt.itemsize * count)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
