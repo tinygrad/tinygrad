@@ -116,24 +116,19 @@ def wrap(ctx, x) -> UOp:
 pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
-  # AND of CUSTOMI fragments inside a CUSTOM becomes a single CUSTOMI (joined with " and ")
-  (UPat(Ops.CUSTOM, src=(UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), UPat(), UPat()), name="r"),
-    lambda r,x: r.replace(src=(UOp(Ops.CUSTOMI, arg=("(" + ' and '.join(y.arg[0] for y in x.src) + ")", dtypes.void)),)+r.src[1:])),
+  # AND/OR of CUSTOMI fragments becomes a single CUSTOMI
+  (UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=("(" + ' and '.join(y.arg[0] for y in x.src) + ")", dtypes.void))),
+  (UPat(Ops.OR, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=("(" + ' or '.join(y.arg[0] for y in x.src) + ")", dtypes.void))),
 
   (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=(x.arg[0].format(*[y.arg[0] for y in x.src]), dtypes.void))),
   (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"),
    lambda x,c,g: x.replace(arg=(x.arg[0]+f".src[{c.val}]", dtypes.void)))
 ], compiled=False)
 
-def predstr(x:UOp) -> str:  # render a match clause to a predicate string
-  if x.op is Ops.CUSTOMI: return x.arg[0]
-  if x.op is Ops.AND: return f"({' and '.join(predstr(y) for y in x.src)})"
-  if x.op is Ops.OR: return f"({' or '.join(predstr(y) for y in x.src)})"
-  if x.op is Ops.CUSTOM and x.src[0].op is Ops.AND:  # nested repeat
-    return f"all([{' and '.join(predstr(y) for y in x.src[0].src)} for {x.src[1].arg[0]} in {x.src[2].arg[0]}.src])"
-  raise UPatCompileError(f"can't compile this {x}")
-
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
+  # the whole clause collapsed to a single predicate (no binds)
+  if x.op is Ops.CUSTOMI:
+    return [f"{'  '*depth}if {x.arg[0]} and (_ret:=_fxn({'ctx=ctx' if has_ctx else ''})) is not None: return _ret"]
   assert x.op is Ops.AND
   and_pieces: list[str] = []
   bound: dict[str, str] = {}  # rebinding a name renders an identity compare (setdefault semantics in the interpreter)
@@ -148,12 +143,12 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
     elif s.op is Ops.STORE:
       assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.CUSTOMI
       bind(s.src[0].arg[0], s.src[1].arg[0])
-    # repeat: named binds come from the first src, and every element must be identical to it (setdefault semantics)
-    elif s.op is Ops.CUSTOM and s.src[0].op is Ops.AND:
+    # repeat with named binds: binds come from the first src, and every element must be identical to it (setdefault semantics)
+    elif s.op is Ops.CUSTOM and s.src[0].op is Ops.AND and all(y.op in (Ops.CUSTOMI, Ops.STORE) for y in s.src[0].src):
       stores, pred = partition(s.src[0].src, lambda x: x.op is Ops.STORE)
       it, base = s.src[1].arg[0], s.src[2].arg[0]
       lifted = {st.src[0].arg[0]: f"{base}.src[0]{st.src[1].arg[0][len(it):]}" for st in stores}
-      piece = ' and '.join([predstr(y) for y in pred]+[f"{st.src[1].arg[0]} is {lifted[st.src[0].arg[0]]}" for st in stores])
+      piece = ' and '.join([y.arg[0] for y in pred]+[f"{st.src[1].arg[0]} is {lifted[st.src[0].arg[0]]}" for st in stores])
       and_pieces += [f"all([{piece} for {it} in {base}.src])"] + ([f"len({base}.src) != 0"] if stores else [])
       for nm, path in lifted.items(): bind(nm, path)
     elif s.op is Ops.CUSTOMI: and_pieces.append(s.arg[0])
