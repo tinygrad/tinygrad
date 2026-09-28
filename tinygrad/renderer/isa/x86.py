@@ -144,10 +144,6 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
 def flag_gate(m:UOp) -> UOp|None:
   return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
 
-def lower_binary(ctx, x:UOp):
-  buf = UOp.alloc(x.shape, x.dtype, slot=next(ctx), addrspace=AddrSpace.REG)
-  return buf.after(*[buf.index(UOp.const(i, dtypes.int)).store(v) for i,v in enumerate(x.arg)])
-
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
@@ -160,7 +156,6 @@ pre_isel_matcher = PatternMatcher([
   # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
    lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
-  (UPat(Ops.BINARY, name="x"), lower_binary),
 ])
 
 # ***** X86 registers *****

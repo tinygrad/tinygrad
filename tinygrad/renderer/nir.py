@@ -191,13 +191,9 @@ class NIRRenderer(Renderer):
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST} or (u.op is Ops.STACK and len(u.src) == 0): pass
-      elif u.op is Ops.BINARY:
-        self.r[u] = mesa.nir_local_variable_create(self.b.impl, mesa.glsl_array_type(glsl_type(u.dtype), len(u.arg), 0).contents, b"binary").contents
-        for i,v in enumerate(u.arg):
-          nstore(self.b, AddrSpace.REG, nidx(self.b, self.r[u], nimm(self.b, i, dtypes.int), AddrSpace.REG, 1), nimm(self.b, v, u.dtype))
       elif u.op in {Ops.INDEX, Ops.SHRINK}:
         # INDEX on a register value picks the element, memory INDEX is handled in the LOAD/STORE patterns
-        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER, Ops.BINARY}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].src[0].val)
+        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].src[0].val)
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:

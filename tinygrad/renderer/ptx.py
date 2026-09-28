@@ -56,7 +56,7 @@ ptx_matcher = PatternMatcher([
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
 ])
 
-def mem_type(x:UOp) -> str: return 'local' if x.buf_uop.op is Ops.BINARY else 'shared' if x.addrspace == AddrSpace.LOCAL else 'global'
+def mem_type(x:UOp) -> str: return 'shared' if x.addrspace == AddrSpace.LOCAL else 'global'
 
 def render_wmma(ctx: "PTXRenderer", wmma: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
@@ -132,9 +132,6 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat(Ops.BINARY, name="x"), lambda ctx,x: [
-    f".local .b8 {ctx.r[x][1:]}_data[{len(x.arg)}];", f"mov.u64 {ctx.r[x]}, {ctx.r[x][1:]}_data;",
-    "{", ".reg .b16 %init;", *[f"mov.b16 %init, {v}; st.local.u8 [{ctx.r[x]}+{i}], %init;" for i,v in enumerate(x.arg)], "}"]),
 ])
 
 class PTXRenderer(Renderer):
@@ -201,7 +198,7 @@ class PTXRenderer(Renderer):
       if u.op is Ops.BUFFER and u.addrspace == AddrSpace.REG:
         r[u] = [ssa("reg", u, self.types[u.dtype]) for _ in range(u.max_numel())]
         continue
-      if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU) and u.buf_uop.op is not Ops.BINARY:
+      if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
         if u.op is not Ops.LOAD and not (u.src[1].op is Ops.CAST and u.src[1].src[0].op is Ops.CONST):
           raise RuntimeError(f"PTX does not support dynamic register indexing: {u}")
@@ -218,7 +215,7 @@ class PTXRenderer(Renderer):
                        [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.dtype.itemsize)]]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype]) for _ in range(u.max_numel())]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
-        Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"), Ops.BINARY: ("binary", "u64"),
+        Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if u.op is Ops.RANGE and u.dtype == dtypes.void: prefix = None  # loop headers don't have a register
       if prefix: r[u] = ssa(prefix, u, dtype)
