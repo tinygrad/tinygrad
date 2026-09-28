@@ -6,6 +6,7 @@ from tinygrad.uop.ops import GroupOp, remove_all_tags
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
+from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # **** schedule linearizer
 
@@ -128,14 +129,18 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
   st = time.perf_counter()
   cache_key = function.key
-  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+  # SCACHE >= 2 also persists the cache to disk
+  sc_ret, disk_hit = schedule_cache.get(cache_key, None) if SCACHE else None, False
+  if sc_ret is None and SCACHE >= 2: disk_hit = (sc_ret:=diskcache_get("schedule_cache", {"key": cache_key})) is not None
+  if sc_ret is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(prepare_rangeify(function)))
     if SCACHE: schedule_cache[cache_key] = linear
+    if SCACHE >= 2: diskcache_put("schedule_cache", {"key": cache_key}, linear)
   else:
-    # schedule cache hit
-    linear = sc_ret
+    # schedule cache hit (memory or disk)
+    linear = schedule_cache[cache_key] = sc_ret
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
@@ -144,7 +149,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
     else:
       frm = None
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
+          f" | {colored(' cache hit', 'yellow') if disk_hit else (' cache hit' if sc_ret is not None else 'CACHE MISS')} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return call.replace(src=(linear,)+call.src[1:])
 
