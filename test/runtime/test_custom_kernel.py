@@ -505,6 +505,13 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), a, fxn=call_add_sum)[0]
     self.assertEqual(out.tolist(), [N*(N+1)//2])
 
+  def test_binary(self):
+    def kernel(out:UOp):
+      i = UOp.range(4, 0)
+      data = UOp(Ops.BINARY, arg=b"\x01\x02\x03\xff")
+      return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
+    self.assertEqual(Tensor.empty(4, dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), [1, 2, 3, 255])
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
