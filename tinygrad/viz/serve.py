@@ -611,6 +611,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
     pc_tokens[pc] = tokens = []
     for name, f in inst._fields:
       if isinstance(val:=getattr(inst, name), Reg):
+        if inst.operands and name not in inst.operands: continue
         reg_str = val.fmt().replace("v", "a", 1) if (is_acc:=is_acc_operand(inst, name)) else val.fmt()
         tokens.append({"st":reg_str, "keys":[f"{'a' if is_acc else 'r'}{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
