@@ -591,8 +591,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
   def ConstantOfShape(shape:list[int], value:Tensor|None=None):
     if value is None: value = Tensor(0, dtype=dtypes.float32)
-    if shape == [0]: return Tensor([], dtype=value.dtype)
-    return value.expand(shape)
+    return value.reshape(()).expand(shape)
 
   def Size(data:Tensor): return data.numel()
   def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64, device=data.device)
@@ -673,14 +672,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if select_last_index: return ((int(x.shape[axis])-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
     return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
   def ArgMin(x, axis:int=0, keepdims:int=1, select_last_index:int=0):
-    return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
+    return ArgMax(x._inverse(), axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
   # ***** Movement Ops *****
   def Reshape(data:Tensor, shape:Sequence[int], allowzero:int=0):
     return data.reshape([x if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(shape)])
   def Flatten(x:Tensor, axis:int=1): return x.reshape(prod(x.shape[0:axis]), -1)
   def Expand(x:Tensor, shape:list[int]): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
-  def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
+  def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0))
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
   def Squeeze(data:Tensor, axes:Sequence[int]|None=None):

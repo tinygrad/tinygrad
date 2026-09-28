@@ -385,6 +385,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,35)], lambda x: x.round(), forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
+    helper_test_op(None, lambda x: x.round(), vals=[[16777217, -3, 0]], forward_only=True)
 
   def test_round_quantization_gradient(self):
     helper_test_op(None, lambda x: x + 0.125 * (x.round() - x), vals=[[-1.2, -0.7, -0.2, 0.2, 0.7, 1.2]])
@@ -923,7 +924,7 @@ class TestOps(TensorTestCase):
   def test_selu(self):
     helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
     helper_test_op([(3,3)], torch.nn.functional.selu, Tensor.selu, low=300, high=400)
-    helper_test_op(None, torch.nn.functional.selu, Tensor.selu, vals=[[-1.,0.,1.]])
+    helper_test_op(None, torch.nn.functional.selu, Tensor.selu, vals=[[-1.,0.,1.]], atol=0, rtol=1e-6)
     helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
   def test_silu(self):
     helper_test_op([(45,65)], torch.nn.functional.silu, Tensor.silu)
