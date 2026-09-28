@@ -2,6 +2,7 @@ import unittest, subprocess, platform
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
+from tinygrad.runtime.autogen import libc
 
 class TestElfLoader(unittest.TestCase):
   def test_load_clang_jit_strtab(self):
@@ -34,6 +35,15 @@ class TestElfLoader(unittest.TestCase):
     obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
     with self.assertRaisesRegex(RuntimeError, 'powf'): elf_loader(obj)
     elf_loader(obj, link_libs=[DLL('m', 'm')])
+  def test_does_not_load_non_alloc_sections(self):
+    src = 'int test(int x) { return x + 1; }'
+    args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
+    obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
+    image, sections, _ = elf_loader(obj)
+    comment = next(sh for sh in sections if sh.name == '.comment')
+    self.assertEqual(comment.header.sh_type, libc.SHT_PROGBITS)
+    self.assertFalse(comment.header.sh_flags & libc.SHF_ALLOC)
+    self.assertNotIn(comment.content, bytes(image))
 
 if __name__ == '__main__':
   unittest.main()
