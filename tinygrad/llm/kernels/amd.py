@@ -60,8 +60,8 @@ class Linear(nn.Linear):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
   def set_quantized(self, decoded:Tensor):
-    if self.in_features % GGML_BLOCK_SIZE: return
-    packed_sizes = {typ: prod(decoded.uop.shard_shape) // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
+    if self.in_features % GGML_BLOCK_SIZE or not isinstance(numel:=prod(decoded.uop.shard_shape), int): return
+    packed_sizes = {typ: numel // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
     raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER) and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
     if raw is None: return
@@ -74,7 +74,7 @@ class Linear(nn.Linear):
     # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
     for ggml_type, size in packed_sizes.items():
       if size != prod(raw.shape): continue
-      expected = ggml_data_to_tensor(Tensor(raw), cast(int, prod(decoded.uop.shard_shape)), ggml_type)
+      expected = ggml_data_to_tensor(Tensor(raw), numel, ggml_type)
       if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
     else: return
     if isinstance(decoded.device, tuple) and ggml_type not in (Q4_K, Q5_K, Q6_K, IQ4_XS): return
@@ -84,7 +84,7 @@ class Linear(nn.Linear):
     if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return
     self.ggml_type, self.shard_axis = ggml_type, decoded.uop.axis
     self.weight = Tensor(raw).bitcast(word_dtype).contiguous()
-    if isinstance(raw.device, tuple): self.weight = Tensor(UOp.from_buffer(self.weight.uop.buffer, raw.device))
+    if isinstance(raw.device, tuple): self.weight = Tensor(UOp.from_buffer(self.weight.uop.buffer))
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
@@ -93,7 +93,7 @@ class Linear(nn.Linear):
         # tiny dense fp16 matmul (e.g. the ssm beta/alpha head rows): single fp16 gemv kernel instead of a
         # generic matmul schedule, and realize the densely packed weight once if it is still a lazy ggml view
         if self.weight.dtype in (dtypes.half, dtypes.float, dtypes.bfloat16) and self.out_features <= 2048 \
-          and self.in_features % (WARP_SIZE*4) == 0 and self.weight.uop.axis is None:
+          and self.in_features % (WARP_SIZE*4) == 0:
           numel, max_shape = x.numel(), x.max_shape
           if isinstance(numel, int) or prod(max_shape) // self.in_features <= 32:
             out = f16_gemv(self, x if isinstance(numel, int) else x.pad_to(max_shape))
@@ -104,7 +104,7 @@ class Linear(nn.Linear):
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = q8_linear(self, x.pad_to(x.max_shape))
       return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
-    return super().__call__(Tensor(x.uop.unshard(x.ndim-1)) if self.weight.uop.axis == 1 else x)
+    return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
@@ -460,7 +460,6 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   if len(result.shape) == 3: result = result.sum(-1)
   result = result.reshape(*x.shape[:-1], out_features)
   if layer.shard_axis == 0: result = Tensor(result.uop.unshard(result.ndim-1))
-  if layer.shard_axis == 1: result = Tensor(result.uop.allreduce(Ops.ADD, cast(tuple, result.device)))
   return result if layer.bias is None else result + layer.bias
 
 # ******** tiny dense fp16 gemv ********

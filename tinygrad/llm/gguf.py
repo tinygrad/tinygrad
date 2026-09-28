@@ -268,7 +268,7 @@ def apply_shards(state:dict[str, tuple[Tensor, tuple[int, ...], int]], kv:dict, 
       if axis == 1 or len(groups) > 1: storage = storage.to('CPU')
       parts = storage.split(tuple(g//block if axis == len(shape)-1 else g for g in groups), dim=axis)
       pieces = [p[0] if len(p) == 1 else Tensor.cat(*p, dim=axis) for p in zip(*(p.chunk(len(devices), dim=axis) for p in parts))]
-    data = Tensor(UOp.from_buffer(UOp.mstack(*(p.contiguous().flatten().to(d).realize().uop for p,d in zip(pieces, devices))).buffer, devices))
+    data = Tensor(UOp.from_buffer(UOp.mstack(*(p.contiguous().flatten().to(d).realize().uop for p,d in zip(pieces, devices))).buffer))
     data = ggml_data_to_tensor(data, prod(local), typ).reshape(local)
-    weights[name] = Tensor(data.uop.unshard(axis)) if axis == 1 or name in ('token_embd.weight', 'output.weight') else data
+    weights[name] = Tensor(data.uop.unshard(axis)) if name in ('token_embd.weight', 'output.weight') else data
   return weights

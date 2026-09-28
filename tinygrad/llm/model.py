@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
-from tinygrad.uop.ops import resolve
+from tinygrad.uop.ops import resolve, Ops
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -118,6 +118,8 @@ def shard_config(config:TransformerConfig, count:int) -> TransformerConfig:
     hidden_dim=config.hidden_dim//count, ssm=replace(config.ssm, group_count=config.ssm.group_count//count,
       time_step_rank=config.ssm.time_step_rank//count, inner_size=config.ssm.inner_size//count))
 
+def allreduce(x:Tensor) -> Tensor: return Tensor(x.uop.allreduce(Ops.ADD, x.device)) if isinstance(x.device, tuple) else x
+
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
     self.config = config
@@ -173,7 +175,7 @@ class FFNBlock:
         out = out + shexp
       return out
     # TODO: remove the need for this contiguous
-    return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
+    return allreduce(self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x)))
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -227,7 +229,7 @@ class TransformerBlock(FFNBlock):
     if amd_custom_kernels_supported(x.device) and self.config.ssm is not None:
       attn = flash_attention(q, assigned_kv, start_pos+T)
       attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-      return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
+      return allreduce(self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid())))
     k = assigned_kv[0, :, :, 0:start_pos+T, :]
     v = assigned_kv[1, :, :, 0:start_pos+T, :]
 
@@ -248,7 +250,7 @@ class TransformerBlock(FFNBlock):
       mask = mask.expand(1, self.config.n_heads, T, start_pos+T).cat(sink_col, dim=-1)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
+    return allreduce(self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid())))
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
@@ -393,7 +395,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
-    return self.ssm_out(z.reshape(B, T, -1))
+    return allreduce(self.ssm_out(z.reshape(B, T, -1)))
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
@@ -421,7 +423,7 @@ class Transformer:
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
+    x = self.token_embd(tokens.to(self.token_embd.weight.device)).float() # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :]
@@ -518,15 +520,8 @@ class Transformer:
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0))
     model = Transformer(shard_config(config, shard) if shard > 1 else config)
-    for name,target in nn.state.get_state_dict(model).items():
-      if target.shape not in ((weight:=state_dict.pop(name)).shape, weight.uop.shard_shape): raise ValueError(f'{name}: shape mismatch')
-      target.uop = weight.uop
-    if devices:
-      for layer in nn.state.get_state_dict(model, tensor_type=Linear).values():
-        assert isinstance(layer, Linear)
-        if amd_custom_kernels_supported(layer.weight.device): layer.set_quantized(layer.weight)
-      for param in nn.state.get_parameters(model):
-        if param is not model.token_embd.weight: param.realize()
+    for p in (nn.state.get_parameters(model) if devices else []): p.to_(devices)
+    nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
