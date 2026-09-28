@@ -481,7 +481,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
-  @unittest.expectedFailure
   def test_call_in_kernel(self):
     def call_add(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.numel(), 0)
