@@ -339,7 +339,7 @@ class TestTransformerGenerate(unittest.TestCase):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0], [0]])
+    self.assertEqual(calls, [[0] * (TEST_CONFIG.max_context - 8)] * 2)
 
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)

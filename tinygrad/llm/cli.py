@@ -155,7 +155,7 @@ def main():
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--mmproj", default=None, help="Path to a mmproj GGUF file to enable image input")
   parser.add_argument("--vision_device", default=None, help="Device for the vision tower (e.g. AMD:1 to offload from the LLM's GPU)")
-  parser.add_argument("--vision_max_tokens", type=int, default=None, help="Max tokens per image (default: 4096 with --vision_device, 512 when sharing the LLM's GPU)")
+  parser.add_argument("--vision_max_tokens", type=int, default=None, help="Max tokens per image (default: 4096 with --vision_device, 512 otherwise)")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
@@ -199,7 +199,7 @@ def main():
   # warmup the JIT
   if args.warmup or args.serve:
     with Context(DEBUG=max(DEBUG.value, 1)):
-      model.warmup()
+      model.warmup(media_tokens=vision.max_tokens if vision is not None else 0)
       if vision is not None: vision.warmup()
 
   # start server

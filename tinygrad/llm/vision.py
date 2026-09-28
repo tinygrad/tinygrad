@@ -1,15 +1,18 @@
 from __future__ import annotations
-import base64, functools, io, math
+import base64, io, math
+from array import array
 from typing import NamedTuple
-from tinygrad import Tensor, nn, Device, TinyJit, UOp
+from tinygrad import Tensor, nn, Device, TinyJit
 from tinygrad.helpers import fetch
 from tinygrad.llm.gguf import gguf_load
 
 class ImageEmbed(NamedTuple):
   start: int        # index of the first image token in the (expanded) prompt
-  embeds: Tensor    # (n_tokens, dim) image embeddings in raster order over the merged grid
+  embeds: Tensor    # (max_tokens, dim) buffer holding the image embeddings in raster order over the merged grid
   grid_h: int       # merged grid height (patches_y // merge_size)
   grid_w: int       # merged grid width  (patches_x // merge_size)
+  @property
+  def n_tokens(self) -> int: return self.grid_h * self.grid_w
 
 def load_image(src:str):
   from PIL import Image
@@ -73,7 +76,7 @@ def mrope_positions(seq_len:int, images:list[ImageEmbed]) -> tuple[list[list[int
   pos: list[list[int]] = []
   cur, prev = 0, 0
   for img in sorted(images, key=lambda x: x.start):
-    n = img.grid_h * img.grid_w
+    n = img.n_tokens
     assert prev <= img.start and img.start + n <= seq_len, "image tokens overlap or exceed the prompt"
     pos.extend([[cur + i] * 3 for i in range(img.start - prev)])
     cur += img.start - prev
@@ -96,30 +99,13 @@ def imrope_freqs_cis(positions:Tensor, rope_dim:int, theta:float, sections:tuple
   angles = positions.float()[:, chan] * freqs    # (T, n_pairs)
   return angles.cos().cat(angles.sin(), dim=-1)  # (T, rope_dim)
 
-def resize_grid_align_corners(grid:Tensor, oh:int, ow:int) -> Tensor:
-  # grid (H, W, C) -> (oh*ow, C), matching ggml_interpolate with GGML_SCALE_MODE_BILINEAR | ALIGN_CORNERS
-  (H, W, C) = tuple(int(s) for s in grid.shape)
-  if (oh, ow) == (H, W): return grid.reshape(oh * ow, C)
-  def axis(o:int, S:int) -> tuple[Tensor, Tensor, Tensor]:
-    if o == 1:
-      z = Tensor.zeros(1, device=grid.device)
-      return z.cast('int32'), z.cast('int32'), z
-    src = Tensor.arange(o, dtype='float32').to(grid.device) * ((S - 1) / (o - 1))
-    lo = src.floor()
-    return lo.cast('int32'), (lo + 1).clip(max_=S - 1).cast('int32'), src - lo
-  y0, y1, wy = axis(oh, H)
-  x0, x1, wx = axis(ow, W)
-  wy, wx = wy.reshape(-1, 1, 1), wx.reshape(1, -1, 1)
-  return (grid[y0][:, x0] * (1 - wy) * (1 - wx) + grid[y1][:, x0] * wy * (1 - wx) +
-          grid[y0][:, x1] * (1 - wy) * wx + grid[y1][:, x1] * wy * wx).reshape(oh * ow, C)
-
 class ViTBlock:
   def __init__(self, dim:int, ffn_dim:int, n_heads:int, eps:float):
     self.ln1, self.ln2 = nn.LayerNorm(dim, eps), nn.LayerNorm(dim, eps)
     self.attn_qkv, self.attn_out = nn.Linear(dim, 3 * dim), nn.Linear(dim, dim)
     self.ffn_up, self.ffn_down = nn.Linear(dim, ffn_dim), nn.Linear(ffn_dim, dim)
     self.dim, self.n_heads, self.head_dim = dim, n_heads, dim // n_heads
-  def __call__(self, x:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
+  def __call__(self, x:Tensor, cos:Tensor, sin:Tensor, attn_mask:Tensor) -> Tensor:
     n, rope_dims = x.shape[0], self.head_dim // 2
     cos, sin = cos.unsqueeze(1), sin.unsqueeze(1)                             # (n, 1, hd//2) for the head dim
     def rope(t:Tensor) -> Tensor:   # 2D rope over the first head_dim // 2 dims, half-split pairs (i, i + hd//2)
@@ -128,13 +114,16 @@ class ViTBlock:
     q, k, v = self.attn_qkv(self.ln1(x.float()).half()).split([self.dim] * 3, dim=-1)  # layernorm in f32 like ggml
     q, k = (rope(t.reshape(n, self.n_heads, self.head_dim)).transpose(0, 1) for t in (q, k))
     v = v.reshape(n, self.n_heads, self.head_dim).transpose(0, 1)             # (H, n, hd)
-    attn = q.scaled_dot_product_attention(k, v)
+    attn = q.scaled_dot_product_attention(k, v, attn_mask=attn_mask)
     x = x + self.attn_out(attn.transpose(0, 1).reshape(n, self.dim))
     return x + self.ffn_down(self.ffn_up(self.ln2(x.float()).half()).gelu())
 
 class Qwen3VLTower:
   """Vision encoder + merger from a qwen3vl-style mmproj GGUF (clip architecture, qwen3vl_merger projector).
-  Encodes an image into LLM-sized embeddings, one per spatial_merge_size**2 patches."""
+  Encodes an image into LLM-sized embeddings, one per spatial_merge_size**2 patches.
+  The whole tower is one JIT graph with FIXED shapes (padded to max_patches): the image grid shape enters only
+  as tensor data (scalar geometry + a padding key mask), so kernels are fully static, compile once at warmup,
+  and never again. (Symbolic shapes were tried and cost 3-4.5x per kernel in codegen quality.)"""
   def __init__(self, kv:dict, state_dict:dict[str, Tensor], device:str|None=None, max_tokens:int=1024):
     self.device = device or Device.DEFAULT
     if kv.get('general.architecture') != 'clip' or kv.get('clip.projector_type') != 'qwen3vl_merger':
@@ -145,15 +134,18 @@ class Qwen3VLTower:
     self.patch_size, self.merge_size = kv['clip.vision.patch_size'], kv.get('clip.vision.spatial_merge_size', 2)
     self.image_mean = kv.get('clip.vision.image_mean', [0.5] * 3)
     self.image_std = kv.get('clip.vision.image_std', [0.5] * 3)
+    self.head_dim = self.dim // self.n_heads
     # llama.cpp's set_limit_image_tokens for qwen3vl is (8, 4096), but the default here is lower: the vision jit
     # arena is planned at the max patch count and must fit next to the LLM when they share a GPU
     self.min_pixels = 8 * (self.patch_size * self.merge_size) ** 2
-    self.max_pixels = max_tokens * (self.patch_size * self.merge_size) ** 2
+    self.max_tokens, self.max_patches = max_tokens, max_tokens * self.merge_size ** 2
+    self.max_pixels = self.max_patches * self.patch_size ** 2
+    self.grid_side = kv['clip.vision.image_size'] // self.patch_size
     self.blk = [ViTBlock(self.dim, kv['clip.vision.feed_forward_length'], self.n_heads, self.eps) for _ in range(self.n_blocks)]
     self.post_ln = nn.LayerNorm(self.dim, self.eps)
     self.patch_embd = {"weight": Tensor.zeros(self.dim, 3, self.patch_size, self.patch_size), "bias": Tensor.zeros(self.dim)}
     self.patch_embd_1 = {"weight": Tensor.zeros(self.dim, 3, self.patch_size, self.patch_size)}
-    self.position_embd = {"weight": Tensor.zeros((kv['clip.vision.image_size'] // self.patch_size) ** 2, self.dim, dtype='float32')}
+    self.position_embd = {"weight": Tensor.zeros(self.grid_side ** 2, self.dim, dtype='float32')}
     self.mm_0 = nn.Linear(self.dim * self.merge_size ** 2, self.dim * self.merge_size ** 2)
     self.mm_2 = nn.Linear(self.dim * self.merge_size ** 2, kv['clip.vision.projection_dim'])
     state_dict = {(k[2:] if k.startswith('v.') else k.replace('mm.', 'mm_')).replace('patch_embd.weight.1', 'patch_embd_1.weight'): v
@@ -166,73 +158,74 @@ class Qwen3VLTower:
       for s in params: s.replace(s.to(self.device).realize())
     # the temporal-merge conv on a still image sums both patch embeddings
     self.patch_w = (self.patch_embd["weight"] + self.patch_embd_1["weight"]).reshape(self.dim, -1).contiguous().realize()
-    self.head_dim = self.dim // self.n_heads
-    n_side = int(math.sqrt(self.position_embd["weight"].shape[0]))
-    self._pos_embd_grid = self.position_embd["weight"].reshape(n_side, n_side, self.dim)
-    # fixed-size input buffers, sliced with a symbolic patch count: one JIT compile serves every image size
-    self.max_patches = self.max_pixels // self.patch_size ** 2
-    self._buf_patches = Tensor.zeros(self.max_patches, 3 * self.patch_size ** 2, device=self.device, dtype='float16')
-    self._buf_pe = Tensor.zeros(self.max_patches, self.dim, device=self.device, dtype='float16')
-    self._buf_cos = Tensor.zeros(self.max_patches, self.head_dim // 2, device=self.device, dtype='float16')
-    self._buf_sin = Tensor.zeros(self.max_patches, self.head_dim // 2, device=self.device, dtype='float16')
-    Tensor.realize(self._buf_patches, self._buf_pe, self._buf_cos, self._buf_sin)
-    self._v_n = UOp.variable("n_quads", 1, self.max_patches // (self.merge_size ** 2))  # patch count / 4
+    self._pos_embd_flat = self.position_embd["weight"].contiguous().realize()  # (grid_side**2, dim)
+    self._mean = Tensor(self.image_mean, device=self.device).reshape(1, 3, 1)
+    self._std = Tensor(self.image_std, device=self.device).reshape(1, 3, 1)
+    rope_j = Tensor.arange(self.head_dim // 2)
+    self._rope_j = rope_j.to(self.device).realize()
+    self._rope_freqs = (10000.0 ** (-2.0 * (rope_j % (self.head_dim // 4)).float() / (self.head_dim // 2))).to(self.device).realize()
+    # fixed-size staging buffers; everything written with full-buffer copies (memcpy, no kernels to compile)
+    self._buf_img = Tensor.zeros(self.max_patches * self.patch_size ** 2 * 3, dtype='uint8', device=self.device).realize()
+    self._buf_geom = Tensor.zeros(2, dtype='int32', device=self.device).realize()     # [ph // 2, pw // 2]
+    self._buf_mask = Tensor.zeros(self.max_patches, dtype='float32', device=self.device).realize()  # 0 valid, -1e4 pad
+    self._arange = Tensor.arange(self.max_patches, dtype='int32').to(self.device).realize()
+    self._arange_ps = Tensor.arange(self.patch_size, dtype='int32').to(self.device).realize()
+    self._arange3 = Tensor.arange(3, dtype='int32').to(self.device).realize()
     self._vit = TinyJit(self._run)
+    # big images can legitimately need minutes of GPU time here; don't trip the device watchdog
+    Device[self.device].wait_timeout_ms = max(Device[self.device].wait_timeout_ms, 600_000)
 
   @staticmethod
   def from_gguf(path:str, device:str|None=None, max_tokens:int=1024) -> Qwen3VLTower:
     return Qwen3VLTower(*gguf_load(path), device, max_tokens)
 
-  def _run(self, patches:Tensor, pos_embd:Tensor, cos:Tensor, sin:Tensor, n4) -> Tensor:
-    x = patches @ self.patch_w.T + self.patch_embd["bias"].half() + pos_embd
-    for blk in self.blk: x = blk(x, cos, sin)
-    x = self.post_ln(x.float()).reshape(n4, self.merge_size ** 2 * self.dim).half()
-    return self.mm_2(self.mm_0(x).gelu())
+  def _run(self, img:Tensor, geom:Tensor, pad_mask:Tensor) -> Tensor:
+    n, ps, gs = self.max_patches, self.patch_size, self.grid_side
+    ph2, pw2 = geom[0], geom[1]                                # scalar int tensors: half the patch grid dims
+    t = self._arange                                           # token indices in merge-grouped order
+    py = (2 * (t // (4 * pw2)) + (t // 2) % 2).clip(max_=2 * ph2 - 1)   # patch row of token t (padded rows clamp in-bounds)
+    px = (2 * ((t // 4) % pw2) + t % 2).clip(max_=2 * pw2 - 1)          # patch col of token t
+    # patchify by gather: patch vector (c, ky, kx) per token, grouped so 2x2 patch blocks are consecutive
+    ky, kx = self._arange_ps.reshape(1, 1, ps, 1), self._arange_ps.reshape(1, 1, 1, ps)
+    flat = (((py.reshape(-1, 1, 1, 1) * ps + ky) * (2 * pw2 * ps) + px.reshape(-1, 1, 1, 1) * ps +
+             kx) * 3 + self._arange3.reshape(1, 3, 1, 1)).flatten()
+    x = img[flat].reshape(n, 3, ps * ps)
+    x = (x.float() / 255.0 - self._mean) / self._std
+    x = x.reshape(n, 3 * ps * ps).half() @ self.patch_w.T + self.patch_embd["bias"].half()
+    # learned position embeddings, bilinearly interpolated (align corners) to the patch grid
+    sy, sx = py.float() * ((gs - 1) / (2 * ph2 - 1)), px.float() * ((gs - 1) / (2 * pw2 - 1))
+    y0, x0 = sy.floor(), sx.floor()
+    y0i, y1i = y0.cast('int32').clip(0, gs - 1), (y0.cast('int32') + 1).clip(max_=gs - 1)
+    x0i, x1i = x0.cast('int32').clip(0, gs - 1), (x0.cast('int32') + 1).clip(max_=gs - 1)
+    wy, wx = (sy - y0).reshape(-1, 1), (sx - x0).reshape(-1, 1)
+    pe = (self._pos_embd_flat[y0i * gs + x0i] * (1 - wy) * (1 - wx) + self._pos_embd_flat[y1i * gs + x0i] * wy * (1 - wx) +
+          self._pos_embd_flat[y0i * gs + x1i] * (1 - wy) * wx + self._pos_embd_flat[y1i * gs + x1i] * wy * wx)
+    x = x + pe.half()
+    # 2D rope; pairs 0..hd//4-1 read the row, the rest the column (ggml ROPE_TYPE_VISION, freqs restart per half)
+    pos = (self._rope_j < self.head_dim // 4).reshape(1, -1).where(py.reshape(-1, 1), px.reshape(-1, 1)).float()
+    angles = pos * self._rope_freqs.reshape(1, -1)
+    cos, sin = angles.cos().half(), angles.sin().half()
+    attn_mask = pad_mask.half().reshape(1, 1, n)               # key bias: 0 for real patches, -1e4 for padding
+    for blk in self.blk: x = blk(x, cos, sin, attn_mask)
+    x = self.post_ln(x.float()).half()
+    return self.mm_2(self.mm_0(x.reshape(self.max_tokens, self.merge_size ** 2 * self.dim)).gelu()).half()
 
   def warmup(self):
     from PIL import Image
-    for _ in range(2): self.encode(Image.new('RGB', (64, 64)))
-
-  @functools.cache
-  def _pos_embd(self, ph:int, pw:int) -> Tensor:   # (ph*pw, dim) in merge-grouped order
-    pe = resize_grid_align_corners(self._pos_embd_grid, ph, pw)                 # raster order
-    return pe.reshape(ph // 2, 2, pw // 2, 2, self.dim).permute(0, 2, 1, 3, 4).reshape(ph * pw, -1).half().realize()
-
-  @functools.cache
-  def _rope(self, ph:int, pw:int) -> tuple[Tensor, Tensor]:   # (ph*pw, hd//2) cos/sin in merge-grouped order
-    # tokens are in merge-grouped order: block (y2, x2) raster, then (dy, dx) = (0,0), (0,1), (1,0), (1,1)
-    y2 = Tensor.arange(ph // 2).reshape(-1, 1).expand(ph // 2, pw // 2).reshape(-1, 1)
-    x2 = Tensor.arange(pw // 2).reshape(1, -1).expand(ph // 2, pw // 2).reshape(-1, 1)
-    rows = (2 * y2 + Tensor([0, 0, 1, 1])).flatten()
-    cols = (2 * x2 + Tensor([0, 1, 0, 1])).flatten()                            # (n_patches,)
-    # pairs 0..hd//4-1 rotate with the row position, the rest with the column position (ggml ROPE_TYPE_VISION),
-    # and the frequency table restarts at the column half (independent sections)
-    j = Tensor.arange(self.head_dim // 2)
-    half = self.head_dim // 4
-    freqs = 10000.0 ** (-2.0 * (j % half).float() / (self.head_dim // 2))
-    pos = (j < half).reshape(1, -1).where(rows.reshape(-1, 1).float(), cols.reshape(-1, 1).float())
-    angles = pos * freqs.reshape(1, -1)
-    return angles.cos().half().to(self.device).realize(), angles.sin().half().to(self.device).realize()
+    for _ in range(2): self.encode(Image.new('RGB', (512, 512)))  # a realistic size: JITBEAM times kernels at capture size
 
   def encode(self, image) -> tuple[Tensor, int, int]:
-    """image: PIL image, path, URL or data URI. Returns (embeds (gh*gw, dim), gh, gw) over the merged grid."""
+    """image: PIL image, path, URL or data URI. Returns (embeds buffer copy (max_tokens, dim), gh, gw)."""
     img = load_image(image) if not hasattr(image, 'size') else image.convert("RGB")
     w, h = smart_resize(img.size[0], img.size[1], self.patch_size * self.merge_size, self.min_pixels, self.max_pixels)
     img = img.resize((w, h), resample=2)   # 2 = PIL bicubic
-    ph, pw, ps = h // self.patch_size, w // self.patch_size, self.patch_size
-    n = ph * pw
-    x = Tensor(img.tobytes(), dtype='uint8', device=self.device).reshape(h, w, 3).float() / 255.0
-    x = (x - Tensor(self.image_mean, device=self.device).reshape(1, 1, 3)) / Tensor(self.image_std, device=self.device).reshape(1, 1, 3)
-    # patchify (c, kh, kw) per patch, then group 2x2 patches into consecutive tokens, the order the merger expects
-    patches = x.reshape(ph, ps, pw, ps, 3).permute(0, 2, 4, 1, 3).reshape(n, -1)
-    patches = patches.reshape(ph // 2, 2, pw // 2, 2, -1).permute(0, 2, 1, 3, 4).reshape(n, -1).half()
-    pe, (cos, sin) = self._pos_embd(ph, pw), self._rope(ph, pw)
-    Tensor.realize(*[buf[:n].assign(t) for buf, t in
-                     ((self._buf_patches, patches), (self._buf_pe, pe), (self._buf_cos, cos), (self._buf_sin, sin))])
-    vn = self._v_n.bind(n // (self.merge_size ** 2))
-    embds = self._vit(self._buf_patches[:vn*4], self._buf_pe[:vn*4], self._buf_cos[:vn*4], self._buf_sin[:vn*4], vn)
-    # concretize the symbolic output shape: substitute the bound variable with its value
-    bound = {x: x.const_like(x.arg.val) for x in embds.uop.backward_slice_with_self if x.is_bound_var}
-    if bound: embds = Tensor(embds.uop.substitute(bound, walk=True))
-    # clone: the jit output views the memory-planned arena, the next jit run would overwrite it
-    return embds.to(Device.DEFAULT).clone().realize(), ph // self.merge_size, pw // self.merge_size
+    ph, pw = h // self.patch_size, w // self.patch_size
+    raw = img.tobytes()
+    # fixed-size host->device copies (padded to the buffer sizes) so nothing size-dependent ever compiles
+    self._buf_img.assign(Tensor(raw + bytes(int(self._buf_img.numel()) - len(raw)), dtype='uint8', device=self.device)).realize()
+    n_pad = self.max_patches - ph * pw
+    self._buf_mask.assign(Tensor(array('f', [0.0] * (ph * pw) + [-1e4] * n_pad).tobytes(), dtype='float32', device=self.device)).realize()
+    self._buf_geom.assign(Tensor(array('i', [ph // 2, pw // 2]).tobytes(), dtype='int32', device=self.device)).realize()
+    # copy out of the jit-managed buffer: the next encode overwrites it
+    return self._vit(self._buf_img, self._buf_geom, self._buf_mask).to(Device.DEFAULT).clone().realize(), \
+      ph // self.merge_size, pw // self.merge_size

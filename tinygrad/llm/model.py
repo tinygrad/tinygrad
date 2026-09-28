@@ -1,5 +1,6 @@
 from __future__ import annotations
 import enum, functools, itertools, math, pathlib
+from array import array
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
@@ -418,8 +419,8 @@ class Transformer:
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
     # ... and again for the image path (custom embeddings and mrope frequencies as extra inputs)
-    self.media_prefill_jit = TinyJit(self.forward_media)
-    self.media_rollout_jit = TinyJit(self.forward_media)
+    self.media_prefill_jit = TinyJit(self.forward_media_prefill)
+    self.media_rollout_jit = TinyJit(self.forward_media_rollout)
     self.config = config
 
   def _sample(self, x:Tensor, temperature:Tensor) -> Tensor:
@@ -433,8 +434,18 @@ class Transformer:
     for block in self.blk: x = block(x, start_pos)
     return self._sample(x, temperature)
 
-  def forward_media(self, embd:Tensor, start_pos:int|UOp, temperature:Tensor, freqs:Tensor) -> Tensor:
-    x = embd.float()                                      # (B, T, D) precomputed embeddings (image tokens spliced in)
+  def forward_media_prefill(self, start_pos:int|UOp, temperature:Tensor, tokens:Tensor, positions:Tensor, sel:Tensor,
+                            img_embd:Tensor) -> Tensor:
+    # sel: (T,) int32 image source row per token (-1 = text token); img_embd: staged image embeddings buffer
+    x = self.token_embd(tokens).float()
+    rows = img_embd[sel.clip(min_=0)].float()
+    x = (sel >= 0).reshape(1, -1, 1).where(rows, x)
+    freqs = imrope_freqs_cis(positions, self.config.rope_dim, self.config.rope_theta, self.config.mrope_sections)
+    for block in self.blk: x = block(x, start_pos, freqs)
+    return self._sample(x, temperature)
+
+  def forward_media_rollout(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, freqs:Tensor) -> Tensor:
+    x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos, freqs)
     return self._sample(x, temperature)
 
@@ -535,8 +546,14 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
-  def warmup(self):
-    for _ in range(2): list(zip(range(2), self.generate([0])))
+  def warmup(self, media_tokens:int=0):
+    # prefill with a few chunks, not a single token: JITBEAM times kernels with the bound sizes at capture time
+    for _ in range(2): list(zip(range(2), self.generate([0] * min(96, self.max_context - 8))))
+    if media_tokens:
+      # capture the media jits too: a fake 128-token image plus text on both sides
+      fake_img = Tensor.zeros(media_tokens, self.config.dim, dtype='float16', device=self.token_embd.weight.device)
+      fake = [ImageEmbed(32, fake_img, 8, 16)]
+      for _ in range(2): list(zip(range(2), self.generate([0]*32 + [0]*128 + [0]*32, images=fake)))
 
   def get_start_pos(self, tokens:list[int]) -> int:
     # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
@@ -550,22 +567,12 @@ class Transformer:
   def freqs_cis(self) -> Tensor:  # all attention blocks share the same cached rope table
     return next(b.freqs_cis for b in self.blk if hasattr(b, 'freqs_cis'))
 
-  def _build_media_inputs(self, tokens:list[int], images:list[ImageEmbed]) -> tuple[Tensor, Tensor, int]:
-    """Returns ((1, L, D) embeddings with image embeds spliced in, (L, rope_dim) mrope freqs, position shift)."""
-    embd = self.token_embd(Tensor(tokens, dtype='int32').reshape(1, -1)).float()  # (1, L, D)
-    ar = Tensor.arange(len(tokens))
-    for img in images:
-      n = int(img.embeds.shape[0])
-      sel = (ar - img.start).clip(0, n - 1)
-      mask = ((ar >= img.start) & (ar < img.start + n)).reshape(1, -1, 1)
-      embd = mask.where(img.embeds.float()[sel].unsqueeze(0), embd)
-    positions, cursor = mrope_positions(len(tokens), images)
-    freqs = imrope_freqs_cis(Tensor(positions), self.config.rope_dim, self.config.rope_theta, self.config.mrope_sections)
-    # pad to max_context so the JIT input views have a static shape, like the token buffer
-    # (half precision to halve the buffer size; forward_media upcasts to float)
-    embd = embd.half().pad(((0, 0), (0, self.max_context - len(tokens)), (0, 0))).contiguous()
-    freqs = freqs.pad(((0, self.max_context - len(tokens)), (0, 0))).contiguous()
-    return embd.realize(), freqs.to(self.token_embd.weight.device).realize(), cursor - len(tokens)
+  def _init_media(self):
+    if hasattr(self, "_buf_pos"): return
+    dev = self.token_embd.weight.device
+    self._buf_pos = Tensor.zeros(self.max_context, 3, dtype='int32', device=dev).realize()
+    self._buf_sel = Tensor.zeros(self.max_context, dtype='int32', device=dev).realize()
+    self._buf_img_embd = Tensor.zeros(4096, self.config.dim, dtype='float16', device=dev).realize()
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0, images:list[ImageEmbed]|None=None):
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
@@ -576,27 +583,39 @@ class Transformer:
     temp = Tensor([temperature])
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
-    embd: Tensor|None = None
-    freqs: Tensor|None = None
+    media = bool(images)
     shift = 0
-    if images:
+    if media:
       if not self.config.mrope_sections: raise RuntimeError("model has no mrope sections, image support requires a VL model")
-      embd, freqs, shift = self._build_media_inputs(tokens, images)
+      self._init_media()
+      positions, cursor = mrope_positions(len(tokens), images or [])
+      shift = cursor - len(tokens)
+      sel = [-1] * len(tokens)
+      off = 0  # stage all images into the shared buffer and compute each token's source row
+      for img in images or []:
+        self._buf_img_embd[off:off + img.embeds.shape[0]].assign(img.embeds).realize()
+        for i in range(img.n_tokens): sel[img.start + i] = off + i
+        off += img.n_tokens
+      # stage positions and source rows: fixed-size host->device copies, no kernels compiled
+      def stage(buf:Tensor, flat:list[int]):
+        data = array('i', flat).tobytes() + bytes(buf.numel() * 4 - len(flat) * 4)
+        buf.assign(Tensor(data, dtype='int32').reshape(buf.shape).to(buf.device)).realize()
+      stage(self._buf_pos, [p for triple in positions for p in triple])
+      stage(self._buf_sel, sel)
     # recompute start_pos from what's currently valid in the caches
     # NOTE: image requests always prefill from scratch, cached KV can't be validated against the image content
-    start_pos = 0 if images else self.get_start_pos(tokens)
+    start_pos = 0 if media else self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
-      if embd is not None and start_pos < prompt_len:
-        assert freqs is not None
-        out = self.media_prefill_jit(embd[:, sp:sp+nt], sp, temp, freqs[sp:sp+nt]).realize()
-      elif embd is not None:
-        assert out is not None
+      if media and start_pos < prompt_len:
+        out = self.media_prefill_jit(sp, temp, t[:, sp:sp+nt], self._buf_pos[sp:sp+nt], self._buf_sel[sp:sp+nt],
+                                     self._buf_img_embd).realize()
+      elif media:
         # rollout with shifted mrope positions: text after an image uses positions shifted by `shift`
         rp = v_rope_pos.bind(start_pos + shift)
-        out = self.media_rollout_jit(self.token_embd(out).realize(), sp, temp, self.freqs_cis[rp:rp + 1]).realize()
+        out = self.media_rollout_jit(out, sp, temp, self.freqs_cis[rp:rp + 1]).realize()
       else:
         out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
