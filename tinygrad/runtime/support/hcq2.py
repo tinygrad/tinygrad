@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence
-import functools, itertools, weakref, ctypes, importlib
+import functools, itertools, weakref, ctypes, importlib, struct
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, round_up
@@ -401,7 +401,7 @@ def _is_link_patch(w:UOp) -> bool:
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, (o if isinstance(o, int) else o.vmin) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
+  keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, type(o) is int and _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
   groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
 
   dep = [buf.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
@@ -411,6 +411,8 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
     offs = [UOp.const(i) if isinstance(i:=(o - phase) // dt.itemsize, int) else i for o, _ in grp]
     stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
   return buf.after(*dep, *stores)
+
+def consts(vals:Sequence[int]) -> UOp: return UOp(Ops.BINARY, arg=struct.pack(f"<{len(vals)}I", *vals)).bitcast(dtypes.uint32)
 
 def hcq_fence(f:UOp) -> UOp:
   devs = dedup(to_tuple(s.device)[0] for s in f.src)
@@ -445,7 +447,7 @@ pm_hcq_encode = PatternMatcher([
 # 3.2. split
 
 def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
-  links, rest = partition(a.src[1:], lambda s: s.op in (Ops.STORE, Ops.END) and _is_link_patch(s))
+  links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
   if not links: return None
   ctx.extend(links)
   return a.src[0].after(*rest)
@@ -454,6 +456,16 @@ pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
 
 def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   stream, patches = bytes(hq.blob), hq.patches
+  # a runtime word at many offsets is one loop over them, a ranged word stores trip r at its r-th use
+  uses = defaultdict[UOp, list[int]](list)
+  for o, w in patches:
+    if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w): uses[w].append(o)
+  looped = {w: at for w, at in uses.items() if len(at) > 1 or w.ranges}
+  patches = [(o, w) for o, w in patches if w not in looped]
+  for w, at in looped.items():
+    r = next(iter(w.ranges)) if w.ranges else UOp.range(len(at), next(UOp.unique_num))
+    off = consts(at).index(r).load()
+    patches += [(off + 4 * k, (w >> 32 * k).cast(dtypes.uint32)) for k in range(w.dtype.itemsize // 4)]
   nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
@@ -597,15 +609,10 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
   cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')[off:off + len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_words(buf:UOp, offs:UOp, ws:UOp, r:UOp|None=None) -> UOp:
-  def trips(x:UOp) -> list[int]: return [x.val] if r is None else [x.sym_infer({"i": i}) for i in range(int(r.vmax) + 1)]
-
+def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   base, off = unwrap_view(buf)
   mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
-  # a ranged word has a value per trip
-  if r is not None: offs, ws = (x.substitute({r: UOp.variable("i", 0, r.vmax, r.dtype)}) for x in (offs, ws))
-
-  writes = [(off + i * w.dtype.itemsize, w.dtype.itemsize, v) for o, w in zip(offs.src, ws.src) for i, v in zip(trips(o), trips(w))]
+  writes = [(off + o.val * w.dtype.itemsize, w.dtype.itemsize, w.val) for o, w in zip(offs.src, ws.src)]
   for at, n, v in writes: mv[at:at + n] = (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
   return UOp(Ops.NOOP)
 
@@ -621,7 +628,6 @@ pm_link = PatternMatcher([
   # fold rules
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
-  (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(UPat(Ops.RANGE, name="r")), fold_words),
   # a call keeps the deps that are not written yet
   (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"), lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.src[0].op is Ops.CALL else

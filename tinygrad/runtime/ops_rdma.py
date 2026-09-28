@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import cast
-import functools, struct, operator, re
+import functools, struct, operator, re, itertools
 from tinygrad.device import Allocator, Buffer, BufferSpec, BufferStorage, Compiled, Device
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
-from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
+from tinygrad.runtime.support.hcq2 import unwrap_view, to_name, consts
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.runtime.support.system import filter_visible_devices
@@ -114,13 +114,16 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
   ring, cq = rdma_ring(nic.device, pair, is_recv), rdma_cq(nic.device, pair, is_recv)
   seq, psn = rdma_seq(nic.device, pair, is_recv), rdma_psn(nic.device, pair)
   bufs = [get_call_arg_uops(c)[0 if is_recv else 1] for c in calls]
-  wqes, packets = sum(ceildiv(b.nbytes(), RDMA_CHUNK) for b in bufs), sum(ceildiv(b.nbytes(), MTU) for b in bufs)
+  chunks = [ceildiv(min(RDMA_CHUNK, b.nbytes() - o), MTU) for b in bufs for o in range(0, b.nbytes(), RDMA_CHUNK)] # packets per wqe
+  wqes, packets = len(chunks), sum(chunks)
 
   assert wqes <= min(RING_ENTRIES, CQ_ENTRIES), "a batch posts at most a ring of wqes per pair"
 
   # next slot and psn persist in nic memory. read once per submit and own it
   bumps = [seq.index(0).store(seq.index(0).load() + wqes)] + ([] if is_recv else [psn.index(0).store(psn.index(0).load() + packets)])
-  n, p = seq.after(*bumps).index(0).load() - wqes, psn.after(*bumps).index(0).load() - packets
+  n0, p0 = seq.after(*bumps).index(0).load() - wqes, psn.after(*bumps).index(0).load() - packets
+  i, psns = UOp.range(wqes, next(UOp.unique_num), dtype=dtypes.uint64), consts(list(itertools.accumulate(chunks, initial=0)))
+  n, p, p_next = n0 + i, p0 + psns.index(i).load(), p0 + psns.index(i + 1).load()
 
   ring_addr, cq_addr = ring.getaddr(devs), cq.getaddr(devs)
   db = rdma_db(nic.device, pair).getaddr(devs) + (nic.iface.dev_impl.db_off & 0xfff)
@@ -139,7 +142,7 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
 
       # a send also fills in its msn entry: the slot, the psn after it (a psn per packet), its first psn
       if not is_recv: ops += [ins("write", ring_addr + RING_ENTRIES * WQE_SIZE + (n % RING_ENTRIES) * 8,
-                                  ((n % RING_ENTRIES) << 48) | (((p + ceildiv(size, MTU)) & 0xffffff) << 24) | (p & 0xffffff))]
+                                  ((n % RING_ENTRIES) << 48) | ((p_next & 0xffffff) << 24) | (p & 0xffffff))]
 
       # rings the doorbell: the slot after the wqe and the epoch of its pass
       ops += [ins("write", db, ((n + 1) % RING_ENTRIES | ((n + 1) // RING_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | ring_db)]
@@ -147,7 +150,6 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
       # waits for the cqe, acks the cq
       ops += [ins("wait_eq", cq_addr + (n % CQ_ENTRIES) * 32 + 24, (n // CQ_ENTRIES & 1 ^ 1 | (2 if is_recv else 0)).cast(dtypes.uint16)),
               ins("write", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
-      n, p = n + 1, p + ceildiv(size, MTU)
 
     # and invalidate the gpu caches on recv
     copies.append(ops + ([ins("barrier")] if is_recv else []))
