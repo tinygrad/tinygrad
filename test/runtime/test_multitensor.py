@@ -5,6 +5,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
+from tinygrad.engine.jit import JitError
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, check_schedule, assert_kernel_count, KernelCountException
 from hypothesis import given, strategies as strat, settings
 
@@ -67,10 +68,11 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
-    assert X.uop.src[0].shape == (128,)
-    # the MULTI carries and ends the DEVICE range as its second src
-    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
-    assert X.uop.ended_ranges == X.uop.src[1:]
+    unshard = X.uop.base
+    assert unshard.src[0].shape == (128,)
+    # the UNSHARD carries and ends the DEVICE range as its second src
+    assert unshard.src[1].op is Ops.RANGE and unshard.src[1].arg[-1] is AxisType.DEVICE
+    assert unshard.ended_ranges == unshard.src[1:]
     (X + X).realize()
 
   @unittest.expectedFailure # TODO: fix
@@ -215,6 +217,36 @@ class TestMultiTensor(unittest.TestCase):
       tt = Tensor.arange(0, 4).clone().realize().shard((d1,d2), 0).realize()
       out = f(tt)
       assert out.item() == 1+2+3+4
+
+  def test_multitensor_jit_checks_global_layout(self):
+    f = TinyJit(lambda x: (x+1).contiguous())
+    base = Tensor.arange(16).float().clone()
+    x = base.shard(devices_2, 0).realize().reshape(4, 4)
+    f(x)
+    f(x)
+    y = base.reshape(1, 2, 8).shard(devices_2, 2).realize().reshape(2, 8)
+    replicated = base[:8].reshape(2, 4).shard(devices_2).realize()
+    for other in (y, replicated):
+      with self.subTest(shape=other.shape):
+        local = other.uop.shard_view if other.uop.sharding else other.uop
+        self.assertEqual(x.uop.shard_view.shape, local.shape)
+        with self.assertRaisesRegex(JitError, "args mismatch"):
+          f(other)
+
+  def test_multitensor_jit_equivalent_layout(self):
+    f = TinyJit(lambda x: (x+1).contiguous())
+    for i in range(4):
+      x = (Tensor.arange(16).float()+i*100).clone()
+      x = x.shard(devices_2, 0).realize().reshape(4, 4) if i < 2 else x.reshape(4, 4).shard(devices_2, 0).realize()
+      np.testing.assert_array_equal(f(x).numpy(), (np.arange(16)+i*100+1).reshape(4, 4))
+
+  def test_multitensor_jit_symbolic_shard_view(self):
+    f = TinyJit(lambda x: (x+1).sum())
+    x = Tensor.arange(16).float().clone().reshape(4, 4).shard(devices_2, 1).realize()
+    for n in (2, 3, 4, 2):
+      rows = Variable("rows", 1, 4).bind(n)
+      view = Tensor(x.uop.shard_view.shrink(((0, rows), None)).unshard(1))
+      self.assertEqual(f(view).item(), (np.arange(16).reshape(4, 4)[:n]+1).sum())
 
   def test_multitensor_inside_jit(self):
     @TinyJit

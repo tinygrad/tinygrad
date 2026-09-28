@@ -21,7 +21,7 @@ from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
-from tinygrad.schedule.multi import multi_pm
+from tinygrad.schedule.multi import multi_pm, pm_index_multi
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -134,7 +134,7 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
+devectorizer2 = mop_cleanup+pm_mops+pm_index_multi+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)

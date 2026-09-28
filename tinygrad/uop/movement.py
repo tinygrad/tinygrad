@@ -1,4 +1,13 @@
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops
+from tinygrad.uop.ops import PatternMatcher, UPat, UOp, Ops
+
+def index_index(idx1:UOp, idx2:UOp):
+  idxs, srcs = list(idx2.src[1:]), []
+  for idx in idx1.src[1:]:
+    rank = len(idx.shape)
+    if len(idxs) < rank: return None
+    srcs.append(idx.index(*idxs[:rank]) if rank else idx)
+    idxs = idxs[rank:]
+  return idx1.src[0].index(*srcs, *idxs, arg=idx2.arg)
 
 # TODO: pm_mops from rangeify belongs here. this is all pattern matchers that strictly clean up movement ops
 
@@ -20,10 +29,6 @@ mop_cleanup = PatternMatcher([
   # const INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
    lambda a,i,idx: a.src[i.val] if len(idx.src) <= 2 else a.src[i.val].index(*idx.src[2:])),
-  # INDEX on INDEX is INDEX
-  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
-   lambda idx1,idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:]) if all(x.shape == () for x in idx1.src[1:]+idx2.src[1:]) else None),
-  # INDEX on shaped INDEX (TODO: this can be more generic)
-  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx1_arg"))),), allow_any_len=True, name="idx2"),
-   lambda buf,idx1_arg,idx2: buf.index(idx1_arg.index(*idx2.src[1:])) if len(idx1_arg.shape) == len(idx2.src[1:]) else None),
+  # Consume the dimensions introduced by each index tensor, then index the remaining source dimensions.
+  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"), index_index),
 ])
