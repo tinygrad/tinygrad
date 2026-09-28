@@ -126,9 +126,8 @@ pm_renderer = PatternMatcher([
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
-  # the whole clause collapsed to a single predicate (no binds)
-  if x.op is Ops.CUSTOMI:
-    return [f"{'  '*depth}if {x.arg[0]} and (_ret:=_fxn({'ctx=ctx' if has_ctx else ''})) is not None: return _ret"]
+  # if the whole clause collapsed to a single predicate (no binds), rewrap it
+  if x.op is Ops.CUSTOMI: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
   and_pieces: list[str] = []
   bound: dict[str, str] = {}  # rebinding a name renders an identity compare (setdefault semantics in the interpreter)
@@ -148,7 +147,8 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       stores, pred = partition(s.src[0].src, lambda x: x.op is Ops.STORE)
       it, base = s.src[1].arg[0], s.src[2].arg[0]
       for st in stores:
-        first = f"{base}.src[0]{st.src[1].arg[0][len(it):]}"  # the path this name binds in the first src
+        # st.src[1] is the path this name binds, written as {it}.src[...]; rebase it on the first src
+        first = f"{base}.src[0]{st.src[1].arg[0].removeprefix(it)}"
         pred.append(UOp(Ops.CUSTOMI, arg=(f"{st.src[1].arg[0]} is {first}", dtypes.void)))
         bind(st.src[0].arg[0], first)
       and_pieces.append(f"all([{' and '.join(y.arg[0] for y in pred)} for {it} in {base}.src])")
