@@ -47,6 +47,10 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["out"]
     self.helper_test_single_op("Reshape", inputs, attributes, outputs)
 
+  def test_constant_of_shape_scalar(self):
+    from tinygrad.nn.onnx import onnx_ops
+    self.assertEqual(onnx_ops["ConstantOfShape"]([], Tensor([3.0])).shape, ())
+
   def test_squeeze(self):
     # axes is None
     inputs = {"data": np.random.randn(1, 3, 1, 1).astype(np.float32)}
@@ -269,6 +273,11 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = runner(inputs)
     assert outputs["y"].dtype is dtypes.bool
 
+  def test_shrink(self):
+    x = np.array([-np.inf, -1, 1, np.inf, np.nan], dtype=np.float32)
+    self.helper_test_single_op("Shrink", {"x": x}, {}, ["y"])
+    self.helper_test_single_op("Shrink", {"x": x}, {"lambd": -1.0, "bias": 0.5}, ["y"])
+
   def test_quantize_linear(self):
     test_cases = [
       {"test_case": "round_half_to_even", "qdtype": np.int8, "qzero_point": 0, "x": [-1.5, -0.5, 0.5, 1.5], "scale": 1.0},
@@ -379,6 +388,10 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_reduce_l2_half(self):
     inputs = {"data": np.random.randn(1, 1, 32, 32, 32).astype(np.half)*100}
     self.helper_test_single_op("ReduceL2", inputs, {}, ["reduced"])
+
+  def test_argmin_int(self):
+    self.helper_test_single_op("ArgMin", {"data": np.array([1, 0], dtype=np.uint8)}, {}, ["reduced"])
+    self.helper_test_single_op("ArgMin", {"data": np.array([5, np.iinfo(np.int32).min, 3], dtype=np.int32)}, {}, ["reduced"])
 
   def test_same_device_as_input(self):
     from tinygrad.nn.onnx import onnx_ops
