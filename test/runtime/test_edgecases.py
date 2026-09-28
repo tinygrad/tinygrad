@@ -84,14 +84,13 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
 class TestZeroFolding(unittest.TestCase):
   # we don't need more of these
 
-  # folding rules treat x/x, x//x and x%x as constants even when x can be zero
-  @unittest.expectedFailure
   def test_divide_by_self_with_zero(self):
     x = Tensor([0.0, 1.0])
     torch_out = torch.tensor([0.0, 1.0]) / torch.tensor([0.0, 1.0])
     out = (x / x).numpy()
     np.testing.assert_allclose(out, torch_out.numpy(), equal_nan=True)
 
+  # the x//x -> 1 fold no longer fires here (fixed), but tinygrad still doesn't raise on int div/mod by zero like torch does
   @unittest.expectedFailure
   def test_floordiv_by_self_with_zero(self):
     x = Tensor([0])

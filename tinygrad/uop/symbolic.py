@@ -117,7 +117,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0)]), lambda x: x),  # x+0 / x^0 / x|0 -> x
   (UPat({Ops.SHL, Ops.SHR}, src=(UPat.var("x"), UPat.const(0))), lambda x: x),          # x<<0 / x>>0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
+  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1) if x.vmin > 0 or x.vmax < 0 else None), # x//x -> 1 (only if x can't be 0)
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   ((UPat.var("x") ^ UPat.var("y")) ^ UPat.var("y"), lambda x,y: x), # (x^y)^y -> x
@@ -137,7 +137,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False, dtypes.bool)), # x < x -> False
-  (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
+  (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0) if x.vmin > 0 or x.vmax < 0 else None), # x%x -> 0 (only if x can't be 0)
   (UPat.var("x") ^ UPat.var("x"), lambda x: x.const_like(0)), # x^x -> 0
   (UPat.var("x") & 0, lambda x: x.const_like(0)), # x&0 -> 0
   # (x&mask)>>k -> x>>k when mask only clears bits below k
@@ -166,9 +166,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** div rules ***
   (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
-  # can be wrong if x or x2 is 0
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)),          # x/x -> 1
-  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
+  # only fold when the divisor is proven nonzero: wrong otherwise (x/0 -> inf/nan, not 1 or x)
+  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1) if x.vmin > 0 or x.vmax < 0 else None),          # x/x -> 1
+  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x if x2.vmin > 0 or x2.vmax < 0 else None), # (x*x2)/x2 -> x
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
