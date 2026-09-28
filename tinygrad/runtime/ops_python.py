@@ -103,6 +103,7 @@ class PythonProgram(Program['PythonDevice']):
             size = u.max_numel() * u.dtype.itemsize
             buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
+        elif u.op is Ops.BINARY: values[u] = [memoryview(u.arg)] * warp_size
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
           elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
