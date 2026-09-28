@@ -26,12 +26,11 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
 
-def dev_rng_ok(u:UOp) -> bool:
-  # multi-device BUFFER/ALLOC carry a DEVICE range as their only src; single-device ones have no srcs
-  if isinstance(u.arg.device, tuple):
-    return len(u.src) == 1 and u.src[0].op is Ops.RANGE and u.src[0].axis_type is AxisType.DEVICE \
-      and int(u.src[0].vmax)+1 == len(u.arg.device)
-  return len(u.src) == 0
+def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> bool:
+  if not isinstance(device, tuple): return len(src) == 0
+  if len(src) != 1: return False
+  rng = src[0]
+  return rng.op is Ops.RANGE and rng.axis_type is AxisType.DEVICE and int(rng.vmax)+1 == len(device)
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
@@ -146,11 +145,12 @@ spec_tensor = PatternMatcher([
   # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
   (UPat(Ops.BUFFER, name="buf"), lambda buf:
    isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device) and buf.arg.buffer is not None
-   and dev_rng_ok(buf) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+   and valid_device_range(buf.arg.device, buf.src) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.ALLOC, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
    and buf.arg.buffer is None and (buf.arg.size is None or isinstance(buf.arg.size, int))
-   and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device))) and dev_rng_ok(buf)),
+   and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
+   and valid_device_range(buf.arg.device, buf.src)),
 
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
@@ -171,13 +171,9 @@ spec_tensor = PatternMatcher([
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce
    and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
-  # COPY
   # COPY carries the DEVICE range as src[1] when the target is multi-device
   (UPat(Ops.COPY, name="copy", src=(UPat(),), allow_any_len=True), lambda copy:
-   is_device(copy.arg) and not is_disk_device(copy.arg)
-   and (len(copy.src) == 1 if not isinstance(copy.arg, tuple) else
-        len(copy.src) == 2 and copy.src[1].op is Ops.RANGE and copy.src[1].axis_type is AxisType.DEVICE
-        and int(copy.src[1].vmax)+1 == len(copy.arg))),
+   is_device(copy.arg) and not is_disk_device(copy.arg) and valid_device_range(copy.arg, copy.src[1:])),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat(),)),
    lambda red: isinstance(red.arg, tuple) and len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
@@ -265,10 +261,10 @@ spec_kernel_graph = PatternMatcher([
   #(UPat(Ops.LINEAR), lambda: True),
   # PARAM is caller-provided storage (or a Variable in the ALU addrspace), ALLOC is call-local storage; size is in the arg, no shape input
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and dev_rng_ok(x) and
+  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src) and
    (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),
   (UPat(Ops.ALLOC, name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None and dev_rng_ok(x)),
+   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None and valid_device_range(x.arg.device, x.src)),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
