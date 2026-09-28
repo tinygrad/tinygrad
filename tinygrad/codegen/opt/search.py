@@ -3,6 +3,7 @@ from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -60,7 +61,8 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   try:
     st = time.perf_counter()
     ast, dev = x[1].copy().get_optimized_ast(name_override="test"), x[1].ren.target.device
-    prg = to_program(ast.substitute({p: p.replace(arg=replace(p.arg, device=dev)) for p in ast.toposort() if p.op is Ops.PARAM}), x[1].ren)
+    prg = to_program(ast.substitute({p: p.replace(arg=replace(p.arg, device=dev)) for p in ast.toposort()
+                                     if p.op is Ops.PARAM and p.addrspace is not AddrSpace.ALU}), x[1].ren)
     et = time.perf_counter() - st
     uops = prg.src[1].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
