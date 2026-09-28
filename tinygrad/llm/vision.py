@@ -112,18 +112,20 @@ class ViTBlock:
       t1, t2 = t[..., :rope_dims], t[..., rope_dims:rope_dims*2]
       return (t1 * cos - t2 * sin).cat(t1 * sin + t2 * cos, dim=-1)
     q, k, v = self.attn_qkv(self.ln1(x.float()).half()).split([self.dim] * 3, dim=-1)  # layernorm in f32 like ggml
-    q, k = (rope(t.reshape(n, self.n_heads, self.head_dim)).transpose(0, 1) for t in (q, k))
-    v = v.reshape(n, self.n_heads, self.head_dim).transpose(0, 1)             # (H, n, hd)
+    # Materialize rotated Q/K so the score matmul doesn't recompute RoPE for every query/key pair.
+    # GGUF biases are f32: restore f16 operands at matmul boundaries rather than promoting the attention/FFN to f32.
+    q, k = (rope(t.reshape(n, self.n_heads, self.head_dim)).transpose(0, 1).half().contiguous() for t in (q, k))
+    v = v.reshape(n, self.n_heads, self.head_dim).transpose(0, 1).half().contiguous()  # (H, n, hd)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=attn_mask)
     x = x + self.attn_out(attn.transpose(0, 1).reshape(n, self.dim))
-    return x + self.ffn_down(self.ffn_up(self.ln2(x.float()).half()).gelu())
+    return x + self.ffn_down(self.ffn_up(self.ln2(x.float()).half()).gelu().half().contiguous())
 
 class Qwen3VLTower:
   """Vision encoder + merger from a qwen3vl-style mmproj GGUF (clip architecture, qwen3vl_merger projector).
   Encodes an image into LLM-sized embeddings, one per spatial_merge_size**2 patches.
   The whole tower is one JIT graph with FIXED shapes (padded to max_patches): the image grid shape enters only
   as tensor data (scalar geometry + a padding key mask), so kernels are fully static, compile once at warmup,
-  and never again. (Symbolic shapes were tried and cost 3-4.5x per kernel in codegen quality.)"""
+  and never again."""
   def __init__(self, kv:dict, state_dict:dict[str, Tensor], device:str|None=None, max_tokens:int=1024):
     self.device = device or Device.DEFAULT
     if kv.get('general.architecture') != 'clip' or kv.get('clip.projector_type') != 'qwen3vl_merger':
@@ -172,8 +174,6 @@ class Qwen3VLTower:
     self._arange_ps = Tensor.arange(self.patch_size, dtype='int32').to(self.device).realize()
     self._arange3 = Tensor.arange(3, dtype='int32').to(self.device).realize()
     self._vit = TinyJit(self._run)
-    # big images can legitimately need minutes of GPU time here; don't trip the device watchdog
-    Device[self.device].wait_timeout_ms = max(Device[self.device].wait_timeout_ms, 600_000)
 
   @staticmethod
   def from_gguf(path:str, device:str|None=None, max_tokens:int=1024) -> Qwen3VLTower:
