@@ -108,6 +108,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
+  # if masked axes were upcast, unroll small masked reduce axes too so the masks fold to constants per lane
+  to_unroll: list[int] = []
+  for axis in k.unrollable_dims if to_upcast else []:
+    if k.full_shape[axis] <= 7 and k.rngs[axis] in where_gate_rngs and prod(k.full_shape[j] for j in to_unroll) * k.full_shape[axis] <= 7 * 7:
+      to_unroll.append(axis)
+  for axis in to_unroll[::-1]: k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UNROLL)))
 
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren is not None and k.ren.target.device == "DSP"
