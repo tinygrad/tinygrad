@@ -542,6 +542,20 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [11, 14, 19, 26])
 
+  def test_call_loop_mini(self, apply_opts=False):
+    def kernel(C:UOp, A:UOp):
+      i = UOp.range(4, 0)
+      p = UOp.param(0, dtypes.int, (1,))
+      q = UOp.param(1, dtypes.int, (1,))
+      call = p[0].store(q[0]*3).sink().call(C[i], A[i], name="triple")
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=None if apply_opts else ()))
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [3, 6, 9, 12])
+
+  @unittest.expectedFailure
+  def test_call_loop_mini_opts(self): self.test_call_loop_mini(apply_opts=True)
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
