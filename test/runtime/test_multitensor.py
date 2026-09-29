@@ -692,6 +692,21 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(out.shape, (rows,))
     np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.full(3, 2))
 
+  def test_from_multibuffer(self):
+    buf = UOp.mstack(*(Tensor([i, i+1], device=d).realize().uop for i,d in enumerate((d0, d1)))).buffer
+    u = UOp.from_buffer(buf)
+    self.assertEqual((u.device, u.shape, u.buffer), (buf.device, (2,), buf))
+    self.assertEqual(Tensor(u.unshard(0)).to(Device.DEFAULT).tolist(), [0, 1, 1, 2])
+
+  def test_broadcast_symbolic(self):
+    data = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    x = Tensor(data)[:, :Variable('rows', 1, 3).bind(2)].contiguous().realize()
+    np.testing.assert_equal(x.to((d0, d1)).sum(1).to(Device.DEFAULT).numpy(), data[:, :2].sum(1))
+
+  def test_broadcast_expand(self):
+    x = Tensor(np.arange(6, dtype=np.float32).reshape(2, 3, 1)).realize()
+    np.testing.assert_equal(x.expand(2, 3, 4).to((d0, d1)).sum(1).to(Device.DEFAULT).numpy(), [[3]*4, [12]*4])
+
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
     @TinyJit
