@@ -98,6 +98,8 @@ class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
     self.bufs = [Buffer(d, size, dtype) for d in device]
   @property
+  def device(self): return tuple(x.device for x in self.bufs)
+  @property
   def size(self): return self.bufs[0].size
   @property
   def dtype(self): return self.bufs[0].dtype
