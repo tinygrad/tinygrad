@@ -1264,7 +1264,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
-    # body holding the callee (a function pointer), rendered as an indirect call
+    # body holding CUSTOM_FUNCTION op, the callee (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
                                                         ret_dtype if ret_dtype is not None else dtypes.void))
 
