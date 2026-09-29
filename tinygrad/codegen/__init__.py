@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, argsort, partition
+from tinygrad.helpers import all_same, all_int, argsort, partition, to_function_name
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -416,8 +416,20 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+pm_lower_calls = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"),
+   lambda ctx,call: call.replace(src=(full_rewrite_to_sink(call.body, ctx, optimize=False),)+call.src[1:])),
+])
+
+pm_call_fixup = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="call"),
+   lambda call,sink: call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
+                                           arg=to_function_name(call.arg.name)),)+call.src[1:])),
+])
+
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
+  sink = graph_rewrite(sink, pm_call_fixup, name="call fixup", enter_calls=True)
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)
   prg = prg.replace(src=(lst[-1],))
   # isa renderers need to allocate registers
@@ -476,6 +488,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
+    ast = graph_rewrite(ast, pm_lower_calls, ctx=renderer, name="lower calls", enter_calls=True)
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
