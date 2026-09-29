@@ -1,10 +1,10 @@
 from __future__ import annotations
 import enum, functools, itertools, math, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
-from tinygrad.llm.gguf import gguf_load
-from tinygrad.uop.ops import resolve
+from tinygrad.llm.gguf import gguf_load, gguf_parse, ggml_data_to_tensor, _GGML_QUANT
+from tinygrad.uop.ops import resolve, Ops
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -111,6 +111,36 @@ class TransformerConfig:
   sliding_window: int = 0
   sliding_window_pattern: int = 0
 
+def shard_gguf(state:dict[str, tuple[Tensor, tuple[int, ...], int]], kv:dict, devices:tuple[str, ...]) -> dict[str, Tensor]:
+  assert kv['general.architecture'] == 'qwen35', 'TP only supports dense qwen35'
+  dims = [kv[f'qwen35.{k}'] for k in ('attention.head_count', 'attention.head_count_kv', 'feed_forward_length', 'ssm.group_count',
+                                    'ssm.time_step_rank', 'ssm.inner_size')] + [len(kv['tokenizer.ggml.tokens'])]
+  assert all(d % len(devices) == 0 for d in dims), f'uneven TP dimensions {dims} for {len(devices)} devices'
+  (k_heads, k_dim, v_heads, v_size), weights = (kv[f'qwen35.ssm.{k}'] for k in ('group_count', 'state_size', 'time_step_rank', 'inner_size')), {}
+  for name,(raw,shape,typ) in state.items():
+    block = _GGML_QUANT.get(typ, (1, 0))[0]
+    axis = 1 if name.endswith(('attn_output.weight', 'ffn_down.weight', 'ssm_out.weight')) else 0 if name.endswith(('token_embd.weight',
+      'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'attn_qkv.weight', 'attn_gate.weight', 'ffn_gate.weight', 'ffn_up.weight',
+      'ssm_alpha.weight', 'ssm_beta.weight', 'ssm_conv1d.weight', 'ssm_a', 'ssm_dt.bias')) else None
+    storage = raw.reshape(*shape[:-1], shape[-1]//block, -1)
+    if axis is None: pieces = [storage]*len(devices)
+    else:
+      groups, repeats = (shape[axis],), v_heads//k_heads
+      # Q/K heads repeat as whole groups; keep their corresponding V heads together on each device.
+      if name.endswith(('attn_qkv.weight', 'ssm_conv1d.weight')): groups = (k_heads*k_dim,)*2 + (v_size//repeats,)*repeats
+      elif 'ssm_' in name or name.endswith('attn_gate.weight'): groups = (shape[axis]//repeats,)*repeats
+      assert all(g % (len(devices)*(block if axis == len(shape)-1 else 1)) == 0 for g in groups), f'{name}: uneven TP group'
+      if axis == 1 or len(groups) > 1: storage = storage.to('CPU')
+      parts = storage.split(tuple(g//block if axis == len(shape)-1 else g for g in groups), dim=axis)
+      pieces = [p[0] if len(p) == 1 else Tensor.cat(*p, dim=axis) for p in zip(*(p.chunk(len(devices), dim=axis) for p in parts))]
+    weights[name] = ([p.contiguous().flatten().to(d) for p,d in zip(pieces, devices)],
+                     tuple(s//len(devices) if i == axis else s for i,s in enumerate(shape)), typ)
+  Tensor.realize(*(p for parts,_,_ in weights.values() for p in parts))
+  return {name: ggml_data_to_tensor(Tensor(UOp.from_buffer(UOp.mstack(*(p.uop for p in parts)).buffer)), math.prod(shape), typ).reshape(shape)
+          for name,(parts,shape,typ) in weights.items()}
+
+def allreduce(x:Tensor) -> Tensor: return Tensor(x.uop.allreduce(Ops.ADD, x.device)) if isinstance(x.device, tuple) else x
+
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
     self.config = config
@@ -178,8 +208,8 @@ class FFNBlock:
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
-      h =     x + self._attention(self.attn_norm(x), start_pos)
-      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+      h =     x + allreduce(self._attention(self.attn_norm(x), start_pos))
+      return (h + allreduce(self._feed_forward(self.ffn_norm(h)))).contiguous()
     return _run(x, start_pos)
 
 class TransformerBlock(FFNBlock):
@@ -412,10 +442,11 @@ class Transformer:
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    x = self.token_embd(tokens).float()                   # (B, T, D)
+    x = self.token_embd(tokens.to(self.token_embd.weight.device)).float() # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :]
+    if isinstance(logits.device, tuple): logits = Tensor(logits.uop.unshard(logits.ndim-1)).to(logits.device[0])
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
@@ -424,9 +455,12 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
-    # TODO: remove the need for copy to default device
-    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+                realize=bool(getenv("REALIZE", 0)), shard:int=1) -> tuple[Transformer, dict]:
+    assert shard > 0, 'shard must be positive'
+    if shard > 1:
+      kv, entries = gguf_parse(gguf)
+      state_dict = shard_gguf(entries, kv, devices:=tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard)))
+    else: kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -507,8 +541,16 @@ class Transformer:
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0))
+    if shard > 1:
+      assert config.ssm is not None
+      config = replace(config, n_heads=config.n_heads//shard, n_kv_heads=config.n_kv_heads//shard,
+        hidden_dim=config.hidden_dim//shard, vocab_size=config.vocab_size//shard,
+        ssm=replace(config.ssm, group_count=config.ssm.group_count//shard,
+                    time_step_rank=config.ssm.time_step_rank//shard, inner_size=config.ssm.inner_size//shard))
     model = Transformer(config)
+    for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    if shard > 1: model.token_embd.weight = Tensor(model.token_embd.weight.uop.unshard(0))
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
