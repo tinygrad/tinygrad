@@ -224,10 +224,8 @@ jobs:
       run: SKIP=ruff,mypy,tests pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
-    - name: Run runtime tests
-      run: |
-        DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
-        DEV=CPU python -m pytest -n=auto test/runtime/ test/device/cpu --durations=20
+    - name: Run test as module
+      run: DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
@@ -255,7 +253,7 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --ignore test/runtime/test_custom_kernel.py --ignore test/runtime/test_hashing.py --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
