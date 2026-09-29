@@ -404,6 +404,7 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
     return h
 
   # each control transfer writes 32 bits
+  v = v.bitcast(dtypes.uint32 if v.dtype.itemsize == 4 else dtypes.uint64)
   h, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
   loop, value = None, v
   if str(unwrap_view(b)[0].tag).startswith("kernargs"):
