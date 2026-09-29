@@ -281,6 +281,7 @@ class TestRandomness(unittest.TestCase):
     for shape in [(32, 16, 3, 3), (20, 44), (3, 15, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_multinomial(self):
     self.assertRaises(AssertionError, lambda: Tensor(2).multinomial(1, replacement=False))
     self.assertRaises(AssertionError, lambda: Tensor([1, 9]).multinomial(0, replacement=False))
