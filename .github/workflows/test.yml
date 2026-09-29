@@ -598,9 +598,7 @@ jobs:
         if: ${{ matrix.backend == 'amd' && matrix.arch == 'gfx950' }}
         run: PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd --durations=20
-      - name: Run opt tests
-        run: python -m pytest -n=auto test/runtime/test_kernel_opts.py test/runtime/test_tensor_cores.py test/runtime/test_search.py --durations=20
+        run: python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/runtime/test_search.py test/runtime/test_tensor_cores.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/runtime/test_disk_tensor.py -k test_copy_from_disk
       - name: Run TRANSCENDENTAL math
