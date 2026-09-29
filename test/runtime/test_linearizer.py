@@ -127,6 +127,7 @@ class TestLinearizer(unittest.TestCase):
     opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
     # the uops graph is reg BUFFER -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
+    # (with lane-wise accumulators the in-loop store value is a STACK of the ALU lanes instead)
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
@@ -135,7 +136,7 @@ class TestLinearizer(unittest.TestCase):
         if uops.index(u) < begin_range:
           assert u.src[1].op not in GroupOp.ALU
         else:
-          assert u.src[1].op in GroupOp.ALU
+          assert u.src[1].op in GroupOp.ALU or (u.src[1].op is Ops.STACK and all(x.op in GroupOp.ALU for x in u.src[1].src))
           assert begin_range < uops.index(u) < end_range
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
