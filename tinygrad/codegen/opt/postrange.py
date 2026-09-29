@@ -170,10 +170,7 @@ class Scheduler:
     elif opt.op is OptOps.SWAP:
       check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
       altrng:UOp = self.rngs[cast(int, opt.arg)]
-      # globals swap freely; weak loops may only interchange when they surround the same statement (they are independent there)
-      same_block = any(rng in (ls:=set(e.src[1:]) | set(e.ranges)) and altrng in ls for e in self.ast.toposort() if e.op is Ops.END)
-      check((rng.axis_type == AxisType.GLOBAL and altrng.axis_type == AxisType.GLOBAL) or
-            (rng.axis_type is AxisType.WEAK and altrng.axis_type is AxisType.WEAK and same_block), "swap only for globals or same-block weak loops")
+      check(rng.axis_type == AxisType.GLOBAL and altrng.axis_type == AxisType.GLOBAL, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.axis_id, rng.axis_type)),
                                       altrng:altrng.replace(arg=(*rng.axis_id, altrng.axis_type))},
                                       name=f"swap {rng.axis_id} {altrng.axis_id}", walk=True)
