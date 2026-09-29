@@ -547,7 +547,7 @@ class TestCallInKernel(unittest.TestCase):
       i = UOp.range(4, 0)
       p = UOp.param(0, dtypes.int, (1,))
       q = UOp.param(1, dtypes.int, (1,))
-      call = p[0].store(q[0]*3).sink().call(C[i], A[i], name="triple")
+      call = p[0].store(q[0]*3).sink().call(C[i], A[i], name="mul")
       return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=None if apply_opts else ()))
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
