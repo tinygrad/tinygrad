@@ -269,7 +269,7 @@ class MovementMixin:
     dim = tensors[0]._resolve_dim(dim, extra=True)
     assert all(t.shape == tensors[0].shape for t in tensors), f"all shapes must match for stack, got {[t.shape for t in tensors]}"
     ret = tensors[0]._mop(Ops.STACK, arg=tuple(t._uop for t in tensors[1:]))
-    return ret if dim == 0 else ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
+    return ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
 
   # **** high level ****
 

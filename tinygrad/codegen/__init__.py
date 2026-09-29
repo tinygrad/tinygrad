@@ -134,7 +134,7 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
+devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)

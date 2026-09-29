@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, KernelInfo
 from tinygrad.renderer.cstyle import CStyleLanguage
 
-# an external call is a CALL on a CUSTOM_FUNCTION body (the callee identity), the loaded function pointer is the target
+# an external call is a CALL on a CUSTOM_FUNCTION body, the callee (the loaded function pointer) is in the caller's scope
 def call_out_kernel(F:UOp, C:UOp) -> UOp:
   call = UOp.custom_function("callback").call(F[0].load(), UOp.const(3).cast(dtypes.int), C[0], ret_dtype=dtypes.void)
   return C.after(call)[1].store(C.after(call)[0].load() + 1).sink(arg=KernelInfo(name="call_out"))

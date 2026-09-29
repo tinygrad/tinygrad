@@ -11,33 +11,41 @@ if z3.get_version() < (4, 12, 4, 0):
 # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
 def z3_cdiv(a:z3.ArithRef, b:z3.ArithRef) -> z3.ArithRef:return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
 def z3_floordiv(a:z3.ArithRef, b:z3.ArithRef) -> z3.ArithRef: return z3.If(b > 0, a/b, (-a)/(-b))
-def z3_xor(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+# general int bitops are bit-blasted through the narrowest BV that fits both sides in two's complement (BV ops get exponentially slower with width)
+def z3_bv(x:UOp, op:Callable[[z3.ExprRef, z3.ExprRef], z3.ExprRef], a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+  w = 1 + max(int(x.src[0].vmax).bit_length(), int(x.src[1].vmax).bit_length(), int(-x.src[0].vmin).bit_length(), int(-x.src[1].vmin).bit_length())
+  return z3.BV2Int(op(z3.Int2BV(a, w), z3.Int2BV(b, w)), is_signed=True)
+def z3_xor(x:UOp, a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   if isinstance(a, z3.BoolRef): return a^b
   # x ^ -1 = -(x+1), i.e. bitwise NOT
   if isinstance(b, z3.IntNumRef) and b.as_long() == -1: return -(a+1)
   if isinstance(a, z3.IntNumRef) and a.as_long() == -1: return -(b+1)
-  raise RuntimeError(f"z3 int XOR only supports XOR with -1, got {a=} {b=}")
-def z3_and(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+  return z3_bv(x, lambda u,v: u^v, a, b)
+def z3_and(x:UOp, a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   if isinstance(a, z3.BoolRef): return a&b
   if isinstance(a, z3.IntNumRef): a, b = b, a
   if isinstance(b, z3.IntNumRef):
     # x & (2^k-1) = x % 2^k and x & -(2^k) = x - x % 2^k for any x in two's complement
     if (m:=b.as_long()+1) > 0 and m&(m-1) == 0: return a%m
     if (m:=-b.as_long()) > 0 and m&(m-1) == 0: return a - a%m
-  raise RuntimeError(f"z3 int AND only supports 2**k-1 and -2**k masks, got {a=} {b=}")
-z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: z3_cdiv, Ops.FLOORDIV: z3_floordiv,
-  Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
-  Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
+  return z3_bv(x, lambda u,v: u&v, a, b)
+def z3_or(x:UOp, a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+  return a|b if isinstance(a, z3.BoolRef) else z3_bv(x, lambda u,v: u|v, a, b)
 
 # Factor out the minimum count, then shift by its varying bits. Constant counts need no stages.
-def z3_shift(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
-  a, b = (ctx[1][s] for s in x.src)
+def z3_shift(x:UOp, a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   lo = max(0, int(x.src[1].vmin))
   a = a / (1 << lo) if x.op is Ops.SHR else a * (1 << lo)
   for i in range(max(0, int(x.src[1].vmax)-lo).bit_length()):
     factor = 1 << (1 << i)
     a = z3.If(((b-lo) / (1 << i)) % 2 == 1, a / factor if x.op is Ops.SHR else a * factor, a)
-  return z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=ctx[0].ctx), a)
+  return z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=a.ctx), a)
+
+# handlers take (x, *src exprs): x provides vmin/vmax for the bounds-aware ops; anything not here falls back to python_alu
+z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = {Ops.CMOD: lambda _,a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: lambda _,a,b: z3_cdiv(a,b),
+  Ops.FLOORDIV: lambda _,a,b: z3_floordiv(a,b), Ops.FLOORMOD: lambda _,a,b: a-z3_floordiv(a,b)*b,
+  Ops.WHERE: lambda _,c,a,b: z3.If(c,a,b), Ops.MAX: lambda _,a,b: z3.If(a<b, b, a),
+  Ops.AND: z3_and, Ops.OR: z3_or, Ops.XOR: z3_xor, Ops.SHL: z3_shift, Ops.SHR: z3_shift}
 
 def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
@@ -66,8 +74,8 @@ z3_renderer = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: z3.Int("Invalid", ctx=ctx[0].ctx)),
   (UPat(Ops.CONST, name="x"), lambda x,ctx: z3.BoolVal(x.val, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else z3.IntVal(x.val, ctx=ctx[0].ctx)),
   (UPat(Ops.CAST, src=(UPat.var("x"),), name="c"), lambda c,x,ctx: z3_cast(c, ctx[1][x])),
-  (UPat((Ops.SHL, Ops.SHR), name="x"), z3_shift),
-  (UPat(GroupOp.ALU, name="x"), lambda x,ctx: z3_alu[x.op](*(ctx[1][s] for s in x.src))),
+  (UPat(tuple(z3_alu), name="x"), lambda x,ctx: z3_alu[x.op](x, *(ctx[1][s] for s in x.src))),
+  (UPat(GroupOp.ALU, name="x"), lambda x,ctx: python_alu[x.op](*(ctx[1][s] for s in x.src))),
 ])
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:

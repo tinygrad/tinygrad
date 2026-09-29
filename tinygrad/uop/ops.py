@@ -292,9 +292,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
 
-  @property
-  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
-
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
@@ -471,7 +468,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
-    if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION and not self.body.src: return ()
+    if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION: return ()
     if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE)
     if self.op is Ops.BACKEDGE: return self.src[1:2]  # the condition's other ranges remain live
     if self.op in range_start: return self.src[range_start[self.op]:]
@@ -751,11 +748,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.EXPAND: return src_axis + len(self.marg) if src_axis is not None else None
     return src_axis
 
-  def _unshard(self, axis:int) -> UOp:
-    bsz, dcount = self.shape[axis], len(self.device)
-    dnum = UOp.range(dcount, -1, AxisType.DEVICE)
-    return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
-
   def _shard(self, axis:int, rng:UOp) -> UOp:
     if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
     dcount = int(rng.vmax)+1
@@ -865,7 +857,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     buf = MultiBuffer(device, size, dtype) if isinstance(device, tuple) else Buffer(device, size, dtype)
     return UOp(Ops.BUFFER, src=UOp.device_range_src(device), arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
   @staticmethod
-  def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
+  def from_buffer(opaque:Buffer|MultiBuffer, device:str|tuple[str, ...]|None=None):
     # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
     return UOp(Ops.BUFFER, src=UOp.device_range_src(device or opaque.device),
                arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
@@ -1272,7 +1264,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
-    # body (the callee identity) whose first src is the call target (a function pointer), rendered as an indirect call
+    # body (the callee identity), with the function pointer in CALL.src[1], rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
                                                         ret_dtype if ret_dtype is not None else dtypes.void))
 
@@ -1330,6 +1322,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     sig = tuple((u.arg.name, gmap[u.arg.slot], u.dtype, u._shape) for u in params) + \
           tuple((v.arg.name, len(self.arg.globals)+j, v.dtype, v._shape) for j, v in enumerate(self.arg.vars))
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
+
+  @property
+  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 
 @dataclass(frozen=True)
 class KernelInfo:
