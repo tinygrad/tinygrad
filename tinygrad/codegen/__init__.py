@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, argsort, partition
+from tinygrad.helpers import all_same, all_int, argsort, partition, prod, getenv
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -195,13 +195,25 @@ def merge_reduce_ends(sink:UOp):
   return sink.substitute(subs) if subs else None
 
 def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
-  acc = UOp.alloc_like(r, next(ctx), AddrSpace.REG)
+  # with few horizontal (unrolled) lanes, keep them as separate accumulator lanes and combine them once after the
+  # loop: this gives the backend independent accumulation chains it can vectorize instead of a serial per-iteration
+  # fold. gated on total accumulator size to avoid register pressure when output upcasts are large, and to dtypes
+  # the backend doesn't decompose into another dtype (decomposition runs after devectorize and can't see the lanes)
+  vec_acc = r.arg[1] and prod(r.src[0].max_shape) <= getenv("VEC_ACC_MAX", 32) \
+    and (r.dtype in (dtypes.float, dtypes.double) or dtypes.is_int(r.dtype))
+  acc = UOp.alloc(r.src[0].max_shape if vec_acc else r.max_shard_shape, r.dtype, next(ctx), AddrSpace.REG)
+  if vec_acc:
+    # tag the ALLOC so memory coalescing knows this is a reduce accumulator it may vectorize
+    au = next(x for x in acc.backward_slice_with_self if x.op is Ops.ALLOC)
+    acc = acc.substitute({au: au.rtag("reduce_acc")})
   input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
-  inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
+  inp = r.src[0] if vec_acc else (r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0])
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
-  return acc.after(acc_out)
+  if not vec_acc: return acc.after(acc_out)
+  vals = [acc.after(acc_out).index(*idx) for idx in itertools.product(*[range(acc.max_shape[a]) for a in range(r.arg[1])])]
+  return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals).reshape(r.shape)
 
 def expand_horizontal_reduce(r:UOp):
   inp = r.src[0]

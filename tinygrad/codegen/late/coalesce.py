@@ -117,7 +117,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
-      if buf.addrspace == AddrSpace.REG: continue
+      if buf.addrspace == AddrSpace.REG and (ctx.target.device != "CPU" \
+          or not any(x.op is Ops.ALLOC and x.tag == "reduce_acc" for x in buf.backward_slice_with_self)): continue
       if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       if idx.is_invalid: continue
@@ -142,7 +143,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       lengths = [4]
     elif buf.dtype in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and ctx.supports_float4:
       # TODO: a better way to get this than ctx
-      lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
+      lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [16,8,4,2] if ctx.target.device == "CPU" else [4,2]
     lengths.append(1)  # worst case, it's not folded
     # do the grouping
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]

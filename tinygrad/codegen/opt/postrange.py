@@ -1,10 +1,10 @@
 from __future__ import annotations
 import itertools
-from typing import cast
+from typing import cast, Any
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
 from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
@@ -13,6 +13,13 @@ from tinygrad.renderer import Renderer
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK), AxisType.UNROLL: (AxisType.REDUCE, AxisType.LOCAL),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK, AxisType.REDUCE)}
+
+def _affine_coeff(e:UOp, r:UOp, rngs:list[UOp]) -> int|None:
+  """coefficient of range r in an affine expression e, None if not affine"""
+  z = e.substitute({x: x.const_like(0) for x in rngs}, walk=True)
+  o = e.substitute({**{x: x.const_like(0) for x in rngs}, r: r.const_like(1)}, walk=True)
+  z, o = ssimplify(z), ssimplify(o)
+  return int(o - z) if isinstance(z, int) and isinstance(o, int) else None
 
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
@@ -167,6 +174,214 @@ class Scheduler:
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.axis_id, rng.axis_type)),
                                       altrng:altrng.replace(arg=(*rng.axis_id, altrng.axis_type))},
                                       name=f"swap {rng.axis_id} {altrng.axis_id}", walk=True)
+    elif opt.op is OptOps.OUTER:
+      check(type(opt.axis) is int and 0 <= opt.axis < self.shape_len, f"invalid axis on {opt.axis=} {self.shape_len=}")
+      rng = self.rngs[opt.axis]
+      reduces = [u for u in self.reduceops if rng in merge_dicts([r.ranges for r in u.src[1:]])]
+      check(len(reduces) == 1 and len(self.reduceops) == 1, "outer needs a single reduce")
+      red = reduces[0]
+      check(rng.axis_type is AxisType.REDUCE and len(red.src[1:]) == 1, "outer needs a single reduce range")
+      check(red.arg[1] == 0, "outer is incompatible with horizontal reduce lanes")
+      check(red.dtype in (dtypes.float, dtypes.double) or dtypes.is_int(red.dtype), "outer requires a natively supported dtype")
+      check(type(opt.arg) is int and opt.arg > 1 and rng.src[0].divides(opt.arg) is not None, f"bad outer block {opt.arg}")
+      # the reduce must be stored directly
+      sts = [u for u in self.ast.toposort() if u.op is Ops.STORE and u.src[1] is red]
+      check(len(sts) == 1, "outer needs the reduce to be stored directly")
+      loop_ranges = [x for x in self.rngs if x.axis_type is AxisType.WEAK]
+      lane_ranges = [x for x in self.rngs if x.axis_type is AxisType.UPCAST]
+      check(len(loop_ranges) + len(lane_ranges) > 0, "outer needs an output range")
+      acc_shape = tuple(int(x.vmax+1) for x in loop_ranges+lane_ranges)
+      check(prod(acc_shape) * red.dtype.itemsize <= 32768, "outer accumulator too big for L1")
+
+      # register-blocked outer reduce (BLAS gemv style): the accumulator spans all outputs and lives in L1,
+      # the reduce range is split into blocks whose partial sums accumulate in a register tile.
+      # this streams the reduce input sequentially instead of re-reading it once per output tile.
+      amt = cast(int, opt.arg)
+      kb = UOp.range(cast(int, (rng.vmax+1) // amt), next(self.opt_range), AxisType.REDUCE, dtype=rng.dtype)
+      k2 = UOp.range(amt, next(self.opt_range), AxisType.REDUCE, dtype=rng.dtype)
+      def clone(x:UOp) -> UOp: return UOp.range(cast(int, x.vmax+1), next(self.opt_range), x.axis_type, dtype=x.dtype)
+      j0, l0 = [clone(x) for x in loop_ranges], [clone(x) for x in lane_ranges]
+      j2 = [clone(x) for x in loop_ranges]
+      l1, l2, l3 = [[clone(x) for x in lane_ranges] for _ in range(3)]
+      slot = max([u.arg.slot+1 for u in self.ast.toposort() if u.op in (Ops.BUFFER, Ops.ALLOC)], default=0)
+      acc = UOp.alloc(acc_shape, red.dtype, slot, AddrSpace.REG)
+      tmp = UOp.alloc(tuple(int(x.vmax+1) for x in lane_ranges), red.dtype, slot+1, AddrSpace.REG)
+      # tag both as reduce accumulators so memory coalescing may vectorize their accesses
+      for buf in (acc, tmp):
+        au = next(x for x in buf.backward_slice_with_self if x.op is Ops.ALLOC)
+        if buf is acc: acc = acc.substitute({au: au.rtag("reduce_acc")})
+        else: tmp = tmp.substitute({au: au.rtag("reduce_acc")})
+      idc = UOp.const(identity_element(red.arg[0], red.dtype))
+      def indexed(buf:UOp, js:list[UOp], ls:list[UOp]) -> UOp:
+        for x in js+ls: buf = buf.index(x)
+        return buf
+      init = indexed(acc, j0, l0).store(idc).end(*l0, *j0)
+      tmp0 = indexed(tmp.after(kb, *j2), [], l1).store(idc).end(*l1)
+      inp2 = red.src[0].substitute({rng: kb*amt + k2, **dict(zip(loop_ranges, j2)), **dict(zip(lane_ranges, l2))}, walk=True)
+      tmp2 = tmp.after(tmp0, k2)
+      upd = indexed(tmp2, [], l2).store(indexed(tmp2, [], l2).alu(red.arg[0], inp2)).end(*l2, k2)
+      accv = acc.after(init, upd)
+      updacc = indexed(accv, j2, l3).store(indexed(accv, j2, l3).alu(red.arg[0], indexed(tmp.after(upd), [], l3))).end(*l3, *j2, kb)
+      self.ast = self.ast.substitute({red: indexed(acc.after(updacc), loop_ranges, lane_ranges)}, name="outer", walk=True)
+      ret = None
+    elif opt.op is OptOps.PACK:
+      # pack a reduce operand into a kernel-local scratch with a transposed layout (BLIS-style packing):
+      # enables the vectorized FMA form when the operand is contiguous in the reduce axis but strided in the
+      # output axis it varies with. opt.axis selects which qualifying operand to pack.
+      check(type(opt.axis) is int and opt.axis >= 0, f"invalid axis on {opt.axis=}")
+      check(len(self.reduceops) == 1, "pack needs a single reduce")
+      red = self.reduceops[0]
+      check(red.arg[1] == 0, "pack is incompatible with horizontal reduce lanes")
+      out_rngs = [x for x in self.rngs if x.axis_type in (AxisType.WEAK, AxisType.UPCAST)]
+      check(len(out_rngs) > 0, "pack needs an output range")
+      # the output axis that is contiguous in the store (the natural vector axis)
+      sts = [u for u in self.ast.toposort() if u.op is Ops.STORE and u.src[1] is red]
+      check(len(sts) == 1, "pack needs the reduce to be stored directly")
+      st_expr = sts[0].src[0].src[1]
+      st_rngs = list(st_expr.ranges)
+      st_coeffs = {r: _affine_coeff(st_expr, r, st_rngs) for r in st_rngs}
+      contig_out = next((r for r in out_rngs if st_coeffs.get(r) == 1), out_rngs[-1])
+      # nothing to do if some operand is already contiguous in the store-contiguous output axis
+      pre_idx = [v for v in red.src[0].toposort() if v.op is Ops.INDEX and v.src[0].op is Ops.PARAM]
+      check(not any(_affine_coeff(v.src[1], contig_out, list(v.src[1].ranges)) == 1 for v in pre_idx), "already output-contiguous")
+      # candidates: param reads that are contiguous in a reduce axis but strided in an output axis they vary with
+      cands: list[tuple[bool, Any, str, Any]] = []  # (score, tgt, kind, payload)
+      for v in pre_idx:
+        expr = v.src[1]
+        rngs = list(expr.ranges)
+        coeffs = {r: _affine_coeff(expr, r, rngs) for r in rngs}
+        if any(c is None for c in coeffs.values()): continue
+        if not any(coeffs.get(r, 0) == 1 for r in rngs if r.axis_type is AxisType.REDUCE): continue
+        # target: the store-contiguous output axis if strided there, else the most strided output axis
+        if coeffs.get(contig_out, 0) not in (0, 1, None): tgt = contig_out
+        else:
+          strided_out = [r for r in out_rngs if (c:=coeffs.get(r, 0)) not in (0, 1, None)]
+          tgt = max(strided_out, key=lambda r: cast(int, coeffs[r])) if strided_out else None
+        if tgt is None: continue
+        cands.append((tgt is contig_out, tgt, "plain", (v, coeffs)))
+      # gated (padded) candidates: WHERE(cond, INDEX(param, WHERE(cond, affine, Invalid)), pad_const)
+      # pack over the padded domain, evaluating the gates in the copy loop: the main loop then reads gate-free
+      for w in red.src[0].toposort():
+        if w.op is not Ops.WHERE or w.src[0].dtype is not dtypes.bool or w.src[2].op is not Ops.CONST: continue
+        idx = w.src[1]
+        if idx.op is not Ops.INDEX or idx.src[0].op is not Ops.PARAM: continue
+        gi = idx.src[1]
+        if gi.op is not Ops.WHERE or not gi.src[2].base.is_invalid: continue
+        affine = gi.src[1]
+        rngs = list(affine.ranges)
+        coeffs = {r: _affine_coeff(affine, r, rngs) for r in rngs}
+        if any(c is None for c in coeffs.values()): continue
+        # padded coordinates: coefficient groups with both a loop (WEAK) and a reduce member (e.g. oy+ky share a stride)
+        by_coeff: dict[int, list[UOp]] = {}
+        for r in rngs:
+          if coeffs[r]: by_coeff.setdefault(cast(int, coeffs[r]), []).append(r)
+        subs = {}  # coeff -> (weak member, reduce member)
+        for cf, members in by_coeff.items():
+          wm = [r for r in members if r.axis_type is AxisType.WEAK]
+          rm = [r for r in members if r.axis_type is AxisType.REDUCE]
+          if len(members) == 2 and wm and rm: subs[cf] = (wm[0], rm[0])
+        if not subs: continue
+        if not any(coeffs[r] == 1 and r.axis_type is AxisType.REDUCE for r in rngs): continue
+        # the target coord is the one containing the store-contiguous output axis
+        tgt_sum = next((cf for cf, (wr, rr) in subs.items() if wr is contig_out), None)
+        if tgt_sum is None: continue  # only support packing toward the store-contiguous axis for now
+        cands.append((True, tgt_sum, "gated", (w, idx, coeffs, subs)))
+      # rank: prefer operands varying with the store-contiguous output axis, gated (pad-materializing) last
+      cands.sort(key=lambda c: (not c[0], c[2] == "gated"))
+      check(cast(int, opt.axis) < len(cands), "no packable operand")
+      _, tgt, kind, payload = cands[cast(int, opt.axis)]
+      slot = max([u.arg.slot+1 for u in self.ast.toposort() if u.op in (Ops.BUFFER, Ops.ALLOC)], default=0)
+      if kind == "plain":
+        v, coeffs = payload
+        expr = v.src[1]
+        rngs = list(expr.ranges)
+        # scratch layout: other axes in current memory order, the target axis innermost
+        pack_rngs = [r for r in rngs if coeffs[r] != 0]
+        order = sorted([r for r in pack_rngs if r is not tgt], key=lambda r: -cast(int, coeffs[r])) + [tgt]
+        new_coeffs = {}
+        c = 1
+        for r in reversed(order):
+          new_coeffs[r] = c
+          c *= int(r.vmax+1)
+        scratch_elems = prod(int(r.vmax+1) for r in pack_rngs)
+        check(scratch_elems * v.dtype.itemsize <= 4*1024*1024, "pack scratch too big")
+        const = ssimplify(expr.substitute({r: r.const_like(0) for r in rngs}, walk=True))
+        assert isinstance(const, int)
+        def new_idx(m):  # build the packed index expression under range mapping m
+          out = UOp.const(const) if const else None
+          for r in pack_rngs:
+            term = m[r] * new_coeffs[r]
+            out = term if out is None else out + term
+          return out
+        clones = {r: UOp.range(cast(int, r.vmax+1), next(self.opt_range), AxisType.WEAK, dtype=r.dtype) for r in pack_rngs}
+        scratch = UOp.alloc((scratch_elems,), v.dtype, slot, AddrSpace.REG)
+        au = next(x for x in scratch.backward_slice_with_self if x.op is Ops.ALLOC)
+        scratch = scratch.substitute({au: au.rtag("reduce_acc")})
+        # prologue copy loop: scratch[new] = v[old], ends before the main loop via AFTER
+        pack_end = scratch.index(new_idx(clones)).store(v.src[0].index(expr.substitute({r: clones[r] for r in pack_rngs}, walk=True)))\
+          .end(*[clones[r] for r in order])
+        packed_read = scratch.after(pack_end).index(new_idx({r: r for r in pack_rngs}))
+        self.ast = self.ast.substitute({v: packed_read}, name="pack", walk=True)
+        clone_set = set(clones.values())
+      else:
+        w, idx, coeffs, subs = payload  # subs: coeff group -> (loop member, reduce member)
+        assert tgt is not None
+        tgt_cf = cast(int, tgt)  # the padded coord's coefficient containing the store-contiguous output axis
+        # fresh ranges for the padded coords (size = weak + reduce - 1) and clones for the remaining ranges
+        coord_rngs = {cf: UOp.range(cast(int, wr.vmax+1) + cast(int, rr.vmax+1) - 1, next(self.opt_range), AxisType.WEAK, dtype=wr.dtype)
+                      for cf, (wr, rr) in subs.items()}
+        # in the pack loop the reduce member folds into the coord: map weak member -> coord, reduce member -> 0
+        sub_map: dict[UOp, UOp] = {}
+        for cf, (wr, rr) in subs.items():
+          sub_map[wr] = coord_rngs[cf]
+          sub_map[rr] = UOp.const(0)
+        lone = [r for r in w.ranges if all(r is not wr and r is not rr for wr, rr in subs.values())]
+        sub_map |= {r: UOp.range(cast(int, r.vmax+1), next(self.opt_range), AxisType.WEAK, dtype=r.dtype) for r in lone}
+        # scratch layout: the target coord innermost
+        all_coords = list(coord_rngs.values()) + [sub_map[r] for r in lone]
+        order = [c for c in all_coords if c is not coord_rngs[tgt_cf]] + [coord_rngs[tgt_cf]]
+        new_coeffs = {}
+        c = 1
+        for r in reversed(order):
+          new_coeffs[r] = c
+          c *= int(r.vmax+1)
+        scratch_elems = prod(int(r.vmax+1) for r in all_coords)
+        check(scratch_elems * idx.dtype.itemsize <= 4*1024*1024, "pack scratch too big")
+        def new_idx_g(m):
+          out = None
+          for r in all_coords:
+            term = m[r] * new_coeffs[r]
+            out = term if out is None else out + term
+          return out
+        scratch = UOp.alloc((scratch_elems,), idx.dtype, slot, AddrSpace.REG)
+        au = next(x for x in scratch.backward_slice_with_self if x.op is Ops.ALLOC)
+        scratch = scratch.substitute({au: au.rtag("reduce_acc")})
+        # the copy loop evaluates the pad gates once; the main loop then reads the scratch gate-free
+        pack_end = scratch.index(new_idx_g({r: r for r in all_coords})).store(w.substitute(sub_map, walk=True)).end(*order)
+        # the read maps the original mixed sums (e.g. oy+ky) back onto the padded coords
+        read_map: dict[UOp, UOp] = {}
+        for cf, (wr, rr) in subs.items(): read_map[coord_rngs[cf]] = wr + rr
+        for r in lone: read_map[sub_map[r]] = r
+        packed_read = scratch.after(pack_end).index(new_idx_g(read_map))
+        self.ast = self.ast.substitute({w: packed_read}, name="pack_gated", walk=True)
+        tgt = contig_out
+        clone_set = set(coord_rngs.values()) | {sub_map[r] for r in lone}
+      # the pack only pays off with the target output vectorized: upcast it to the vector width,
+      # and tile the next output range too, so the greedy beam keeps the pack candidate (register blocking)
+      pre_weak = [x for x in self.rngs if x.axis_type is AxisType.WEAK and x is not tgt and x not in clone_set]
+      if tgt.axis_type is AxisType.WEAK and tgt.vmax+1 >= 16:
+        try: self.shift_to(tgt, 16, AxisType.UPCAST)
+        except KernelOptError: pass  # fine without it, beam can still decide by timing
+      outer_out = [x for x in pre_weak if x in self.rngs]
+      if kind == "plain" and len(outer_out) == 1 and outer_out[0].vmax+1 >= 8:
+        try: self.shift_to(outer_out[0], 8, AxisType.UPCAST)
+        except KernelOptError: pass
+      if kind == "gated":
+        prev = [x for x in out_rngs if x is not tgt and x in self.rngs and x.axis_type is AxisType.WEAK and x not in clone_set]
+        if prev and prev[-1].vmax+1 >= 4:
+          try: self.shift_to(prev[-1], 4, AxisType.UPCAST)
+          except KernelOptError: pass
+      ret = None
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 

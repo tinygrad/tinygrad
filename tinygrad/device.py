@@ -160,7 +160,7 @@ class Buffer:
     if storage.maps[dev].host is not storage.host: storage.maps[dev] = replace(storage.maps[dev], host=storage.host)
     return storage.maps[dev]
 
-  def get_buf(self, device:str) -> Any: return self.get_storage(device).buf
+  def get_buf(self, device:str|None=None) -> Any: return self.get_storage(device).buf
 
   def is_allocated(self) -> bool: return self._storage is not None and (self._base is None or self._base_storage is self.base._storage)
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
