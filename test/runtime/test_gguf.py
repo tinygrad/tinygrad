@@ -245,7 +245,7 @@ class TestGGUF(unittest.TestCase):
             data, parsed_shape, parsed_typ = entries[name]
             self.assertEqual((parsed_shape, parsed_typ), (shape, typ))
             self.assertEqual((data.shape, data.dtype), ((len(packed),), dtypes.uint8))
-            self.assertEqual(data.device, source.device if isinstance(source, Tensor) else f"DISK:{path}")
+            self.assertEqual(data.device, source.device if isinstance(source, Tensor) else f"DISK:{path.resolve()}")
             self.assertEqual(data.data().tobytes(), packed)
           loaded_kv, decoded = gguf_load(source)
           self.assertEqual(loaded_kv, kv)
@@ -277,7 +277,7 @@ class TestGGUF(unittest.TestCase):
       for i, (name, value) in enumerate((("a", a), ("b", b)), 1):
         data, shape, typ = entries[name]
         self.assertEqual((shape, typ, data.nbytes()), (value.shape, 0, value.nbytes))
-        self.assertEqual(data.device, f"DISK:{d / f'test-{i:05d}-of-00002.gguf'}")
+        self.assertEqual(data.device, f"DISK:{(d / f'test-{i:05d}-of-00002.gguf').resolve()}")
         self.assertEqual(data.data().tobytes(), value.tobytes())
       for loader in (gguf_parse, gguf_load):
         with self.assertRaisesRegex(ValueError, "requires a path argument"):
