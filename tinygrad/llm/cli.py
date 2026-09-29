@@ -3,7 +3,7 @@ import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
+from tinygrad.helpers import prod, partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -154,8 +154,9 @@ def main():
   with Context(DEBUG=max(DEBUG.value, 2 if args.serve else 0)):
     model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
-  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
+  file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
+  params = sum(prod(x.uop.shard_shape) for x in nn.state.get_parameters(model))*args.shard
+  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {params:,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer

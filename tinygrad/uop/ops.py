@@ -859,10 +859,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
   @staticmethod
   def from_buffer(opaque:Buffer|MultiBuffer, device:str|tuple[str, ...]|None=None):
-    buf_device = opaque.device if isinstance(opaque, Buffer) else tuple(b.device for b in opaque.bufs)
-    assert isinstance(opaque, Buffer) or device in (None, buf_device), "MultiBuffer device mismatch"
     # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
-    return UOp(Ops.BUFFER, arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or buf_device, buffer=opaque))
+    return UOp(Ops.BUFFER, arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None

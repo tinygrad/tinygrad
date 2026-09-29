@@ -98,11 +98,13 @@ class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
     self.bufs = [Buffer(d, size, dtype) for d in device]
   @property
+  def device(self): return tuple(x.device for x in self.bufs)
+  @property
   def size(self): return self.bufs[0].size
   @property
   def dtype(self): return self.bufs[0].dtype
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
-  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
+  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}>"
 
 @dataclass(frozen=True)
 class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[Compiled, BufferStorage]=field(default_factory=dict) # noqa: E702

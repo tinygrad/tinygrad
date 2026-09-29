@@ -60,31 +60,29 @@ class Linear(nn.Linear):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
   def set_quantized(self, decoded:Tensor):
-    if self.in_features % GGML_BLOCK_SIZE or not isinstance(numel:=prod(decoded.uop.shard_shape), int): return
-    packed_sizes = {typ: numel // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
+    if self.in_features % GGML_BLOCK_SIZE: return
+    packed_sizes = {typ: decoded.numel() // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
     raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER) and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
     if raw is None: return
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
     def unwrapped(u:UOp) -> UOp:
-      while u.op in (Ops.RESHAPE, Ops.STAGE, Ops.UNSHARD) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
+      while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
         u = u.src[0]
       return u
     # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
     for ggml_type, size in packed_sizes.items():
       if size != prod(raw.shape): continue
-      expected = ggml_data_to_tensor(Tensor(raw), numel, ggml_type)
+      expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
       if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
     else: return
-    if isinstance(decoded.device, tuple) and ggml_type not in (Q4_K, Q5_K, Q6_K, IQ4_XS): return
     # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
     word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
     raw_offset = raw.contiguous_view_offset()
     if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return
-    self.ggml_type, self.shard_axis = ggml_type, decoded.uop.axis
+    self.ggml_type = ggml_type
     self.weight = Tensor(raw).bitcast(word_dtype).contiguous()
-    if isinstance(raw.device, tuple): self.weight = Tensor(UOp.from_buffer(self.weight.uop.buffer))
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
@@ -198,7 +196,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(token_output, chunk, lane).sink(
     arg=KernelInfo(name=name, opts_to_apply=()))
 
-def _iq_grid(device:str, ggml_type:int) -> Tensor:
+def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
   grid, words = {IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2),
                  IQ3_XXS: (ggml.iq3xxs_grid, 1), IQ3_S: (ggml.iq3s_grid, 1)}[ggml_type]
@@ -439,10 +437,9 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, layer.in_features
-  if layer.shard_axis == 0: out_features //= len(cast(tuple, x.device))
   out_shape:tuple[int, ...] = (tokens, out_features)
   fxn:Callable[..., UOp]
-  extra = (_iq_grid(str(x.device), layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
+  extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   if tokens % 16 == 0 and out_features % 16 == 0:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
@@ -459,7 +456,6 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=out_features, in_features=in_features))[0]
   if len(result.shape) == 3: result = result.sum(-1)
   result = result.reshape(*x.shape[:-1], out_features)
-  if layer.shard_axis == 0: result = Tensor(result.uop.unshard(result.ndim-1))
   return result if layer.bias is None else result + layer.bias
 
 # ******** tiny dense fp16 gemv ********
