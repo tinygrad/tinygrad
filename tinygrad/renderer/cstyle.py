@@ -264,14 +264,13 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
   def render(self, uops:list[UOp]) -> str:
-    prefix, helper_uops = [], []
+    prefix, call_bodies = [], []
     for body,name in dedup((u.body, u.arg.name) for u in UOp.sink(*uops).toposort() if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
-      lst = list(body.src)
-      _, kernel, bufs = self._render(lst)
+      _, call, bufs = self._render(body.src)
       params = ', '.join(f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
-      prefix.append(f"static inline void {name}({params}) {{\n" + '\n'.join(kernel) + "\n}")
-      helper_uops.extend(lst)
-    return self.render_kernel(*self._render(uops), helper_uops+list(uops), prefix or None)
+      prefix.append(f"static inline void {name}({params}) {{\n" + '\n'.join(call) + "\n}")
+      call_bodies.extend(body.src)
+    return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -392,7 +391,7 @@ class MetalRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    prefix = ["#include <metal_stdlib>","using namespace metal;"] + (prefix or [])
+    prefix = ["#include <metal_stdlib>","using namespace metal;"]
     for name, _, dtype_in, dtype_out, _ in wmma_args(uops):
       dstr_out, dstr_in = self._render_dtype(dtype_out, 2, AddrSpace.REG), self._render_dtype(dtype_in, 2, AddrSpace.REG)
       prefix.append(

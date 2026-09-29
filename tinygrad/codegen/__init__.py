@@ -420,9 +420,7 @@ def lower_call(ctx:Renderer, call:UOp) -> UOp:
   sink = full_rewrite_to_sink(call.body, ctx, optimize=False)
   return call.replace(src=(sink,)+call.src[1:])
 
-pm_lower_calls = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),
-])
+pm_lower_calls = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),])
 
 def name_call(ctx:dict[str, UOp], call:UOp) -> UOp:
   base = to_function_name(call.arg.name or "function")
