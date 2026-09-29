@@ -1,10 +1,12 @@
 import unittest
 import numpy as np
 from unittest.mock import patch
+from dataclasses import replace
 from tinygrad import Tensor, UOp
 from tinygrad.nn.state import get_state_dict
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
+from tinygrad.llm.vision import ImageEmbed
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
@@ -217,6 +219,51 @@ class TestTransformerGenerate(unittest.TestCase):
       gen = model.generate([1, 2, 3], temperature=0.6)
       next(gen)
     self.assertAlmostEqual(captured_temps[-1], 0.6, places=5)
+
+class TestMediaCache(unittest.TestCase):
+  def test_image_identity_and_recurrent_state(self):
+    model = Transformer(TEST_CONFIG)
+    img = ImageEmbed(2, Tensor.zeros(6, 64), 2, 3, b"a")
+    model._cached_tokens, model._cached_images = [1]*10, [(2, 2, 3, b"a")]
+    for recurrent in (False, True):
+      model.has_recurrent_block = recurrent
+      for images, expected in (([img], 10), ([img, img._replace(start=11)], 10), (None, 2),
+                               ([img._replace(cache_key=b"b")], 2), ([img._replace(grid_h=3, grid_w=2)], 2),
+                               ([img._replace(cache_key=None)], 2)):
+        with self.subTest(recurrent=recurrent, images=images):
+          self.assertEqual(model.get_start_pos([1]*12, images), 0 if recurrent and expected < 10 else expected)
+
+  def test_media_resume_and_invalidation_match_fresh(self):
+    config = replace(TEST_CONFIG, num_blocks=2, dim=8, hidden_dim=16, n_heads=1, n_kv_heads=1,
+                     head_dim=8, v_head_dim=8, rope_dim=8, mrope_sections=(2, 1, 1), max_context=64)
+    model, rng = Transformer(config), np.random.RandomState(1234)
+    for t in get_state_dict(model).values(): t.assign(Tensor(rng.uniform(-1, 1, t.shape).astype(np.float32))).realize()
+    img = ImageEmbed(2, Tensor(rng.uniform(-1, 1, (8, 8)).astype(np.float16)), 2, 3, b"a")
+    prompt = [1, 2] + [3]*6 + [4, 5]
+    def run(tokens, images, count):
+      gen = model.generate(list(tokens), chunk_size=4, images=images)
+      out = [next(gen) for _ in range(count)]
+      gen.close()
+      kv = [b.cache_kv.numpy()[:, :, :, :len(tokens)+count-1].copy() for b in model.blk]
+      return out, kv
+    for case in ("same", "append", "changed", "geometry", "removed", "unknown"):
+      with self.subTest(case=case):
+        model._cached_tokens = []
+        out, _ = run(prompt, [img], 2)
+        tokens, images = prompt + out + [6, 7], [img]
+        if case == "append":
+          images += [img._replace(start=len(tokens), grid_h=2, grid_w=2)]
+          tokens += [3]*4 + [8]
+        if case == "changed": images = [img._replace(embeds=-img.embeds, cache_key=b"b")]
+        if case == "geometry": images = [img._replace(grid_h=3, grid_w=2)]
+        if case == "removed": images = None
+        if case == "unknown": images = [img._replace(cache_key=None)]
+        self.assertEqual(model.get_start_pos(tokens, images), 11 if case in ("same", "append") else 2)
+        resumed, kv = run(tokens, images, 3)
+        model._cached_tokens = []
+        fresh, fresh_kv = run(tokens, images, 3)
+        self.assertEqual(resumed, fresh)
+        for a, b in zip(kv, fresh_kv): np.testing.assert_allclose(a, b, atol=2e-3, rtol=2e-3)
 
 if __name__ == '__main__':
   unittest.main()

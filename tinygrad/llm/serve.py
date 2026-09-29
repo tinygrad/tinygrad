@@ -78,7 +78,7 @@ class Handler(VizHandler):
                 reasoning:bool=False, images:list|None=None):
     model, tok = self.server.model, self.server.tok
     prompt_tokens = len(ids)
-    cache_start_pos = 0 if images else model.get_start_pos(ids)
+    cache_start_pos = model.get_start_pos(ids, images)
     stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
@@ -121,7 +121,7 @@ class Handler(VizHandler):
       yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
       if include_usage:
         yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                        "total_tokens": prompt_tokens + len(out)}, **tmpl}
+          "total_tokens": prompt_tokens + len(out), "prompt_tokens_details": {"cached_tokens": cache_start_pos}}, **tmpl}
       log_stats()
     except GeneratorExit:
       if not completed: log_stats(interrupted=True)
@@ -136,7 +136,8 @@ class Handler(VizHandler):
     if self.path == "/v1/chat/completions":
       # render and tokenize
       normalize_messages(body["messages"])
-      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
+      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True,
+        enable_thinking=body.get("chat_template_kwargs", {}).get("enable_thinking", body.get("reasoning_effort") != "none"))
       ids: list[int] = self.server.tok.encode(rendered)
       stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
       # expand image placeholders into vision tokens

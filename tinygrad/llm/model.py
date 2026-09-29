@@ -415,6 +415,7 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
+    self._cached_images: list[tuple[int, int, int, bytes|None]] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
@@ -550,31 +551,37 @@ class Transformer:
     # prefill with a few chunks, not a single token: JITBEAM times kernels with the bound sizes at capture time
     for _ in range(2): list(zip(range(2), self.generate([0] * min(96, self.max_context - 8))))
     if media_tokens:
-      # capture the media jits too: a fake 128-token image plus text on both sides
+      # Capture the media jits too: a fake image plus text on both sides.
       fake_img = Tensor.zeros(media_tokens, self.config.dim, dtype='float16', device=self.token_embd.weight.device)
-      fake = [ImageEmbed(32, fake_img, 8, 16)]
-      for _ in range(2): list(zip(range(2), self.generate([0]*32 + [0]*128 + [0]*32, images=fake)))
+      n_image = min(128, media_tokens)
+      fake = [ImageEmbed(32, fake_img, 1, n_image)]
+      for _ in range(2): list(zip(range(2), self.generate([0]*32 + [0]*n_image + [0]*32, images=fake)))
 
-  def get_start_pos(self, tokens:list[int]) -> int:
-    # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
-    if self.has_recurrent_block:
-      return len(self._cached_tokens) if self._cached_tokens and len(self._cached_tokens) < len(tokens) \
-        and tokens[:len(self._cached_tokens)] == self._cached_tokens else 0
+  def get_start_pos(self, tokens:list[int], images:list[ImageEmbed]|None=None) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+    image_keys = [(img.start, img.grid_h, img.grid_w, img.cache_key) for img in images or []]
+    for old, new in itertools.zip_longest(self._cached_images, image_keys):
+      if old == new and old is not None and old[3] is not None: continue
+      # Image-pad tokens alone don't identify embeddings or their mrope layout.
+      prefix_len = min(prefix_len, *(key[0] for key in (old, new) if key is not None))
+      break
+    # Recurrent state can't roll back: only a strict extension of the live state can reuse it.
+    if self.has_recurrent_block: return prefix_len if prefix_len == len(self._cached_tokens) else 0
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   @property
   def freqs_cis(self) -> Tensor:  # all attention blocks share the same cached rope table
     return next(b.freqs_cis for b in self.blk if hasattr(b, 'freqs_cis'))
 
-  def _init_media(self):
+  def _init_media(self, image_buffer_size:int):
     if hasattr(self, "_buf_pos"): return
     dev = self.token_embd.weight.device
     self._buf_pos = Tensor.zeros(self.max_context, 3, dtype='int32', device=dev).realize()
     self._buf_sel = Tensor.zeros(self.max_context, dtype='int32', device=dev).realize()
-    self._buf_img_embd = Tensor.zeros(4096, self.config.dim, dtype='float16', device=dev).realize()
+    # Valid image rows fit within the context; leave room for the last image's padded buffer copy.
+    self._buf_img_embd = Tensor.zeros(self.max_context + image_buffer_size, self.config.dim, dtype='float16', device=dev).realize()
 
-  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0, images:list[ImageEmbed]|None=None):
+  def generate(self, tokens:list[int], chunk_size:int=getenv("PREFILL_CHUNK_SIZE", 32), temperature:float=0.0, images:list[ImageEmbed]|None=None):
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
@@ -585,15 +592,18 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     media = bool(images)
     shift = 0
+    start_pos = self.get_start_pos(tokens, images)
     if media:
       if not self.config.mrope_sections: raise RuntimeError("model has no mrope sections, image support requires a VL model")
-      self._init_media()
+      self._init_media(max(int(img.embeds.shape[0]) for img in images or []))
       positions, cursor = mrope_positions(len(tokens), images or [])
       shift = cursor - len(tokens)
       sel = [-1] * len(tokens)
       off = 0  # stage all images into the shared buffer and compute each token's source row
       for img in images or []:
-        self._buf_img_embd[off:off + img.embeds.shape[0]].assign(img.embeds).realize()
+        # Images wholly inside the reused prefix already occupy these source rows.
+        if img.start + img.n_tokens > start_pos:
+          self._buf_img_embd[off:off + img.embeds.shape[0]].assign(img.embeds).realize()
         for i in range(img.n_tokens): sel[img.start + i] = off + i
         off += img.n_tokens
       # stage positions and source rows: fixed-size host->device copies, no kernels compiled
@@ -602,9 +612,8 @@ class Transformer:
         buf.assign(Tensor(data, dtype='int32').reshape(buf.shape).to(buf.device)).realize()
       stage(self._buf_pos, [p for triple in positions for p in triple])
       stage(self._buf_sel, sel)
-    # recompute start_pos from what's currently valid in the caches
-    # NOTE: image requests always prefill from scratch, cached KV can't be validated against the image content
-    start_pos = 0 if media else self.get_start_pos(tokens)
+    image_keys = [(img.start, img.grid_h, img.grid_w, img.cache_key) for img in images or []]
+    self._cached_tokens = []  # a failed/interrupted prefill must not advertise the previous live state
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
@@ -622,5 +631,5 @@ class Transformer:
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
-      self._cached_tokens = tokens[:-1]
+      self._cached_tokens, self._cached_images = tokens[:-1], image_keys
       yield tokens[-1]

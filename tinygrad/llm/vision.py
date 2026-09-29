@@ -1,5 +1,5 @@
 from __future__ import annotations
-import base64, io, math
+import base64, functools, hashlib, io, math
 from array import array
 from typing import NamedTuple
 from tinygrad import Tensor, nn, Device, TinyJit
@@ -11,6 +11,7 @@ class ImageEmbed(NamedTuple):
   embeds: Tensor    # (max_tokens, dim) buffer holding the image embeddings in raster order over the merged grid
   grid_h: int       # merged grid height (patches_y // merge_size)
   grid_w: int       # merged grid width  (patches_x // merge_size)
+  cache_key: bytes|None = None  # digest of the pixels fed to the tower; None disables cross-request reuse
   @property
   def n_tokens(self) -> int: return self.grid_h * self.grid_w
 
@@ -45,7 +46,7 @@ def expand_image_tokens(ids:list[int], images:list, tower:Qwen3VLTower, image_pa
       out.append(tid)
       continue
     emb, gh, gw = tower.encode(next(it))
-    embeds.append(ImageEmbed(len(out), emb, gh, gw))
+    embeds.append(ImageEmbed(len(out), emb, gh, gw, getattr(tower, 'image_key', None)))
     out.extend([image_pad_id] * (gh * gw))
   return out, embeds
 
@@ -212,15 +213,20 @@ class Qwen3VLTower:
 
   def warmup(self):
     from PIL import Image
-    for _ in range(2): self.encode(Image.new('RGB', (512, 512)))  # a realistic size: JITBEAM times kernels at capture size
+    for i in range(2): self.encode(Image.new('RGB', (512, 512), (i, i, i)))  # distinct images also warm the JIT behind the pixel cache
 
   def encode(self, image) -> tuple[Tensor, int, int]:
     """image: PIL image, path, URL or data URI. Returns (embeds buffer copy (max_tokens, dim), gh, gw)."""
     img = load_image(image) if not hasattr(image, 'size') else image.convert("RGB")
     w, h = smart_resize(img.size[0], img.size[1], self.patch_size * self.merge_size, self.min_pixels, self.max_pixels)
     img = img.resize((w, h), resample=2)   # 2 = PIL bicubic
-    ph, pw = h // self.patch_size, w // self.patch_size
     raw = img.tobytes()
+    self.image_key = hashlib.sha256(raw).digest()
+    return self._encode(raw, h, w)
+
+  @functools.lru_cache(maxsize=128)
+  def _encode(self, raw:bytes, h:int, w:int) -> tuple[Tensor, int, int]:
+    ph, pw = h // self.patch_size, w // self.patch_size
     # fixed-size host->device copies (padded to the buffer sizes) so nothing size-dependent ever compiles
     self._buf_img.assign(Tensor(raw + bytes(int(self._buf_img.numel()) - len(raw)), dtype='uint8', device=self.device)).realize()
     n_pad = self.max_patches - ph * pw

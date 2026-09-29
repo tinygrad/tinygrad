@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib, gc
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -129,7 +129,7 @@ class FallbackTemplate:
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
-  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False, enable_thinking:bool=True) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
@@ -203,7 +203,11 @@ def main():
       if vision is not None: vision.warmup()
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, vision).serve_forever()
+  if args.serve:
+    # Model/JIT objects live for the whole server lifetime; don't rescan them in request-time cyclic GC.
+    gc.collect()
+    gc.freeze()
+    LLMServer(('', args.serve), model, model_name, tok, template, vision).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
