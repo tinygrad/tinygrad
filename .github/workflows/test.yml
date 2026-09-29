@@ -209,8 +209,6 @@ jobs:
     name: Backend Tests (CPU)
     runs-on: *linux
     timeout-minutes: 15
-    env:
-      DEV: CPU
 
     steps:
     - name: Checkout Code
@@ -228,7 +226,7 @@ jobs:
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run test as module
-      run: python test/null/test_device.py TestRunAsModule.test_module_runs
+      run: DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
