@@ -107,7 +107,7 @@ spec_shared = PatternMatcher([
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[0], str) and isinstance(x.arg[1], DType)),
 
   # a CUSTOM_FUNCTION is the body of an external call
-  (UPat(Ops.CUSTOM_FUNCTION, src=(), name="x"), lambda x: isinstance(x.arg, str)),
+  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
   # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype),
@@ -158,7 +158,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PARAM, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # custom function
-  (UPat(Ops.CUSTOM_FUNCTION, src=(), name="x"), lambda x: isinstance(x.arg, str)),
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
