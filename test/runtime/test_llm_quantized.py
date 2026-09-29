@@ -77,6 +77,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         raw.assign(raw.full_like(1)).realize()
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
     if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
     # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here

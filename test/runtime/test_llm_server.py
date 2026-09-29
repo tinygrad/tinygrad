@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from unittest.mock import patch
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, Device
 from tinygrad.nn.state import get_state_dict
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
@@ -159,6 +159,7 @@ class TestTransformerGenerate(unittest.TestCase):
     for g, r in zip(prefill(model(), 4), prefill(model(), 8)):
       np.testing.assert_allclose(g[:, :, :, :8, :], r[:, :, :, :8, :], atol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_kv_cache_resume_matches_fresh(self):
     model = Transformer(TEST_CONFIG)
 

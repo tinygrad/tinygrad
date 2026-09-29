@@ -1,6 +1,6 @@
 from typing import Self, Sequence
 from tinygrad.uop import Ops
-from tinygrad.dtype import DTypeLike, dtypes, sum_acc_dtype, to_dtype
+from tinygrad.dtype import DTypeLike, dtypes, sum_acc_dtype
 from tinygrad.helpers import make_tuple
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -41,7 +41,7 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     print(t.sum(axis=1).numpy())
     ```
     """
-    ret = self.cast(sum_acc_dtype(self.commit_dtype()) if dtype is None else to_dtype(dtype))._reduce(Ops.ADD, axis, keepdim)
+    ret = self.cast(sum_acc_dtype(self.commit_dtype()) if dtype is None else dtype)._reduce(Ops.ADD, axis, keepdim)
     return ret.cast(self.dtype) if dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16, *dtypes.fp8s) else ret
 
   def prod(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Self:
@@ -68,7 +68,7 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     print(t.prod(axis=1).numpy())
     ```
     """
-    return self.cast(to_dtype(dtype) if dtype is not None else self.dtype)._reduce(Ops.MUL, axis, keepdim)
+    return self.cast(dtype if dtype is not None else self.dtype)._reduce(Ops.MUL, axis, keepdim)
 
   def max(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
     """

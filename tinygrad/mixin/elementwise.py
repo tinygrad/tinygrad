@@ -433,8 +433,7 @@ class ElementwiseMixin(CreationMixin):
     print(cond.where(1, 3).numpy())
     ```
     """
-    ref = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else self
-    x, y = ref.ufix(x)._broadcasted(y)
+    x, y = self.ufix(x)._broadcasted(y)
     return self.alu(Ops.WHERE, x, y)
 
   def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:

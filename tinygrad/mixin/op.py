@@ -135,7 +135,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       x = (mask.where(x.reshape(reshape_arg), 0)).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
 
       # special permute case
-      if (permuted := dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1))):
+      if (permuted := dims[0] != 0 and not consecutive):
         mask, x = (y.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), y.ndim)) for y in (mask, x))
 
       if v is None: return x  # advanced getitem
@@ -389,7 +389,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
     x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
-    return (x*w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else to_dtype(dtype))
+    return (x*w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else dtype)
 
   def matmul(self, x:Self, reverse=False, dtype:DTypeLike|None=None) -> Self:
     """
@@ -656,7 +656,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
     m = self - self.max(axis=axis, keepdim=True).detach()
-    if dtype is not None: m = m.cast(to_dtype(dtype))
+    if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
@@ -1264,9 +1264,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.linear(weight, bias).numpy())
     ```
     """
-    if dtype is not None:
-      dt = to_dtype(dtype)
-      return self.cast(dt).linear(weight.cast(dt), bias.cast(dt) if bias is not None else bias)
+    if dtype is not None: return self.cast(dtype).linear(weight.cast(dtype), bias.cast(dtype) if bias is not None else bias)
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 

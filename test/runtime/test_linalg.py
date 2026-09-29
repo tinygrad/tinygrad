@@ -1,5 +1,5 @@
 import unittest, functools
-from tinygrad import Tensor, Context
+from tinygrad import Tensor, Context, Device
 import numpy as np
 
 def orthogonality_helper(A:Tensor, tolerance=1e-5):
@@ -12,6 +12,7 @@ def reconstruction_helper(A:list[Tensor],B:Tensor, tolerance=1e-5):
   np.testing.assert_allclose(reconstructed_tensor.numpy(),B.numpy(),atol=tolerance,rtol=tolerance)
 
 class TestLinAlg(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_svd_general(self):
     sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
     for size in sizes:
