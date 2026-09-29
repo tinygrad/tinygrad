@@ -42,7 +42,7 @@ class TestLinearizerRewrite(unittest.TestCase):
   def test_dependent_loop_bound(self):
     buf, out, counts = UOp.param(0, dtypes.int, 16), UOp.param(1, dtypes.int, 4), UOp.param(2, dtypes.int, 4)
     outer = UOp.range(4, 0, AxisType.LOOP)
-    inner = UOp.range(counts.index(outer).load(), 1)
+    inner = UOp.range(counts.index(outer).load().maximum(0).minimum(4), 1)
     store = buf.index(outer * 4 + inner).store(UOp.const(1, dtypes.int)).end(inner)
     uops = to_uops_list([out.after(store).index(outer).store(UOp.const(2, dtypes.int))])
     self.assertEqual([u.op for u in uops if u.op in (Ops.RANGE, Ops.STORE, Ops.END)],
