@@ -1,4 +1,4 @@
-import gc, unittest, weakref
+import gc, itertools, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid
@@ -58,10 +58,10 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
       self.assertIsNone(ref())
 
   def test_quant_weights_share_storage(self):
-    for ggml_type, type_size in QUANT_SIZES.items():
-      with self.subTest(ggml_type=ggml_type):
-        packed = np.arange(type_size + 4, dtype=np.uint8)
-        raw = Tensor(packed).realize()[4:]
+    for (ggml_type, type_size), offset in itertools.product(QUANT_SIZES.items(), (0, 4)):
+      with self.subTest(ggml_type=ggml_type, offset=offset):
+        packed = np.arange(type_size + offset, dtype=np.uint8)
+        raw = Tensor(packed).realize()[offset:]
         if raw.uop.contiguous_view() is None: self.skipTest("requires buffer views")
         decoded = ggml_data_to_tensor(raw, 256, ggml_type).reshape(1, 256)
         linear = Linear(256, 1, bias=False)
@@ -70,7 +70,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         self.assertEqual(linear.ggml_type, ggml_type)
         self.assertEqual(linear.weight.dtype, dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
         self.assertEqual(linear.weight.nbytes(), type_size)
-        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[4:])
+        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[offset:])
         raw.assign(raw.full_like(1)).realize()
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
