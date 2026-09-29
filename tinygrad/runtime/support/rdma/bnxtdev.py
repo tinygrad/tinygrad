@@ -9,7 +9,7 @@ BNXT_DEBUG = getenv("BNXT_DEBUG", 0)
 BNXT_ACCESS, BNXT_INIT_MASK, BNXT_RTR_MASK, BNXT_RTS_MASK = 3, 0xd, 0x41515ad, 0xae005
 BNXT_CHIMP_COMM, BNXT_CHIMP_COMM_TRIGGER = 0x0, 0x100
 BNXT_BACKING_STORE = ((0, 64), (1, 0), (2, 128), (3, 0), (4, 2), (5, 0), (6, 0), (14, 1024), (15, 0))
-WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU = 128, 1024, 1024, 4096
+WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU = 128, 4096, 4096, 4096
 def db_value(xid, typ, index, epoch):
   return (xid & bnxt.DBC_DBC_XID_MASK | bnxt.DBC_DBC_PATH_ROCE | typ | bnxt.BNXT_QPLIB_DBR_VALID) << 32 | \
          index & bnxt.DBC_DBC_INDEX_MASK | epoch << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT
@@ -142,14 +142,16 @@ class BNXTDev:
     self.bar0[(bnxt.RCFW_COMM_BASE_OFFSET + bnxt.RCFW_PF_VF_COMM_PROD_OFFSET) // 4] = prod
     self.bar0[(bnxt.RCFW_COMM_BASE_OFFSET + bnxt.RCFW_COMM_TRIG_OFFSET) // 4] = bnxt.RCFW_CMDQ_TRIG_VAL
 
-    wait_cond(lambda: (self.creq.read(self.creq.read_idx)[8] & bnxt.CREQ_BASE_V) != (self.creq.read_idx // 256 & 1),
-              timeout_ms=timeout_ms, msg=f"RCFW {name}")
+    while True: # skip async events (qp/cq error notifications)
+      wait_cond(lambda: (self.creq.read(self.creq.read_idx)[8] & bnxt.CREQ_BASE_V) != (self.creq.read_idx // 256 & 1),
+                timeout_ms=timeout_ms, msg=f"RCFW {name}")
 
-    ret = resp_t.from_buffer_copy(self.creq.read(self.creq.read_idx))
-    self.creq.read_idx += 1
+      ret = resp_t.from_buffer_copy(self.creq.read(self.creq.read_idx))
+      self.creq.read_idx += 1
 
-    # NQ_ARM also publishes the CREQ consumer index, which is what frees ring space for the next command
-    self.doorbell(self.creq_id, bnxt.DBC_DBC_TYPE_NQ_ARM, self.creq.read_idx & 255, (self.creq.read_idx // 256) & 1)
+      # NQ_ARM also publishes the CREQ consumer index, which is what frees ring space for the next command
+      self.doorbell(self.creq_id, bnxt.DBC_DBC_TYPE_NQ_ARM, self.creq.read_idx & 255, (self.creq.read_idx // 256) & 1)
+      if ret.type == bnxt.CREQ_BASE_TYPE_QP_EVENT and ret.event < bnxt.CREQ_QP_EVENT_EVENT_QP_ERROR_NOTIFICATION: break
     assert ret.status == 0, f"RCFW {name}: {ret.status}"
 
     if BNXT_DEBUG >= 1: print(f"bnxt {self.devfmt}: rcfw {name} xid={getattr(ret, 'xid', 0):#x}")

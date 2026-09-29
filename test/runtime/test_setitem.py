@@ -18,6 +18,8 @@ class TestSetitem(unittest.TestCase):
       ((6,6), (slice(1,5,2), slice(0,5,3)), 1.0),
       ((6,6), (slice(5,1,-2), slice(5,0,-3)), 1.0),
       ((6,6), (slice(None), slice(0,6,2)), 1.0),
+      ((3,3), (slice(0,2,2), slice(0,3,3)), 1.0),
+      ((4,), slice(2,0,-4), 1.0),
     )
     for shp, slc, val in cases:
       for realize in (False, True):

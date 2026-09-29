@@ -681,6 +681,23 @@ class TestUnshardStore(unittest.TestCase):
     out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
     np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
 
+  def _test_store_load_fragment(self, addrspace:AddrSpace):
+    # thread ty stores A[ty*8:ty*8+8] into its fragment, then reads it back into the same slice of C
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      frag = UOp.placeholder((8,), dtypes.float32, 0, addrspace).unshard((0,), (ty,))
+      return C.store(frag.after(frag.store(A))).end(ty).sink(arg=KernelInfo(name="store_load_fragment", opts_to_apply=()))
+    a = Tensor.arange(64, dtype=dtypes.float32)
+    out = _run_fragment_kernel(self, kernel, (64,), inputs=(a,))
+    np.testing.assert_equal(out, a.numpy())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_load_reg_fragment(self): self._test_store_load_fragment(AddrSpace.REG)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  @unittest.expectedFailure  # TODO: should not fail silently
+  def test_store_load_local_fragment(self): self._test_store_load_fragment(AddrSpace.LOCAL)
+
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])

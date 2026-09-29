@@ -192,9 +192,9 @@ def dispatch(x:Tensor, r:Routing) -> Tensor:
   G, D = r.n_groups, x.shape[-1]
   return grouped_scatter_rows(x.reshape(G, r.t_local, D), r.dest_row, r.m_l).reshape(G * r.m_l, D)
 
-def dispatch_fp8(x:Tensor, r:Routing) -> tuple[Tensor, Tensor]:
+def dispatch_fp8(x:Tensor|tuple[Tensor, Tensor], r:Routing) -> tuple[Tensor, Tensor]:
   from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
-  q, e8 = quantize_mxfp8_fused_qe8(x)
+  q, e8 = x if isinstance(x, tuple) else quantize_mxfp8_fused_qe8(x)
   if getenv("DISPATCH_GATHER", 0):
     from extra.gptoss_kernels.dispatch import inverse_rows, dispatch_gather
     assert r.counts is not None

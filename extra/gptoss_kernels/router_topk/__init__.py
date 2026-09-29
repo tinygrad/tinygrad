@@ -1,7 +1,7 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes, function
 from tinygrad.helpers import getenv
-from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from extra.llama_kernels import alloc_like, compile_hip
 
@@ -75,6 +75,34 @@ def fused_router(x:Tensor, weight:Tensor, bias:Tensor) -> tuple[Tensor, Tensor]:
   logits = router_mfma(x, weight, bias) if getenv("ROUTER_MFMA", 0) else x.float() @ weight.float().T + bias.float()
   groups = len(x.device) if isinstance(x.device, tuple) else 1
   return fused_router_topk(logits.reshape(groups, -1, 32))
+
+@functools.cache
+def _router_input_bwd_kernel(out:UOp, weight:UOp, gradient:UOp, residual:UOp, scales:UOp) -> UOp:
+  assert math.prod(out.shape[:-1]) == 16384 and out.shape[-1] == 2880 and weight.shape == (32, 2880)
+  assert math.prod(gradient.shape[:-1]) == 16384 and gradient.shape[-1] == 32
+  assert residual.shape == (16384, 3072) and scales.shape == (16384, 96)
+  sink = UOp.sink(out.base, weight.base, gradient.base, residual.base, scales.base,
+                  UOp.special(16, "lidx0"), UOp.special(4, "lidx1"), UOp.special(9, "gidx0"), UOp.special(2048, "gidx1"),
+                  arg=KernelInfo("moe_router_dgrad_fused"))
+  src = (pathlib.Path(__file__).parent/"input_backward.cpp").read_text()
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                  UOp(Ops.BINARY, arg=HIPCompiler("gfx950").compile_cached(src))))
+
+def _router_quantize_bwd(gradient:UOp, quantized_gradient:UOp, *, call:UOp) -> tuple:
+  x, weight, bias = (Tensor(u) for u in call.src[1:4])
+  weights, indices, _, scales = (Tensor(u) for u in call.unbound_outputs)
+  grad_logits, bias_partials = router_topk_backward(Tensor(gradient), weights, indices)
+  grad_x = alloc_like(x.shape, x.dtype, x.device, x.uop.axis)
+  grad_x, *_ = Tensor.custom_kernel(grad_x, weight, grad_logits, Tensor(quantized_gradient), scales, fxn=_router_input_bwd_kernel)
+  return grad_x.uop, router_weight_gradient(x, grad_logits).uop, bias_partials.sum((0, 1)).cast(bias.dtype).uop
+
+@function(grad_fxn=_router_quantize_bwd)
+def fused_router_quantize(x:Tensor, weight:Tensor, bias:Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+  from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
+  weights, indices = fused_router(x, weight, bias)
+  quantized, scales = quantize_mxfp8_fused_qe8(x.reshape(-1, 2880).pad(((0, 0), (0, 192))))
+  return weights, indices, quantized, scales
 
 def fused_router_topk(logits:Tensor) -> tuple[Tensor, Tensor]:
   assert logits.ndim == 3 and logits.shape[-1] == 32 and logits.dtype == dtypes.float32

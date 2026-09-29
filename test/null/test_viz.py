@@ -881,6 +881,16 @@ class TestCfg(unittest.TestCase):
     tokens = next(iter(cfg["pc_tokens"].values()))
     self.assertEqual(len(tokens), 2)
 
+  def test_immediates(self):
+    from tinygrad.renderer.amd.dsl import LIT
+    k = Kernel()
+    for value in (0x7fffffff, 0x80000000, 4294962812, 0xffffffff): k.emit(s_add_u32(s[2], s[2], LIT, value))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("immediates", k)["data"]
+    tokens = list(cfg["pc_tokens"].values())[:4]
+    self.assertEqual([t[-1]["st"] for t in tokens], ["2147483647", "-2147483648", "-4484", "-1"])
+
   def test_diamond(self):
     k = Kernel()
     k.label("entry")
