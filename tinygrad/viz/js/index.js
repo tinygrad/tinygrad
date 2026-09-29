@@ -228,7 +228,7 @@ const waveColor = (op) => {
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
-const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["do_to_program","#1d2e62"],["DEFAULT","#354f52"]]),
+const colorScheme = {TINY:new Map([["Bufferize","#1b5745"],["do_to_program","#1d2e62"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
@@ -928,7 +928,7 @@ const createToggle = (id, text) => {
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
-const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)"); showCallSrc.toggle.checked = false;
+const showCallSrc = createToggle("show-call-body", "Show CALL bodies (c)"); showCallSrc.toggle.checked = false;
 const showSink = createToggle("show-sink", "Show SINK (s)");
 showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");

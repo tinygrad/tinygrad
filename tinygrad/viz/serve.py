@@ -377,7 +377,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
                                           CDNA_ISSUE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
-  pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
+  decoded = amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)
+  pc_map = {addr:str(inst) for addr,inst in decoded.items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
   curr_barrier:dict[int, ProfileRangeEvent] = {}
@@ -550,14 +551,16 @@ def get_elf_section(lib:bytes, name:str):
   from tinygrad.runtime.support.elf import elf_loader
   return next((sh for sh in elf_loader(lib)[1] if sh.name == name))
 
-def amd_decode(lib:bytes, target:str) -> dict[int, Inst]:
-  text = get_elf_section(lib, ".text")
-  off, buf = text.header.sh_addr, text.content
-  arch = "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
+def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
+
+def amd_decode(buf:bytes, arch:str, off:int=0) -> dict[int, Inst]:
+  from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
+  code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
   addr_table:dict[int, Inst] = {}
   offset = 0
   while offset < len(buf):
     remaining = buf[offset:]
+    if code_end is not None and remaining.startswith(code_end): break
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
@@ -582,7 +585,7 @@ def is_acc_operand(inst, name:str) -> bool:
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 def amdgpu_cfg(lib:bytes, target:str) -> dict:
   # decode
-  pc_table = amd_decode(lib, target)
+  pc_table = amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
@@ -608,10 +611,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
     pc_tokens[pc] = tokens = []
     for name, f in inst._fields:
       if isinstance(val:=getattr(inst, name), Reg):
+        if inst.operands and name not in inst.operands: continue
         reg_str = val.fmt().replace("v", "a", 1) if (is_acc:=is_acc_operand(inst, name)) else val.fmt()
         tokens.append({"st":reg_str, "keys":[f"{'a' if is_acc else 'r'}{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
-      elif name != "encoding" and val != f.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
+      elif name != "encoding" and val != f.default:
+        tokens.append({"st":repr(val - (1 << 32) if name == "literal" and val >= (1 << 31) else val), "keys":[repr(val)], "kind":1})
   # show a smaller view for repeated instructions in the graph
   lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}

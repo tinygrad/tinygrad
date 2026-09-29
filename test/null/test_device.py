@@ -128,7 +128,7 @@ class TestDevice(unittest.TestCase):
 
   def test_dev_contextvar(self):
     orig_dev = Device.DEFAULT
-    with Context(DEV="CPU"): self.assertEqual(Tensor.empty(1).device, "CPU")
+    with Context(DEV="PYTHON"): self.assertEqual(Tensor.empty(1).device, "PYTHON")
     with Context(DEV="NULL"): self.assertEqual(Tensor.empty(1).device, "NULL")
     self.assertEqual(Tensor.empty(1).device, orig_dev)
 

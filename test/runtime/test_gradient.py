@@ -46,6 +46,15 @@ class TestTensorGradient(unittest.TestCase):
     self.assertEqual(t.grad.device, t.device)
     self.assertListEqual(t.grad.tolist(), [2.0, 4.0, 6.0])
 
+  def test_multi_device_copy_gradient(self):
+    for src in ("CPU", ("CPU", "CPU:1")):
+      for dst in ("CPU:2", ("CPU:2", "CPU:3")):
+        with self.subTest(src=src, dst=dst):
+          t = Tensor([1.0, 2, 3]).to(src).realize()
+          grad = t.to(dst).square().sum().gradient(t)[0]
+          self.assertEqual(grad.device, t.device)
+          self.assertListEqual(grad.tolist(), [2.0, 4.0, 6.0])
+
   def test_multiple_backward(self):
     x = Tensor([3.])
     (x*2)[0].backward()

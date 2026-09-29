@@ -36,7 +36,7 @@ class TestAttention(unittest.TestCase):
 class TestLinear(unittest.TestCase):
   def test_recovers_packed_ggml_weight(self):
     for ggml_type,packed_size in ((13, 176), (14, 210), (23, 136)):
-      packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8, device="CPU")[4:]
+      packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8)[4:]
       decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
       linear = Linear(256, 1, bias=False)
       linear.set_quantized(decoded)

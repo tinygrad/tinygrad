@@ -12,7 +12,7 @@ BLOCK_M, BLOCK_N, WARP_SIZE = 32, 32, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
-LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_M, WMMA_N, WMMA_K), 32), math.log2(math.e)
+LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
 Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 10, 11, 12, 13, 14
 IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS = 17, 18, 20, 21, 22, 23
@@ -146,10 +146,10 @@ def _q5_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   d, dmin = (raw[base] & 0xffff).cast(dtypes.uint16), (raw[base] >> 16).cast(dtypes.uint16)
   return _half(d), _half(dmin), scale.float(), minimum.float()
 
-def _iq4_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp]:
-  low = _load_byte(raw, base, 4 + subgroup//2)
-  scale = ((low >> (4*(subgroup%2)).cast(dtypes.uint32)) & 15) | ((((raw[base] >> 16) >> (2*subgroup).cast(dtypes.uint32)) & 3) << 4)
-  return _half(raw[base] & 0xffff), (scale.cast(dtypes.uint8).bitcast(dtypes.int8)-32).float()
+def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp) -> UOp:
+  header, low = raw[base].load(), raw[base+1].load()
+  scale = ((low >> (4*subgroup)) & 15) | (((header >> (16+2*subgroup)) & 3) << 4)
+  return _half(header) * (scale.cast(dtypes.int32)-32).float()
 
 def iq4_half_lut(device:str|tuple[str, ...]|None) -> Tensor:
   from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
@@ -185,15 +185,17 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor, 
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str) -> UOp:
   chunks = out.shape[2]
-  # two-dim global grid instead of one flat grid: no div/mods needed to decompose the gid
-  token_output = UOp.range(out.shape[0]*out_features, 0, axis_type=AxisType.GLOBAL)
-  chunk, lane = UOp.range(chunks, 1, axis_type=AxisType.GLOBAL), UOp.range(32, 2, axis_type=AxisType.LOCAL)
+  # One wave per output/chunk; group neighboring rows to amortize workgroup scheduling.
+  rows = math.gcd(out_features, 4)
+  row = UOp.range(out.shape[0]*out_features//rows, 0, AxisType.GLOBAL)
+  wave = UOp.range(rows, 3, AxisType.LOCAL)
+  token_output = row*rows+wave
+  chunk, lane = UOp.range(chunks, 1, AxisType.GLOBAL), UOp.range(32, 2, AxisType.LOCAL)
   token, output = token_output // out_features, token_output % out_features
-  group = (lane+chunk*32).minimum(group_count-1)
-  value = group_dot(token, output, group) if chunks*32 == group_count else \
-    (lane+chunk*32 < group_count).where(group_dot(token, output, group), UOp.const(0, dtypes.float32))
+  group = lane+chunk*32
+  value = (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
   total = warp_reduce(value, full_wave=True)
-  return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(token_output, chunk, lane).sink(
+  return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(row, wave, chunk, lane).sink(
     arg=KernelInfo(name=name, opts_to_apply=()))
 
 def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
@@ -218,6 +220,11 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   # Four packed weight bytes, shared by integer-dot decode and FP16 WMMA prefill.
   def byte(offset): return _load_byte(raw, base, offset)
   def word(offset): return _load_u32(raw, base, offset, stream=ggml_type == Q6_K)
+  if ggml_type in (Q4_K, Q5_K):
+    offset = (4 if ggml_type == Q4_K else 12) + (subgroup//2)*8
+    weights = (_amd_load(raw[base+offset], 8)[i] >> ((subgroup&1)*4).cast(dtypes.uint32)) & 0x0f0f0f0f
+    if ggml_type == Q5_K: weights |= ((_amd_load(raw[base+4], 8)[i] >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
+    return weights
   if ggml_type == Q6_K:
     low = word((subgroup//4)*64 + (subgroup%2)*32 + i*4) >> ((subgroup%4//2)*4).cast(dtypes.uint32)
     high = word(128 + (subgroup//4)*32 + i*4) >> ((subgroup%4)*2).cast(dtypes.uint32)
@@ -255,27 +262,18 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
     if ggml_type == IQ4_NL: base = (output*in_features//32 + group)*9
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
-    if ggml_type in (Q4_K, Q5_K):
-      qs_base = base + (4 if ggml_type == Q4_K else 12) + (subgroup//2)*8
-      # Keep the vector loads for these formats; scalarizing them hurts decode bandwidth.
-      qs_pair = (_amd_load(raw[qs_base], 4), _amd_load(raw[qs_base+4], 4))
-      if ggml_type == Q5_K: qh_pair = (_amd_load(raw[base+4], 4), _amd_load(raw[base+8], 4))
     xwords = _amd_load(xq[token, group, 0], 8)
     # One accumulator per scale group: 32 weights for Q4/Q5/IQ4_XS, two groups of 16 otherwise.
     dots = [UOp.const(0, dtypes.int32)] * (1 if ggml_type in (Q4_K, Q5_K, IQ4_XS) else 2)
     for i in range(8):
-      if ggml_type in (Q4_K, Q5_K):
-        weights = (qs_pair[i//4][i%4] >> ((subgroup&1)*4).cast(dtypes.uint32)) & 0x0f0f0f0f
-        if ggml_type == Q5_K: weights |= ((qh_pair[i//4][i%4] >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
-      else: weights = _quant_word(raw, base, subgroup, i, ggml_type, grids[0] if grids else None)
+      weights = _quant_word(raw, base, subgroup, i, ggml_type, grids[0] if grids else None)
       acc = i//(8//len(dots))
       dots[acc] = _amd_dp4a(weights, xwords[i], dots[acc])
     if ggml_type in (Q4_K, Q5_K):
       d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
       total = dots[0].float()*d*scale - (xs[token, group, 0].load()+xs[token, group, 1].load())*dmin*minimum
     elif ggml_type == IQ4_XS:
-      d, scale = _iq4_scales(raw, base, subgroup)
-      return dots[0].float() * xd[token, group] * d * scale
+      total = dots[0].float() * _iq4_scale(raw, base, subgroup)
     elif ggml_type == Q6_K:
       # Subtract the quant offset via the activation sums instead of unpacking signed bytes.
       scales = [(raw[base+96+subgroup] >> (h*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() for h in range(2)]
@@ -388,8 +386,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
   tid, lut_items = wave*32+lane, 256//(32*output_waves)
   lut = local_lut.after(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items)))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
-    d, scale = _iq4_scales(raw, base, subgroup)
-    scale = scale * d
+    scale = _iq4_scale(raw, base, subgroup)
     pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
                   for word in word_indices for byte in range(4))
     return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)

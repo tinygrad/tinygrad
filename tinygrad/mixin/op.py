@@ -151,7 +151,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     per_dim = []
     for d, m in enumerate(mops):
       (s, e), st = m['boundary'], abs(m['stride'])
-      if st != 1 and vb.shape[d] > 1:  # un-stride: interleave with zeros
+      if st != 1:  # un-stride: interleave with zeros
         vb = vb.unsqueeze(d+1)
         vb = vb.pad_to(tuple(st if j == d+1 else None for j in range(vb.ndim)))
         vb = vb.reshape(vb.shape[:d] + (vb.shape[d]*vb.shape[d+1],) + vb.shape[d+2:])
