@@ -519,6 +519,29 @@ class TestCustomKernel(unittest.TestCase):
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
+@unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render on CPU")
+class TestCallInKernel(unittest.TestCase):
+  def test_nested_call(self):
+    def incr(out:UOp, A:UOp):
+      i = UOp.range(A.shape[0], 0)
+      return out[i].store(A[i]+1).end(i).sink()
+
+    def square(out:UOp, A:UOp):
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      call = incr(UOp.param(0, tmp.dtype, tmp.shape, addrspace=AddrSpace.REG), A.param_like(1)).call(tmp, A, name="incr")
+      i = UOp.range(A.shape[0], 1)
+      return out[i].store(tmp.after(call)[i]**2).end(i).sink()
+
+    def kernel(C:UOp, A:UOp):
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      call = square(UOp.param(0, tmp.dtype, tmp.shape, addrspace=AddrSpace.REG), A.param_like(1)).call(tmp, A, name="square")
+      i = UOp.range(A.shape[0], 2)
+      return C[i].store(tmp.after(call)[i]+10).end(i).sink(arg=KernelInfo(name="nested_calls"))
+
+    a = Tensor.arange(4).clone().realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [11, 14, 19, 26])
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
