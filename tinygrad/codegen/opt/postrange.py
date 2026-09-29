@@ -18,12 +18,12 @@ class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
-    self.opt_range = count(start=max([x.arg[0] for x in self.ast.backward_slice_without_call if x.op is Ops.RANGE], default=0)+1)
+    self.opt_range = count(start=max([x.arg[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
   @property
   def rngs(self):
     # always in order by axistype. void RANGEs are loops, not opt axes. the DEVICE axis is launched, not an opt axis
-    return sorted([u for u in self.ast.backward_slice_without_call if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0
+    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0
                    and u.axis_type is not AxisType.DEVICE], key=lambda x: (axis_to_pos[x.axis_type],) + x.axis_id)
   @property
   def shape_len(self) -> int: return len(self.rngs)
@@ -41,7 +41,7 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.ast.backward_slice_without_call if x.op is Ops.SPECIAL], key=lambda x: x.arg)
+      special_uops = sorted([x for x in self.ast.backward_slice if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
@@ -52,7 +52,7 @@ class Scheduler:
   def _globalizable_rngs(self) -> list[UOp]:
     ret = [r for r in self._output_rngs() if r.axis_type == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
-    for x in self.ast.backward_slice_without_call:
+    for x in self.ast.backward_slice:
       if x.op is Ops.STAGE:
         ret = [r for r in ret if r in x.ranges]
     return ret
@@ -91,7 +91,7 @@ class Scheduler:
 
   @property
   def reduce_axes(self) -> list[int]:
-    red = {r for u in self.ast.backward_slice_without_call if u.op is Ops.REDUCE for s in u.src[1:] for r in s.ranges}
+    red = {r for u in self.ast.backward_slice if u.op is Ops.REDUCE for s in u.src[1:] for r in s.ranges}
     return [i for i,r in enumerate(self.rngs) if r in red]
 
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
@@ -243,18 +243,18 @@ class Scheduler:
 
   # helpers for hand_coded_optimizations
   @property
-  def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice_without_call if x.op is Ops.REDUCE]
+  def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
   @property
   def reduceop(self) -> UOp|None: return red[0] if (red:=self.reduceops) else None
   @property
-  def bufs(self) -> list[UOp]: return [x for x in self.ast.backward_slice_without_call if x.op is Ops.INDEX][::-1]
+  def bufs(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.INDEX][::-1]
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
   def group_for_reduces(self) -> int: return len([i for i in self.reduce_axes if self.axis_types[i] in (AxisType.WARP, AxisType.LOCAL)])
 
 def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
-  glbls = sorted([x for x in ast.backward_slice_without_call if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
+  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
   return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
@@ -272,6 +272,6 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.STAGE for u in ast.backward_slice_without_call):
+    if not any(u.op is Ops.STAGE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
