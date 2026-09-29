@@ -149,6 +149,8 @@ def _val_to_u32(val: UOp) -> UOp:
   return val.cast(dtypes.uint32)
 
 _pcode_fixes = {
+  'V_CVT_F32_FP8': ('VGPR[laneId][SRC0.u32]', 'S0'),
+  'V_CVT_F32_BF8': ('VGPR[laneId][SRC0.u32]', 'S0'),
   'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
     'D0.f32 = (exponent(S2.f32) > 127) ? (2.0F ** 64 * fma(S0.f32, S1.f32, S2.f32)) : (2.0F ** -64 * fma(S0.f32, S1.f32, S2.f32))'),
   'V_DIV_FMAS_F64': ('D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
@@ -964,7 +966,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
   if isinstance(inst, (ir3.VOP1, ir4.VOP1, irc.VOP1)):
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
     s0, src0_off = _load_vsrc0(ctx, inst, lane, bits, literal, is_f64, is_float, d0)
-    srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0}
+    srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0, 'OPSEL': _c(0)}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
@@ -1333,7 +1335,7 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   sz = 8 if any(t in op_name for t in ('IU8', 'FP8', 'BF8')) else 16  # input element size
 
   # read a source element from VGPRs: (src, lane, vgpr, element-in-vgpr) -> f32/i32
-  def gval(src, lane, vgpr, ridx):
+  def gval(src, lane, vgpr, ridx, cvt=cvt):
     v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(lane, dtypes.int))
     pkd = v >> UOp.const(ridx * sz, dtypes.uint32) if ridx > 0 else v
     pkd = pkd & UOp.const((1 << sz) - 1, dtypes.uint32)
@@ -1343,14 +1345,16 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   # RDNA3 f16/bf16: 16 lanes x 8 VGPRs x 2 halves,    k maps linearly
   # RDNA3 iu8:      16 lanes x 4 VGPRs x 4 quarters,  k maps linearly
   # RDNA4:          32 lanes x 4 VGPRs x 2 halves, k bits are scrambled (k[2] goes to lane bit 4)
-  def read_mat(src):
+  def read_mat(src, fmt):
+    convert = _FUNCS[f'{fmt.lower()}_to_f32'] if fmt in ('FP8', 'BF8') else cvt
     n = 32 // sz  # values per vgpr
     def ab_map(i, k):  # (row, k) -> (lane, vgpr, element-in-vgpr)
       elem, lane = ((k & 3) | ((k >> 1) & 4), i + ((k >> 2) & 1) * 16) if is_rdna4 else (k, i)
       return lane, elem // n, elem % n
-    return [gval(src, *ab_map(row, k)) for row in range(16) for k in range(16)]
+    return [gval(src, *ab_map(row, k), cvt=convert) for row in range(16) for k in range(16)]
 
-  mat_a, mat_b = read_mat(src0_r), read_mat(src1_r)
+  a_fmt, b_fmt = op_name.rsplit('_', 2)[-2:]
+  mat_a, mat_b = read_mat(src0_r, a_fmt), read_mat(src1_r, b_fmt)
   def d_map(m, n):  # output (row, col) -> (lane, vgpr)
     lane_bit, vgpr = (m >> 3, m & 7) if is_rdna4 else (m & 1, m >> 1)
     return n + lane_bit * 16, vgpr

@@ -128,7 +128,8 @@ class TestFp8sConversions(unittest.TestCase):
         values = np.array([fp8_to_float(x, dt) for x in range(256)], dtype=np.float32)
         np.testing.assert_equal(Tensor(np.arange(256, dtype=np.uint8)).bitcast(dt).float().numpy(), values)
         finite = np.unique(values[np.isfinite(values)])
-        samples = np.concatenate((finite, (finite[:-1] + finite[1:]) / 2))
+        midpoints = (finite[:-1] + finite[1:]) / 2
+        samples = np.concatenate((finite, [-0.0], midpoints, np.nextafter(midpoints, -np.inf), np.nextafter(midpoints, np.inf))).astype(np.float32)
         expected = np.array([float_to_fp8(float(x), dt) for x in samples], dtype=np.uint8)
         np.testing.assert_equal(Tensor(samples).cast(dt).bitcast(dtypes.uint8).numpy(), expected)
 
