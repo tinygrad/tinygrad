@@ -251,6 +251,11 @@ class TestGGUF(unittest.TestCase):
           self.assertEqual(loaded_kv, kv)
           for name, value in expected.items(): np.testing.assert_equal(decoded[name].numpy(), value)
 
+  def test_parse_empty(self):
+    blob = self._build_gguf([], [("general.name", "empty")])
+    for loader in (gguf_parse, gguf_load):
+      self.assertEqual(loader(Tensor(blob, device="CPU")), ({"general.name": "empty"}, {}))
+
   def test_parse_unsupported_type(self):
     blob = self._build_gguf([("a", (256,), 1337, bytes(256))], [])
     for loader in (gguf_parse, gguf_load):

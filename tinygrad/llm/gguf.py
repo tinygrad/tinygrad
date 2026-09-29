@@ -249,4 +249,6 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   Packed weights are copied to the default device before constructing the lazy decoding expressions.
   """
   kv, entries = gguf_parse(fn)
-  return kv, {name: ggml_data_to_tensor(data.to(None).realize(), prod(shape), typ).reshape(shape) for name, (data, shape, typ) in entries.items()}
+  packed = {name: data.to(None) for name, (data, _, _) in entries.items()}
+  if packed: Tensor.realize(*packed.values())
+  return kv, {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
