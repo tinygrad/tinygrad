@@ -66,9 +66,8 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
-  # call an external function: the CUSTOM_FUNCTION body is the callee identity, src[1] is the call target (a function
-  # pointer, a caller-scope value like any other call input), the rest are the args
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(name="fptr")), allow_any_len=True, name="x"), lambda ctx,x,fptr:
+  # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(name="fptr"),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
    f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[2:])}))({ctx[fptr]}))" +
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[2:])}))" + (";" if x.dtype is dtypes.void else "")),
 
