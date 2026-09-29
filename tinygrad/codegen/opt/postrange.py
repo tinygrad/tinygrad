@@ -41,7 +41,7 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
+      special_uops = sorted([x for x in self.ast.backward_slice if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
@@ -52,7 +52,7 @@ class Scheduler:
   def _globalizable_rngs(self) -> list[UOp]:
     ret = [r for r in self._output_rngs() if r.axis_type == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
-    for x in self.ast.toposort():
+    for x in self.ast.backward_slice:
       if x.op is Ops.STAGE:
         ret = [r for r in ret if r in x.ranges]
     return ret
@@ -247,7 +247,7 @@ class Scheduler:
   @property
   def reduceop(self) -> UOp|None: return red[0] if (red:=self.reduceops) else None
   @property
-  def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
+  def bufs(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.INDEX][::-1]
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
