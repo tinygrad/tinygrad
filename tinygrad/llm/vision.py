@@ -1,6 +1,7 @@
 from __future__ import annotations
-import base64, functools, hashlib, io, math
+import base64, hashlib, io, math
 from array import array
+from collections import OrderedDict
 from typing import NamedTuple
 from tinygrad import Tensor, nn, Device, TinyJit
 from tinygrad.helpers import fetch
@@ -8,7 +9,7 @@ from tinygrad.llm.gguf import gguf_load
 
 class ImageEmbed(NamedTuple):
   start: int        # index of the first image token in the (expanded) prompt
-  embeds: Tensor    # (max_tokens, dim) buffer holding the image embeddings in raster order over the merged grid
+  embeds: Tensor    # (at least n_tokens, dim) buffer holding image embeddings in raster order over the merged grid
   grid_h: int       # merged grid height (patches_y // merge_size)
   grid_w: int       # merged grid width  (patches_x // merge_size)
   cache_key: bytes|None = None  # digest of the pixels fed to the tower; None disables cross-request reuse
@@ -127,7 +128,7 @@ class Qwen3VLTower:
   The whole tower is one JIT graph with FIXED shapes (padded to max_patches): the image grid shape enters only
   as tensor data (scalar geometry + a padding key mask), so kernels are fully static, compile once at warmup,
   and never again."""
-  def __init__(self, kv:dict, state_dict:dict[str, Tensor], device:str|None=None, max_tokens:int=1024):
+  def __init__(self, kv:dict, state_dict:dict[str, Tensor], device:str|None=None, max_tokens:int=1024, cache_tokens:int|None=None):
     self.device = device or Device.DEFAULT
     if kv.get('general.architecture') != 'clip' or kv.get('clip.projector_type') != 'qwen3vl_merger':
       raise ValueError(f"unsupported mmproj: {kv.get('general.architecture')}/{kv.get('clip.projector_type')}")
@@ -175,10 +176,13 @@ class Qwen3VLTower:
     self._arange_ps = Tensor.arange(self.patch_size, dtype='int32').to(self.device).realize()
     self._arange3 = Tensor.arange(3, dtype='int32').to(self.device).realize()
     self._vit = TinyJit(self._run)
+    self.cache_tokens = cache_tokens if cache_tokens is not None else 128 * max_tokens
+    self._cache: OrderedDict[tuple[bytes, int, int], tuple[Tensor, int, int]] = OrderedDict()
+    self._cache_tokens = 0
 
   @staticmethod
-  def from_gguf(path:str, device:str|None=None, max_tokens:int=1024) -> Qwen3VLTower:
-    return Qwen3VLTower(*gguf_load(path), device, max_tokens)
+  def from_gguf(path:str, device:str|None=None, max_tokens:int=1024, cache_tokens:int|None=None) -> Qwen3VLTower:
+    return Qwen3VLTower(*gguf_load(path), device, max_tokens, cache_tokens)
 
   def _run(self, img:Tensor, geom:Tensor, pad_mask:Tensor) -> Tensor:
     n, ps, gs = self.max_patches, self.patch_size, self.grid_side
@@ -216,7 +220,7 @@ class Qwen3VLTower:
     for i in range(2): self.encode(Image.new('RGB', (512, 512), (i, i, i)))  # distinct images also warm the JIT behind the pixel cache
 
   def encode(self, image) -> tuple[Tensor, int, int]:
-    """image: PIL image, path, URL or data URI. Returns (embeds buffer copy (max_tokens, dim), gh, gw)."""
+    """image: PIL image, path, URL or data URI. Returns (embeds buffer copy (gh*gw, dim), gh, gw)."""
     from PIL import Image
     img = load_image(image) if not hasattr(image, 'size') else image.convert("RGB")
     w, h = smart_resize(img.size[0], img.size[1], self.patch_size * self.merge_size, self.min_pixels, self.max_pixels)
@@ -225,15 +229,26 @@ class Qwen3VLTower:
     self.image_key = hashlib.sha256(raw).digest()
     return self._encode(raw, h, w)
 
-  @functools.lru_cache(maxsize=128)
   def _encode(self, raw:bytes, h:int, w:int) -> tuple[Tensor, int, int]:
+    key = (raw, h, w)
+    if key in self._cache:
+      self._cache.move_to_end(key)
+      return self._cache[key]
     ph, pw = h // self.patch_size, w // self.patch_size
+    gh, gw = ph // self.merge_size, pw // self.merge_size
+    n_tokens = gh * gw
     # fixed-size host->device copies (padded to the buffer sizes) so nothing size-dependent ever compiles
     self._buf_img.assign(Tensor(raw + bytes(int(self._buf_img.numel()) - len(raw)), dtype='uint8', device=self.device)).realize()
     n_pad = self.max_patches - ph * pw
     self._buf_mask.assign(Tensor(array('f', [0.0] * (ph * pw) + [-1e4] * n_pad).tobytes(), dtype='float32', device=self.device)).realize()
     self._buf_geom.assign(Tensor(array('i', [ph // 2, pw // 2]).tobytes(), dtype='int32', device=self.device)).realize()
-    # Keep cached copies on the vision device, not the memory-constrained LLM device.
-    # The next encode overwrites the jit-managed buffer, so each cached image needs its own copy.
-    return self._vit(self._buf_img, self._buf_geom, self._buf_mask).clone().realize(), \
-      ph // self.merge_size, pw // self.merge_size
+    # Cache only valid rows, independently of the overwritten JIT output. A context-sized token budget
+    # retains every image in a long prompt without an image-count cliff or unbounded GPU memory growth.
+    result = self._vit(self._buf_img, self._buf_geom, self._buf_mask)[:n_tokens].clone().realize(), gh, gw
+    if n_tokens <= self.cache_tokens:
+      while self._cache_tokens + n_tokens > self.cache_tokens:
+        _, old_h, old_w = self._cache.popitem(last=False)[1]
+        self._cache_tokens -= old_h * old_w
+      self._cache[key] = result
+      self._cache_tokens += n_tokens
+    return result

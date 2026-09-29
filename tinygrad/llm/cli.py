@@ -180,7 +180,7 @@ def main():
   if (mmproj := args.mmproj or mmprojs.get(args.model)) is not None:
     with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
       vision = Qwen3VLTower.from_gguf(str(fetch(mmproj)), device=args.vision_device,
-                                      max_tokens=args.vision_max_tokens or (4096 if args.vision_device else 512))
+                                      max_tokens=args.vision_max_tokens or (4096 if args.vision_device else 512), cache_tokens=args.max_context)
     print(f"using vision tower with {sum(x.numel() for x in nn.state.get_parameters(vision)):,} params")
 
   # get tokenizer
