@@ -692,6 +692,12 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(out.shape, (rows,))
     np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.full(3, 2))
 
+  def test_from_multibuffer(self):
+    buf = UOp.mstack(*(Tensor([i, i+1], device=d).realize().uop for i,d in enumerate((d0, d1)))).buffer
+    u = UOp.from_buffer(buf)
+    self.assertEqual((u.device, u.shape, u.buffer), (buf.device, (2,), buf))
+    self.assertEqual(Tensor(u.unshard(0)).to(Device.DEFAULT).tolist(), [0, 1, 1, 2])
+
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
     @TinyJit
