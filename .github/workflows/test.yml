@@ -22,7 +22,7 @@ concurrency:
 jobs:
   docs:
     name: Docs
-    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'turin' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
