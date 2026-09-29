@@ -72,7 +72,7 @@ base_rewrite = PatternMatcher([
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{x.arg.name}({', '.join(ctx[x.src[p.arg.slot+1]] for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u: u.arg.slot))});"),
+   f"{body.arg}({', '.join(ctx[x.src[p.arg.slot+1]] for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u: u.arg.slot))});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -265,10 +265,10 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def render(self, uops:list[UOp]) -> str:
     prefix, call_bodies = [], []
-    for body,name in dedup((u.body, u.arg.name) for u in UOp.sink(*uops).toposort() if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
+    for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
       _, call, bufs = self._render(body.src)
       params = ', '.join(f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
-      prefix.append(f"static inline void {name}({params}) {{\n" + '\n'.join(call) + "\n}")
+      prefix.append(f"static inline void {body.arg}({params}) {{\n" + '\n'.join(call) + "\n}")
       call_bodies.extend(body.src)
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 

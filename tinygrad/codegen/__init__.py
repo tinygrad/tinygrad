@@ -422,21 +422,15 @@ def lower_call(ctx:Renderer, call:UOp) -> UOp:
 
 pm_lower_calls = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),])
 
-def name_call(ctx:dict[str, UOp], call:UOp) -> UOp:
-  base = to_function_name(call.arg.name or "function")
-  name = next(n for i in itertools.count() if ctx.get(n:=f"{base}n{i}" if i else base, call.body) is call.body)
-  ctx[name] = call.body
-  return call.replace(arg=replace(call.arg, name=name))
-
 pm_call_fixup = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="call"), lambda call,sink:
-   call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf))),)+call.src[1:])),
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), allow_any_len=True, name="call"), name_call),
+   call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
+                         arg=to_function_name(call.arg.name or "function")),)+call.src[1:])),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  sink = graph_rewrite(sink, pm_call_fixup, ctx={sink.arg.function_name: sink}, name="call fixup", enter_calls=True)
+  sink = graph_rewrite(sink, pm_call_fixup, name="call fixup", enter_calls=True)
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)
   prg = prg.replace(src=(lst[-1],))
   # isa renderers need to allocate registers
