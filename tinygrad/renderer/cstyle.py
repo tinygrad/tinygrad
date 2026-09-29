@@ -124,7 +124,6 @@ class CStyleLanguage(Renderer):
   abi: str = ""
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
-  reg_prefix: str = ""
   buffer_suffix: str = ""
   smem_align: str = ""
   smem_prefix: str = ""
@@ -269,8 +268,7 @@ class CStyleLanguage(Renderer):
     for body,name in dedup((u.body, u.arg.name) for u in UOp.sink(*uops).toposort() if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
       lst = list(body.src)
       _, kernel, bufs = self._render(lst)
-      params = ', '.join((self.reg_prefix if p.addrspace == AddrSpace.REG else "") +
-                        f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
+      params = ', '.join(f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
       prefix.append(f"static inline void {name}({params}) {{\n" + '\n'.join(kernel) + "\n}")
       helper_uops.extend(lst)
     return self.render_kernel(*self._render(uops), helper_uops+list(uops), prefix or None)
@@ -368,7 +366,6 @@ class MetalRenderer(CStyleLanguage):
   # language options
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
-  reg_prefix = "thread "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
   var_prefix = "constant "
   var_suffix = "&"
