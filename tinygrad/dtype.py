@@ -245,7 +245,6 @@ _fp8_cfg = {
 def float_to_fp8(x: float, dtype: DType) -> int:
   assert dtype in dtypes.fp8s, "Only for fp8s"
   if dtype in dtypes.fp8_fnuz and not math.isfinite(x): return 0x80
-  if dtype in dtypes.fp8_fnuz and x == 0.0: return 0x00
   # e4m3 don't support inf, return 0x7f(+NaN) and 0xff(-NaN) to match jax
   # NaN is unordered, can't compare with zero, use math.copysign to get sign
   if dtype == dtypes.fp8e4m3 and not math.isfinite(x): return 0x7f if math.copysign(1, x) > 0 else 0xff
