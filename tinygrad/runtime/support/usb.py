@@ -350,8 +350,9 @@ def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i
   xfer = xfer.after(field("status").store(0xff), field("length").store(wire.cast(dtypes.uint)),
                     field("buffer").store(stage.getaddr("CPU") + (end - wire).cast(dtypes.uint64)))
   ret = ccall(libusb.libusb_submit_transfer, xfer.index(0))
-  status = cfield(xfer.after(ret), libusb.struct_libusb_transfer, "status").src[0]
-  return status.index(UOp.const(0).valid(ret < 0)).store(ret.cast(dtypes.uint32))
+
+  # clear pending if failed to submit
+  return cfield(xfer.after(ret), libusb.struct_libusb_transfer, "status").src[0].index(UOp.const(0).valid(ret < 0)).store(ret.cast(dtypes.uint32))
 
 def usb_copyin(h:UOp, table:UOp, n:int, run:int) -> UOp: # pipeline writes through two halves
   h = h.after(usb_drained(h, UOp.const(run + 1, dtypes.uint64))) # both halves must be free
