@@ -7,6 +7,7 @@ from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.cstyle import CStyleLanguage
 from test.helpers import assert_kernel_count
 from test.null.test_custom_kernel import custom_elementwise_add_kernel, custom_elementwise_addmul_kernel, custom_gemm
 
@@ -505,6 +506,16 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), a, fxn=call_add_sum)[0]
     self.assertEqual(out.tolist(), [N*(N+1)//2])
 
+  @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
+                       Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
+  def test_binary(self):
+    payload = bytes(range(256))
+    def kernel(out:UOp):
+      i = UOp.range(len(payload), 0)
+      data = UOp(Ops.BINARY, arg=payload)
+      return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
+    self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
@@ -667,6 +678,23 @@ class TestUnshardStore(unittest.TestCase):
     a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
     out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
     np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
+
+  def _test_store_load_fragment(self, addrspace:AddrSpace):
+    # thread ty stores A[ty*8:ty*8+8] into its fragment, then reads it back into the same slice of C
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      frag = UOp.placeholder((8,), dtypes.float32, 0, addrspace).unshard((0,), (ty,))
+      return C.store(frag.after(frag.store(A))).end(ty).sink(arg=KernelInfo(name="store_load_fragment", opts_to_apply=()))
+    a = Tensor.arange(64, dtype=dtypes.float32)
+    out = _run_fragment_kernel(self, kernel, (64,), inputs=(a,))
+    np.testing.assert_equal(out, a.numpy())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_load_reg_fragment(self): self._test_store_load_fragment(AddrSpace.REG)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  @unittest.expectedFailure  # TODO: should not fail silently
+  def test_store_load_local_fragment(self): self._test_store_load_fragment(AddrSpace.LOCAL)
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):

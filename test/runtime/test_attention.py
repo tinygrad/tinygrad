@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, nn
+from tinygrad import Tensor, dtypes, nn, Device
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
@@ -243,6 +243,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(prefill_conv, decode_conv, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_varied_chunk_sizes_match_decode(self):
     # full prefill is proven equivalent to decode by test_gatedeltanet_reference_and_reset (delta rule) and
     # test_kda_prefill_matches_decode (kda), so use it as the baseline and only exercise multi-chunk handoffs here

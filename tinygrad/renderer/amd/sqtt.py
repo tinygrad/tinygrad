@@ -644,8 +644,8 @@ class InstructionInfo:
 def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
-  from tinygrad.viz.serve import amd_decode
-  pc_map = amd_decode(lib, target)
+  from tinygrad.viz.serve import amd_decode, get_arch, get_elf_section
+  pc_map = amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)
   wave_pc:dict[tuple[int, int], int] = {}
   cdna_imm_queue:dict[tuple[int, int], list[CDNA_ISSUE|None]] = {}
   def cdna_imm_dequeue(key:tuple[int, int]) -> Iterator[tuple[PacketType, InstructionInfo]]:

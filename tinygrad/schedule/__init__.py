@@ -6,6 +6,7 @@ from tinygrad.uop.ops import GroupOp, remove_all_tags
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
+from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # **** schedule linearizer
 
@@ -68,13 +69,10 @@ def create_schedule(sched_sink:UOp) -> UOp:
     linearized: list[UOp] = []
     while len(queue):
       rk = queue.popleft()
-      if rk.op is Ops.LINEAR:
-        linearized.extend(rk.src)
-      else:
-        k = rk.src[0] if rk.op is Ops.END else rk
-        assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-        linearized.append(k.replace(src=(k.body, *buf_uops)))
+      k = rk.src[0] if rk.op is Ops.END else rk
+      assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
+      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+      linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -99,7 +97,7 @@ pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
   # bind ALLOCs to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, src=(), name="b"), create_new_buffer),
+  (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
@@ -112,7 +110,7 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
-    subs = {v:binds[v.arg.slot] for v in si.variables() if v.arg.slot in binds}
+    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
@@ -128,14 +126,18 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
   st = time.perf_counter()
   cache_key = function.key
-  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+  # SCACHE >= 2 also persists the cache to disk
+  sc_ret, disk_hit = schedule_cache.get(cache_key, None) if SCACHE else None, False
+  if sc_ret is None and SCACHE >= 2: disk_hit = (sc_ret:=diskcache_get("schedule_cache", {"key": cache_key})) is not None
+  if sc_ret is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(prepare_rangeify(function)))
     if SCACHE: schedule_cache[cache_key] = linear
+    if SCACHE >= 2: diskcache_put("schedule_cache", {"key": cache_key}, linear)
   else:
-    # schedule cache hit
-    linear = sc_ret
+    # schedule cache hit (memory or disk)
+    linear = schedule_cache[cache_key] = sc_ret
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
@@ -144,7 +146,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
     else:
       frm = None
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
+          f" | {colored(' cache hit', 'yellow') if disk_hit else (' cache hit' if sc_ret is not None else 'CACHE MISS')} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return call.replace(src=(linear,)+call.src[1:])
 
@@ -221,7 +223,7 @@ def collect_stores(ctx:CallifyCtx, u:UOp):
 # NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
 pm_callify_ctx_collect = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
-  (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), allow_any_len=True, name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
 
   # Collect effects after their sources have been rewritten, without entering call bodies.
@@ -240,7 +242,7 @@ def canonicalize_call_body(c:UOp):
 pm_canonicalize_alloc = PatternMatcher([
   # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc
   (UPat(Ops.CALL, name="c"), lambda c: canonicalize_call_body(c)),
-  (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
+  (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
 ])
 
 def replace_input_buffer(ctx:CallifyCtx, b:UOp):
@@ -249,7 +251,7 @@ def replace_input_buffer(ctx:CallifyCtx, b:UOp):
 
 pm_replace_buf = PatternMatcher([
   # replace GLOBAL BUFFERs with PARAMs for cache key normalization (Variables are ALU PARAMs, they don't match this)
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.BUFFER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # replace bound Variables with renamed value-stripped PARAMs for cache key normalization, so different values hit same cache
@@ -295,5 +297,5 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}
   return memory_plan_rewrite(linear, held_bufs), var_vals

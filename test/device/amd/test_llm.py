@@ -129,6 +129,13 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
       with self.subTest(ggml_type=typ):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
 
+  def test_quant_linear_decode_row_groups(self):
+    # One, two, and four waves per workgroup; ragged split-K and multiple tokens must stay independent.
+    for typ in (12, 13, 14, 23):
+      for outputs in (3, 6, 12):
+        with self.subTest(ggml_type=typ, out_features=outputs):
+          self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3))
+
   def test_quant_linear_bias(self):
     for typ in (12, 21, 23):
       with self.subTest(ggml_type=typ):

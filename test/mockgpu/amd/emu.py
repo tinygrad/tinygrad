@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, PROFILE, colored
+from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -1807,6 +1807,14 @@ _COMMON_HANDLERS: list[tuple[Callable[..., UOp], tuple[str, ...]]] = [
 _INST_HANDLERS: dict[type, Callable[..., UOp]] = {t: h for h, names in _COMMON_HANDLERS for t in _inst_kinds(*names)}
 _INST_HANDLERS[irc.MUBUF] = _compile_mubuf  # CDNA only (rdna3 also has a MUBUF class, intentionally unhandled)
 
+def _get_handler(inst: Inst) -> Callable[..., UOp]:
+  # Look up handler by type, falling back to base classes for _LIT variants
+  handler = _INST_HANDLERS.get(type(inst))
+  if handler is not None: return handler
+  for cls in type(inst).__mro__:
+    if cls in _INST_HANDLERS: return _INST_HANDLERS[cls]
+  raise RuntimeError(f"[emu] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1824,17 +1832,8 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   for inst_type, base, mask, size, entry in _canonical_runner_cache:
     if type(inst) is inst_type and inst_size == size and (inst_int & mask) == base: return entry
 
-  # Look up handler by type, falling back to base classes for _LIT variants
-  handler = _INST_HANDLERS.get(type(inst))
-  if handler is None:
-    for cls in type(inst).__mro__:
-      if cls in _INST_HANDLERS:
-        handler = _INST_HANDLERS[cls]
-        break
-  if handler is None: raise RuntimeError(f"[emu] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-
   ctx = _Ctx(inst_size, _wave_size(arch))
-  sink = handler(inst, ctx)
+  sink = _get_handler(inst)(inst, ctx)
   base, mask, size = ctx.canonical_mask(inst_bytes)
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
@@ -1957,6 +1956,12 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
+  lifted = None
+  if getenv("ASM_CALL"):
+    from test.mockgpu.amd.call import lift
+    prg = lift(lib, lib_sz, arch)
+    lifted = (prg, get_runtime('CPU', prg))
+
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
@@ -1995,6 +2000,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf), ctypes.c_uint64(st.vgpr_buf._buf),
                          ctypes.c_uint64(vmem_buf._buf), ctypes.c_uint64(lds_buf._buf),
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
+    if lifted is not None:
+      prg, runtime = lifted
+      for st, c_bufs in waves: runtime.fxn(*[c_bufs[g] for g in prg.arg.globals])
+      return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):
       if all(done): return
