@@ -305,7 +305,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls else node.src_without_body):
+          # TODO: this doesn't work because of CUSTOM_FUNCTION
+          #for s in reversed(node.src if enter_calls else node.src_without_body):
+          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
