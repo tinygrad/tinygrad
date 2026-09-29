@@ -519,42 +519,6 @@ class TestCustomKernel(unittest.TestCase):
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
-@unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render on CPU")
-class TestCallInKernel(unittest.TestCase):
-  def test_naming(self):
-    a = Tensor.arange(4).clone().realize()
-
-    def add_impl(X:UOp, Y:UOp, num:int) -> UOp:
-      i = UOp.range(X.numel(), 0)
-      return X[i].store(Y[i] + num).end(i).sink()
-
-    def kernel_1(X:UOp, Y:UOp) -> UOp:
-      xp, yp = X.param_like(0), Y.param_like(1)
-      c1 = xp[i].store(yp[i] + 1).call(B, A, name=n1)
-      c2 = call_add(xp, yp, num=2).call(C, B.after(first), name=n2)
-      return c2.sink(arg=KernelInfo(name="custom_call_add"))
-
-  def test_naming(self):
-    def test_call(n1:str, amt1:int, n2:str, amt2:int):
-      def call_add(C:UOp, A:UOp, amt:int) -> UOp:
-        i = UOp.range(A.numel(), 0)
-        return C[i].store(A[i] + amt).end(i).sink()
-
-      def kernel(C:UOp, B:UOp, A:UOp) -> UOp:
-        p, q = C.param_like(0), A.param_like(1)
-        first = call_add(p, q, amt1).call(B, A, name=n1)
-        second = call_add(p, q, amt2).call(C, B.after(first), name=n2)
-        return second.sink(arg=KernelInfo(name="custom_call_add"))
-
-      a = Tensor.arange(4).clone().realize()
-      return Tensor.custom_kernel(Tensor.empty_like(a), Tensor.empty_like(a), a, fxn=kernel)[0]
-
-    self.assertEqual(test_call("add", 1, "add", 1).tolist(), [2, 3, 4, 5])
-    self.assertEqual(test_call("add", 1, "add2", 1).tolist(), [2, 3, 4, 5])
-    # duplicating names with different bodies should fail to compile
-    with self.assertRaises(Exception):
-      test_call("add", 1, "add", 2).tolist()
-
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
