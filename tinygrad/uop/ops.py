@@ -293,7 +293,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
 
   @property
-  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL and self.body.op is not Ops.CUSTOM_FUNCTION else self.src
+  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
