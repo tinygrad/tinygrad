@@ -6,6 +6,7 @@ from tinygrad.helpers import DEV
 from tinygrad.uop.ops import Ops
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig, shard_gguf
 from tinygrad.llm.kernels.amd import Linear, QUANT_SIZES
+from tinygrad.llm.vision import ImageEmbed
 from test.helpers import not_support_multi_device
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
@@ -42,6 +43,7 @@ class TestTensorParallel(unittest.TestCase):
                         'ssm.conv_kernel':4, 'ssm.state_size':32, 'ssm.group_count':2, 'ssm.time_step_rank':4, 'ssm.inner_size':128,
                         'attention.head_count':4, 'attention.head_count_kv':2, 'attention.key_length':64, 'rope.dimension_count':16}.items():
         writer.add_uint32('qwen35.'+key, value)
+      writer.add_array('qwen35.rope.dimension_sections', [3, 3, 2, 0])
       writer.add_float32('qwen35.rope.freq_base', 10000)
       writer.add_float32('qwen35.attention.layer_norm_rms_epsilon', 1e-5)
       writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(64)])
@@ -58,5 +60,19 @@ class TestTensorParallel(unittest.TestCase):
       prompt = [int(x) for x in rng.integers(0, 64, 40)]
       self.assertEqual(list(itertools.islice(parallel.generate(list(prompt)), 6)),
                        list(itertools.islice(single.generate(list(prompt)), 6)))
+      images = [ImageEmbed(2, Tensor(rng.normal(0, .5, (8, 256)).astype(np.float16)), 2, 3, b"first")]
+      def run(model, tokens, imgs): return list(itertools.islice(model.generate(list(tokens), images=imgs), 3))
+      # Exercise multimodal prefill, shifted-RoPE decode, exact prefix reuse, and image invalidation.
+      result: list[int] = []
+      for case in ("cold", "resume", "changed"):
+        if case != "cold":
+          prompt += result + [1, 2]
+          for model in (single, parallel): self.assertGreater(model.get_start_pos(prompt, images), 0)
+        if case == "changed": images = [images[0]._replace(embeds=-images[0].embeds, cache_key=b"changed")]
+        with self.subTest(media=case):
+          if case != "resume":
+            for model in (single, parallel): self.assertEqual(model.get_start_pos(prompt, images), 0)
+          result = run(single, prompt, images)
+          self.assertEqual(run(parallel, prompt, images), result)
 
 if __name__ == '__main__': unittest.main()

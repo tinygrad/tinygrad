@@ -1,7 +1,8 @@
 # vision eval for the OpenAI API server: RealWorldQA (765 multiple-choice questions on real-world images)
 # https://huggingface.co/datasets/lmms-lab-encoder/RealWorldQA
 # usage: python3 test/external/external_vlm_eval.py --port 8000
-import argparse, base64, re, pyarrow.parquet as pq
+import argparse, base64, io, json, pathlib, re, time, pyarrow.parquet as pq
+from PIL import Image
 from openai import OpenAI
 from tinygrad.helpers import fetch, colored
 
@@ -12,7 +13,8 @@ if __name__ == "__main__":
   parser.add_argument("--max_tokens", "-T", type=int, default=4096)
   parser.add_argument("--offset", "-O", type=int, default=0)
   parser.add_argument("--temperature", "-t", type=float, default=0.0)
-  parser.add_argument("--no_think", action="store_true", help="disable thinking (prefills empty think block via assistant message)")
+  parser.add_argument("--no_think", action="store_true", help="disable thinking via chat_template_kwargs")
+  parser.add_argument("--output", type=pathlib.Path, help="save per-question responses, usage and timings as JSON")
   parser.add_argument("--debug", action="store_true")
   args = parser.parse_args()
 
@@ -21,15 +23,20 @@ if __name__ == "__main__":
   rows = [row for part in parts for row in pq.read_table(part).to_pylist()]
 
   num_correct, num_answered = 0, 0
+  results = []
   total_questions = min(len(rows), args.offset + args.limit) if args.limit else len(rows)
   for row in rows[args.offset:total_questions]:
-    data_uri = "data:image/jpeg;base64," + base64.b64encode(row["image"]["bytes"]).decode()
+    # The dataset contains WebP too; use lossless RGB PNG for servers without a WebP decoder.
+    image = io.BytesIO()
+    Image.open(io.BytesIO(row["image"]["bytes"])).convert("RGB").save(image, format="PNG")
+    data_uri = "data:image/png;base64," + base64.b64encode(image.getvalue()).decode()
     messages = [{"role": "user", "content": [
       {"type": "image_url", "image_url": {"url": data_uri}},
       {"type": "text", "text": row["question"]}]}]
-    if args.no_think: messages.append({"role": "assistant", "content": "<think>\n\n</think>\n\n"})
-    resp = client.chat.completions.create(model="test", messages=messages,
-                                          max_tokens=args.max_tokens, temperature=args.temperature)
+    st = time.perf_counter()
+    resp = client.chat.completions.create(model="test", messages=messages, max_tokens=args.max_tokens, temperature=args.temperature,
+      extra_body={"chat_template_kwargs":{"enable_thinking":False}} if args.no_think else {})
+    elapsed = time.perf_counter() - st
     correct = row["answer"].strip()
     text = (resp.choices[0].message.content or "").strip()
     if args.debug: print(f"\n--- PROMPT ---\n{row['question']}\n--- RESPONSE ---\n{text}\n---")
@@ -41,6 +48,9 @@ if __name__ == "__main__":
     good = c == g or (len(g) == 1 and c.startswith(g)) or (len(c) == 1 and g.startswith(c))
     num_correct += good
     num_answered += 1
+    results.append({"index":args.offset+num_answered-1, "question":row["question"], "expected":correct, "given":given,
+                    "correct":good, "seconds":elapsed, "response":resp.model_dump()})
+    if args.output: args.output.write_text(json.dumps(results, indent=2) + "\n")
     print(f"{num_answered:4d}/{total_questions:4d}  "+\
           f"Correct Answer: {correct}  "+\
           f"Given Answer: {colored(given, 'green' if good else 'red')}  "+\
