@@ -1,7 +1,7 @@
 import gc, os, struct, unittest, tempfile, pathlib, sys, weakref
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc, Context
-from tinygrad.llm.gguf import _ggml_iq_grid, _ggml_iq_signs, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import _ggml_iq_grid, _ggml_iq_signs, ggml_data_to_tensor, gguf_parse, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -227,6 +227,41 @@ class TestGGUF(unittest.TestCase):
     for _, _, _, data in tensors: buf += data
     return bytes(buf)
 
+  def test_parse(self):
+    f32, f16 = np.arange(8, dtype=np.float32).reshape(2, 4), np.arange(16, dtype=np.float16).reshape(2, 8)
+    q8 = (np.float16(2.0).tobytes() + np.arange(32, dtype=np.int8).tobytes())*2
+    tensors = [("f32", f32.shape, 0, f32.tobytes()), ("f16", f16.shape, 1, f16.tobytes()), ("q8", (2, 32), 8, q8)]
+    expected = {"f32": f32, "f16": f16, "q8": np.tile(np.arange(32, dtype=np.float32)*2, (2, 1))}
+    # Neither following tensors nor trailing file padding belong in the packed views.
+    blob = self._build_gguf(tensors, [("general.name", "test")]) + bytes(32)
+    with tempfile.TemporaryDirectory() as d:
+      (path := pathlib.Path(d) / "test.gguf").write_bytes(blob)
+      for source in (path, str(path), Tensor(path), Tensor(blob, device="CPU")):
+        with self.subTest(source=repr(source)):
+          kv, entries = gguf_parse(source)
+          self.assertEqual(kv, {"general.name": "test"})
+          self.assertEqual(set(entries), set(expected))
+          for name, shape, typ, packed in tensors:
+            data, parsed_shape, parsed_typ = entries[name]
+            self.assertEqual((parsed_shape, parsed_typ), (shape, typ))
+            self.assertEqual((data.shape, data.dtype), ((len(packed),), dtypes.uint8))
+            self.assertEqual(data.device, source.device if isinstance(source, Tensor) else f"DISK:{path.resolve()}")
+            self.assertEqual(data.data().tobytes(), packed)
+          loaded_kv, decoded = gguf_load(source)
+          self.assertEqual(loaded_kv, kv)
+          for name, value in expected.items(): np.testing.assert_equal(decoded[name].numpy(), value)
+
+  def test_parse_empty(self):
+    blob = self._build_gguf([], [("general.name", "empty")])
+    for loader in (gguf_parse, gguf_load):
+      self.assertEqual(loader(Tensor(blob, device="CPU")), ({"general.name": "empty"}, {}))
+
+  def test_parse_unsupported_type(self):
+    blob = self._build_gguf([("a", (256,), 1337, bytes(256))], [])
+    for loader in (gguf_parse, gguf_load):
+      with self.assertRaisesRegex(ValueError, "GGML type '1337' is not supported"):
+        loader(Tensor(blob, device="CPU"))
+
   def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:
       d = pathlib.Path(d)
@@ -237,11 +272,23 @@ class TestGGUF(unittest.TestCase):
       self.assertEqual(kv["split.count"], 2)
       np.testing.assert_equal(ts["a"].numpy(), a)
       np.testing.assert_equal(ts["b"].numpy(), b)
+      parsed_kv, entries = gguf_parse(d / "test-00001-of-00002.gguf")
+      self.assertEqual(parsed_kv, kv)
+      for i, (name, value) in enumerate((("a", a), ("b", b)), 1):
+        data, shape, typ = entries[name]
+        self.assertEqual((shape, typ, data.nbytes()), (value.shape, 0, value.nbytes))
+        self.assertEqual(data.device, f"DISK:{(d / f'test-{i:05d}-of-00002.gguf').resolve()}")
+        self.assertEqual(data.data().tobytes(), value.tobytes())
+      for loader in (gguf_parse, gguf_load):
+        with self.assertRaisesRegex(ValueError, "requires a path argument"):
+          loader(Tensor(d / "test-00001-of-00002.gguf"))
+        with self.assertRaisesRegex(ValueError, "must be loaded from the first split"):
+          loader(d / "test-00002-of-00002.gguf")
 
       # missing part 2
       (d / "test-00002-of-00002.gguf").unlink()
-      with self.assertRaises(FileNotFoundError):
-        gguf_load(d / "test-00001-of-00002.gguf")
+      for loader in (gguf_parse, gguf_load):
+        with self.assertRaises(FileNotFoundError): loader(d / "test-00001-of-00002.gguf")
 
   def _test_dequantization(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
