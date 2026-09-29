@@ -44,6 +44,13 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertEqual(out.shape, (rows,))
     self.assertTrue((out == 4).all().item())
 
+  def test_symbolic_shape_2d(self):
+    rows = UOp.variable("rows", 1, 4).bind(3)
+    t = Tensor.ones(4, 4, 2).shard(("CPU:0", "CPU:1"), axis=1).realize()
+    out = t[:rows].sum(1).realize()
+    self.assertEqual(out.shape, (rows, 2))
+    self.assertTrue((out == 4).all().item())
+
   def test_correct_ring(self):
     with Context(RING=2):
       N = 4
