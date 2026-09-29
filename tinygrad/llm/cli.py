@@ -177,7 +177,7 @@ def main():
   # load the vision tower if provided or known for this model
   vision = None
   if (mmproj := args.mmproj or mmprojs.get(args.model)) is not None:
-    with Context(DEBUG=max(DEBUG.value, 2 if args.serve else 0)):
+    with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
       vision = Qwen3VLTower.from_gguf(str(fetch(mmproj)), device=args.vision_device,
                                       max_tokens=args.vision_max_tokens or (4096 if args.vision_device else 512))
     print(f"using vision tower with {sum(x.numel() for x in nn.state.get_parameters(vision)):,} params")

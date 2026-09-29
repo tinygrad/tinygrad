@@ -217,6 +217,24 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(len(content_chunks), 2)
     self.assertEqual(chunks[-1].choices[0].finish_reason, "length")
 
+  def test_one_token_budget_hit_and_miss(self):
+    # A one-token client budget, not an EOS or a broken cache, can truncate a thinking-only reply.
+    for cached in (0, 2):
+      for field in ("max_tokens", "max_completion_tokens"):
+        with self.subTest(cached=cached, field=field), \
+             patch.object(self.mock_model, "get_start_pos", return_value=cached), \
+             patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
+             patch.object(self.server.template, "render", return_value="<think>\n"), \
+             patch("tinygrad.llm.serve.stderr_log") as log:
+          chunks = list(self.client.chat.completions.create(model="test", messages=[{"role":"user", "content":"Hello"}],
+            stream=True, stream_options={"include_usage": True}, extra_body={field:1}))
+          choices = [c.choices[0] for c in chunks if c.choices]
+          self.assertEqual(choices[-1].finish_reason, "length")
+          self.assertEqual("".join(getattr(c.delta, "reasoning_content", "") or "" for c in choices), "Hello")
+          self.assertEqual(chunks[-1].usage.completion_tokens, 1)
+          self.assertEqual(chunks[-1].usage.prompt_tokens_details.cached_tokens, cached)
+          self.assertIn("finish:length (max_tokens=1)", "".join(c.args[0] for c in log.call_args_list))
+
   def test_max_tokens_non_streaming(self):
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
     resp = self.client.chat.completions.create(

@@ -5,7 +5,7 @@ from dataclasses import replace
 from tinygrad import Tensor, UOp, Device
 from tinygrad.nn.state import get_state_dict
 from tinygrad.schedule import schedule_cache
-from tinygrad.llm.model import Transformer, TransformerConfig
+from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
 from tinygrad.llm.vision import ImageEmbed
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
@@ -233,6 +233,35 @@ class TestMediaCache(unittest.TestCase):
                                ([img._replace(cache_key=None)], 2)):
         with self.subTest(recurrent=recurrent, images=images):
           self.assertEqual(model.get_start_pos([1]*12, images), 0 if recurrent and expected < 10 else expected)
+
+  def test_recurrent_media_hit_and_miss_match_fresh(self):
+    config = replace(TEST_CONFIG, num_blocks=2, dim=8, hidden_dim=16, n_heads=1, n_kv_heads=1,
+      head_dim=8, v_head_dim=8, rope_dim=8, mrope_sections=(2, 1, 1), max_context=64,
+      ssm=SSMConfig(conv_kernel=4, state_size=32, group_count=1, time_step_rank=1, inner_size=32), ssm_layers=(True, False))
+    model, rng = Transformer(config), np.random.RandomState(1234)
+    for t in get_state_dict(model).values(): t.assign(Tensor(rng.uniform(-0.1, 0.1, t.shape).astype(np.float32))).realize()
+    img = ImageEmbed(2, Tensor(rng.uniform(-1, 1, (8, 8)).astype(np.float16)), 2, 3, b"a")
+    prompt = [1, 2] + [3]*6 + [4, 5]
+    def run(tokens):
+      gen = model.generate(list(tokens), chunk_size=4, images=[img])
+      out = [next(gen) for _ in range(3)]
+      gen.close()
+      return out, [t.numpy().copy() for name, t in get_state_dict(model).items()
+                   if name.endswith(("conv_state", "recurrent_state"))], model.blk[1].cache_kv.numpy()[:, :, :, :len(tokens)+2].copy()
+    for hit in (True, False):
+      with self.subTest(hit=hit):
+        out, _, _ = run(prompt)
+        tokens = prompt + out + [6, 7] if hit else prompt[:-1] + [6, 7]
+        self.assertEqual(model.get_start_pos(tokens, [img]), len(prompt)+2 if hit else 0)
+        actual, states, kv = run(tokens)
+        # Reference starts with explicitly zeroed recurrent state, not just cleared cache metadata.
+        model._cached_tokens = []
+        for name, t in get_state_dict(model).items():
+          if name.endswith(("conv_state", "recurrent_state")): t.assign(Tensor.zeros_like(t)).realize()
+        expected, fresh_states, fresh_kv = run(tokens)
+        self.assertEqual(actual, expected)
+        for a, b in zip(states, fresh_states): np.testing.assert_allclose(a, b, atol=2e-3, rtol=2e-3)
+        np.testing.assert_allclose(kv, fresh_kv, atol=2e-3, rtol=2e-3)
 
   def test_media_resume_and_invalidation_match_fresh(self):
     config = replace(TEST_CONFIG, num_blocks=2, dim=8, hidden_dim=16, n_heads=1, n_kv_heads=1,

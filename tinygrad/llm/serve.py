@@ -90,8 +90,11 @@ class Handler(VizHandler):
     def log_stats(interrupted:bool=False):
       et = time.perf_counter()
       total = f"total:{et-st:6.2f}s"
+      finish = "interrupted" if interrupted else finish_reason
+      if finish == "length" and max_tokens is not None: finish += f" (max_tokens={max_tokens})"
       stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
+                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  finish:{finish}  {colored('--', 'BLACK')}  "
+                 f"{colored(total, 'red') if interrupted else total}\n")
     completed = False
     try:
       yield chunk({"role":"assistant", "content":""})
