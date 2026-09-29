@@ -104,7 +104,8 @@ class TestLLMServer(unittest.TestCase):
       for token in (300, 301, 999):
         ids.append(token)
         yield token
-    with patch.object(self.mock_model, "generate", side_effect=generate):
+    with patch.object(self.mock_model, "generate", side_effect=generate), \
+         patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
       chunks = list(self.client.chat.completions.create(
         model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, stream_options={"include_usage": True}))
     last_chunk = chunks[-1]
@@ -217,6 +218,22 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(len(content_chunks), 2)
     self.assertEqual(chunks[-1].choices[0].finish_reason, "length")
 
+  def test_context_exhaustion_reports_length(self):
+    # generate() exhausts its iterator at max_context; it does not yield an EOS.
+    def generate(ids, **kwargs):
+      ids.append(300)
+      yield 300
+    for stream in (True, False):
+      with self.subTest(stream=stream), patch.object(self.mock_model, "generate", side_effect=generate), \
+           patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
+        response = self.client.chat.completions.create(model="test", messages=[{"role":"user", "content":"Hello"}],
+                                                       stream=stream, max_completion_tokens=2048)
+        if stream:
+          self.assertEqual(list(response)[-1].choices[0].finish_reason, "length")
+        else:
+          self.assertEqual(response.choices[0].finish_reason, "length")
+          self.assertEqual(response.usage.completion_tokens, 1)
+
   def test_one_token_budget_hit_and_miss(self):
     # A one-token client budget, not an EOS or a broken cache, can truncate a thinking-only reply.
     for cached in (0, 2):
@@ -263,7 +280,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok.decode = Mock(return_value="")
     cls.mock_tok.preset = "qwen2"
     cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
-    cls.mock_tok.is_end = Mock(return_value=False)
+    cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid == 999)
 
     cls.mock_model = Mock()
     cls.mock_model.max_context = 4
@@ -291,7 +308,7 @@ class TestLLMToolCalls(unittest.TestCase):
   def set_output(self, text:str):
     pieces = dict(enumerate(text, 1))
     self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([*pieces, 999]))
 
   @staticmethod
   def tools():

@@ -83,7 +83,7 @@ class Handler(VizHandler):
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     out: list[int] = []
-    finish_reason = "stop"
+    finish_reason, limit_reason = "stop", ""
     st = pt = time.perf_counter()
     dec = tok.stream_decoder()
     router = StreamRouter(reasoning)
@@ -91,7 +91,7 @@ class Handler(VizHandler):
       et = time.perf_counter()
       total = f"total:{et-st:6.2f}s"
       finish = "interrupted" if interrupted else finish_reason
-      if finish == "length" and max_tokens is not None: finish += f" (max_tokens={max_tokens})"
+      if finish == "length": finish += f" ({limit_reason})"
       stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
                  f"out:{len(out):5d}  {colored('--', 'BLACK')}  finish:{finish}  {colored('--', 'BLACK')}  "
                  f"{colored(total, 'red') if interrupted else total}\n")
@@ -105,8 +105,11 @@ class Handler(VizHandler):
         out.append(next_id)
         for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
         if max_tokens is not None and len(out) >= max_tokens:
-          finish_reason = "length"
+          finish_reason, limit_reason = "length", f"max_tokens={max_tokens}"
           break
+      else:
+        # generate exhausted max_context without producing an end token.
+        finish_reason, limit_reason = "length", f"max_context={model.max_context}"
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
       for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
