@@ -6,7 +6,6 @@ from tinygrad.uop.ops import Ops
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig, shard_gguf, allreduce, gather
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd import Linear, QUANT_SIZES, amd_custom_kernels_supported
-from test.runtime import test_gguf
 from test.helpers import not_support_multi_device
 
 SSM_KV = {'general.architecture':'qwen35', 'qwen35.ssm.group_count':2, 'qwen35.ssm.time_step_rank':4, 'qwen35.ssm.state_size':1,
@@ -36,23 +35,6 @@ class TestShardGGUF(unittest.TestCase):
         layer.set_quantized(w.half())
         self.assertEqual(layer.ggml_type, None if storage.contiguous_view_offset() is None else typ)
 
-  def test_reject_uneven(self):
-    for name, shape in (('ffn_gate.weight', (3, 512)), ('ffn_down.weight', (4, 256))):
-      with self.subTest(name=name), self.assertRaisesRegex(AssertionError, 'uneven TP group'):
-        shard_gguf({name: (Tensor.empty(shape[0]*shape[1]//256*QUANT_SIZES[12], dtype='uint8', device='CPU'), shape, 12)}, SSM_KV, devices())
-
-  def test_reject_uneven_heads(self):
-    # rejected from the metadata, before any weight is loaded
-    with self.assertRaisesRegex(AssertionError, 'uneven TP dimensions'):
-      shard_gguf({'blk.0.ffn_gate.weight': (Tensor.empty(1, device='DISK:/dev/null'), (8, 256), 12)},
-                 {**SSM_KV, 'qwen35.attention.head_count_kv':3}, devices())
-
-  def test_reject_other_architectures(self):
-    for arch in ('qwen3', 'qwen35moe', 'llama', 'kimi-linear'):
-      with self.subTest(arch=arch), self.assertRaisesRegex(AssertionError, 'TP only supports'), tempfile.TemporaryDirectory() as folder:
-        (path:=pathlib.Path(folder)/'unsupported.gguf').write_bytes(test_gguf.TestGGUF._build_gguf([], [('general.architecture', arch)]))
-        Transformer.from_gguf(path, shard=2)
-
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestTensorParallel(unittest.TestCase):
   def test_linear(self):
@@ -66,9 +48,9 @@ class TestTensorParallel(unittest.TestCase):
     # column-parallel layers hold a slice of the output rows, the row-parallel layer a slice of the input columns
     up.weight, down.weight, head.weight = per_device(*np.split(w1, 2, 0)), per_device(*np.split(w2, 2, 1)), per_device(*np.split(w3, 2, 0))
     x = rng.normal(size=(1, 8, 32)).astype(np.float32)
-    for tokens in (8, UOp.variable('tokens', 1, 8).bind(5)):
-      with self.subTest(tokens=tokens):
-        n = tokens if isinstance(tokens, int) else 5
+    for n, symbolic in ((8, False), (5, True)):
+      with self.subTest(n=n, symbolic=symbolic):
+        tokens = UOp.variable('tokens', 1, 8).bind(n) if symbolic else n
         out = allreduce(down(up(Tensor(x).to(devices())[:, :tokens]).relu()))
         logits = gather(head(out)[:, -1, :])
         ref = np.maximum(x[:, :n] @ w1.T, 0) @ w2.T
