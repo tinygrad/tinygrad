@@ -4110,6 +4110,110 @@ class struct_v9_gfx_meta_data(c.Struct):
 struct_v9_gfx_meta_data.register_fields([('ce_payload', struct_v9_ce_ib_state, 0), ('reserved1', c.Array[uint32_t, Literal[54]], 40), ('de_payload', struct_v9_de_ib_state, 256), ('DeIbBaseAddrLo', uint32_t, 364), ('DeIbBaseAddrHi', uint32_t, 368), ('reserved2', c.Array[uint32_t, Literal[931]], 372)])
 enum_soc15_ih_clientid: dict[int, str] = {(SOC15_IH_CLIENTID_IH:=0): 'SOC15_IH_CLIENTID_IH', (SOC15_IH_CLIENTID_ACP:=1): 'SOC15_IH_CLIENTID_ACP', (SOC15_IH_CLIENTID_ATHUB:=2): 'SOC15_IH_CLIENTID_ATHUB', (SOC15_IH_CLIENTID_BIF:=3): 'SOC15_IH_CLIENTID_BIF', (SOC15_IH_CLIENTID_DCE:=4): 'SOC15_IH_CLIENTID_DCE', (SOC15_IH_CLIENTID_ISP:=5): 'SOC15_IH_CLIENTID_ISP', (SOC15_IH_CLIENTID_PCIE0:=6): 'SOC15_IH_CLIENTID_PCIE0', (SOC15_IH_CLIENTID_RLC:=7): 'SOC15_IH_CLIENTID_RLC', (SOC15_IH_CLIENTID_SDMA0:=8): 'SOC15_IH_CLIENTID_SDMA0', (SOC15_IH_CLIENTID_SDMA1:=9): 'SOC15_IH_CLIENTID_SDMA1', (SOC15_IH_CLIENTID_SE0SH:=10): 'SOC15_IH_CLIENTID_SE0SH', (SOC15_IH_CLIENTID_SE1SH:=11): 'SOC15_IH_CLIENTID_SE1SH', (SOC15_IH_CLIENTID_SE2SH:=12): 'SOC15_IH_CLIENTID_SE2SH', (SOC15_IH_CLIENTID_SE3SH:=13): 'SOC15_IH_CLIENTID_SE3SH', (SOC15_IH_CLIENTID_UVD1:=14): 'SOC15_IH_CLIENTID_UVD1', (SOC15_IH_CLIENTID_THM:=15): 'SOC15_IH_CLIENTID_THM', (SOC15_IH_CLIENTID_UVD:=16): 'SOC15_IH_CLIENTID_UVD', (SOC15_IH_CLIENTID_VCE0:=17): 'SOC15_IH_CLIENTID_VCE0', (SOC15_IH_CLIENTID_VMC:=18): 'SOC15_IH_CLIENTID_VMC', (SOC15_IH_CLIENTID_XDMA:=19): 'SOC15_IH_CLIENTID_XDMA', (SOC15_IH_CLIENTID_GRBM_CP:=20): 'SOC15_IH_CLIENTID_GRBM_CP', (SOC15_IH_CLIENTID_ATS:=21): 'SOC15_IH_CLIENTID_ATS', (SOC15_IH_CLIENTID_ROM_SMUIO:=22): 'SOC15_IH_CLIENTID_ROM_SMUIO', (SOC15_IH_CLIENTID_DF:=23): 'SOC15_IH_CLIENTID_DF', (SOC15_IH_CLIENTID_VCE1:=24): 'SOC15_IH_CLIENTID_VCE1', (SOC15_IH_CLIENTID_PWR:=25): 'SOC15_IH_CLIENTID_PWR', (SOC15_IH_CLIENTID_RESERVED:=26): 'SOC15_IH_CLIENTID_RESERVED', (SOC15_IH_CLIENTID_UTCL2:=27): 'SOC15_IH_CLIENTID_UTCL2', (SOC15_IH_CLIENTID_EA:=28): 'SOC15_IH_CLIENTID_EA', (SOC15_IH_CLIENTID_UTCL2LOG:=29): 'SOC15_IH_CLIENTID_UTCL2LOG', (SOC15_IH_CLIENTID_MP0:=30): 'SOC15_IH_CLIENTID_MP0', (SOC15_IH_CLIENTID_MP1:=31): 'SOC15_IH_CLIENTID_MP1', (SOC15_IH_CLIENTID_MAX:=32): 'SOC15_IH_CLIENTID_MAX', (SOC15_IH_CLIENTID_VCN:=16): 'SOC15_IH_CLIENTID_VCN', (SOC15_IH_CLIENTID_VCN1:=14): 'SOC15_IH_CLIENTID_VCN1', (SOC15_IH_CLIENTID_SDMA2:=1): 'SOC15_IH_CLIENTID_SDMA2', (SOC15_IH_CLIENTID_SDMA3:=4): 'SOC15_IH_CLIENTID_SDMA3', (SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid:=5): 'SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid', (SOC15_IH_CLIENTID_SDMA4:=5): 'SOC15_IH_CLIENTID_SDMA4', (SOC15_IH_CLIENTID_SDMA5:=17): 'SOC15_IH_CLIENTID_SDMA5', (SOC15_IH_CLIENTID_SDMA6:=19): 'SOC15_IH_CLIENTID_SDMA6', (SOC15_IH_CLIENTID_SDMA7:=24): 'SOC15_IH_CLIENTID_SDMA7', (SOC15_IH_CLIENTID_VMC1:=6): 'SOC15_IH_CLIENTID_VMC1'}
 enum_soc21_ih_clientid: dict[int, str] = {(SOC21_IH_CLIENTID_IH:=0): 'SOC21_IH_CLIENTID_IH', (SOC21_IH_CLIENTID_ATHUB:=2): 'SOC21_IH_CLIENTID_ATHUB', (SOC21_IH_CLIENTID_BIF:=3): 'SOC21_IH_CLIENTID_BIF', (SOC21_IH_CLIENTID_DCN:=4): 'SOC21_IH_CLIENTID_DCN', (SOC21_IH_CLIENTID_ISP:=5): 'SOC21_IH_CLIENTID_ISP', (SOC21_IH_CLIENTID_MP3:=6): 'SOC21_IH_CLIENTID_MP3', (SOC21_IH_CLIENTID_RLC:=7): 'SOC21_IH_CLIENTID_RLC', (SOC21_IH_CLIENTID_GFX:=10): 'SOC21_IH_CLIENTID_GFX', (SOC21_IH_CLIENTID_IMU:=11): 'SOC21_IH_CLIENTID_IMU', (SOC21_IH_CLIENTID_VCN1:=14): 'SOC21_IH_CLIENTID_VCN1', (SOC21_IH_CLIENTID_THM:=15): 'SOC21_IH_CLIENTID_THM', (SOC21_IH_CLIENTID_VCN:=16): 'SOC21_IH_CLIENTID_VCN', (SOC21_IH_CLIENTID_VPE1:=17): 'SOC21_IH_CLIENTID_VPE1', (SOC21_IH_CLIENTID_VMC:=18): 'SOC21_IH_CLIENTID_VMC', (SOC21_IH_CLIENTID_GRBM_CP:=20): 'SOC21_IH_CLIENTID_GRBM_CP', (SOC21_IH_CLIENTID_ROM_SMUIO:=22): 'SOC21_IH_CLIENTID_ROM_SMUIO', (SOC21_IH_CLIENTID_DF:=23): 'SOC21_IH_CLIENTID_DF', (SOC21_IH_CLIENTID_VPE:=24): 'SOC21_IH_CLIENTID_VPE', (SOC21_IH_CLIENTID_PWR:=25): 'SOC21_IH_CLIENTID_PWR', (SOC21_IH_CLIENTID_LSDMA:=26): 'SOC21_IH_CLIENTID_LSDMA', (SOC21_IH_CLIENTID_MP0:=30): 'SOC21_IH_CLIENTID_MP0', (SOC21_IH_CLIENTID_MP1:=31): 'SOC21_IH_CLIENTID_MP1', (SOC21_IH_CLIENTID_MAX:=32): 'SOC21_IH_CLIENTID_MAX'}
+enum_idh_request: dict[int, str] = {(IDH_REQ_GPU_INIT_ACCESS:=1): 'IDH_REQ_GPU_INIT_ACCESS', (IDH_REL_GPU_INIT_ACCESS:=2): 'IDH_REL_GPU_INIT_ACCESS', (IDH_REQ_GPU_FINI_ACCESS:=3): 'IDH_REQ_GPU_FINI_ACCESS', (IDH_REL_GPU_FINI_ACCESS:=4): 'IDH_REL_GPU_FINI_ACCESS', (IDH_REQ_GPU_RESET_ACCESS:=5): 'IDH_REQ_GPU_RESET_ACCESS', (IDH_REQ_GPU_INIT_DATA:=6): 'IDH_REQ_GPU_INIT_DATA', (IDH_LOG_VF_ERROR:=200): 'IDH_LOG_VF_ERROR', (IDH_READY_TO_RESET:=201): 'IDH_READY_TO_RESET', (IDH_RAS_POISON:=202): 'IDH_RAS_POISON', (IDH_REQ_RAS_ERROR_COUNT:=203): 'IDH_REQ_RAS_ERROR_COUNT', (IDH_REQ_RAS_CPER_DUMP:=204): 'IDH_REQ_RAS_CPER_DUMP', (IDH_REQ_RAS_BAD_PAGES:=205): 'IDH_REQ_RAS_BAD_PAGES', (IDH_REQ_RAS_CHK_CRITI:=206): 'IDH_REQ_RAS_CHK_CRITI'}
+enum_idh_event: dict[int, str] = {(IDH_CLR_MSG_BUF:=0): 'IDH_CLR_MSG_BUF', (IDH_READY_TO_ACCESS_GPU:=1): 'IDH_READY_TO_ACCESS_GPU', (IDH_FLR_NOTIFICATION:=2): 'IDH_FLR_NOTIFICATION', (IDH_FLR_NOTIFICATION_CMPL:=3): 'IDH_FLR_NOTIFICATION_CMPL', (IDH_SUCCESS:=4): 'IDH_SUCCESS', (IDH_FAIL:=5): 'IDH_FAIL', (IDH_QUERY_ALIVE:=6): 'IDH_QUERY_ALIVE', (IDH_REQ_GPU_INIT_DATA_READY:=7): 'IDH_REQ_GPU_INIT_DATA_READY', (IDH_RAS_POISON_READY:=8): 'IDH_RAS_POISON_READY', (IDH_PF_SOFT_FLR_NOTIFICATION:=9): 'IDH_PF_SOFT_FLR_NOTIFICATION', (IDH_RAS_ERROR_DETECTED:=10): 'IDH_RAS_ERROR_DETECTED', (IDH_RAS_ERROR_COUNT_READY:=11): 'IDH_RAS_ERROR_COUNT_READY', (IDH_RAS_CPER_DUMP_READY:=14): 'IDH_RAS_CPER_DUMP_READY', (IDH_RAS_BAD_PAGES_READY:=15): 'IDH_RAS_BAD_PAGES_READY', (IDH_RAS_BAD_PAGES_NOTIFICATION:=16): 'IDH_RAS_BAD_PAGES_NOTIFICATION', (IDH_UNRECOV_ERR_NOTIFICATION:=17): 'IDH_UNRECOV_ERR_NOTIFICATION', (IDH_REQ_RAS_CHK_CRITI_READY:=18): 'IDH_REQ_RAS_CHK_CRITI_READY', (IDH_TEXT_MESSAGE:=255): 'IDH_TEXT_MESSAGE'}
+class struct_amdgpu_virt_ops(c.Struct): pass
+enum_amdgpu_sriov_vf_mode: dict[int, str] = {(SRIOV_VF_MODE_BARE_METAL:=0): 'SRIOV_VF_MODE_BARE_METAL', (SRIOV_VF_MODE_ONE_VF:=1): 'SRIOV_VF_MODE_ONE_VF', (SRIOV_VF_MODE_MULTI_VF:=2): 'SRIOV_VF_MODE_MULTI_VF'}
+@c.record
+class struct_amdgpu_mm_table(c.Struct):
+  SIZE = 24
+  bo: c.POINTER[struct_amdgpu_bo]
+  cpu_addr: c.POINTER[ctypes.c_uint32]
+  gpu_addr: int
+class struct_amdgpu_bo(c.Struct): pass
+struct_amdgpu_mm_table.register_fields([('bo', c.POINTER[struct_amdgpu_bo], 0), ('cpu_addr', c.POINTER[uint32_t], 8), ('gpu_addr', uint64_t, 16)])
+class struct_amdgpu_vf_error_buffer(c.Struct): pass
+@c.record
+class struct_amdgpu_virt_fw_reserve(c.Struct):
+  SIZE = 32
+  p_pf2vf: c.POINTER[struct_amd_sriov_msg_pf2vf_info_header]
+  p_vf2pf: c.POINTER[struct_amd_sriov_msg_vf2pf_info_header]
+  ras_telemetry: ctypes.c_void_p
+  checksum_key: int
+@c.record
+class struct_amd_sriov_msg_pf2vf_info_header(c.Struct):
+  SIZE = 16
+  size: int
+  version: int
+  reserved: c.Array[ctypes.c_uint32, Literal[2]]
+struct_amd_sriov_msg_pf2vf_info_header.register_fields([('size', uint32_t, 0), ('version', uint32_t, 4), ('reserved', c.Array[uint32_t, Literal[2]], 8)])
+@c.record
+class struct_amd_sriov_msg_vf2pf_info_header(c.Struct):
+  SIZE = 16
+  size: int
+  version: int
+  reserved: c.Array[ctypes.c_uint32, Literal[2]]
+struct_amd_sriov_msg_vf2pf_info_header.register_fields([('size', uint32_t, 0), ('version', uint32_t, 4), ('reserved', c.Array[uint32_t, Literal[2]], 8)])
+struct_amdgpu_virt_fw_reserve.register_fields([('p_pf2vf', c.POINTER[struct_amd_sriov_msg_pf2vf_info_header], 0), ('p_vf2pf', c.POINTER[struct_amd_sriov_msg_vf2pf_info_header], 8), ('ras_telemetry', ctypes.c_void_p, 16), ('checksum_key', ctypes.c_uint32, 24)])
+enum_AMDGIM_FEATURE_FLAG: dict[int, str] = {(AMDGIM_FEATURE_ERROR_LOG_COLLECT:=1): 'AMDGIM_FEATURE_ERROR_LOG_COLLECT', (AMDGIM_FEATURE_GIM_LOAD_UCODES:=2): 'AMDGIM_FEATURE_GIM_LOAD_UCODES', (AMDGIM_FEATURE_GIM_FLR_VRAMLOST:=4): 'AMDGIM_FEATURE_GIM_FLR_VRAMLOST', (AMDGIM_FEATURE_GIM_MM_BW_MGR:=8): 'AMDGIM_FEATURE_GIM_MM_BW_MGR', (AMDGIM_FEATURE_PP_ONE_VF:=16): 'AMDGIM_FEATURE_PP_ONE_VF', (AMDGIM_FEATURE_INDIRECT_REG_ACCESS:=32): 'AMDGIM_FEATURE_INDIRECT_REG_ACCESS', (AMDGIM_FEATURE_AV1_SUPPORT:=64): 'AMDGIM_FEATURE_AV1_SUPPORT', (AMDGIM_FEATURE_VCN_RB_DECOUPLE:=128): 'AMDGIM_FEATURE_VCN_RB_DECOUPLE', (AMDGIM_FEATURE_MES_INFO_ENABLE:=256): 'AMDGIM_FEATURE_MES_INFO_ENABLE', (AMDGIM_FEATURE_RAS_CAPS:=512): 'AMDGIM_FEATURE_RAS_CAPS', (AMDGIM_FEATURE_RAS_TELEMETRY:=1024): 'AMDGIM_FEATURE_RAS_TELEMETRY', (AMDGIM_FEATURE_RAS_CPER:=2048): 'AMDGIM_FEATURE_RAS_CPER', (AMDGIM_FEATURE_XGMI_TA_EXT_PEER_LINK:=4096): 'AMDGIM_FEATURE_XGMI_TA_EXT_PEER_LINK'}
+enum_AMDGIM_REG_ACCESS_FLAG: dict[int, str] = {(AMDGIM_FEATURE_IH_REG_PSP_EN:=1): 'AMDGIM_FEATURE_IH_REG_PSP_EN', (AMDGIM_FEATURE_MMHUB_REG_RLC_EN:=2): 'AMDGIM_FEATURE_MMHUB_REG_RLC_EN', (AMDGIM_FEATURE_GC_REG_RLC_EN:=4): 'AMDGIM_FEATURE_GC_REG_RLC_EN', (AMDGIM_FEATURE_L1_TLB_CNTL_PSP_EN:=8): 'AMDGIM_FEATURE_L1_TLB_CNTL_PSP_EN', (AMDGIM_FEATURE_REG_ACCESS_SQ_CONFIG:=16): 'AMDGIM_FEATURE_REG_ACCESS_SQ_CONFIG'}
+@c.record
+class struct_amdgim_pf2vf_info_v1(c.Struct):
+  SIZE = 44
+  header: struct_amd_sriov_msg_pf2vf_info_header
+  uvd_enc_max_pixels_count: int
+  uvd_enc_max_bandwidth: int
+  vce_enc_max_pixels_count: int
+  vce_enc_max_bandwidth: int
+  mecfw_kboffset: int
+  feature_flags: int
+  checksum: int
+struct_amdgim_pf2vf_info_v1.register_fields([('header', struct_amd_sriov_msg_pf2vf_info_header, 0), ('uvd_enc_max_pixels_count', ctypes.c_uint32, 16), ('uvd_enc_max_bandwidth', ctypes.c_uint32, 20), ('vce_enc_max_pixels_count', ctypes.c_uint32, 24), ('vce_enc_max_bandwidth', ctypes.c_uint32, 28), ('mecfw_kboffset', ctypes.c_uint32, 32), ('feature_flags', ctypes.c_uint32, 36), ('checksum', ctypes.c_uint32, 40)])
+@c.record
+class struct_amdgim_vf2pf_info_v1(c.Struct):
+  SIZE = 128
+  header: struct_amd_sriov_msg_vf2pf_info_header
+  driver_version: c.Array[ctypes.c_char, Literal[64]]
+  driver_cert: int
+  os_info: int
+  fb_usage: int
+  gfx_usage: int
+  gfx_health: int
+  compute_usage: int
+  compute_health: int
+  vce_enc_usage: int
+  vce_enc_health: int
+  uvd_enc_usage: int
+  uvd_enc_health: int
+  checksum: int
+struct_amdgim_vf2pf_info_v1.register_fields([('header', struct_amd_sriov_msg_vf2pf_info_header, 0), ('driver_version', c.Array[ctypes.c_char, Literal[64]], 16), ('driver_cert', ctypes.c_uint32, 80), ('os_info', ctypes.c_uint32, 84), ('fb_usage', ctypes.c_uint32, 88), ('gfx_usage', ctypes.c_uint32, 92), ('gfx_health', ctypes.c_uint32, 96), ('compute_usage', ctypes.c_uint32, 100), ('compute_health', ctypes.c_uint32, 104), ('vce_enc_usage', ctypes.c_uint32, 108), ('vce_enc_health', ctypes.c_uint32, 112), ('uvd_enc_usage', ctypes.c_uint32, 116), ('uvd_enc_health', ctypes.c_uint32, 120), ('checksum', ctypes.c_uint32, 124)])
+@c.record
+class struct_amdgim_vf2pf_info_v2(c.Struct):
+  SIZE = 1024
+  header: struct_amd_sriov_msg_vf2pf_info_header
+  checksum: int
+  driver_version: c.Array[ctypes.c_ubyte, Literal[64]]
+  driver_cert: int
+  os_info: int
+  fb_usage: int
+  gfx_usage: int
+  gfx_health: int
+  compute_usage: int
+  compute_health: int
+  vce_enc_usage: int
+  vce_enc_health: int
+  uvd_enc_usage: int
+  uvd_enc_health: int
+  reserved: c.Array[ctypes.c_uint32, Literal[224]]
+struct_amdgim_vf2pf_info_v2.register_fields([('header', struct_amd_sriov_msg_vf2pf_info_header, 0), ('checksum', uint32_t, 16), ('driver_version', c.Array[uint8_t, Literal[64]], 20), ('driver_cert', uint32_t, 84), ('os_info', uint32_t, 88), ('fb_usage', uint32_t, 92), ('gfx_usage', uint32_t, 96), ('gfx_health', uint32_t, 100), ('compute_usage', uint32_t, 104), ('compute_health', uint32_t, 108), ('vce_enc_usage', uint32_t, 112), ('vce_enc_health', uint32_t, 116), ('uvd_enc_usage', uint32_t, 120), ('uvd_enc_health', uint32_t, 124), ('reserved', c.Array[uint32_t, Literal[224]], 128)])
+@c.record
+class struct_amdgpu_virt_ras_err_handler_data(c.Struct):
+  SIZE = 24
+  bps: c.POINTER[struct_eeprom_table_record]
+  bps_bo: c.POINTER[c.POINTER[struct_amdgpu_bo]]
+  count: int
+  last_reserved: int
+class struct_eeprom_table_record(c.Struct): pass
+struct_amdgpu_virt_ras_err_handler_data.register_fields([('bps', c.POINTER[struct_eeprom_table_record], 0), ('bps_bo', c.POINTER[c.POINTER[struct_amdgpu_bo]], 8), ('count', ctypes.c_int32, 16), ('last_reserved', ctypes.c_int32, 20)])
+class struct_amdgpu_virt_ras(c.Struct): pass
+@c.record
+class struct_amdgpu_virt_region(c.Struct):
+  SIZE = 8
+  offset: int
+  size_kb: int
+struct_amdgpu_virt_region.register_fields([('offset', uint32_t, 0), ('size_kb', uint32_t, 4)])
+class struct_amdgpu_virt(c.Struct): pass
+class struct_amdgpu_video_codec_info(c.Struct): pass
 AMDGPU_VM_MAX_UPDATE_SIZE = 0x3FFFF
 AMDGPU_PTE_VALID = (1 << 0)
 AMDGPU_PTE_SYSTEM = (1 << 1)
@@ -4466,3 +4570,46 @@ SDMA0_5_0__SRCID__SDMA_DOORBELL_INVALID = 244
 SDMA0_5_0__SRCID__SDMA_FROZEN = 245
 SDMA0_5_0__SRCID__SDMA_POLL_TIMEOUT = 246
 SDMA0_5_0__SRCID__SDMA_SRBMWRITE = 247
+NV_MAILBOX_POLL_ACK_TIMEDOUT = 500
+NV_MAILBOX_POLL_MSG_TIMEDOUT = 15000
+NV_MAILBOX_POLL_FLR_TIMEDOUT = 10000
+NV_MAILBOX_POLL_MSG_REP_MAX = 11
+mmMAILBOX_CONTROL = 0xE5E
+NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE = (mmMAILBOX_CONTROL * 4)
+NV_MAIBOX_CONTROL_RCV_OFFSET_BYTE = (NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE + 1)
+mmMAILBOX_MSGBUF_TRN_DW0 = 0xE56
+mmMAILBOX_MSGBUF_TRN_DW1 = 0xE57
+mmMAILBOX_MSGBUF_TRN_DW2 = 0xE58
+mmMAILBOX_MSGBUF_TRN_DW3 = 0xE59
+mmMAILBOX_MSGBUF_RCV_DW0 = 0xE5A
+mmMAILBOX_MSGBUF_RCV_DW1 = 0xE5B
+mmMAILBOX_MSGBUF_RCV_DW2 = 0xE5C
+mmMAILBOX_MSGBUF_RCV_DW3 = 0xE5D
+mmMAILBOX_INT_CNTL = 0xE5F
+AMDGPU_SRIOV_CAPS_SRIOV_VBIOS = (1 << 0)
+AMDGPU_SRIOV_CAPS_ENABLE_IOV = (1 << 1)
+AMDGPU_SRIOV_CAPS_IS_VF = (1 << 2)
+AMDGPU_PASSTHROUGH_MODE = (1 << 3)
+AMDGPU_SRIOV_CAPS_RUNTIME = (1 << 4)
+AMDGPU_VF_MMIO_ACCESS_PROTECT = (1 << 5)
+AMDGPU_RLCG_GC_WRITE_LEGACY = (0x8 << 28)
+AMDGPU_RLCG_GC_WRITE = (0x0 << 28)
+AMDGPU_RLCG_GC_READ = (0x1 << 28)
+AMDGPU_RLCG_MMHUB_WRITE = (0x2 << 28)
+AMDGPU_RLCG_VFGATE_DISABLED = 0x4000000
+AMDGPU_RLCG_WRONG_OPERATION_TYPE = 0x2000000
+AMDGPU_RLCG_REG_NOT_IN_RANGE = 0x1000000
+AMDGPU_RLCG_SCRATCH1_ADDRESS_MASK = 0xFFFFF
+AMDGPU_RLCG_SCRATCH1_ERROR_MASK = 0xF000000
+mmRCC_IOV_FUNC_IDENTIFIER = 0xDE5
+mmBIF_IOV_FUNC_IDENTIFIER = 0x1503
+AMDGPU_VF2PF_UPDATE_MAX_RETRY_LIMIT = 2
+AMDGPU_SRIOV_CRIT_DATA_SIGNATURE = "INDA"
+AMDGPU_SRIOV_CRIT_DATA_SIG_LEN = 4
+AMDGPU_VF_ERROR_ENTRY_SIZE = 16
+AMDGIM_DATAEXCHANGE_OFFSET = (64 * 1024)
+AMDGIM_GET_STRUCTURE_RESERVED_SIZE = lambda total,u8,u16,u32,u64: (total - (((u8)+3) / 4 + ((u16)+1) / 2 + (u32) + (u64)*2)) # type: ignore
+AMDGPU_VIRT_CAPS_LIST = lambda X: X(AMDGPU_VIRT_CAP_POWER_LIMIT) # type: ignore
+amdgpu_sriov_fullaccess = lambda adev: (amdgpu_sriov_vf((adev)) and not amdgpu_sriov_runtime((adev))) # type: ignore
+amdgpu_sriov_rlcg_error_report_enabled = lambda adev: (amdgpu_sriov_reg_indirect_mmhub(adev) or amdgpu_sriov_reg_indirect_gc(adev)) # type: ignore
+amdgpu_sriov_multi_vf_mode = lambda adev: (amdgpu_sriov_vf(adev) and not amdgpu_sriov_is_pp_one_vf(adev)) # type: ignore

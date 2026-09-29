@@ -1,9 +1,31 @@
 import functools, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.helpers import getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-from extra.gemm.cdna_asm_gemm import quantize_mxfp8, _mx_block_scale, _mx_block_scale_3d
+from extra.gemm.cdna_asm_gemm import quantize_mxfp8, mx_pack, _mx_block_scale, _mx_block_scale_3d
+
+ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
+
+def reduce_scatter_devaxis(out:Tensor, shard_axis:int=0) -> Tensor:
+  # out: sharded on the device axis, shape (ndev, *rest); return the device-axis sum left sharded on shard_axis.
+  u = out.uop
+  devs, rest = u.device, u.shape[1:]
+  assert rest[shard_axis] % len(devs) == 0, f"reduce_scatter needs even shards: {rest[shard_axis]} % {len(devs)}"
+  # reach the raw per-device buffer below the UNSHARD, keeping the AFTERs so reads stay ordered after the kernel writes
+  node, barriers = u, []
+  while node.op is not Ops.UNSHARD:
+    if node.op is Ops.AFTER: barriers += node.src[1:]
+    node = node.src[0]
+  mbuf = node.src[0].after(*barriers) if barriers else node.src[0]
+  sz = rest[shard_axis] // len(devs)
+  shards = []
+  for i in range(len(devs)):
+    bounds = tuple((0,s) if a != shard_axis else (i*sz,(i+1)*sz) for a,s in enumerate(rest))
+    contribs = [mbuf.mselect(j).reshape(rest).shrink(bounds).copy_to_device(devs[i]) for j in range(len(devs))]
+    shards.append(functools.reduce(lambda a,b: a.alu(Ops.ADD, b), contribs))
+  return Tensor(UOp.mstack(*shards).unshard(shard_axis, UOp.range(len(devs), -1, AxisType.DEVICE)), device=devs)
 
 @functools.cache
 def custom_hk_grouped_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:UOp, dname:str, n_experts:int) -> UOp:
@@ -58,7 +80,8 @@ def grouped_mx_wgrad(g:Tensor, xg:Tensor, expert_off:Tensor, n_experts:int) -> T
   out = Tensor(inv.uop.unshard(0), device=g.device) if is_multi else inv
   out = Tensor.custom_kernel(out, gT, xT, g_si, x_si, expert_off,
                              fxn=functools.partial(custom_hk_grouped_mxfp8_wgrad, dname=dname, n_experts=n_experts))[0]
-  out = out.sum(0) if is_multi else out.squeeze(0)
+  if is_multi and ZERO_OPTIM: out = reduce_scatter_devaxis(out, 0)
+  else: out = out.sum(0) if is_multi else out.squeeze(0)
   return out.reshape(n_experts, N, K)
 
 def mx_pack_3d(e8:Tensor) -> Tensor:
@@ -86,17 +109,22 @@ def custom_grouped_mx_gemm_bw(gradient:UOp, kernel:UOp, w_stored:bool=False) -> 
 
 _grouped_bw_stored = functools.partial(custom_grouped_mx_gemm_bw, w_stored=True)
 
-def grouped_mx_gemm(x:Tensor, w:Tensor|tuple[Tensor, Tensor], expert_off:Tensor) -> Tensor:
+def grouped_mx_gemm(x:Tensor|tuple[Tensor, Tensor], w:Tensor|tuple[Tensor, Tensor], expert_off:Tensor) -> Tensor:
+  if isinstance(x, tuple):
+    x_q, x_e8 = x
+    x_si, x = mx_pack(x_e8), x_q
+  else:
+    x_q, x_e8, x_si = quantize_mxfp8(x)
   if (pre_quantized := isinstance(w, tuple)):
     w_q, w_e8 = w
     E, N, K2 = w_q.shape
   else:
     E, N, K2 = w.shape
   M, K = x.shape
-  assert K == K2, f"shape mismatch {x.shape} {w.shape}"
-  assert M % 256 == 0 and N % 256 == 0 and K % 128 == 0, f"grouped mxfp8 needs M%256,N%256,K%128, got {x.shape} {w.shape}"
+  assert K == K2, f"shape mismatch K {K} != {K2}"
+  assert x_e8.shape == (M, K // 32)
+  assert M % 256 == 0 and N % 256 == 0 and K % 128 == 0, f"grouped mxfp8 needs M%256,N%256,K%128, got {M,K,N}"
   dname = (x.device[0] if isinstance(x.device, tuple) else x.device).split(":")[0]
-  x_q, x_e8, x_si = quantize_mxfp8(x)
   if not pre_quantized: w_q, w_e8, _ = quantize_mxfp8(w)
   w_si = mx_pack_3d(w_e8)
   xe_in, out_shape = x_e8.reshape(M, K // 32), (M, N)

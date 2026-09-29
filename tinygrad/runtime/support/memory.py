@@ -1,6 +1,15 @@
-import collections, functools, dataclasses, enum
-from typing import Any, ClassVar
-from tinygrad.helpers import round_up, getenv
+from __future__ import annotations
+import collections, functools, dataclasses, enum, struct
+from typing import Any
+from tinygrad.helpers import round_up, getenv, to_mv
+
+class MMIOInterface:
+  def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
+  def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
+  def __getitem__(self, k): return (self.mv[k] if self.fmt == 'B' else self.mv[k].tolist()) if isinstance(k, slice) else self.mv[k]
+  def __setitem__(self, k, v): self.mv[k] = v
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
+    return MMIOInterface(self.addr+offset, (self.nbytes - offset) if size is None else size, fmt=fmt or self.fmt)
 
 class BumpAllocator:
   def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
@@ -170,7 +179,7 @@ class PageTableTraverseContext:
       self.level_up()
 
 class MemoryManager:
-  va_allocator: ClassVar[TLSFAllocator|None] = None
+  va_allocator = TLSFAllocator((1 << 44), base=0x200000000000)
 
   def __init__(self, dev, vram_size:int, boot_size:int, pt_t, va_bits:int, va_shifts:list[int], va_base:int,
                palloc_ranges:list[tuple[int, int]], first_lv:int=0, reserve_ptable=False):
@@ -228,7 +237,6 @@ class MemoryManager:
 
   @classmethod
   def alloc_vaddr(cls, size:int, align=0x1000) -> int:
-    assert cls.va_allocator is not None, "must be set"
     return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
@@ -236,7 +244,7 @@ class MemoryManager:
     self.map_range(va:=self.alloc_vaddr(self.vram_size, self.vram_size), self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
     return va
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False, zero=False) -> VirtMapping:
     if not getenv("GMMU", 1):
       paddr = self.palloc(size:=round_up(size, 0x1000), align, zero=False)
       return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
@@ -251,7 +259,7 @@ class MemoryManager:
       while rem_size > 0:
         while self.palloc_ranges[nxt_range][0] > rem_size: nxt_range += 1
 
-        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=False), try_sz)]
+        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=zero), try_sz)]
         except MemoryError:
           # Move to a smaller size and try again.
           nxt_range += 1
@@ -266,7 +274,6 @@ class MemoryManager:
   def vfree(self, vm:VirtMapping):
     if not getenv("GMMU", 1): return self.pfree(vm.paddrs[0][0])
 
-    assert self.va_allocator is not None, "must be set"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pfree(paddr)

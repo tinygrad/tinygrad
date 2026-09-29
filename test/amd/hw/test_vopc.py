@@ -471,6 +471,20 @@ class TestCmpFloat(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Expected vcc=1 (1.0 != 2.0)")
 
+  def test_v_cmp_eq_f16_src0_hi(self):
+    """v_cmp_eq_f16 with src0 from high half (true16 384+n encoding)."""
+    cmp = v_cmp_eq_f16_e32(v[0], v[1])
+    cmp._raw += 128  # src0 v[0] -> v[0].h, the dsl can't encode hi-half src0 yet
+    instructions = [
+      s_mov_b32(s[0], 0x42003c00),  # hi=3.0, lo=1.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x47004200),  # hi=7.0, lo=3.0
+      v_mov_b32_e32(v[1], s[0]),
+      cmp,
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Expected vcc=1 (v0.hi 3.0 == v1.lo 3.0)")
+
   def test_v_cmp_nge_f16_inf_self(self):
     """v_cmp_nge_f16 comparing -inf with itself (unordered less than).
 
@@ -958,6 +972,71 @@ class TestCmpxPartialWavefront(unittest.TestCase):
     st = run_program(instructions, n_lanes=4)
     self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x4,
                      "Only lane 2 should be active after v_cmpx_eq_u32_e64")
+
+class TestClassDenormalRegressions(unittest.TestCase):
+  """Regression tests: V_CMP_CLASS classifies denormals as DENORMAL (raw bits), not as zero class."""
+
+  def test_class_pos_denormal(self):
+    for bits in (0x00000001, 0x007FFFFF):
+      instructions = [v_mov_b32_e32(v[0], bits), v_mov_b32_e32(v[1], 0x80), v_cmp_class_f32_e64(VCC_LO, v[0], v[1])]
+      st = run_program(instructions, n_lanes=1)
+      self.assertEqual(st.vcc, 1, f"bits=0x{bits:08x}")  # n_lanes=1
+      # ...and it is not the zero class
+      instructions = [v_mov_b32_e32(v[0], bits), v_mov_b32_e32(v[1], 0x40), v_cmp_class_f32_e64(VCC_LO, v[0], v[1])]
+      st = run_program(instructions, n_lanes=1)
+      self.assertEqual(st.vcc, 0, f"bits=0x{bits:08x}")
+
+  def test_class_neg_denormal(self):
+    instructions = [v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 0x10), v_cmp_class_f32_e64(VCC_LO, v[0], v[1])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc, 1)  # n_lanes=1
+    instructions = [v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 0x20), v_cmp_class_f32_e64(VCC_LO, v[0], v[1])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc, 0)  # not the negative-zero class
+
+
+class TestIntCmpModRegressions(unittest.TestCase):
+  """Regression tests: int compares (i32/u32) honor abs/neg as bit-level sign clear/flip (not integer abs/negate)."""
+
+  def test_cmp_i32_abs_neg_bit_level(self):
+    # abs(0x80000001) = 1 -> 1 > 1 is false (integer abs would give 2147483647 > 1)
+    instructions = [v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 1), v_cmp_gt_i32_e64(VCC_LO, v[0], v[1], abs=1)]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc, 0)
+    # neg(0x80000001) flips the sign bit -> 1 > 2 is false (integer negate would give 2147483647 > 2)
+    instructions = [v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 2), v_cmp_gt_i32_e64(VCC_LO, v[0], v[1], neg=1)]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc, 0)
+
+  def test_cmp_u32_abs_bit_level(self):
+    # abs(0x80000000) = 0 -> 0 < 1 is true
+    instructions = [v_mov_b32_e32(v[0], 0x80000000), v_mov_b32_e32(v[1], 1), v_cmp_lt_u32_e64(VCC_LO, v[0], v[1], abs=1)]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc, 1)  # n_lanes=1
+
+
+class TestCmpxSdstRegressions(unittest.TestCase):
+  """Regression tests: V_CMPX_*_E64 writes EXEC only, never SDST (hardware verified)."""
+
+  def test_cmpx_e64_no_sdst(self):
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # preset VCC to 0
+      v_mov_b32_e32(v[0], 0x3F800000), v_mov_b32_e32(v[1], 0x40000000),
+      v_cmpx_lt_f32_e64(VCC_LO, v[0], v[1]),  # 1.0 < 2.0
+    ]
+    st = run_program(instructions, n_lanes=32)
+    self.assertEqual(st.sgpr[EXEC_LO.offset], 0xFFFFFFFF)  # EXEC updated
+    self.assertEqual(st.vcc, 0)  # but VCC untouched
+
+  def test_cmpx_e64_partial_exec(self):
+    instructions = [
+      s_mov_b32(EXEC_LO, 0x0F0F0F0F),
+      s_mov_b32(VCC_LO, 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0x3F800000),
+      v_cmpx_lt_f32_e64(VCC_LO, v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    self.assertEqual(st.sgpr[EXEC_LO.offset], 0x0F0F0F0F)  # EXEC = computed & old EXEC
 
 
 if __name__ == '__main__':

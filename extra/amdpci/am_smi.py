@@ -4,7 +4,7 @@ import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections
 from tinygrad.helpers import DEBUG, NO_COLOR, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -66,6 +66,8 @@ class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.pcibus, self.devfmt = pcibus, pcibus
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.is_vf = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1)
+    self.vf_rlc_gated:list[tuple[int, int]] = []
     self.pci_state = self.read_pci_state()
     if self.pci_state == "D0": self._init_from_d0()
 
@@ -84,7 +86,8 @@ class AMSMI(AMDev):
     with open(f"/sys/bus/pci/devices/{self.pcibus}/power_state", "r") as f: return f.read().strip().rstrip()
 
 class SMICtx:
-  def __init__(self):
+  def __init__(self, dev_filter=None):
+    self.dev_filter = dev_filter
     self.devs = []
     self.opened_pcidevs = []
     self.opened_pci_resources = {}
@@ -135,6 +138,7 @@ class SMICtx:
     pattern = os.path.join('/tmp', 'am_*.lock')
     for d in [f[8:-5] for f in glob.glob(pattern)]:
       if d.startswith("usb"): continue
+      if self.dev_filter is not None and d != self.dev_filter: continue
       if d not in self.opened_pcidevs:
         self._open_am_device(d)
 
@@ -406,7 +410,7 @@ if __name__ == "__main__":
 
   try:
     if not args.list: os.system('clear')
-    smi_ctx = SMICtx()
+    smi_ctx = SMICtx(args.dev)
     while True:
       smi_ctx.rescan_devs()
       smi_ctx.draw(args.list)

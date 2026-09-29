@@ -1,7 +1,9 @@
 import unittest
 from tinygrad import Tensor, dtypes, TinyJit, UOp
+from tinygrad.llm.kernels.amd import Linear
+from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import apply_rope as apply_rope_new, precompute_freqs_cis
-from test.helpers import assert_jit_cache_len
+from test.helpers import assert_jit_cache_len, check_schedule
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
@@ -16,9 +18,8 @@ class TestAttention(unittest.TestCase):
     k = Tensor.ones(BS, seqlen, dim, dtype=dtypes.half).contiguous().realize()
     v = Tensor.ones(BS, seqlen, dim, dtype=dtypes.half).contiguous().realize()
     attn = q.scaled_dot_product_attention(k, v)
-    sched = attn.schedule_linear()
     # attention has 4 kernels now
-    self.assertEqual(len(sched.src), 4)
+    check_schedule(attn, 4)
 
   def test_apply_rope_jit_prune(self):
     def rope_fn(x_in, pos): return apply_rope(x_in, pos)
@@ -31,6 +32,15 @@ class TestAttention(unittest.TestCase):
       rope_prune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
     assert_jit_cache_len(rope_prune, 1)
     assert_jit_cache_len(rope_noprune, 3)
+
+class TestLinear(unittest.TestCase):
+  def test_recovers_packed_ggml_weight(self):
+    for ggml_type,packed_size in ((13, 176), (14, 210), (23, 136)):
+      packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8)[4:]
+      decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
+      linear = Linear(256, 1, bias=False)
+      linear.set_quantized(decoded)
+      self.assertEqual((linear.ggml_type, linear.weight.nbytes()), (ggml_type, packed_size))
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math
 from typing import Self, cast
-from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype
+from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype, bitcast
 from tinygrad.helpers import all_int, argfix, ceildiv, prod, TRAINING
 from tinygrad.mixin.op import OpMixin
 from tinygrad.device import canonicalize_device
@@ -12,7 +12,7 @@ class RandMixin(OpMixin):
   def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
     x = x.threefry((key[1].cast(dtypes.uint64) << 32) | key[0].cast(dtypes.uint64))
-    return (x & 0xffffffff).cast(dtypes.uint32).cat(((x >> 32) & 0xffffffff).cast(dtypes.uint32))
+    return x.cast(dtypes.uint32).cat((x >> 32).cast(dtypes.uint32))
 
   @classmethod
   def random_bits(cls, key:Self, counter:Self, num:int) -> Self:
@@ -33,14 +33,14 @@ class RandMixin(OpMixin):
     _, nmant = dtypes.finfo(dtype)
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
     uint_bits = bits.bitcast(uint_dtype)
-    float_one_bits = uint_bits.const_like(1).cast(dtype).bitcast(uint_dtype)
+    float_one_bits = bitcast(1.0, dtype, uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
   @classmethod
   def _rand(cls, key:Self, counter:Self, shape:tuple[int, ...], dtype:DType, contiguous:bool=True) -> Self:
     bits = cls.random_bits(key, counter, ceildiv(prod(shape) * dtype.itemsize, 4))
     out = cls._bits_to_rand(bits, shape, dtype)
-    return out.contiguous() if contiguous else out
+    return out.clone() if contiguous else out
 
   @staticmethod
   def _next_counter(device:str, num:int):
@@ -293,7 +293,7 @@ class RandMixin(OpMixin):
     if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not TRAINING or p == 0: return self
     if p == 1: return self.const_like(0)
-    return (self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
+    return (self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p).clone().where(self, 0) / (1.0 - p)
 
   def scaled_dot_product_attention(self, key:Self, value:Self, attn_mask:Self|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Self:
@@ -320,7 +320,7 @@ class RandMixin(OpMixin):
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.const_like(1).cast(dtypes.bool).tril()
+      attn_mask = qk.const_like(True, dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask

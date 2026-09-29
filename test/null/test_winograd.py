@@ -1,6 +1,7 @@
 import unittest, sys
 from tinygrad import Tensor, GlobalCounters, dtypes, Context
 from tinygrad.helpers import WINO
+from test.helpers import check_schedule
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):
@@ -13,7 +14,7 @@ class TestWinograd(unittest.TestCase):
   def test_forward_kernels(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
     out = Tensor.conv2d(x,w)
-    self.assertEqual(len(out.schedule_linear().src), 4)
+    check_schedule(out, 4)
 
   def test_backward_counters(self):
     # contiguous_backward on the pooled input keeps the input-transform adjoint out of the overlap accumulation, so

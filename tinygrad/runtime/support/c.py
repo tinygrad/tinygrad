@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, get_args, Generic, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
-  import tinygrad.runtime.support.hcq as hcq, fcntl
-  ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+  import tinygrad.runtime.support.system as system, fcntl
+  ioctl = __fd.ioctl if isinstance(__fd, system.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
   if __struct is None: return ioctl((__base<<8)|__nr, __payload or (args[0] if args else 0))
   if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(*args, **kwargs)))<<16)|(__base<<8)|__nr, out)):
     raise RuntimeError(f"ioctl returned {rc}")
@@ -91,7 +91,7 @@ class DLL(ctypes.CDLL):
 
   @staticmethod
   def findlib(nm:str, paths:list[str], extra_paths=[]):
-    if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
+    if nm in ('libc', 'm') and OSX: return f'/usr/lib/lib{nm.removeprefix("lib")}.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": [d for d in os.environ.get('LD_LIBRARY_PATH', '').split(os.pathsep) if d] + ["/usr/lib64", "/usr/lib", "/usr/local/lib"],
@@ -107,7 +107,7 @@ class DLL(ctypes.CDLL):
           for base in ([f"lib{p}.dylib", f"{p}.dylib", str(p)] if OSX else [f"{p}.dll"]):
             if (l:=pre / base).is_file() or (OSX and 'framework' in str(l) and l.is_symlink()): return str(l)
         else:
-          for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so\\.?[0-9]*", l.name)):
+          for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so[.0-9]*", l.name)):
             # filter out linker scripts
             with open(l, 'rb') as f:
               if f.read(4) == b'\x7FELF': return str(l)
@@ -138,4 +138,5 @@ class DLL(ctypes.CDLL):
 
   def __getattr__(self, nm):
     if self.nm not in self._loaded_: raise AttributeError(f"failed to load library {self.nm}: {self.emsg}")
-    return super().__getattr__(nm)
+    (fn:=super().__getattr__(nm)).__module__ = f"tinygrad.runtime.autogen.{self.nm}"
+    return fn

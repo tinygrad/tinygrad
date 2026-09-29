@@ -12,7 +12,8 @@ if __name__ == "__main__":
     if i % 1000 == 0:
       print(f"Progress: {i}")
     dt = random.choice(dtypes.ints)
-    u = UOp.variable('x', random.randint(dt.min, 0), random.randint(1, dt.max), dtype=dt)
+    vmax = random.randint(1, 2**random.randint(1, dt.max.bit_length()))
+    u = UOp.variable('x', random.randint(0, vmax-1) if vmax > 1 else 0, vmax, dtype=dt)
     d = random.randint(1, max(1, u.vmax)*2)
     if d in powers_of_two: continue
     expr = fast_idiv(Device[Device.DEFAULT].renderer, u, d)

@@ -2,8 +2,7 @@ import unittest, onnx, tempfile, pathlib
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.uop.ops import Ops
-from typing import Any
-from tinygrad.nn.onnx import OnnxRunner, OnnxPBParser, OnnxDataType
+from tinygrad.nn.onnx import OnnxRunner, OnnxDataType
 from hypothesis import given, strategies as st
 
 # copied from test_const_folding.py
@@ -13,10 +12,10 @@ def _check_ast_count(desired_count:int, t:Tensor):
   asts = [call for call in linear.src if call.src[0].op is Ops.SINK]
   assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
-def build_onnx(nodes, from_disk:bool=True, **kwargs):
+def build_onnx(nodes, from_disk:bool=True, opset_imports=None, **kwargs):
   """Helper to build and return an OnnxRunner from ONNX nodes."""
   graph = onnx.helper.make_graph(nodes, 'test', kwargs.get('inputs', []), kwargs.get('outputs', []), kwargs.get('initializers', []))
-  model = onnx.helper.make_model(graph)
+  model = onnx.helper.make_model(graph) if opset_imports is None else onnx.helper.make_model(graph, opset_imports=opset_imports)
   if from_disk:
     with tempfile.TemporaryDirectory() as tmpdir:
       tmp_path = pathlib.Path(tmpdir)
@@ -29,6 +28,23 @@ def build_onnx(nodes, from_disk:bool=True, **kwargs):
   return runner
 
 class TestOnnxRunner(unittest.TestCase):
+  def test_tinygrad_contiguous(self):
+    runner = build_onnx(
+        nodes=[
+          onnx.helper.make_node('Add', ['inp', 'one'], ['added']),
+          onnx.helper.make_node('Contiguous', ['added'], ['materialized'], domain='org.tinygrad'),
+          onnx.helper.make_node('Mul', ['materialized', 'two'], ['output'])
+        ],
+        inputs=[onnx.helper.make_tensor_value_info('inp', onnx.TensorProto.FLOAT, (4,))],
+        outputs=[onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (4,))],
+        initializers=[
+          onnx.helper.make_tensor('one', onnx.TensorProto.FLOAT, (), [1.0]),
+          onnx.helper.make_tensor('two', onnx.TensorProto.FLOAT, (), [2.0])
+        ],
+        opset_imports=[onnx.helper.make_opsetid('', 13), onnx.helper.make_opsetid('org.tinygrad', 1)],
+        from_disk=False).to('PYTHON')
+    _check_ast_count(2, runner({'inp': Tensor.empty(4, device='PYTHON')})['output'])
+
   def _test_const_fold_unary_op(self, from_disk:bool):
     runner = build_onnx(
         nodes=[
@@ -125,41 +141,6 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
         outputs=[onnx.helper.make_tensor_value_info('output', onnx_dtype, (2,))],
         from_disk=False)
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, expected_dtype)
-
-# from openpilot selfdrive/modeld/get_model_metadata.py
-class MetadataOnnxPBParser(OnnxPBParser):
-  def _parse_ModelProto(self) -> dict:
-    obj: dict[str, Any] = {"graph": {"input": [], "output": []}, "metadata_props": []}
-    for fid, wire_type in self._parse_message(self.reader.len):
-      match fid:
-        case 7: obj["graph"] = self._parse_GraphProto()
-        case 14: obj["metadata_props"].append(self._parse_StringStringEntryProto())
-        case _: self.reader.skip_field(wire_type)
-    return obj
-
-class TestOnnxMetadata(unittest.TestCase):
-  def test_metadata_props(self):
-    graph = onnx.helper.make_graph(
-      nodes=[onnx.helper.make_node('Identity', ['input'], ['output'])],
-      name='test',
-      inputs=[onnx.helper.make_tensor_value_info('input', onnx.TensorProto.FLOAT, (1, 3))],
-      outputs=[onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (1, 3))],
-    )
-    model = onnx.helper.make_model(graph)
-    model.metadata_props.append(onnx.StringStringEntryProto(key="model_checkpoint", value="v1.0"))
-    model.metadata_props.append(onnx.StringStringEntryProto(key="output_slices", value="dGVzdA=="))
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-      model_path = pathlib.Path(tmpdir) / "model.onnx"
-      onnx.save(model, model_path)
-      parsed = MetadataOnnxPBParser(model_path).parse()
-
-    # metadata_props should be accessible as dicts with "key" and "value"
-    self.assertEqual(len(parsed["metadata_props"]), 2)
-    self.assertEqual(parsed["metadata_props"][0]["key"], "model_checkpoint")
-    self.assertEqual(parsed["metadata_props"][0]["value"], "v1.0")
-    self.assertEqual(parsed["metadata_props"][1]["key"], "output_slices")
-    self.assertEqual(parsed["metadata_props"][1]["value"], "dGVzdA==")
 
 if __name__ == '__main__':
   unittest.main()

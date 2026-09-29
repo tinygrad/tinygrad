@@ -188,11 +188,11 @@ class VOP3PX2(Inst):
   opsel = BitField(13, 11)
   opsel_hi = BitField(60, 59)
   cbsz = BitField(74, 72)
-  abid = BitField(78, 75)
+  abid = FixedBitField(78, 75, 1)
   acc_cd = BitField(79, 79)
   acc = BitField(124, 123)
   blgp = BitField(127, 125)
-  x2encoding = BitField(31, 16)
+  x2encoding = FixedBitField(31, 16, 0b1101001110101100)
   scale_src0 = BitField(40, 32)
   scale_src1 = BitField(49, 41)
 

@@ -1,6 +1,6 @@
 import unittest, array, time
 from tinygrad.helpers import mv_address
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.usb import USBMMIOInterface
 from test.mockgpu.usb import MockUSB
 

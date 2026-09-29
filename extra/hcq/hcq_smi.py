@@ -16,9 +16,12 @@ def _do_reset_device(pci_bus): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/dev
 def _is_module_loaded(name: str) -> bool: return os.path.isdir(f"/sys/module/{name}")
 
 def cmd_remove_module(args):
-  modules = ["nvidia_drm", "nvidia_modeset", "nvidia_uvm", "nvidia", "ast"] if args.backend == "nv" else ["amdgpu"]
+  modules = ["nvidia_drm", "nvidia_modeset", "nvidia_uvm", "nvidia"] if args.backend == "nv" else ["amdgpu"]
   to_unload = [m for m in modules if _is_module_loaded(m)]
   if not to_unload: print("Kernel modules are not loaded")
+  elif getattr(args, "expect", False):
+    print(f"Kernel modules are loaded: {to_unload}")
+    sys.exit(1)
   else:
     print("Removing kernel modules:", ", ".join(to_unload))
     try: subprocess.run(["sudo", "modprobe", "-r", *to_unload], check=True)
@@ -60,17 +63,19 @@ def cmd_show_pids(args):
 
 def cmd_kill_pids(args):
   devs = scan_devs_based_on_lock(prefix:={"amd":"am", "nv":"nv"}[args.backend], args)
+  use_sudo = not getattr(args, "sudoless", False)
 
   for dev in devs:
     for i in range(128):
       if i > 0: time.sleep(0.2)
 
       try:
-        try: pid = subprocess.check_output(['sudo', 'lsof', temp(f'{prefix}_{dev}.lock')]).decode('utf-8').strip().split('\n')[1].split()[1]
+        try: pid = subprocess.check_output((['sudo'] if use_sudo else []) +
+                                           ['lsof', temp(f'{prefix}_{dev}.lock')]).decode('utf-8').strip().split('\n')[1].split()[1]
         except subprocess.CalledProcessError: break
 
         print(f"Killing process {pid} (which uses {dev})")
-        subprocess.run(['sudo', 'kill', '-9', pid], check=True)
+        subprocess.run((['sudo'] if use_sudo else []) + ['kill', '-9', pid], check=True)
       except subprocess.CalledProcessError as e:
         print(f"Failed to kill process for device {dev}: {e}", file=sys.stderr)
 
@@ -79,6 +84,7 @@ def add_common_commands(parent_subparsers):
   p_insmod.set_defaults(func=cmd_insert_module)
 
   p_rmmod = parent_subparsers.add_parser("rmmod", help="Remove a kernel module")
+  p_rmmod.add_argument("--expect", action="store_true", help="Just assert that module is already unloaded")
   p_rmmod.set_defaults(func=cmd_remove_module)
 
   p_reset = parent_subparsers.add_parser("reset", help="Reset a device")
@@ -91,17 +97,20 @@ def add_common_commands(parent_subparsers):
 
   p_reset = parent_subparsers.add_parser("kill_pids", help="Kill pids of processes using the device")
   p_reset.add_argument("--pci_bus", default="", help="PCI bus ID of the device")
+  p_reset.add_argument("--sudoless", action="store_true", help="Do not use sudo when detecting or killing pids")
   p_reset.set_defaults(func=cmd_kill_pids)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   backend_subparsers = parser.add_subparsers(dest="backend", required=True, metavar="{nv,amd}", help="Hardware backend to target")
 
-  nv_parser = backend_subparsers.add_parser("nv", help="NVIDIA GPUs")
+  nv_parser = backend_subparsers.add_parser("nv", aliases=["NV"], help="NVIDIA GPUs")
+  nv_parser.set_defaults(backend="nv")
   nv_commands = nv_parser.add_subparsers(dest="command", required=True)
   add_common_commands(nv_commands)
 
-  amd_parser = backend_subparsers.add_parser("amd", help="AMD GPUs")
+  amd_parser = backend_subparsers.add_parser("amd", aliases=["AMD"], help="AMD GPUs")
+  amd_parser.set_defaults(backend="amd")
   amd_commands = amd_parser.add_subparsers(dest="command", required=True)
   add_common_commands(amd_commands)
 

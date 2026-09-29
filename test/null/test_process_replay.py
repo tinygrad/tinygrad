@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, Context
 from tinygrad.codegen import do_to_program
 from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.uop.ops import AxisType
 from test.external.process_replay.process_replay import replay_to_program
 from test.helpers import replace_opts
 
@@ -27,7 +28,7 @@ class TestProcessReplay(unittest.TestCase):
 
   def test_replay_with_opt(self):
     # opts=[Opt(...)] means apply a specific opt
-    opts = [Opt(OptOps.UPCAST, 0, 4)]
+    opts = [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = replace_opts(self.ast, opts)
     p = do_to_program(ast, self.renderer)
     good, compare, _ = replay_to_program(p, ast, self.renderer)

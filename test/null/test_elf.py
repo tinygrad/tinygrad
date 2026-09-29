@@ -1,6 +1,7 @@
 import unittest, subprocess, platform
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.support.c import DLL
 
 class TestElfLoader(unittest.TestCase):
   def test_load_clang_jit_strtab(self):
@@ -23,7 +24,7 @@ class TestElfLoader(unittest.TestCase):
       }
     '''
     with self.assertRaisesRegex(RuntimeError, 'evil_external_function'):
-      ClangCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src)
+      elf_loader(ClangCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src))
   def test_link(self):
     src = '''
       float powf(float, float); // from libm
@@ -32,7 +33,7 @@ class TestElfLoader(unittest.TestCase):
     args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
     obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
     with self.assertRaisesRegex(RuntimeError, 'powf'): elf_loader(obj)
-    elf_loader(obj, link_libs=['m'])
+    elf_loader(obj, link_libs=[DLL('m', 'm')])
 
 if __name__ == '__main__':
   unittest.main()

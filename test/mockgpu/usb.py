@@ -1,5 +1,7 @@
 from __future__ import annotations
 import ctypes, mmap, struct, sys
+from typing import Any, Callable
+from tinygrad.runtime.autogen import libusb
 if sys.platform != "win32": from tinygrad.runtime.autogen import libc
 
 class MockUSB:
@@ -36,7 +38,7 @@ class MockASM24State:
     self._dma_regions: dict[int, tuple[int, int]] = {}
     self._add_dma_window(0xF000, 0x200000, 0x80000)
     self._add_dma_window(0xA000, 0x820000, 0x1000)
-    self._add_dma_window(0xB000, 0x800000, 0x200)
+    self._add_dma_window(0xB000, 0x822000, 0x200)
 
     # PCI config space: (bus,dev,fn) -> bytearray(4096)
     self._pci_cfg: dict[tuple[int,int,int], bytearray] = {}
@@ -124,9 +126,7 @@ class MockASM24State:
   def _pcie_write(self, address:int, data:bytes):
     reg_off, offset = self._find_bar(address, len(data))
     if reg_off == 0x10: self.gpu.vram[offset:offset+len(data)] = list(data)
-    elif reg_off == 0x18:
-      self._doorbell[offset:offset+len(data)] = list(data)
-      self.driver._emulate_execute()
+    elif reg_off == 0x18: self._doorbell[offset:offset+len(data)] = list(data)
     elif reg_off == 0x24:
       updates: dict[int, int] = {}
       for i, byte in enumerate(data):
@@ -134,6 +134,7 @@ class MockASM24State:
         updates[idx] = (updates.get(idx, self.gpu.mmio[idx]) & ~(0xFF << shift)) | (byte << shift)
       for idx, val in updates.items(): self.gpu.mmio[idx] = val
     else: raise RuntimeError(f"unsupported BAR register {reg_off:#x}")
+    if reg_off in (0x10, 0x18): self.driver._emulate_execute() # a written word may release a polling ring
 
   def _pcie_dispatch(self, address:int, value:int|None, size:int) -> int|None:
     if value is None: return int.from_bytes(self._pcie_read(address, size), 'little')
@@ -141,10 +142,13 @@ class MockASM24State:
     return None
 
 class MockUSB3:
+  inst: MockUSB3
+  ctx = staticmethod(lambda ctx=ctypes.pointer(ctypes.c_uint64()): ctx) # the link block packs the context and handle addresses
   @classmethod
   def list_devices(cls, vendor, dev): return [(0, "usb:mock")]
   def __init__(self, *args, **kwargs):
-    self.product = "custom mock"
+    MockUSB3.inst, self.product = self, "custom mock"
+    self.handle = ctypes.cast(ctypes.pointer(ctypes.c_uint64()), ctypes.POINTER(libusb.libusb_device_handle))
     self._bulk_read_op: tuple[str, int, int]|None = None
     self._bulk_write_op: tuple[str, int, int]|None = None
     self._f0_reply = bytes(8)
@@ -160,7 +164,7 @@ class MockUSB3:
     elif request == 0xE5:
       self.state._xram_write_byte(value, index)
     elif request == 0xF2:
-      op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000, (value & 0x7FFF) * 512)
+      op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000 + (index & 0xFF) * 0x4000, (value & 0x7FFF) * 512)
       if value & 0x8000: self._bulk_read_op = op
       else: self._bulk_write_op = op
     elif request == 0xF0:
@@ -193,8 +197,9 @@ class MockUSB3:
     op, address, size = self._bulk_write_op
     assert len(data) == size
     if op == "sram_write":
-      host_addr, region_size = self.state._dma_regions[address]
-      ctypes.memmove(host_addr, data, min(len(data), region_size))
+      ctrl, (host_addr, region_size) = next((ca, r) for ca, r in self.state._dma_regions.items() if ca <= address < ca + r[1])
+      ctypes.memmove(host_addr + (address - ctrl), data, min(len(data), region_size - (address - ctrl)))
+      self.state.driver._emulate_execute()  # landed data may un-stall a ring polling on it (e.g. copyin sentinels)
     elif op == "pcie_write": self.state._pcie_write(address, data)
     else: raise RuntimeError(f"cannot bulk write for {op}")
     self._bulk_write_op = None
@@ -204,9 +209,31 @@ class MockUSB3:
     op, address, size = self._bulk_read_op
     assert length == size
     if op == "sram_read":
-      host_addr, region_size = self.state._dma_regions[address]
-      data = bytes((ctypes.c_ubyte * min(length, region_size)).from_address(host_addr))
+      ctrl, (host_addr, region_size) = next((ca, r) for ca, r in self.state._dma_regions.items() if ca <= address < ca + r[1])
+      data = bytes((ctypes.c_ubyte * min(length, region_size - (address - ctrl))).from_address(host_addr + (address - ctrl)))
     elif op == "pcie_read": data = self.state._pcie_read(address, length)
     else: raise RuntimeError(f"cannot bulk read for {op}")
     self._bulk_read_op = None
     return memoryview(data)
+
+# the host program calls libusb through function pointers: mock the calls the copies make, the transfers complete synchronously
+def _control(h, rtype, req, val, idx, data, n, timeout):
+  if rtype & 0x80: ctypes.memmove(data, bytes(MockUSB3.inst.control_read(req, n, val, idx)), n)
+  else: MockUSB3.inst.control_write(req, val, idx, ctypes.string_at(data, n))
+  return n
+def _bulk(h, ep, data, n, actual, timeout):
+  if ep & 0x80: ctypes.memmove(data, bytes(MockUSB3.inst.bulk_read(n)), n)
+  else: MockUSB3.inst.bulk_write(ctypes.string_at(data, n))
+  return 0
+def _submit(t):
+  MockUSB3.inst.bulk_write(ctypes.string_at(t.contents.buffer, t.contents.length))
+  t.contents.status = 0
+  return 0
+_transfers:list = []
+def _alloc(n):
+  _transfers.append(t:=libusb.struct_libusb_transfer())
+  return ctypes.addressof(t)
+_mocked:list[tuple[Any, Callable]] = [(libusb.libusb_control_transfer, _control), (libusb.libusb_bulk_transfer, _bulk),
+  (libusb.libusb_submit_transfer, _submit), (libusb.libusb_handle_events_timeout, lambda ctx, tv: 0), (libusb.libusb_alloc_transfer, _alloc)]
+for _fn, _impl in _mocked:
+  setattr(libusb.dll, _fn.__name__, ctypes.CFUNCTYPE(ctypes.c_void_p if _fn is libusb.libusb_alloc_transfer else _fn.restype, *_fn.argtypes)(_impl))

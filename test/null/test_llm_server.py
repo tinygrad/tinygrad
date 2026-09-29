@@ -1,5 +1,39 @@
 import unittest, threading, time, json
 from unittest.mock import Mock, patch
+from tinygrad.llm.model import Transformer, TransformerConfig
+from tinygrad.llm.serve import StreamRouter, parse_tool_call
+
+TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                           norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
+
+class TestParseToolCall(unittest.TestCase):
+  def test_argument_newlines(self):
+    for value in ("", "text", " text ", "\n", "\nfirst\nsecond\n\n", "\r\nfirst\r\nsecond\r\n\r\n"):
+      for newline in ("\n", "\r\n"):
+        self.assertEqual(parse_tool_call(f"write<arg_key>content</arg_key><arg_value>{newline}{value}{newline}</arg_value>"),
+                         ("write", {"content":value}))
+        self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
+                         ("write", {"content":value}))
+
+  def test_json_arguments(self):
+    for value in ('"text"', '42', 'true', 'null', '[1, "two"]', '{"nested":{"ok":true}}'):
+      for call in (f"read<arg_key>value</arg_key><arg_value>{value}</arg_value>",
+                   f"<function=read><parameter=value>{value}</parameter></function>"):
+        self.assertEqual(parse_tool_call(call), ("read", {"value":json.loads(value)}))
+
+  def test_glm_multiple_arguments(self):
+    for separator in ("", "\n"):
+      call = separator.join(("write", "<arg_key>path</arg_key>", "<arg_value>out.txt</arg_value>",
+                             "<arg_key>content</arg_key>", "<arg_value>\nhello\n</arg_value>"))
+      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"hello"}))
+
+  def test_glm_no_arguments(self):
+    self.assertEqual(parse_tool_call("tools.ping-v1"), ("tools.ping-v1", {}))
+
+  def test_invalid_glm_call(self):
+    for call in ("not a call", "read<arg_key>path</arg_key>", "read<arg_key>path</arg_key><arg_value>unfinished",
+                 "read<arg_key>path</arg_key><arg_value>a</arg_value>trailing junk"):
+      self.assertIsNone(parse_tool_call(call))
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -108,6 +142,40 @@ class TestLLMServer(unittest.TestCase):
         contents.append(chunk.choices[0].delta.content)
 
     self.assertGreater(len(contents), 0)
+
+  def test_interrupted_stream_logs_tokens(self):
+    # the threaded server checks cancellation between tokens, so gate the scheduler to synchronize:
+    # generation pauses after the first token until close() has set req.cancelled
+    gate, interrupted = threading.Event(), threading.Event()
+    def slow_generate(ids, **kwargs):
+      yield 300
+      gate.wait(2)
+      yield 301
+    def log(s):
+      if "total:" in s: interrupted.set()
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), \
+         patch("tinygrad.llm.serve.stderr_log", side_effect=log) as log_mock, \
+         patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
+      next(stream)
+      next(stream)
+      stream.close()
+      gate.set()
+      self.assertTrue(interrupted.wait(2))
+    interrupt = log_mock.call_args.args[0]
+    self.assertFalse(interrupt.startswith("\n"))
+    self.assertTrue(interrupt.endswith("\n"))
+    self.assertIn("gen:", interrupt)
+    self.assertIn("out:    1", interrupt)
+    self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
+
+  def test_stream_disconnect_closes_source(self):
+    from tinygrad.llm.serve import Handler
+    source, handler = Mock(), Mock()
+    source.__iter__ = Mock(return_value=iter([{}]))
+    handler.wfile.write.side_effect = BrokenPipeError
+    Handler.stream_json(handler, source)
+    source.close.assert_called_once()
 
   def test_non_streaming(self):
     resp = self.client.chat.completions.create(
@@ -230,6 +298,18 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual([json.loads(tc.function.arguments)["path"] for tc in response.choices[0].message.tool_calls], ["a", "b"])
     self.assertEqual(response.choices[0].finish_reason, "tool_calls")
 
+  def test_streaming_glm_tool_calls(self):
+    self.set_output("before<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>"
+                    "<tool_call>read\n<arg_key>path</arg_key>\n<arg_value>\nb\n</arg_value>\n</tool_call>")
+    chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Read files"}],
+                                                     tools=self.tools(), stream=True))
+    self.assertEqual("".join(c.choices[0].delta.content or "" for c in chunks if c.choices), "before")
+    calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+    self.assertEqual([tc.function.name for tc in calls], ["read", "read"])
+    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"b"}])
+    self.assertEqual([tc.index for tc in calls], [0, 1])
+    self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
+
   def test_multiline_tool_argument_preserves_trailing_newline(self):
     self.set_output("<tool_call>\n<function=write>\n<parameter=content>\nfirst\nsecond\n\n</parameter>\n"
                     "<parameter=filePath>\nout.txt\n</parameter>\n</function>\n</tool_call>")
@@ -263,6 +343,20 @@ class TestLLMToolCalls(unittest.TestCase):
     ], tools=self.tools())
     self.assertEqual(second.choices[0].message.content, "done")
     self.assertEqual(second.choices[0].finish_reason, "stop")
+
+class TestTransformerGenerate(unittest.TestCase):
+  def test_warmup(self):
+    model, calls = Transformer(TEST_CONFIG), []
+    def generate(tokens, **kwargs):
+      calls.append(tokens)
+      yield from (1, 2)
+    with patch.object(model, "generate", generate): model.warmup()
+    self.assertEqual(calls, [[0], [0]])
+
+  def test_template_starts_reasoning(self):
+    router = StreamRouter(reasoning=True)
+    self.assertEqual(list(router.route("reasoning</think>answer")),
+                     [("reasoning_content", "reasoning"), ("content", "answer")])
 
 if __name__ == '__main__':
   unittest.main()

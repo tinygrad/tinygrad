@@ -1,4 +1,4 @@
-import glob, importlib, os, pathlib, shutil, subprocess, tarfile, tempfile
+import glob, importlib, os, pathlib, subprocess
 from tinygrad.helpers import fetch, flatten, system, getenv
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
@@ -10,16 +10,20 @@ rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.ta
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
+bnxt_src = ["https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/drivers/" + s + "?h=v6.18" for s in
+            ("infiniband/hw/bnxt_re/roce_hsi.h", "infiniband/hw/bnxt_re/qplib_rcfw.h", "infiniband/hw/bnxt_re/qplib_res.h",
+             "net/ethernet/broadcom/bnxt/bnxt_hwrm.h")]
 ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
 cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-12.0.146-archive.tar.xz"
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
 opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
-macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+comgr_2_src = "https://repo.radeon.com/rocm/apt/6.2/pool/main/c/comgr/comgr_2.8.0.60200-66~24.04_amd64.deb"
+def macossdk(): return system("xcrun --show-sdk-path")
 
 llvm_lib = (
   (win_llvm:=r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ") +
   (mac_llvm:=repr([f'/opt/homebrew/opt/llvm@{i}/lib/libLLVM.dylib' for i in reversed(range(14, 21+1))]) + " if OSX else ") +
-  (other_llvm:=repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))])))
+  (other_llvm:=repr([f'LLVM-{i}' for i in reversed(range(14, 21+1))] + ['LLVM'])))
 clang_lib = win_llvm.replace("LLVM-C", "libclang") + (mac_llvm + other_llvm).replace("LLVM", "clang")
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
@@ -31,6 +35,7 @@ def load(name, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
     files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
     if (srcs:=kwargs.pop('srcs', None)):
+      import tempfile, tarfile
       srcpath = (td:=tempfile.TemporaryDirectory(f"autogen-src-{name.replace('/','-')}")).name + "/"
       for src in (srcs if isinstance(srcs, list) else [srcs]):
         if 'tar' in src:
@@ -38,7 +43,7 @@ def load(name, files, **kwargs):
           with tarfile.open(fetch(src, gunzip=src.endswith("gz"))) as tf:
             tf.extractall(srcpath)
             if not isinstance(srcs, list): srcpath += tf.getnames()[0] # if we just have a single tarball, make this the root
-        else: fetch(src, name=srcpath + src.split('/')[-1])
+        else: fetch(src, name=srcpath + src.split('/')[-1].split('?')[0])
       files, kwargs['args'] = [str(f).format(srcpath) for f in files], [a.format(srcpath) for a in kwargs.get('args', [])]
       kwargs['anon_names'] = {k.format(srcpath):v for k,v in kwargs.get('anon_names', {}).items()}
       if (preprocess:=kwargs.pop('preprocess', None)): preprocess(srcpath)
@@ -48,6 +53,8 @@ def load(name, files, **kwargs):
     except Exception as e: raise RuntimeError(f"error while generating {name}") from e
     if srcs: td.cleanup()
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
+
+def _extract_deb(path:str): subprocess.run("ar x *.deb && tar xf data.tar.*", cwd=path, shell=True, check=True)
 
 def __getattr__(nm):
   match nm:
@@ -98,14 +105,11 @@ def __getattr__(nm):
     # this defines all syscall numbers. should probably unify linux autogen?
     case "io_uring":
       return load("io_uring", ["{}/liburing.h", "{}/usr/include/linux/io_uring.h", "{}/usr/include/asm-generic/unistd.h"],
-                  args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
-                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
+                  args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')], preprocess=_extract_deb)
     case "llvm": return load("llvm", lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"], dll=llvm_lib,
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
-    case "pci": return load("pci", ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
-                             preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
-    case "vfio": return load("vfio", ["{}/usr/include/linux/vfio.h"], args=["-I{}/usr/include"], srcs=linux_headers_deb,
-                             preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
+    case "pci": return load("pci", ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb, preprocess=_extract_deb)
+    case "vfio": return load("vfio", ["{}/usr/include/linux/vfio.h"], args=["-I{}/usr/include"], srcs=linux_headers_deb, preprocess=_extract_deb)
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", [root/"extra/webgpu/webgpu.h"], dll=webgpu_lib,
                                prolog=["from tinygrad.helpers import WIN, OSX", "import sysconfig, os"])
@@ -115,9 +119,10 @@ def __getattr__(nm):
                             dll="os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'",
                             args=["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"], prolog=["import os"])
     case "comgr" | "comgr_3":
-      return load("comgr_3" if nm == "comgr_3" else "comgr", ["/opt/rocm/include/amd_comgr/amd_comgr.h"],
-                  dll= "[os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so', 'amd_comgr']",
-                  args=["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"], prolog=["import os"])
+      prefix = "{}/opt/rocm-6.2.0" if nm == "comgr" else "/opt/rocm"
+      return load(nm, [f"{prefix}/include/amd_comgr/amd_comgr.h"], dll="[os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so', 'amd_comgr']",
+                  args=["-D__HIP_PLATFORM_AMD__", f"-I{prefix}/include", "-x", "c++"], prolog=["import os"], srcs=comgr_2_src if nm == "comgr" else None,
+                  **({'preprocess':_extract_deb} if nm == "comgr" else {}))
     case "hsa": return load("hsa", [*[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/core/inc/{s}.h" for s in ["registers"]],
                                     *[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/inc/{s}.h" for s in [
                                         "hsa", "hsa_ext_amd", "amd_hsa_signal", "amd_hsa_queue", "amd_hsa_kernel_code",
@@ -157,21 +162,20 @@ def __getattr__(nm):
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
   srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
   dll=f"'tinymesa_cpu' if DEV.renderer == 'LVP' else 'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'",
-  prolog=["from tinygrad.helpers import DEV", "import gzip, base64, platform, sysconfig, os"],
+  prolog=["from tinygrad.helpers import DEV", "import gzip, base64, sysconfig, os"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang",
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   dll=clang_lib, prolog=["from tinygrad.helpers import WIN, OSX"], args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
-      return load("metal", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
+      return load("metal", lambda: [f"{macossdk()}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
-                  dll="'Metal'", args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
-    case "iokit": return load("iokit", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
-                              args=["-isysroot", macossdk])
-    case "corefoundation": return load("corefoundation",
-                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
-                                       dll="'CoreFoundation'",args=["-isysroot", macossdk])
+                  dll="'Metal'", args=lambda: ["-xobjective-c", "-isysroot", macossdk()], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", lambda: [f"{macossdk()}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
+                              args=lambda: ["-isysroot", macossdk()])
+    case "corefoundation": return load("corefoundation", lambda: [f"{macossdk()}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h"
+                                       for s in ["String", "Data"]], dll="'CoreFoundation'", args=lambda: ["-isysroot", macossdk()])
     case "llvm_qcom": return load("llvm_qcom", [root/"extra/tinydreno.h"], dll="'llvm-qcom'")
     case "ggml_common": return load("ggml_common", ["{}/ggml-common.h"], srcs=ggml_common_src,
                                     args=["-DGGML_COMMON_DECL_C", "-DGGML_COMMON_IMPL_C"], macros=False)
@@ -180,6 +184,17 @@ def __getattr__(nm):
       return load("mlx5", [root/"extra/mlx_driver/mlx5.h", f"{kh}/mlx5_ifc.h"], srcs=linux_headers_kern_deb,
                   args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
                         "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long", f"-I{kh}"],
-                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_kern_deb.split('/')[-1]} && tar xf data.tar.xz",
-                                                         cwd=path, shell=True, check=True))
+                  preprocess=_extract_deb)
+    case "bnxt":
+      kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
+      return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1].split('?')[0]}" for s in bnxt_src]],
+                  srcs=[linux_headers_kern_deb, *bnxt_src],
+                  args=["-Du8=unsigned char", "-Du32=unsigned int", "-Du64=unsigned long long", "-D__le16=unsigned short",
+                        "-D__le32=unsigned int", "-D__le64=unsigned long long", "-D__be16=unsigned short", "-D__be32=unsigned int", f"-I{kh}"],
+                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_(un)?rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
+                            r"|vnic_(alloc|cfg)|cfa_l2_filter_alloc|port_phy_cfg)_(input|output)|(cmd|resp)_hdr)$",
+                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|(de)?register_mr)(_resp)?"
+                            r"|cq_(base|req)|sq_(rdma_hdr|sge))$",
+                            r"(BNXT|CMDQ|CREQ|CQ|SQ|DBC|PTU|RCFW|HWRM|VNIC|RING_ALLOC|STAT_CTX|CFA_L2_FILTER|PORT_PHY_CFG|FIRMWARE_FIRST"
+                            r"|FUNC_(QCAPS|QCFG|RESET|DRV_RGTR|BACKING_STORE))_"], preprocess=_extract_deb)
     case _: raise AttributeError(f"no such autogen: {nm}")

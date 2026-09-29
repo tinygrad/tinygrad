@@ -1,11 +1,21 @@
 # uops tests that pass on NULL backend (no copyout needed)
-import math, unittest
+import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Timing, Context, cdiv
-from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
+from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
+from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.codegen import to_program
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.wgsl import WGSLRenderer
+from tinygrad.runtime.ops_python import PythonRenderer
+from tinygrad.uop.ops import ParamArg, PatternMatcher, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.codegen.late.coalesce import memory_coalescing
+from tinygrad.renderer import Renderer
+from tinygrad.uop.weak import pm_lower_weak
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
@@ -37,60 +47,56 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual(UOp(Ops.CONST, arg=ConstFloat(3.0)).dtype, dtypes.weakfloat)
     self.assertEqual(UOp(Ops.CONST, arg=True).dtype, dtypes.bool)
     self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
-    # an explicit (strong) const dtype is legal until the field is removed
+    # UOp.const at a strong dtype builds the CAST that carries it
     self.assertEqual(UOp.const(3, dtypes.int32).dtype, dtypes.int32)
-
-  def test_weak_dtype_rejected_by_program_spec(self):
-    for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
-      with self.assertRaises(RuntimeError): type_verify(UOp.const(value, weak).sink(), spec_program)
-      type_verify(UOp.const(value, concrete).sink(), spec_program)
-
-  def test_invalid_stated_dtype(self):
-    # UOp.const normalizes a stated dtype away (const_like/full pass their position's); the core constructor does not,
-    # and the spec is what rejects a non-bool Invalid
-    self.assertIs(UOp.const(Invalid, dtypes.float32), UOp.invalid())
-    with self.assertRaises(RuntimeError): type_verify(UOp(Ops.CONST, dtypes.float32, arg=Invalid), spec_shared)
 
   def test_invalid_dtype_and_consumers(self):
     invalid = UOp.invalid()
     self.assertIs(invalid.dtype, dtypes.bool)
     self.assertIs(UOp.const(Invalid, dtypes.float32), invalid)
-    self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
-    self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
+    self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.ALLOC), next(u.dtype for u in scratch.uop.toposort()
       if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
     invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
-    for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
+    for u in (UOp.param(0, dtypes.bool, ()).where(value, invalid), value+invalid, UOp.stack(value, invalid)): self.assertIs(u.src[-1], invalid)
+    for u in (UOp(Ops.STACK, src=(value, invalid)), UOp(Ops.ADD, src=(value, invalid)),
               UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
-              UOp.param(0, dtypes.float32, (4,)).index(invalid)): type_verify(u, spec_shared)
+              UOp.param(0, dtypes.float32, 4).index(invalid)): type_verify(u, spec_shared)
     gate, value = UOp.param(0, dtypes.bool, ()), UOp.param(1, dtypes.float, ())
     self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(0, dtypes.float))
     type_verify(out.sink(), spec_program)
 
   def test_remove_invalid_stack_lanes(self):
-    stack = UOp(Ops.STACK, dtypes.half, (UOp.const(1, dtypes.half), UOp.invalid()))
+    stack = UOp(Ops.STACK, src=(UOp.const(1, dtypes.half), UOp.invalid()))
     out = graph_rewrite(stack, pm_remove_invalid)
     self.assertEqual(out.src, (UOp.const(1, dtypes.half), UOp.const(0, dtypes.half)))
     type_verify(out.sink(), spec_program)
+
+class TestMemoryCoalescing(unittest.TestCase):
+  def test_volatile_view_not_coalesced(self):
+    buf = UOp.param(0, dtypes.uint32, 4, volatile=True).bitcast(dtypes.int32)
+    sink = memory_coalescing(UOp.sink(*(buf.index(i).load() for i in range(4))), Renderer(Target()))
+    self.assertEqual(sum(u.op is Ops.LOAD for u in sink.toposort()), 4)
 
 class TestLowerIndexDtype(unittest.TestCase):
   def test_gated_shrink_lowers_to_selected_width(self):
     # coalesce builds gated SHRINKs for masked vectorized loads; lowering must resolve them at the
     # width the offset bounds select (this one needs long)
-    buf = UOp.param(0, dtypes.float, (2**31+64,))
+    buf = UOp.param(0, dtypes.float, 2**31+64)
     i = UOp.variable("i", 0, 2**28)
     shrink = UOp(Ops.SHRINK, src=(buf, (i*24).valid(i < 2**28), UOp.const(4)))
-    lowered = graph_rewrite(shrink.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    lowered = graph_rewrite(shrink.sink(), pm_lower_weak)
+    self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
+                    "lowering must resolve every weak width, except a typed literal's value half")
     sh = next(u for u in lowered.backward_slice_with_self if u.op is Ops.SHRINK)
     self.assertEqual(sh.src[1].dtype, dtypes.long)
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
-    self.assertEqual(reg.src[0].dtype, dtypes.weakint)
-    lowered = graph_rewrite(reg.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
-    self.assertEqual(next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0].dtype, dtypes.int)
+    self.assertEqual(reg.arg.size, 4)
+    lowered = graph_rewrite(reg.sink(), pm_lower_weak)
+    self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
+                    "lowering must resolve every weak width, except a typed literal's value half")
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
@@ -126,8 +132,14 @@ class TestConstFloatEq(unittest.TestCase):
     self.assertFalse(nan == Invalid)
     self.assertTrue(nan != Invalid)    # __ne__ must defer to the reflected eq, not swallow NotImplemented
 
+  def test_invalid_eq_defers_to_reflected(self):
+    class HoldsInvalid:  # a carrier that knows it holds Invalid. returning False for foreign types would silence its eq
+      def __eq__(self, other): return other is Invalid
+    self.assertTrue(Invalid == HoldsInvalid())
+    self.assertFalse(Invalid != HoldsInvalid())
+
   def test_matchers_agree_on_nan(self):
-    n = UOp.const(math.nan, dtypes.float32)
+    n = UOp.const(math.nan)
     for compiled in (False, True):
       pm = PatternMatcher([(UPat(Ops.CONST, arg=math.nan), lambda: True)], compiled=compiled)
       self.assertTrue(pm.rewrite(n), f"{compiled=}")
@@ -217,7 +229,7 @@ class TestExecALU(unittest.TestCase):
 
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
-    gmem = UOp.param(0, dtypes.float, (8,))
+    gmem = UOp.param(0, dtypes.float, 8)
     gidx0 = UOp.special(4, 'gidx0')
     gate = gidx0<UOp.const(1)
     idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(2)).valid(gate)))
@@ -233,8 +245,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertEqual(len(gated_uops[-1].src), 2)
 
   def test_gate_some_stores(self):
-    gmem0 = UOp.param(0, dtypes.float, (8,))
-    gmem1 = UOp.param(1, dtypes.float, (8,))
+    gmem0 = UOp.param(0, dtypes.float, 8)
+    gmem1 = UOp.param(1, dtypes.float, 8)
     gidx0 = UOp.special(4, 'gidx0')
     idx = gidx0 * UOp.const(2)
     idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(1))))
@@ -253,8 +265,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
   @unittest.skip("we don't merge ifs anymore")
   def test_merge_ifs_alt(self):
-    gmem0 = UOp.param(0, dtypes.float, (8,))
-    gmem1 = UOp.param(1, dtypes.float, (8,))
+    gmem0 = UOp.param(0, dtypes.float, 8)
+    gmem1 = UOp.param(1, dtypes.float, 8)
     gidx0 = UOp.special(4, 'gidx0')
     idx = gidx0*UOp.const(2)
     gate = gidx0<UOp.const(1)
@@ -272,15 +284,14 @@ class TestGatedStoreRewrite(unittest.TestCase):
     for x in gated_uops: self.assertIs(x.op, Ops.STORE)
     for x in gated_uops: self.assertEqual(len(x.src), 2)
 
-@unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
 @unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
 class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
-      g = UOp.param(0, dt, (3,))
-      c = UOp.const(2).cast(dt)
+      g = UOp.param(0, dt, 3)
+      c = UOp.const(2)
       l = g.index(c)
-      a = UOp(Ops.CDIV, dt, (l, c))
+      a = UOp(Ops.CDIV, src=(l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
       ops = [x.op for x in uops]
@@ -290,32 +301,47 @@ class TestFastIdiv(unittest.TestCase):
   def test_floormod_power_of_two(self):
     # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
     for dt in (dtypes.int32, dtypes.uint32):
-      g = UOp.param(0, dt, (9,))
-      c = UOp.const(8).cast(dt)
-      a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
+      g = UOp.param(0, dt, 9)
+      c = UOp.const(8)
+      a = UOp(Ops.FLOORMOD, src=(g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
       self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
       self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
       self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
 
-  def test_floordiv_power_of_two_uint(self):
-    # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
-    for dt in (dtypes.uint32, dtypes.uint64):
-      g = UOp.param(0, dt, (3,))
-      c = UOp.const(2).cast(dt)
-      a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
+  def test_max_keeps_bound_for_idiv(self):
+    # MAX is lowered to CMPLT+WHERE only after floordiv_to_idiv, so the bound it carries still proves the division same-sign
+    x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).maximum(0) + 1
+    ops = [u.op for u in to_uops_list([x // 3], ren=CStyleLanguage(Target()))]
+    self.assertNotIn(Ops.MAX, ops, "the renderer has no MAX")
+    self.assertNotIn(Ops.CMOD, ops, "a provably positive dividend kept the round toward zero correction")
+
+  def test_floordiv_power_of_two(self):
+    # FLOORDIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)
+    for dt in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64):
+      g = UOp.param(0, dt, 3)
+      c = UOp.const(2)
+      a = UOp(Ops.FLOORDIV, src=(g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORDIV by pow2 kept the round toward zero correction")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
+  def test_unsigned_floordiv_is_cdiv(self):
+    for op in (Ops.FLOORDIV, Ops.FLOORMOD):
+      a, b = (UOp.param(i, dtypes.uint32, 3).index(UOp.const(2)) for i in range(2))
+      ops = [x.op for x in to_uops_list([UOp(op, src=(a, b))], ren=Device[Device.DEFAULT].renderer)]
+      self.assertNotIn(Ops.CMPLT, ops, f"{op} on unsigned kept the sign correction")
+      self.assertEqual(ops.count(Ops.CDIV) + ops.count(Ops.CMOD), 1)
+
   @Context(DISABLE_FAST_IDIV=0)
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
+  @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "fast_idiv widens uint32 to uint64")
   def test_fast_idiv_and_mod(self):
-    g = UOp.param(0, dtypes.uint32, (4,))
-    c = UOp.const(3).cast(dtypes.uint)
+    g = UOp.param(0, dtypes.uint32, 4)
+    c = UOp.const(3)
     l = g.index(c)
     a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -332,24 +358,43 @@ class TestFastIdiv(unittest.TestCase):
     self.assertNotIn(Ops.CMOD, ops)
 
   @Context(DISABLE_FAST_IDIV=0)
+  def test_fast_idiv_nonpositive_divisor(self):
+    ridx = UOp.range(20, 0)
+    for d in (-3, 0):
+      for op in (Ops.CDIV, Ops.CMOD):
+        ops = [x.op for x in to_uops_list([ridx.alu(op, UOp.const(d))], ren=Device[Device.DEFAULT].renderer)]
+        self.assertNotIn(Ops.SHR, ops, f"fast_idiv fired on {op} by {d}")
+
+  @Context(DISABLE_FAST_IDIV=0)
+  @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "needs a uint64 buffer")
+  def test_fast_idiv_cmod_kept_when_idiv_declines(self):
+    ren = Device[Device.DEFAULT].renderer
+    d = UOp.param(0, dtypes.int32, 4).index(UOp.const(0))
+    ops = [x.op for x in to_uops_list([UOp.range(30, 0).alu(Ops.CMOD, d)], ren=ren)]
+    self.assertIn(Ops.CMOD, ops, "CMOD by a non-const divisor should be left alone")
+    big = UOp.param(1, dtypes.uint64, 4).index(UOp.const(0))
+    ops = [x.op for x in to_uops_list([big.alu(Ops.CMOD, UOp.const(3, dtypes.uint64))], ren=ren)]
+    self.assertIn(Ops.CMOD, ops, "CMOD should be left alone when fast_idiv declines")
+
+  @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_bounded_numerator_zero(self):
     x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
     for val in range(2):
-      self.assertEqual(eval_uop(x.alu(Ops.CDIV, UOp.const(3).cast(x.dtype)), vals=(val,)), cdiv(val, 3))
+      self.assertEqual(eval_uop(x.alu(Ops.CDIV, UOp.const(3)), vals=(val,)), cdiv(val, 3))
 
   @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
-    ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
-    self.assertNotIn(Ops.CAST, ops)
+    self.assertNotIn(dtypes.long, [x.dtype for x in uops])
+    self.assertNotIn(Ops.CDIV, [x.op for x in uops])
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
-    g = UOp.param(0, dtypes.uint32, (8,))
+    g = UOp.param(0, dtypes.uint32, 8)
     c = UOp.const(7).cast(dtypes.uint)
     l = UOp(Ops.LOAD, src=(g.index(c),))
     a = UOp(Ops.CDIV, src=(l, c))
@@ -360,8 +405,8 @@ class TestFastIdiv(unittest.TestCase):
     self.assertNotIn(Ops.CDIV, ops)
 
   def test_disable_fast_idiv(self):
-    g = UOp.param(0, dtypes.uint32, (4,))
-    c = UOp.const(3).cast(dtypes.uint)
+    g = UOp.param(0, dtypes.uint32, 4)
+    c = UOp.const(3)
     l = g.index(c)
     a = UOp(Ops.CDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
@@ -403,8 +448,8 @@ class TestUOpMethod(unittest.TestCase):
       self.assertIs((x != x).simplify(), x.const_like(False, dtypes.bool))
 
   def test_replace(self):
-    x = UOp.param(0, dtypes.int, (1,))
-    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int, (1,)).arg).arg.slot, 1)
+    x = UOp.param(0, dtypes.int, 1)
+    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int, 1).arg).arg.slot, 1)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
   def test_const_zero_neg_zero_different(self):
@@ -447,7 +492,7 @@ class TestUPatHelpers(unittest.TestCase):
 
 class TestUopsObject(unittest.TestCase):
   def test_timing(self):
-    with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
+    with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
     assert len(ret) == 10000
 
   def test_nested(self):
@@ -456,11 +501,19 @@ class TestUopsObject(unittest.TestCase):
     self.assertEqual(a.device, Device.DEFAULT)
 
 class TestUOpRender(unittest.TestCase):
+  def test_render_ssimplified_marg_outside_toposort(self):
+    r = UOp.range(UOp.const(16, dtypes.int), 2, AxisType.WEAK, dtype=dtypes.int)
+    offset = (r * 2) + (r * 2)
+    shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, 32), offset, UOp.const(2, dtypes.int)))
+    self.assertIsNot(shrink.src[1], shrink.marg[0][0])
+    self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
+    self.assertEqual(UOp.range(1, 0, src=(shrink,), dtype=dtypes.int).render(simplify=False), "r0")
+
   def test_render_vectorize_empty(self):
-    u = UOp(Ops.STACK, dtype=dtypes.void, src=())
+    u = UOp(Ops.STACK, src=())
     self.assertEqual(u.render(simplify=False), "{}")
   def test_render_vectorize_empty_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.void, src=())
+    u = UOp(Ops.STACK, src=())
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
     u = UOp(Ops.STACK, src=(UOp.const(0),)*3)
@@ -485,6 +538,82 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_expand_is_none(self): self._check(UOp.empty(1).expand(2), None)
   def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
+                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
+class TestBitcastBufferView(unittest.TestCase):
+  @Context(SPEC=2)
+  def test_render(self):
+    buf = UOp.param(0, dtypes.uint32, 4)
+    uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
+    idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
+    self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
+    Device[Device.DEFAULT].renderer.render(uops)
+
+class TestLocalAccess(unittest.TestCase):
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
+  def test_packed_smem_size(self):
+    renderer = WGSLRenderer(Target("WEBGPU", arch="shader-f16"))
+    _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
+    # a partial word still needs a whole word, so sizes that don't fill one must round up
+    for size in (16, 5):
+      for dtype in _dtypes:
+        temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
+        uops = to_uops_list([temp], ren=renderer)
+        out = renderer.render(uops)
+        # half is supported in wgsl, so it doesn't have to be packed
+        corrected_size = ceildiv(size, 4//dtype.itemsize) if dtype != dtypes.half else size
+        self.assertIn(f",{corrected_size}>;", out)
+
+class TestAssembly(unittest.TestCase):
+  def setUp(self): self.renderer = PTXRenderer(Target("CUDA", arch="sm_80"))
+
+  def test_bitshift_left(self):
+    g1 = UOp.param(0, dtypes.int32, 3)
+    out = UOp.param(1, dtypes.int32, 2)
+    c1 = UOp.const(2)
+    c2 = UOp.const(3)
+    l1 = g1.index(c1)
+    a1 = UOp(Ops.MUL, src=(l1, c1))
+    a2 = UOp(Ops.MUL, src=(l1, c2))
+    uops = to_uops_list([out.index(UOp.const(0)).store(a1), out.index(UOp.const(1)).store(a2)], ren=self.renderer)
+    self.renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHL, ops)
+    self.assertIn(Ops.MUL, ops)
+
+  @unittest.skip("this is a questionable microoptimization i won't enforce")
+  def test_mulacc_unrolled(self):
+    # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
+    # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)
+    a = Tensor.empty(1024)
+    b = Tensor.empty(1024)
+    c = (a*b).sum()
+    ast = c.schedule_linear().src[-1].src[0]
+    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UNROLL))]
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = to_program(ast, self.renderer)
+    uops = tuple(program.src[1].src)
+    self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
+
+  def test_mulacc_shl(self):
+    g1 = UOp.param(0, dtypes.int32, 2)
+    c1 = UOp.const(0)
+    c2 = UOp.const(1)
+    expr = g1.index(c1) * UOp.const(4096) + g1.index(c2)
+    uops = to_uops_list([expr], ren=self.renderer)
+    self.renderer.render(uops)
+    self.assertIn(Ops.MULACC, [x.op for x in uops])
+
+  def test_use_cmpeq(self):
+    g = UOp.param(0, dtypes.uint32, 8)
+    c = UOp.const(7)
+    comp = g.index(c).ne(c).ne(True)
+    uops = to_uops_list([comp], ren=self.renderer)
+    self.renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.CMPEQ, ops)
+    self.assertNotIn(Ops.CMPNE, ops)
 
 if __name__ == '__main__':
   unittest.main()

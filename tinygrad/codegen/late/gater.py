@@ -3,17 +3,17 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 from tinygrad.dtype import Invalid, dtypes
 
 def move_where_load(gate, l, a, w):
-  return l.replace(src=(l.src[0], l.vconst_like(0) if a.is_invalid else
+  return l.replace(src=(l.src[0], l.vconst_like(0) if a.is_invalid else l.const_like(a.val) if a.op is Ops.CONST else
     a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(w.dtype)
 
 pm_move_gates_from_index = PatternMatcher([
   # for image idx (must be first)
   (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx_y"), UPat(arg=Invalid)),
                          UPat.var("gate").where(UPat.var("idx_x"), UPat(arg=Invalid))).load(name="l"),
-   lambda buf,gate,idx_y,idx_x,l: buf.index(idx_y, idx_x, dtype=dtypes.float).load(l.vconst_like(0), gate)),
+   lambda buf,gate,idx_y,idx_x,l: buf.index(idx_y, idx_x).load(l.vconst_like(0), gate)),
   (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx_y"), UPat(arg=Invalid)),
                          UPat.var("gate").where(UPat.var("idx_x"), UPat(arg=Invalid))).store(UPat.var("data")),
-   lambda buf,gate,idx_y,idx_x,data: buf.index(idx_y, idx_x, dtype=dtypes.float).store(data, gate)),
+   lambda buf,gate,idx_y,idx_x,data: buf.index(idx_y, idx_x).store(data, gate)),
 
   # here we create the alt value for load to be 0s and remove the where Invalid
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid)),), name="mop", allow_any_len=True) \

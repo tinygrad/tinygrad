@@ -95,6 +95,36 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertEqual(template.end_turn(), "[/INST]")
     self.assertEqual(template.role("assistant"), "")
 
+  def test_gguf_unused_and_eom(self):
+    kv = { "tokenizer.ggml.tokens": ["<unk>", "</s>", "[PAD7]", "[", "P", "A", "D", "7", "]"],
+           "tokenizer.ggml.token_type": [2, 3, 5, 1, 1, 1, 1, 1, 1],
+           "tokenizer.ggml.pre": "llama3", "tokenizer.ggml.eos_token_id": 1, "tokenizer.ggml.eom_token_id": 0 }
+    tok = SimpleTokenizer.from_gguf_kv(kv)
+    self.assertNotIn(2, tok.encode("[PAD7]"))  # UNUSED(5) tokens are not matched as special
+    self.assertEqual(tok.decode([2]), "[PAD7]")
+    self.assertTrue(tok.is_end(0))  # eom ends generation
+    self.assertFalse(tok.is_end(2))
+
+  def test_tekken_gpt4o_split(self):
+    split = {p: SimpleTokenizer({}, {}, p)._split_to_word.findall for p in ("tekken", "gpt-4o")}
+    shared = {
+      "HelloWorld": ["Hello", "World"],
+      " ÜNICODE": [" ÜNICODE"],  # Ü: non-ascii upper joins the run
+      "é café": ["é", " café"],  # first é is e + U+0301 combining acute (NFD)
+      "เพื่อน วิ": ["เพื่อน", " วิ"],  # thai vowel marks stay in the word
+      "a/b\r\n x": ["a", "/b", "\r\n", " x"],  # punct tail eats /
+    }
+    for s, want in shared.items():
+      self.assertEqual(split["tekken"](s), want, f"tekken {s!r}")
+      self.assertEqual(split["gpt-4o"](s), want, f"gpt-4o {s!r}")
+    differ = [
+      ("12345", list("12345"), ["123", "45"]),  # digits: tekken single, o200k groups {1,3}
+      ("it's I'M don'T", ["it", "'s", " I", "'M", " don", "'T"], ["it's", " I'M", " don'T"]),  # contraction: o200k inline suffix
+    ]
+    for s, tk, go in differ:
+      self.assertEqual(split["tekken"](s), tk, f"tekken {s!r}")
+      self.assertEqual(split["gpt-4o"](s), go, f"gpt-4o {s!r}")
+
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]

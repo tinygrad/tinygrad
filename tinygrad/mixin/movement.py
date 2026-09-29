@@ -46,6 +46,16 @@ class MovementMixin:
     """
     return prod(self.shape)
 
+  @property
+  def max_shape(self) -> tuple[int, ...]:
+    """The shape with every symbolic dimension replaced by its maximum."""
+    from tinygrad.uop.ops import to_max_shape  # deferred: ops.py imports the mixins
+    return to_max_shape(self.shape)
+
+  def max_numel(self) -> int:
+    """The number of elements in `max_shape`."""
+    return prod(self.max_shape)
+
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """
     Returns the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
@@ -68,10 +78,9 @@ class MovementMixin:
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_real)
     return indices
 
-  def _resolve_dim(self, dim: int, *, extra: bool = False) -> int:
-    total = self.ndim + int(extra)
-    if not -max(1, total) <= dim <= max(1, total) - 1:
-      raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total) - 1]}")
+  def _resolve_dim(self, dim: int, *, extra: int = 0) -> int:
+    total = self.ndim + extra
+    if not -max(1, total) <= dim <= max(1, total) - 1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total) - 1]}")
     return dim + total if dim < 0 else dim
 
   def _parse_view_index(self, index, size: sint) -> dict:
@@ -90,8 +99,11 @@ class MovementMixin:
         if resolve(index.step == 0, False): raise ValueError(f"{index=} cannot have 0 as step")
         start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
         step = 1 if index.step is None else index.step
+        # resolve negative int bounds against the (possibly symbolic) size, like slice.indices
+        if isinstance(start, int) and start < 0: start = start + size
+        if isinstance(stop, int) and stop < 0: stop = stop + size
         if all_int((start, stop, step)):
-          # handle int slicing (resolve negative bounds, clamp, stride)
+          # handle int slicing (clamp, stride)
           *bound, stride = index.indices(int(size.vmax) if isinstance(size, UOp) else size)
           bound = [0, 0] if stride * (bound[1] - bound[0]) < 0 else ([bound[1]+1, bound[0]+1] if stride < 0 else bound)
           return {"size":ceildiv(bound[1]-bound[0], abs(stride)), "boundary":tuple(bound), "stride":stride, "collapse_dim":False}
@@ -257,7 +269,7 @@ class MovementMixin:
     dim = tensors[0]._resolve_dim(dim, extra=True)
     assert all(t.shape == tensors[0].shape for t in tensors), f"all shapes must match for stack, got {[t.shape for t in tensors]}"
     ret = tensors[0]._mop(Ops.STACK, arg=tuple(t._uop for t in tensors[1:]))
-    return ret if dim == 0 else ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
+    return ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
 
   # **** high level ****
 
@@ -265,7 +277,8 @@ class MovementMixin:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def pad_to(self, shape, *args) -> Self:
-    return self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
+    ret = self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
+    return self if ret.shape == self.shape else ret
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""
@@ -536,9 +549,11 @@ class MovementMixin:
     if dims is None: return self.flatten().roll(shifts, 0).reshape(self.shape)
     dims, shifts = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), make_tuple(shifts, 1)
     if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
-    shrink_arg: list[tuple[sint, sint]|None] = [None] * self.ndim
-    for d, s in zip(dims, shifts): shrink_arg[d] = (delta:=self.shape[d]-s%self.shape[d], delta+self.shape[d])
-    return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim))).shrink(tuple(shrink_arg))
+    if 0 in self.shape: return self
+    shift = [0] * self.ndim
+    for d, s in zip(dims, shifts): shift[d] += s
+    shrink_arg = tuple((delta:=n-s%n, delta+n) if i in dims else None for i, (n, s) in enumerate(zip(self.shape, shift)))
+    return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim))).shrink(shrink_arg)
 
   # *** movement ops with expand ***
 
