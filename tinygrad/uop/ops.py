@@ -1368,7 +1368,7 @@ class ProgramInfo:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
-    for u in sink.toposort():
+    for u in sink.toposort(enter_calls=False):
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):

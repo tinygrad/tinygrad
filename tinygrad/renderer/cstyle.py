@@ -66,10 +66,11 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
-  # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(name="fptr"),)),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
-   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
-   f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
+  # call an external function: the CUSTOM_FUNCTION body is the callee identity, src[1] is the call target (a function
+  # pointer, a caller-scope value like any other call input), the rest are the args
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(name="fptr")), allow_any_len=True, name="x"), lambda ctx,x,fptr:
+   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[2:])}))({ctx[fptr]}))" +
+   f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[2:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
    f"{body.arg}({', '.join(ctx[x.src[p.arg.slot+1]] for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u: u.arg.slot))});"),
