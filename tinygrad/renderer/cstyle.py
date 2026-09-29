@@ -72,7 +72,7 @@ base_rewrite = PatternMatcher([
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[2:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{body.arg}({', '.join(ctx[x.src[p.arg.slot+1]] for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u: u.arg.slot))});"),
+   f"{ctx.fn_names[body]}({', '.join(ctx[x.src[s+1]] for s in sorted(u.arg.slot for u in body.src if u.op is Ops.PARAM))});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -263,11 +263,12 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
   def render(self, uops:list[UOp]) -> str:
-    prefix, call_bodies = [], []
+    prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
     for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
+      self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)
       params = ', '.join(f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
-      prefix.append(f"static inline void {body.arg}({params}) {{\n" + '\n'.join(call) + "\n}")
+      prefix.append(f"static inline void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
       call_bodies.extend(body.src)
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
