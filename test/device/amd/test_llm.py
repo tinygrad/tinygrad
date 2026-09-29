@@ -5,7 +5,7 @@ from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
                                       QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.helpers import Context, DEV, OSX
+from tinygrad.helpers import DEV, OSX
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
@@ -85,9 +85,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     scales = np.array([0, 2**-24, -2**-24, 2**-14, -0.00035, .001, .0037, -.125, 1, -4, 8], np.float16)
     identity = Tensor(np.eye(768, dtype=np.float16)).realize()
     for typ, size in QUANT_SIZES.items():
-      # TODO: z3 cannot model the integer ORs in IQ3_S/IQ2_S lookup indices.
-      # Compile locally so the CHECK_OOB override also applies to compilation.
-      with self.subTest(ggml_type=typ), Context(**({"CHECK_OOB": 0, "PARALLEL": 0} if typ in (21, 22) else {})):
+      with self.subTest(ggml_type=typ):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
         blocks = packed.reshape(-1, 18) if typ == 20 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
