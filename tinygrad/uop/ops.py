@@ -1337,6 +1337,12 @@ class ProgramInfo:
   ins: tuple[int, ...] = ()
   target: Target = Target()
 
+  @functools.cached_property
+  def fixed_launch(self) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]|None:
+    """Precomputed (global_size, local_size, vals) for kernels with no symbolic dims or vars, None otherwise."""
+    if len(self.vars) or not all(isinstance(x, int) for x in self.global_size+self.local_size): return None
+    return (tuple(cast(tuple[int, ...], self.global_size)), self.local_size, ())
+
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
     global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
     local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])

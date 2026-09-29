@@ -12,6 +12,12 @@ from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
 actions = [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, at)) for at in (AxisType.UPCAST, AxisType.UNROLL) for amt in [0,2,3,4,5,7] for axis in range(10)]
+# CPUs vectorize over the full upcast width, so native vector widths are worth exploring there (8=AVX2, 16=AVX-512)
+cpu_actions = [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, at)) for at in (AxisType.UPCAST, AxisType.UNROLL) for amt in [8,16] for axis in range(10)]
+# register-blocked outer reduce, good for reduces with strided inputs and small outputs (e.g. gemv)
+cpu_actions += [Opt(op=OptOps.OUTER, axis=axis, arg=amt) for amt in [8,16,32] for axis in range(10)]
+# pack a reduce operand with a bad layout into a kernel-local scratch with a transposed layout
+cpu_actions += [Opt(op=OptOps.PACK, axis=axis) for axis in range(10)]
 actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.LOCAL)) for amt in [0,2,3,4,8,13,16,29] for axis in range(8)]
 actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.LOCAL, True)) for amt in [13,16,28,29,32,49,64,256] for axis in range(8)]
 if getenv("BEAM_PADTO", 0): actions += [Opt(op=OptOps.PADTO, axis=axis, arg=amt) for amt in [32] for axis in range(7)]
@@ -82,7 +88,7 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 # get dictionary of all possible actions
 def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dict[int, Scheduler]:
   acted, max_up, max_lcl = {0:s} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256) if max_up is None else max_up, getenv("BEAM_LOCAL_MAX", 1024)
-  for i,a in enumerate(actions):
+  for i,a in enumerate(actions + (cpu_actions if s.ren.target.device == "CPU" else [])):
     if a.axis is not None and a.op is not OptOps.TC:
       if (a.axis >= s.shape_len) or (a.op is OptOps.SPLIT and isinstance(arg:=a.arg, tuple) and s.full_shape[a.axis] == arg[0]
                                      and replace(a, arg=(0,)+arg[1:]) in actions): continue

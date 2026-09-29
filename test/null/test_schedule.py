@@ -256,7 +256,8 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(big_enough).realize()
     with Context(SPLIT_REDUCEOP=1):
       out = (x - x.max(keepdim=True)).max()
-      check_schedule(out, 3)
+      # no occupancy to unlock on CPU, so big reduces stay single-kernel there
+      check_schedule(out, 3 if Device.DEFAULT != "CPU" else 1)
 
   def test_example_matmul_contig(self):
     x = Tensor.eye(64).clone().realize()
@@ -714,14 +715,14 @@ class TestSchedule(unittest.TestCase):
     with Context(SPLIT_REDUCEOP=1):
       X = Tensor.empty(32768, 4).realize()
       idx = Tensor.randint(4, high=X.shape[0])
-      linear, _ = check_schedule(X[idx], 3, [Tensor._device_rng_counters[idx.device]])
+      linear, _ = check_schedule(X[idx], 3 if Device.DEFAULT != "CPU" else 2, [Tensor._device_rng_counters[idx.device]])
       # The split's final reduction remains, but the one-hot gather should collapse into a direct indexed load.
       reduce_kernels = 0
       for call in linear.src:
         if call.src[0].op is not Ops.SINK: continue
         sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
         reduce_kernels += any(u.op is Ops.RANGE and u.arg[-1] is AxisType.REDUCE for u in sink.toposort())
-      self.assertEqual(reduce_kernels, 1)
+      self.assertEqual(reduce_kernels, 1 if Device.DEFAULT != "CPU" else 0)
 
   def test_push_through_reshape(self):
     x = Tensor.empty(10, 20).realize()

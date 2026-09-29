@@ -181,7 +181,7 @@ class LLVMRenderer(Renderer):
         r[u] = f"%{'local' if u.addrspace == AddrSpace.LOCAL else 'reg'}_{str(u.arg.slot)}"
         size = u.max_numel()
         if u.addrspace == AddrSpace.REG:
-          kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}]")
+          kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 64")
         elif self.has_local:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")

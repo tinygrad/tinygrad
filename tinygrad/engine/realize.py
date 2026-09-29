@@ -164,8 +164,11 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
-    global_size, local_size = ast.arg.launch_dims(var_vals)
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
+    if not var_vals and (fixed:=ast.arg.fixed_launch) is not None: global_size, local_size, vals = fixed
+    else:
+      global_size, local_size = ast.arg.launch_dims(var_vals)
+      vals = ast.arg.vals(var_vals)
+    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=vals,
                   wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
