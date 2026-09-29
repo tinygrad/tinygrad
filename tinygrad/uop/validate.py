@@ -11,12 +11,13 @@ if z3.get_version() < (4, 12, 4, 0):
 # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
 def z3_cdiv(a:z3.ArithRef, b:z3.ArithRef) -> z3.ArithRef:return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
 def z3_floordiv(a:z3.ArithRef, b:z3.ArithRef) -> z3.ArithRef: return z3.If(b > 0, a/b, (-a)/(-b))
+# general int bitops are bit-blasted through a 64-bit BV: any real index fits, and it never sets the sign bit so is_signed=True is safe
 def z3_xor(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   if isinstance(a, z3.BoolRef): return a^b
   # x ^ -1 = -(x+1), i.e. bitwise NOT
   if isinstance(b, z3.IntNumRef) and b.as_long() == -1: return -(a+1)
   if isinstance(a, z3.IntNumRef) and a.as_long() == -1: return -(b+1)
-  raise RuntimeError(f"z3 int XOR only supports XOR with -1, got {a=} {b=}")
+  return z3.BV2Int(z3.Int2BV(a, 64) ^ z3.Int2BV(b, 64), is_signed=True)
 def z3_and(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   if isinstance(a, z3.BoolRef): return a&b
   if isinstance(a, z3.IntNumRef): a, b = b, a
@@ -24,10 +25,13 @@ def z3_and(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
     # x & (2^k-1) = x % 2^k and x & -(2^k) = x - x % 2^k for any x in two's complement
     if (m:=b.as_long()+1) > 0 and m&(m-1) == 0: return a%m
     if (m:=-b.as_long()) > 0 and m&(m-1) == 0: return a - a%m
-  raise RuntimeError(f"z3 int AND only supports 2**k-1 and -2**k masks, got {a=} {b=}")
+  return z3.BV2Int(z3.Int2BV(a, 64) & z3.Int2BV(b, 64), is_signed=True)
+def z3_or(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+  if isinstance(a, z3.BoolRef): return a|b
+  return z3.BV2Int(z3.Int2BV(a, 64) | z3.Int2BV(b, 64), is_signed=True)
 z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: z3_cdiv, Ops.FLOORDIV: z3_floordiv,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
-  Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
+  Ops.AND: z3_and, Ops.OR: z3_or, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
 
 # Factor out the minimum count, then shift by its varying bits. Constant counts need no stages.
 def z3_shift(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
