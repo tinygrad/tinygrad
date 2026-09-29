@@ -24,7 +24,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 def lower_broadcast_copy(c:UOp, x:UOp):
   if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
   if (sx:=x.simplify()).device is None: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
-  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
+  return UOp(Ops.MSTACK, src=tuple(x.pad_to(x.max_shape).contiguous().copy_to_device(d) for d in c.device)).shrink_to(c.shape)
 
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK

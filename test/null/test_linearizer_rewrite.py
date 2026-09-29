@@ -1,8 +1,9 @@
 import unittest
-from tinygrad import Tensor, Context, Device
+from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.uop.ops import KernelInfo, AxisType
+from tinygrad.uop.ops import KernelInfo, AxisType, UOp, Ops
+from test.helpers import to_uops_list
 
 class TestLinearizerRewrite(unittest.TestCase):
   def test_reduction(self):
@@ -37,6 +38,17 @@ class TestLinearizerRewrite(unittest.TestCase):
 
     prg = to_program(ast.replace(arg=KernelInfo(name="custom")), Device.default.renderer)
     self.assertEqual(prg.src[0].arg.name, "custom")
+
+  def test_dependent_loop_bound(self):
+    buf, out, counts = UOp.param(0, dtypes.int, 16), UOp.param(1, dtypes.int, 4), UOp.param(2, dtypes.int, 4)
+    outer = UOp.range(4, 0, AxisType.LOOP)
+    inner = UOp.range(counts.index(outer).load().maximum(0).minimum(4), 1)
+    store = buf.index(outer * 4 + inner).store(UOp.const(1, dtypes.int)).end(inner)
+    uops = to_uops_list([out.after(store).index(outer).store(UOp.const(2, dtypes.int))])
+    self.assertEqual([u.op for u in uops if u.op in (Ops.RANGE, Ops.STORE, Ops.END)],
+                     [Ops.RANGE, Ops.RANGE, Ops.STORE, Ops.END, Ops.STORE, Ops.END])
+    rngs, ends = [u for u in uops if u.op is Ops.RANGE], [u for u in uops if u.op is Ops.END]
+    self.assertEqual([e.src[1] for e in ends], rngs[::-1])
 
 if __name__ == '__main__':
   unittest.main()
