@@ -325,13 +325,13 @@ def usb_reap(h:UOp, xfer:UOp) -> UOp: # poll while pending (0xff); idle transfer
   loop = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,))
   events = ccall(libusb.libusb_handle_events_timeout, h.after(loop).index(1).load(), usb_stack(dtypes.uint64, 0, 0).index(0)) # zero timeout
   status = cfield(xfer.after(events), libusb.struct_libusb_transfer, "status").load()
-  return events.backedge(loop, status.eq(0xff))
+  return events.backedge(loop, status.eq(0xff) & ((events >= 0) | events.eq(libusb.LIBUSB_ERROR_INTERRUPTED)))
 
 def usb_drained(h:UOp, need:UOp) -> UOp: # wait for fence == need - 1 or need, mod 256. one byte read avoids tearing
-  loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,)), usb_stack(dtypes.uint32)
-  read = usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_fence(h.device).getaddr("CPU"), 0, slot.index(0), 1)
+  loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,)), usb_stack(dtypes.uint32, 0)
+  read = usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_fence(h.device).getaddr("CPU"), 0, slot.index(0), 1).src[0]
   fence = slot.after(read).index(0).load()
-  return read.backedge(loop, ((need - fence.cast(dtypes.uint64)) & 0xff) > 1)
+  return read.backedge(loop, (read >= 0) & (((need - fence.cast(dtypes.uint64)) & 0xff) > 1))
 
 def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i, numbered run + i
   addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
@@ -349,7 +349,9 @@ def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i
   field = functools.partial(cfield, xfer:=xfer.after(h), libusb.struct_libusb_transfer)
   xfer = xfer.after(field("status").store(0xff), field("length").store(wire.cast(dtypes.uint)),
                     field("buffer").store(stage.getaddr("CPU") + (end - wire).cast(dtypes.uint64)))
-  return ccall(libusb.libusb_submit_transfer, xfer.index(0)).cast(dtypes.void)
+  ret = ccall(libusb.libusb_submit_transfer, xfer.index(0))
+  status = cfield(xfer.after(ret), libusb.struct_libusb_transfer, "status").src[0]
+  return status.index(UOp.const(0).valid(ret < 0)).store(ret.cast(dtypes.uint32))
 
 def usb_copyin(h:UOp, table:UOp, n:int, run:int) -> UOp: # pipeline writes through two halves
   h = h.after(usb_drained(h, UOp.const(run + 1, dtypes.uint64))) # both halves must be free
