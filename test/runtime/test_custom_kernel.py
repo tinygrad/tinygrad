@@ -496,7 +496,7 @@ class TestCustomKernel(unittest.TestCase):
       add_call = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG), A.param_like(1)).sink().call(tmp, A, name="add")
       tmp2 = UOp.alloc_like(A, addrspace=AddrSpace.REG)
       add_call2 = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG),
-                          UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(tmp2, tmp.after(add_call), name="add2")
+                           UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(tmp2, tmp.after(add_call), name="add2")
       sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp2.after(add_call2), name="sum")
       return sum_call.sink(arg=KernelInfo(name="call_in_kernel"))
 
