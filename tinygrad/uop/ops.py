@@ -1324,7 +1324,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
   @property
-  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL and self.body.op is not Ops.CUSTOM_FUNCTION else self.src
+  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 
 @dataclass(frozen=True)
 class KernelInfo:
