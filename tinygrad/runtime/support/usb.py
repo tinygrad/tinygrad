@@ -405,16 +405,16 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
 
   # each control transfer writes 32 bits
   h, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
-  loop, value = None, v
-  if v.dtype.itemsize == 8 and str(unwrap_view(b)[0].tag).startswith("kernargs"):
-    cache = UOp.placeholder((1,), v.dtype, device=HCQ_RUNTIME_DEV.value, volatile=True, tag="usb_arg_cache")
-    cache = cache.after(cache.store(UOp(Ops.BINARY, arg=bytes(v.dtype.itemsize)).bitcast(v.dtype)))
-    loop = UOp.range(cache.index(0).load().ne(v).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int,
+  loop, v = None, v.bitcast(dtypes.uint32 if v.dtype.itemsize == 4 else dtypes.uint64)
+  if str(unwrap_view(b)[0].tag).startswith("kernargs"):
+    cache = UOp.placeholder((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.value, volatile=True, tag="usb_arg_cache")
+    cache = cache.after(cache.store(UOp(Ops.BINARY, arg=bytes(v.dtype.itemsize * cache.max_numel())).bitcast(v.dtype)))
+    loop = UOp.range(cache.index(idx - idx.vmin).load().ne(v).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int,
                      src=(h, v.cast(dtypes.uint32).cast(dtypes.uint64), (v >> 32).cast(dtypes.uint32).cast(dtypes.uint64)))
     h = h.after(loop)
   ret = usb_poke(h, addr, v) if v.dtype.itemsize == 4 else \
     usb_poke(h.after(usb_poke(h, addr, v.cast(dtypes.uint32))), addr + 4, (v >> 32).cast(dtypes.uint32))
-  return cache.after(ret.end(loop)).index(0).store(value) if loop is not None else ret
+  return cache.after(ret.end(loop)).index(idx - idx.vmin).store(v) if loop is not None else ret
 
 def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   if not is_remote(dst): return None
