@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
+from test.helpers import not_support_multi_device
 
 class QuantLinearMixin:
   def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128),
@@ -56,6 +57,37 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
       del table
       gc.collect()
       self.assertIsNone(ref())
+
+  @unittest.skipIf(not_support_multi_device(), "no multi")
+  def test_quant_tables_multidevice(self):
+    devices = (Device.DEFAULT, f"{Device.DEFAULT}:1")
+    for typ in (18, 23):
+      with self.subTest(ggml_type=typ):
+        single = iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)
+        table = (iq4_half_lut(devices) if typ == 23 else _iq_grid(devices, typ)).realize()
+        self.assertEqual(table.device, devices)
+        for i in range(len(devices)):
+          np.testing.assert_array_equal(Tensor(table.uop.mselect(i)).numpy(), single.numpy())
+
+  @unittest.skipIf(not_support_multi_device(), "no multi")
+  def test_quant_linear_multidevice(self):
+    if not amd_custom_kernels_supported(Device.DEFAULT): self.skipTest("RDNA3 required")
+    devices = (Device.DEFAULT, f"{Device.DEFAULT}:1")
+    rng = np.random.default_rng(42)
+    # Exercise both the grid-backed decode path and the IQ4 WMMA lookup table without a TP model.
+    for typ, tokens in ((18, 1), (23, 16)):
+      with self.subTest(ggml_type=typ):
+        raw = Tensor(rng.integers(0, 0x3c, 16*QUANT_SIZES[typ]+4, dtype=np.uint8))
+        x = Tensor(rng.normal(size=(tokens, 256)).astype(np.float32))
+        def run(device):
+          linear = Linear(256, 16, bias=False)
+          linear.weight = ggml_data_to_tensor(raw.to(device).realize()[4:], 16*256, typ).reshape(16, 256)
+          out = linear(x.to(device)).realize()
+          self.assertEqual(linear.ggml_type, typ)
+          return out
+        single, parallel = run(Device.DEFAULT).numpy(), run(devices)
+        for i in range(len(devices)):
+          np.testing.assert_allclose(Tensor(parallel.uop.mselect(i)).numpy(), single, atol=1e-5, rtol=1e-5)
 
   def test_quant_weights_share_storage(self):
     for (ggml_type, type_size), offset in itertools.product(QUANT_SIZES.items(), (0, 4)):
