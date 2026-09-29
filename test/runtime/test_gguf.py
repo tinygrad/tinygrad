@@ -1,6 +1,7 @@
 import gc, os, struct, unittest, tempfile, pathlib, sys, weakref
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc, Context
+from tinygrad.uop.ops import Ops
 from tinygrad.llm.gguf import _ggml_iq_grid, _ggml_iq_signs, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
@@ -225,6 +226,15 @@ class TestGGUF(unittest.TestCase):
     buf += b"\x00" * ((32 - len(buf) % 32) % 32)
     for _, _, _, data in tensors: buf += data
     return bytes(buf)
+
+  def test_raw_load(self):
+    with tempfile.TemporaryDirectory() as d:
+      (path := pathlib.Path(d) / "a.gguf").write_bytes(self._build_gguf([("a", (2, 4), 0, np.arange(8, dtype=np.float32).tobytes())], []))
+      # raw entries are (data, shape, ggml_type) with data a lazy view of the file: nothing is copied until it is used
+      data, shape, typ = gguf_load(path, raw=True)[1]["a"]
+      self.assertEqual((shape, typ), ((2, 4), 0))
+      self.assertTrue(all(u.device.startswith("DISK") for u in data.uop.toposort() if u.op is Ops.BUFFER))
+      np.testing.assert_equal(ggml_data_to_tensor(data.to("CPU"), 8, typ).reshape(shape).numpy(), np.arange(8).reshape(2, 4))
 
   def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:
