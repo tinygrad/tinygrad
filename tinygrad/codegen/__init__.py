@@ -273,7 +273,6 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
-  if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
@@ -488,6 +487,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
+    if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
     ast = graph_rewrite(ast, pm_lower_calls, ctx=renderer, name="lower calls", enter_calls=True)
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
