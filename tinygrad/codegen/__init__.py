@@ -425,7 +425,7 @@ pm_lower_calls = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_an
 pm_call_fixup = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="call"), lambda call,sink:
    call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
-                         arg=to_function_name(call.arg.name or "function")),)+call.src[1:])),
+                         arg=to_function_name(call.arg.name)),)+call.src[1:])),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
