@@ -92,7 +92,6 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
   ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", fn.__module__.split(".")[-1], fn.__name__))
   ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
     next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
-  # function ptr is passed as first arg to CALL
   cargs = [ptr.index(0).load()] + [UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args]
   return UOp.custom_function(fn.__name__).call(*cargs, ret_dtype=ret)
 
