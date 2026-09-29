@@ -1,5 +1,5 @@
 from typing import Callable
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, range_str
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu, range_str
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import cpu_profile
 import z3
@@ -41,15 +41,11 @@ def z3_shift(x:UOp, a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
     a = z3.If(((b-lo) / (1 << i)) % 2 == 1, a / factor if x.op is Ops.SHR else a * factor, a)
   return z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=a.ctx), a)
 
-# handlers take (x, *src exprs): the exprs come from ctx, vmin/vmax come from x
-z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = {
-  Ops.ADD: lambda x,a,b: a+b, Ops.SUB: lambda x,a,b: a-b, Ops.MUL: lambda x,a,b: a*b, Ops.NEG: lambda x,a: -a,
-  Ops.CMPLT: lambda x,a,b: a<b, Ops.CMPNE: lambda x,a,b: a!=b, Ops.CMPEQ: lambda x,a,b: a==b,
-  Ops.MAX: lambda x,a,b: z3.If(a<b, b, a), Ops.WHERE: lambda x,c,a,b: z3.If(c,a,b), Ops.MULACC: lambda x,a,b,c: (a*b)+c,
-  Ops.POW: lambda x,a,b: a**b,
-  Ops.CMOD: lambda x,a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: lambda x,a,b: z3_cdiv(a,b),
-  Ops.FLOORDIV: lambda x,a,b: z3_floordiv(a,b), Ops.FLOORMOD: lambda x,a,b: a-z3_floordiv(a,b)*b,
-  Ops.AND: z3_and, Ops.OR: z3_or, Ops.XOR: z3_xor, Ops.SHL: z3_shift, Ops.SHR: z3_shift,}
+# handlers take (x, *src exprs): x provides vmin/vmax for the bounds-aware ops; anything not here falls back to python_alu
+z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = {Ops.CMOD: lambda _,a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: lambda _,a,b: z3_cdiv(a,b),
+  Ops.FLOORDIV: lambda _,a,b: z3_floordiv(a,b), Ops.FLOORMOD: lambda _,a,b: a-z3_floordiv(a,b)*b,
+  Ops.WHERE: lambda _,c,a,b: z3.If(c,a,b), Ops.MAX: lambda _,a,b: z3.If(a<b, b, a),
+  Ops.AND: z3_and, Ops.OR: z3_or, Ops.XOR: z3_xor, Ops.SHL: z3_shift, Ops.SHR: z3_shift}
 
 def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
@@ -78,7 +74,8 @@ z3_renderer = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: z3.Int("Invalid", ctx=ctx[0].ctx)),
   (UPat(Ops.CONST, name="x"), lambda x,ctx: z3.BoolVal(x.val, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else z3.IntVal(x.val, ctx=ctx[0].ctx)),
   (UPat(Ops.CAST, src=(UPat.var("x"),), name="c"), lambda c,x,ctx: z3_cast(c, ctx[1][x])),
-  (UPat(GroupOp.ALU, name="x"), lambda x,ctx: z3_alu[x.op](x, *(ctx[1][s] for s in x.src))),
+  (UPat(tuple(z3_alu), name="x"), lambda x,ctx: z3_alu[x.op](x, *(ctx[1][s] for s in x.src))),
+  (UPat(GroupOp.ALU, name="x"), lambda x,ctx: python_alu[x.op](*(ctx[1][s] for s in x.src))),
 ])
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
