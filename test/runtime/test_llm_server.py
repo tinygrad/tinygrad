@@ -246,7 +246,7 @@ class TestMediaCache(unittest.TestCase):
       gen.close()
       kv = [b.cache_kv.numpy()[:, :, :, :len(tokens)+count-1].copy() for b in model.blk]
       return out, kv
-    for case in ("same", "append", "changed", "geometry", "removed", "unknown"):
+    for case in ("same", "append", "changed", "geometry", "removed", "unknown", "off_device"):
       with self.subTest(case=case):
         model._cached_tokens = []
         out, _ = run(prompt, [img], 2)
@@ -258,7 +258,8 @@ class TestMediaCache(unittest.TestCase):
         if case == "geometry": images = [img._replace(grid_h=3, grid_w=2)]
         if case == "removed": images = None
         if case == "unknown": images = [img._replace(cache_key=None)]
-        self.assertEqual(model.get_start_pos(tokens, images), 11 if case in ("same", "append") else 2)
+        if case == "off_device": images = [img._replace(embeds=img.embeds.to("CPU:1" if img.embeds.device == "CPU" else "CPU"))]
+        self.assertEqual(model.get_start_pos(tokens, images), 11 if case in ("same", "append", "off_device") else 2)
         resumed, kv = run(tokens, images, 3)
         model._cached_tokens = []
         fresh, fresh_kv = run(tokens, images, 3)

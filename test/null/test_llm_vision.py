@@ -1,7 +1,8 @@
-import unittest
+import hashlib, unittest
+from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor
-from tinygrad.llm.vision import ImageEmbed, smart_resize, mrope_positions, expand_image_tokens, prepare_prompt
+from tinygrad.llm.vision import ImageEmbed, Qwen3VLTower, smart_resize, mrope_positions, expand_image_tokens, prepare_prompt
 
 class TestSmartResize(unittest.TestCase):
   def test_aligns_and_keeps_ratio(self):
@@ -15,6 +16,19 @@ class TestSmartResize(unittest.TestCase):
   def test_min_pixels(self):
     w, h = smart_resize(33, 30, 32, 8192, 4194304)
     self.assertGreaterEqual(w * h, 8192)
+
+class TestImagePreprocessing(unittest.TestCase):
+  def test_encode_resizes_with_bicubic(self):
+    from PIL import Image
+    image = Image.fromarray(np.random.default_rng(42).integers(0, 256, (288, 320, 3), dtype=np.uint8))
+    tower = Qwen3VLTower.__new__(Qwen3VLTower)
+    tower.patch_size, tower.merge_size, tower.min_pixels, tower.max_pixels = 16, 2, 8192, 65536
+    expected = image.resize((256, 224), Image.Resampling.BICUBIC).tobytes()
+    self.assertNotEqual(expected, image.resize((256, 224), Image.Resampling.BILINEAR).tobytes())
+    with patch.object(tower, '_encode') as encode:
+      tower.encode(image)
+      encode.assert_called_once_with(expected, 224, 256)
+    self.assertEqual(tower.image_key, hashlib.sha256(expected).digest())
 
 class TestMRopePositions(unittest.TestCase):
   def test_text_only(self):

@@ -217,9 +217,10 @@ class Qwen3VLTower:
 
   def encode(self, image) -> tuple[Tensor, int, int]:
     """image: PIL image, path, URL or data URI. Returns (embeds buffer copy (max_tokens, dim), gh, gw)."""
+    from PIL import Image
     img = load_image(image) if not hasattr(image, 'size') else image.convert("RGB")
     w, h = smart_resize(img.size[0], img.size[1], self.patch_size * self.merge_size, self.min_pixels, self.max_pixels)
-    img = img.resize((w, h), resample=2)   # 2 = PIL bicubic
+    img = img.resize((w, h), resample=Image.Resampling.BICUBIC)
     raw = img.tobytes()
     self.image_key = hashlib.sha256(raw).digest()
     return self._encode(raw, h, w)
@@ -232,6 +233,7 @@ class Qwen3VLTower:
     n_pad = self.max_patches - ph * pw
     self._buf_mask.assign(Tensor(array('f', [0.0] * (ph * pw) + [-1e4] * n_pad).tobytes(), dtype='float32', device=self.device)).realize()
     self._buf_geom.assign(Tensor(array('i', [ph // 2, pw // 2]).tobytes(), dtype='int32', device=self.device)).realize()
-    # copy out of the jit-managed buffer: the next encode overwrites it
-    return self._vit(self._buf_img, self._buf_geom, self._buf_mask).to(Device.DEFAULT).clone().realize(), \
+    # Keep cached copies on the vision device, not the memory-constrained LLM device.
+    # The next encode overwrites the jit-managed buffer, so each cached image needs its own copy.
+    return self._vit(self._buf_img, self._buf_geom, self._buf_mask).clone().realize(), \
       ph // self.merge_size, pw // self.merge_size

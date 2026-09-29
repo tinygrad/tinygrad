@@ -113,6 +113,19 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(last_chunk.usage.completion_tokens, 2)
     self.assertEqual(last_chunk.usage.total_tokens, 5)
 
+  def test_thinking_template_options(self):
+    cases = [({}, True, None), ({"reasoning_effort": "low"}, True, "low"), ({"reasoning_effort": "none"}, False, "none"),
+             ({"chat_template_kwargs": {"enable_thinking": False}}, False, None),
+             ({"reasoning_effort": "high", "chat_template_kwargs": {"reasoning_effort": "low"}}, True, "low")]
+    with patch.object(self.server, 'template', wraps=self.server.template) as template:
+      for options, enabled, effort in cases:
+        with self.subTest(options=options):
+          self.client.chat.completions.create(model="test", messages=[{"role": "user", "content": "Hello"}], extra_body=options)
+          kwargs = template.render.call_args.kwargs
+          self.assertEqual(kwargs['enable_thinking'], enabled)
+          self.assertEqual(kwargs.get('reasoning_effort'), effort)
+          if effort is None: self.assertNotIn('reasoning_effort', kwargs)  # preserve the template's own default
+
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
       model="test",

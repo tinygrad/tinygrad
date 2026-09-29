@@ -603,7 +603,7 @@ class Transformer:
       for img in images or []:
         # Images wholly inside the reused prefix already occupy these source rows.
         if img.start + img.n_tokens > start_pos:
-          self._buf_img_embd[off:off + img.embeds.shape[0]].assign(img.embeds).realize()
+          self._buf_img_embd[off:off + img.embeds.shape[0]].assign(img.embeds.to(self._buf_img_embd.device)).realize()
         for i in range(img.n_tokens): sel[img.start + i] = off + i
         off += img.n_tokens
       # stage positions and source rows: fixed-size host->device copies, no kernels compiled

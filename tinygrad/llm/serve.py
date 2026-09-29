@@ -136,8 +136,11 @@ class Handler(VizHandler):
     if self.path == "/v1/chat/completions":
       # render and tokenize
       normalize_messages(body["messages"])
+      template_kwargs = body.get("chat_template_kwargs", {})
+      reasoning_effort = template_kwargs.get("reasoning_effort", body.get("reasoning_effort"))
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True,
-        enable_thinking=body.get("chat_template_kwargs", {}).get("enable_thinking", body.get("reasoning_effort") != "none"))
+        enable_thinking=template_kwargs.get("enable_thinking", reasoning_effort != "none"),
+        **({"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {}))
       ids: list[int] = self.server.tok.encode(rendered)
       stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
       # expand image placeholders into vision tokens
