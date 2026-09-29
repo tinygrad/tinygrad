@@ -522,6 +522,19 @@ class TestCustomKernel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render on CPU")
 class TestCallInKernel(unittest.TestCase):
   def test_naming(self):
+    a = Tensor.arange(4).clone().realize()
+
+    def add_impl(X:UOp, Y:UOp, num:int) -> UOp:
+      i = UOp.range(X.numel(), 0)
+      return X[i].store(Y[i] + num).end(i).sink()
+
+    def kernel_1(X:UOp, Y:UOp) -> UOp:
+      xp, yp = X.param_like(0), Y.param_like(1)
+      c1 = xp[i].store(yp[i] + 1).call(B, A, name=n1)
+      c2 = call_add(xp, yp, num=2).call(C, B.after(first), name=n2)
+      return c2.sink(arg=KernelInfo(name="custom_call_add"))
+
+  def test_naming(self):
     def test_call(n1:str, amt1:int, n2:str, amt2:int):
       def call_add(C:UOp, A:UOp, amt:int) -> UOp:
         i = UOp.range(A.numel(), 0)
