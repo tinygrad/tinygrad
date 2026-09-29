@@ -81,6 +81,20 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   np.testing.assert_allclose(c, ref, atol=tc_atol, rtol=tc_rtol)
 
 class TestTensorCores(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.target.arch in ("gfx1200", "gfx1201"), "requires RDNA4")
+  def test_rdna4_fp8(self):
+    for dtype in dtypes.fp8_ocp:
+      with self.subTest(dtype=dtype):
+        self.assertIn(dtype, Device[Device.DEFAULT].renderer.supported_dtypes())
+        a, b = Tensor.randn(32, 64).cast(dtype).realize(), Tensor.randn(48, 64).cast(dtype).realize()
+        expected = a.float().numpy() @ b.float().numpy().T
+        ast, bufs = helper_realized_ast(a.matmul(b.T, dtype=dtypes.float))
+        optimized = replace_opts(ast, [Opt(OptOps.TC, 0, (-1, 0, 1))])
+        prg = to_program(optimized, Device[Device.DEFAULT].renderer)
+        self.assertTrue(any(u.op is Ops.WMMA for u in prg.src[1].src))
+        run_program(optimized, bufs)
+        np.testing.assert_allclose(bufs[0].numpy().reshape(32, 48), expected, atol=1e-4, rtol=1e-4)
+
   # TODO: don't skip bf16 for real device (METAL, AMD)
   @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
