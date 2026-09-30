@@ -122,11 +122,9 @@ pm_resolve_linear_call = PatternMatcher([
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
-  old_function = call.body
-  function = graph_rewrite(old_function, pm_schedule)
-  if function is not old_function: call = call.replace(src=(function,)+call.src[1:])
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile:
-    return call if function is not old_function else None
+  function = graph_rewrite(call.body, pm_schedule)
+  call = call.replace(src=(function,)+call.src[1:])
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return call
   st = time.perf_counter()
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk

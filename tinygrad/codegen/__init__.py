@@ -422,13 +422,14 @@ pm_lower_calls = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lambda ctx,call: lower_sink_call(ctx, call)),
 ])
 
-def fixup_sink_call(call:UOp) -> UOp:
-  sink = graph_rewrite(call.body, pm_call_fixup)
+def fixup_sink_call(call:UOp, sink:UOp) -> UOp:
+  sink = graph_rewrite(sink, pm_call_fixup)
   return call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
                                arg=to_function_name(call.arg.name)),)+call.src[1:])
 
 pm_call_fixup = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lambda call: fixup_sink_call(call)),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="call"),
+   lambda call,sink: fixup_sink_call(call, sink)),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
