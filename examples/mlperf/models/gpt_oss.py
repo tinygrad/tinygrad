@@ -223,7 +223,7 @@ class GPTOSS:
       x_q, x_e8, rrms = rmsnorm_mul_quantize_mxfp8(x, attention_norm, self.norm_eps)
       qkv = matmul_mx((x_q, x_e8), wqkv, wqkv_scale) + wqkv_bias
       norm_saves = [x_q, x_e8, rrms]
-    if getenv("FUSED_RMSNORM_MUL", 0):
+    elif getenv("FUSED_RMSNORM_MUL", 0):
       from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
       x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
       qkv = matmul_mx(x_normed, wqkv, wqkv_scale) + wqkv_bias
@@ -233,11 +233,15 @@ class GPTOSS:
       qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
       norm_saves = [x_normed, rrms]
 
-    qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
-    xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
-    xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
+    if getenv("FUSED_QKV_ROPE", 0):
+      from extra.gptoss_kernels.qkv_rope import fused_qkv_rope
+      xq, xk, xv = fused_qkv_rope(qkv, freqs_cis)
+    else:
+      qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
+      xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
+      xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+      xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
 
     fa_saves = []
     if getenv("HK_FLASH_ATTENTION"):
