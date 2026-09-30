@@ -1135,7 +1135,7 @@ class TestCLI(unittest.TestCase):
       r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
       return x + r
     # turn off scache because this test requires a complete schedule rewrite
-    with save_viz() as viz, Context(SCACHE=0):
+    with save_viz() as viz:
       f(f(Tensor.empty(32, 32, device="NULL"))).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       prgs = [s["name"] for s in run_cli(*files, "-s", "NULL")]
