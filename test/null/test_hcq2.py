@@ -43,7 +43,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   return batches
 
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
-  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.without_after.src[1] for s in batch.body.src)}
+  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.src[1].without_after for s in batch.body.src)}
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
 
@@ -219,7 +219,7 @@ class TestHCQ2Link(unittest.TestCase):
   def test_repeated_word_loops(self): # for (i..10) cmdbuf[off[i]] = var
     var, offs = UOp.placeholder((1,), dtypes.uint32, device="CPU", volatile=True, tag="var"), [4 * i * i for i in range(10)]
     var = hcq2.patch(var, [], bytes(4)) # initialize at link: the allocator may return a reused buffer
-    hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0")
+    hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0", deps=())
     lowered = lower_hcq(var.after(hcq2.bufferize_cmdbuf(hq, "cmdbuf", "CPU")).index(0).store(var.index(0).load() + 1))
     self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
     linked = hcq2.hcq_link(lower_and_compile(lowered), allow_cache=False)
