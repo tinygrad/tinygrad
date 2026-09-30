@@ -37,7 +37,7 @@ def lcast(input_type:DType, output_type:DType):
 
 def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
-            **{d: (".fp8.fp8", ".bf8.bf8")[fp8_index(d)] for d in dtypes.fp8s}, dtypes.int8: "iu8", dtypes.int32: "i32"}
+            **{d: ("." if cdna else "") + ("fp8.fp8", "bf8.bf8")[fp8_index(d)] for d in dtypes.fp8s}, dtypes.int8: "iu8", dtypes.int32: "i32"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
   N,M,K = wmma.arg[0]
   if cdna:
@@ -63,7 +63,7 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   dt_in = "i32" if wmma.arg[1] in dtypes.fp8s else dt_map[wmma.arg[1]]
   suffix = f".v{wmma.max_numel()}{dt_map[wmma.dtype]}.v{wmma.src[0].max_numel()}{dt_in}" if rdna4 else ""
   return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
-    f"{dt_map[wmma.arg[1]].lstrip('.')}{suffix}(" + ", ".join(args) + ")"
+    f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "urem",
