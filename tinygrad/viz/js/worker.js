@@ -55,7 +55,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
     // adjust node dims by label size (excluding escape codes) + add padding
     let dims, source, lang;
     if (label.startsWith("SOURCE\n")) {
-      source = label.split("\n").slice(1).join("\n"); lang = "cpp";
+      source = label.slice("SOURCE\n".length); lang = "cpp";
       const lines = source.split("\n");
       dims = rectDims(Math.min(Math.max(...lines.map(line => monoCtx.measureText(line).width), 0), sourceLineLength), Math.max(lines.length, 1)*16);
     } else {
