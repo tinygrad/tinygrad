@@ -98,7 +98,7 @@ def mtl_msg(obj:UOp, sel:str, *args:UOp|int, out:UOp|None=None) -> UOp:
   return mtl_send(obj.index(0).load(), UOp(Ops.BINARY, arg=sel.encode() + b"\0").index(0), *words, out=out)
 
 @uopfunc
-def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, dev:MetalDevice, slots:UOp|None=None) -> UOp:
+def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, dev:MetalDevice, stamp:UOp|None=None) -> UOp:
   (_, cmds, hdr), devs = icb.tag, (dev.device,) # a command buffer for the commands [first, first + count). icb: args, 3 zeros, header, pipelines
   cb, enc = [UOp.placeholder((1,), dtypes.uint64, 0, device=devs, volatile=True, tag=t) for t in ("mtl_cb", "mtl_enc")]
   fence, event = [mtl_handle(devs, h).index(0).load() for h in ("fence", "event")]
@@ -118,9 +118,9 @@ def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, dev:MetalDe
   c = mtl_msg(enc.after(c), "updateFence:", fence)
   c = mtl_msg(enc.after(c), "endEncoding")
 
-  if slots is not None: # write meta to collect timestamps: [command buffer, 0] until synchronize reads its times. MTL4 solves that dance
-    c = slots.after(c).index(7 + 4 * first).store(0)
-    c = slots.after(c).index(5 + 4 * first).store(cb.after(c).index(0).load())
+  if stamp is not None: # write meta to collect timestamps: [command buffer, 0] until synchronize reads its times. MTL4 solves that dance
+    c = stamp.after(c).index(3).store(0)
+    c = stamp.after(c).index(1).store(cb.after(c).index(0).load())
   if last: c = mtl_msg(cb.after(c), "encodeSignalEvent:value:", event, value)
   return mtl_msg(cb.after(c), "commit").sink()
 
@@ -161,9 +161,9 @@ class MetalQueue(HWQueue):
 
     # collect timestamps using cmdbuf metrics, so sep cmdbufs
     if not self.stamps: return mtl_run(icb, self.value, 0, n, True, self.dev)
-    slots, r = self.stamps[0].src[0], UOp.range(n - 1, next(UOp.unique_num), dtype=dtypes.uint64) # slots: [signal, timeline, [x, start, x, end]...]
-    if n > 1: icb = icb.after(mtl_run(icb.after(r), self.value, r, 1, False, self.dev, slots).end(r))
-    return mtl_run(icb, self.value, n - 1, 1, True, self.dev, slots)
+    slots, r = self.stamps[0].src[0], UOp.range(n - 1, next(UOp.unique_num), dtype=dtypes.uint64) # slots: [signal, timeline, [x, cb, x, end]...]
+    if n > 1: icb = icb.after(mtl_run(icb.after(r), self.value, r, 1, False, self.dev, slots.shrink(((4 + 4 * r, 8 + 4 * r),))).end(r))
+    return mtl_run(icb, self.value, n - 1, 1, True, self.dev, slots.shrink(((4 * n, 4 * n + 4),)))
 
 # *****************
 # device

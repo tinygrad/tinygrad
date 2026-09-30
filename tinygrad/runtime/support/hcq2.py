@@ -429,7 +429,7 @@ def encode_fence(f:UOp) -> UOp:
 pm_hcq_encode = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence),
 
-  # TODO: this will go
+  # TODO: remove that
   (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"), lambda root, a: None if root.op is Ops.LINEAR else
     root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort().keys() - UOp.sink(*a.src[1:]).toposort().keys()
                      if s.op is Ops.STORE}, walk=True)),
