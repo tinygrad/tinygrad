@@ -249,5 +249,7 @@ def gguf_load(fn: Tensor|str|pathlib.Path, return_packed:bool=False) -> tuple[di
   packed = {name: data.to(None) for name, (data, _, _) in entries.items()}
   if packed: Tensor.realize(*packed.values())
   state_dict = {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
-  if return_packed: return kv, state_dict, {n: (packed[n], s, t) for n, (_, s, t) in entries.items() if t in _GGML_QUANT}
+  # NOTE: the returned packed entries are the lazy DISK-backed byte views; callers can bitcast them before copying
+  # to the device (a disk bitcast is a free view and the copy is a flat memcpy, unlike a post-hoc device-side bitcast)
+  if return_packed: return kv, state_dict, {n: (entries[n][0], s, t) for n, (_, s, t) in entries.items() if t in _GGML_QUANT}
   return kv, state_dict

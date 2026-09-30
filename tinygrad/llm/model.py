@@ -1,9 +1,10 @@
 from __future__ import annotations
 import enum, functools, itertools, math, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.helpers import prod
-from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, \
+  FMA_QUANT_TYPES, HALFWORD_QUANTS, Q8_0, amd_fma_gemv_supported, quant_gemv_fma
 from tinygrad.llm.gguf import gguf_load, ggml_data_to_tensor
 from tinygrad.uop.ops import resolve
 
@@ -42,11 +43,25 @@ class ExpertWeights:
   def keep_packed(self, packed:Tensor, shape:tuple[int, ...], ggml_type:int, half:bool=True):
     # keep the weight in packed GGUF format on device; the expert selection gathers packed rows before unpacking,
     # so only the selected experts are decoded instead of the whole expert bank
-    self.packed, self.packed_shape, self.ggml_type, self.packed_half = packed, shape, ggml_type, half
+    self.packed_shape, self.ggml_type, self.packed_half = shape, ggml_type, half
+    if ggml_type in FMA_QUANT_TYPES and amd_fma_gemv_supported(Device.DEFAULT):
+      # the input is a lazy DISK byte view: bitcast before the copy so the bank lands on device already word-typed
+      # (a DISK bitcast is a free view and the copy is a flat memcpy; a post-hoc device bitcast would be an elementwise kernel)
+      self.packed = packed.bitcast(dtypes.uint16 if ggml_type in HALFWORD_QUANTS or ggml_type == Q8_0 else dtypes.uint32).to(None).reshape(-1).realize()
+    else:
+      self.packed = packed.to(None).realize()
     del self.weight
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     if hasattr(self, 'packed'):
+      B, T, k = sel.shape
+      if self.ggml_type in FMA_QUANT_TYPES and isinstance(sel.numel(), int) and amd_fma_gemv_supported(x.device):
+        # fused dequant+GEMV straight from the packed weights (x is broadcast over k for the shared gate/up projections)
+        shared = x.shape[2] == 1
+        xt = x.reshape(B*T, -1) if shared else x.reshape(B*T*k, -1)
+        ret = quant_gemv_fma(self.packed, self.ggml_type, xt.contiguous(), self.packed_shape[1],
+                             sel=sel.reshape(B*T, k), shared_x=shared).reshape(B, T, k, -1)
+        return ret + self.bias[sel] if hasattr(self, 'bias') else ret
       n = prod(self.packed_shape[1:])
       w = ggml_data_to_tensor(self.packed[sel].flatten(), prod(sel.shape)*n, self.ggml_type).reshape(*sel.shape, *self.packed_shape[1:])
       if self.packed_half: w = w.cast('float16')
@@ -81,6 +96,7 @@ class SSMConfig:
   inner_size: int
   kda: bool = False
   gate_lower_bound: float|None = None
+  split_qkv: bool = False  # keep separate q/k/v projections (better for fused quant kernels; GGUF cat defeats format detection)
 
 @dataclass(frozen=True)
 class HCConfig:
@@ -216,6 +232,10 @@ class FFNBlock:
     flat = xs.reshape(*xs.shape[:2], hc * self.config.dim)
     flat = flat * (flat.square().mean(-1, keepdim=True) + self.config.norm_eps).rsqrt()
     mixes = fn(flat)                                                    # (B, T, (2+hc)*hc)
+    if amd_fma_gemv_supported(xs.device) and isinstance(mixes.numel(), int):
+      from tinygrad.llm.kernels.amd import hc_sinkhorn
+      pre, post, comb = hc_sinkhorn(mixes.reshape(-1, (2+hc)*hc), base["weight"], scale["weight"], hc, self.config.hc.sinkhorn_iters, eps)
+      return pre.reshape(*xs.shape[:2], hc), post.reshape(*xs.shape[:2], hc), comb.reshape(*xs.shape[:2], hc, hc)
     pre  = (mixes[..., :hc]         * scale["weight"][0] + base["weight"][:hc]).sigmoid() + eps
     post = (mixes[..., hc:2*hc]     * scale["weight"][1] + base["weight"][hc:2*hc]).sigmoid() * 2
     comb = (mixes[..., 2*hc:]       * scale["weight"][2] + base["weight"][2*hc:]).reshape(*xs.shape[:2], hc, hc)  # (..., src, dst)
@@ -433,7 +453,12 @@ class GatedDeltaNetBlock(FFNBlock):
     assert self.num_v_heads % self.num_k_heads == 0
     self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
-    self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
+    if ssm.split_qkv:
+      self.attn_q, self.attn_k, self.attn_v = (Linear(config.dim, ssm.group_count*ssm.state_size, bias=False),
+                                               Linear(config.dim, ssm.group_count*ssm.state_size, bias=False),
+                                               Linear(config.dim, ssm.inner_size, bias=False))
+    else:
+      self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
     if ssm.kda:
       self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
       self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
@@ -471,9 +496,11 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # qkv conv, conv_state is reset when starting from position 0
     conv_state = initial.where(0, self.conv_state)
+    if hasattr(self, 'attn_qkv'): qkv = self.attn_qkv(x)
+    else: qkv = self.attn_q(x).cat(self.attn_k(x), self.attn_v(x), dim=-1)  # separate fused GEMVs, concat the outputs
     # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
     # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
-    conv_window = conv_state.cat(self.attn_qkv(x).cast(conv_state.dtype), dim=1)
+    conv_window = conv_state.cat(qkv.cast(conv_state.dtype), dim=1)
     conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels)).contiguous()
     # the last conv_kernel-1 columns of the window become the next conv state
     conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
@@ -586,11 +613,12 @@ class Transformer:
       else:  # glm5next: KDA on all trunk layers except every 4th (DSA MLA), the nextn block is dropped
         ssm_layers = tuple((i+1) % 4 != 0 for i in range(kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)))
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'],
-                      kda=True, gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'))
+                      kda=True, gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), split_qkv=arch == 'glm5next')
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
-        state_dict[f"blk.{i}.attn_qkv.weight"] = state_dict.pop(f"blk.{i}.attn_q.weight").cat(
-          state_dict.pop(f"blk.{i}.attn_k.weight"), state_dict.pop(f"blk.{i}.attn_v.weight"), dim=0).contiguous()
+        if arch != 'glm5next':  # glm5next keeps separate q/k/v projections (split_qkv)
+          state_dict[f"blk.{i}.attn_qkv.weight"] = state_dict.pop(f"blk.{i}.attn_q.weight").cat(
+            state_dict.pop(f"blk.{i}.attn_k.weight"), state_dict.pop(f"blk.{i}.attn_v.weight"), dim=0).contiguous()
         state_dict[f"blk.{i}.ssm_conv1d.weight"] = state_dict.pop(f"blk.{i}.ssm_conv1d_q.weight").cat(
           state_dict.pop(f"blk.{i}.ssm_conv1d_k.weight"), state_dict.pop(f"blk.{i}.ssm_conv1d_v.weight"), dim=0).squeeze(1).contiguous()
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
@@ -659,7 +687,7 @@ class Transformer:
     for i in range(config.leading_dense_blocks, config.num_blocks):
       for n in ('gate', 'up', 'down'):
         if (key:=f'blk.{i}.ffn_{n}_exps.weight') in packed:
-          data, shape, typ = packed[key]
+          data, shape, typ = packed.pop(key)  # pop frees the original byte buffer after keep_packed copies the word view
           getattr(model.blk[i], f'ffn_{n}_exps').keep_packed(data.reshape(shape[0], -1), shape, typ, half=bool(getenv("HALF", 1)))
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
