@@ -54,8 +54,13 @@ def benchmark(fxn:Callable, cb=None, **kwargs):
   if cb: cb(end-start)
   return [t.numpy().copy() for t in get_parameters(kwargs.get('output_buffers', output))]
 
+def retarget_call(call):
+  body = graph_rewrite(call.body, pm_retargetable, walk=True)
+  return call.replace(src=(body,)+call.src[1:]) if body is not call.body else None
+
 pm_retargetable = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), lambda call: retarget_call(call)),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat()), name="p"), lambda p: p.replace(src=p.src[:-1]) if p.arg.target.device == "CPU" else None)
 ])
 
-def make_retargetable(jit): jit.captured._linear = graph_rewrite(jit.captured._linear, pm_retargetable, walk=True, enter_calls=True)
+def make_retargetable(jit): jit.captured._linear = graph_rewrite(jit.captured._linear, pm_retargetable, walk=True)

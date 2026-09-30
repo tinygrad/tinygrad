@@ -9,12 +9,20 @@ class TestMockGPUInvalidInstruction(unittest.TestCase):
 import os, sys
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_and_compile, run_linear
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, _substitute
+
+def substitute_call_body(ctx:dict[UOp, UOp], call:UOp) -> UOp:
+  return call.replace(src=(graph_rewrite(call.body, recursive_substitute, ctx, bottom_up=True),)+call.src[1:])
+
+recursive_substitute = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), lambda ctx,call: substitute_call_body(ctx, call)),
+])+_substitute
 
 linear = lower_and_compile((Tensor.empty(1) + 1).schedule_linear())
 binary = linear.src[-1].src[0].src[3]
 lib = binary.arg.replace(bytes.fromhex("0000b0bf"), bytes.fromhex("00fe017e"), 1)
 try:
-  run_linear(linear.substitute({binary: binary.replace(arg=lib)}, enter_calls=True))
+  run_linear(graph_rewrite(linear, recursive_substitute, {binary:binary.replace(arg=lib)}, bottom_up=True))
 except ValueError as error:
   print(error, file=sys.stderr, flush=True)
   os._exit(1)

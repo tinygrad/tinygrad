@@ -197,10 +197,9 @@ class TestCallRewrite(unittest.TestCase):
     call = UOp.custom_function("f", a).call(a)
     for walk in (False, True):
       for bottom_up in (False, True):
-        for enter_calls in (False, True):
-          with self.subTest(walk=walk, bottom_up=bottom_up, enter_calls=enter_calls):
-            ret = graph_rewrite(call, _substitute, {a:b}, walk=walk, bottom_up=bottom_up, enter_calls=enter_calls)
-            self.assertIs(ret, UOp.custom_function("f", b if enter_calls else a).call(b))
+        with self.subTest(walk=walk, bottom_up=bottom_up):
+          ret = graph_rewrite(call, _substitute, {a:b}, walk=walk, bottom_up=bottom_up)
+          self.assertIs(ret, UOp.custom_function("f", a).call(b))
 
   def test_body_shared_with_sibling(self):
     a, b = UOp.const(3), UOp.const(4)

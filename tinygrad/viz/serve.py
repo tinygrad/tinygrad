@@ -190,7 +190,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
     replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
-    try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
+    try: new_sink = next_sink.substitute(replaces, walk=ctx.walk) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],

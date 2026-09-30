@@ -272,6 +272,13 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+def lower_call_weak_dtypes(call:UOp) -> UOp:
+  return call.replace(src=(graph_rewrite(call.body, pm_lower_weak+indexing_simplify+pm_lower_weak_calls),)+call.src[1:])
+
+pm_lower_weak_calls = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), lambda call: lower_call_weak_dtypes(call)),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -339,7 +346,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # the boundary: required compute dtypes settle here; derivable const edges may stay bare
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   # NOTE: symbolic must NOT be composed here -- pm_data_invalid pushes the weak result CAST into a gated WHERE, remaking the weak node, and it cycles
-  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify, name="lower all index dtypes", enter_calls=True)
+  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify+pm_lower_weak_calls, name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
@@ -415,20 +422,26 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+def lower_sink_call(ctx:Renderer, call:UOp) -> UOp:
+  body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, walk=True)
+  return call.replace(src=(full_rewrite_to_sink(body, ctx, optimize=False),)+call.src[1:])
+
 pm_lower_calls = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"),
-   lambda ctx,call: call.replace(src=(full_rewrite_to_sink(call.body, ctx, optimize=False),)+call.src[1:])),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lambda ctx,call: lower_sink_call(ctx, call)),
 ])
 
+def fixup_sink_call(call:UOp) -> UOp:
+  sink = graph_rewrite(call.body, pm_call_fixup)
+  return call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
+                                   arg=to_function_name(call.arg.name)),)+call.src[1:])
+
 pm_call_fixup = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="call"),
-   lambda call,sink: call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
-                                           arg=to_function_name(call.arg.name)),)+call.src[1:])),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lambda call: fixup_sink_call(call)),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  sink = graph_rewrite(sink, pm_call_fixup, name="call fixup", enter_calls=True)
+  sink = graph_rewrite(sink, pm_call_fixup, name="call fixup")
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)
   prg = prg.replace(src=(lst[-1],))
   # isa renderers need to allocate registers
@@ -488,7 +501,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-    ast = graph_rewrite(ast, pm_lower_calls, ctx=renderer, name="lower calls", walk=True, enter_calls=True)
+    ast = graph_rewrite(ast, pm_lower_calls, ctx=renderer, name="lower calls", walk=True)
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection

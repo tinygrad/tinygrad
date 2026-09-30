@@ -487,6 +487,13 @@ pm_views = PatternMatcher([
   (UPat((Ops.PARAM, Ops.BUFFER)).or_after("x").f(Ops.SHRINK, allow_any_len=True, name="v").bitcast().named("b"), bitcast_view),
 ])
 
+def substitute_hcq_call_views(ctx:dict[UOp, UOp], call:UOp) -> UOp:
+  return call.replace(src=(call.body.substitute(ctx, extra_pm=pm_hcq_view_substitute),)+call.src[1:])
+
+pm_hcq_view_substitute = pm_mops+pm_views+PatternMatcher([
+  (UPat(Ops.CALL, name="call"), lambda ctx,call: substitute_hcq_call_views(ctx, call)),
+])
+
 pm_renumber = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
@@ -522,7 +529,7 @@ def lower_call(call:UOp) -> UOp|None:
   offs = {g[0]: list(itertools.accumulate([round_up(u.nbytes(), 128) // u.dtype.itemsize for u in g], initial=0)) for g in groups}
   merged = {g[0]: g[0].replace(arg=replace(g[0].arg, size=offs[g[0]][-1])) for g in groups if len(g) > 1}
   views = {u: merged[g[0]][o:o + u.max_numel()] for g in groups if len(g) > 1 for u, o in zip(g, offs[g[0]])}
-  body = body.substitute(views, extra_pm=pm_mops+pm_views, enter_calls=True)
+  body = body.substitute(views, extra_pm=pm_hcq_view_substitute)
   patches = UOp.sink(*dedup(lt_patches)).substitute(views).src
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber

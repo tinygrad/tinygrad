@@ -122,8 +122,11 @@ pm_resolve_linear_call = PatternMatcher([
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
-  function = call.body
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
+  old_function = call.body
+  function = graph_rewrite(old_function, pm_schedule)
+  if function is not old_function: call = call.replace(src=(function,)+call.src[1:])
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile:
+    return call if function is not old_function else None
   st = time.perf_counter()
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk
@@ -151,7 +154,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   return call.replace(src=(linear,)+call.src[1:])
 
 pm_schedule = PatternMatcher([
-  (UPat(Ops.CALL, name="call"), lower_sink_to_linear),
+  (UPat(Ops.CALL, name="call"), lambda call: lower_sink_to_linear(call)),
 ])
 
 def assert_all_same_devices(ast:UOp):
@@ -273,7 +276,7 @@ def transform_to_call(big_sink:UOp) -> UOp:
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   big_sink = transform_to_call(big_sink)
   # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
+  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear")
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")

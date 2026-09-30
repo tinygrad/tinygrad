@@ -20,6 +20,14 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
     sink = graph_rewrite(sink, TrackedPatternMatcher(pm.patterns), name=names[i] if names else None)
   return sink
 
+def rewrite_viz_call(call:UOp) -> UOp:
+  return call.replace(src=(graph_rewrite(call.body, pm_viz_call),)+call.src[1:])
+
+pm_viz_call = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), lambda call: rewrite_viz_call(call)),
+  (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+])
+
 # small container class for the viz server module
 class VizTrace:
   # loader init
@@ -224,12 +232,11 @@ class TestViz(unittest.TestCase):
       graph_rewrite(a + 4, TrackedPatternMatcher(_substitute.patterns), {a:a+1}, walk=True)
     list(viz.get_details(0, 0))
 
-  def test_enter_calls_rewrite(self):
-    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype))])
+  def test_call_body_rewrite(self):
     with save_viz() as viz:
       inner = UOp.const(3)
       call = UOp.sink(inner).call()
-      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+      graph_rewrite(call, TrackedPatternMatcher(pm_viz_call.patterns))
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 

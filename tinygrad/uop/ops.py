@@ -529,12 +529,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints+(dtypes.weakint,), int)
   def __float__(self): return float(self._eval(dtypes.floats+(dtypes.weakfloat,), float))
-  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
-                           bottom_up=True, walk=walk, enter_calls=enter_calls, name=name)
+                           bottom_up=True, walk=walk, name=name)
   # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
   def __index__(self): return self.__int__()
 
@@ -1634,7 +1634,6 @@ class TrackedGraphRewrite:
   depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
   walk:bool
-  enter_calls:bool
 
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
@@ -1674,7 +1673,7 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
           if not tracked_ctxs: add_trace_group(TracingKey(f"default {fn}"))
           dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
           tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], rewrite_name, depth, kwargs.get("bottom_up", False),
-                                                                   kwargs.get("walk", False), kwargs.get("enter_calls", False)))
+                                                                   kwargs.get("walk", False)))
           active_rewrites.append(ctx)
           key = rewrite_name  # profile spans are named after the rewrite step
       with cpu_profile(key, "TINY") as e:
@@ -1768,13 +1767,12 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None, enter_calls=False):
+  def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-    self.enter_calls = enter_calls
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1797,12 +1795,12 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
-        for x in reversed(n.src[1:] if n.op is Ops.CALL and not self.enter_calls else n.src):
+        # CALL bodies are never rewritten separately.
+        for x in reversed(n.src[1:] if n.op is Ops.CALL else n.src):
           if x not in self.replace: stack.append((x, False))
       else:
         # rebuild node with rewritten srcs
-        skip = int(n.op is Ops.CALL and not self.enter_calls)
+        skip = int(n.op is Ops.CALL)
         new_src = n.src[:skip] + tuple(self.replace.get(x, x) for x in n.src[skip:])
         new_n = UOp(n.op, new_src, n.arg, n.tag) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
@@ -1835,14 +1833,13 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
-        # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite,
-        # rewrites that need them pass enter_calls=True
-        for x in reversed(new_n.src[1:] if new_n.op is Ops.CALL and not self.enter_calls else new_n.src):
+        # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite.
+        for x in reversed(new_n.src[1:] if new_n.op is Ops.CALL else new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        skip = int(new_n.op is Ops.CALL and not self.enter_calls)
+        skip = int(new_n.op is Ops.CALL)
         tmp = list(new_n.src[:skip])
         for x in new_n.src[skip:]:
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
@@ -1882,8 +1879,8 @@ class RewriteContext:
     return self.replace[root]
 
 @rewrite_group(new_ctx=False)
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 
