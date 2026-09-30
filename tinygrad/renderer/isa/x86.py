@@ -8,6 +8,7 @@ from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef
 from tinygrad.helpers import unwrap, Target
+from dataclasses import replace
 
 # ***** X86 Ops *****
 
@@ -146,6 +147,9 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
+  # vector BUFFERs get modeled in STACK space
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
+    x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL)) if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
   (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
@@ -306,7 +310,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag, x.dtype.itemsize)]
   elif is_address(x): defs = [ctx.vreg(WGPR, 8)]
-  elif x.op is Ops.INS and x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
+  elif x.dtype in dtypes.floats or x.op is Ops.INS and x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR, x.dtype.itemsize)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
@@ -434,9 +438,10 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is just the value
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
-    x.ins(X86Ops.MOV, src=(val,), tag=buf.tag) if (buf := a.src[0].without_after if a.op in {Ops.INDEX, Ops.SHRINK} else a.without_after).addrspace is AddrSpace.REG
+    x.ins(X86Ops.MOV if val.dtype in dtypes.ints else X86Ops.VMOVSS, src=(val,), tag=buf.tag)
+      if (buf := a.src[0].without_after if a.op in {Ops.INDEX, Ops.SHRINK} else a.without_after).addrspace is AddrSpace.REG
       and isinstance(buf.tag, tuple) else None),
-  (UPat.var("buf").load().named("x"), lambda ctx,buf,x: base(x,0) if buf.addrspace is AddrSpace.REG else None),
+  (UPat.var("buf").load().named("x"), lambda ctx,buf,x: base(x,1) if buf.addrspace is AddrSpace.REG else None),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: lea(x) if not _is_vec_xmm(x.src[0]) and x.addrspace is not AddrSpace.REG else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
