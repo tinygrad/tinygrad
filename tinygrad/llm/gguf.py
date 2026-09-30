@@ -229,7 +229,7 @@ def gguf_parse(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, tuple[Tenso
       state_dict[name] = (tensor[start:start+nbytes], tuple(reversed(dims)), typ)
   return kv_data, state_dict
 
-def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
+def gguf_load(fn: Tensor|str|pathlib.Path, return_packed:bool=False) -> tuple[dict, dict[str, Tensor]] | tuple[dict, dict[str, Tensor], dict[str, tuple[Tensor, tuple[int, ...], int]]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`. Multi-part splits are auto-merged when loaded by path.
 
@@ -243,8 +243,11 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   ```
 
   Packed weights are copied to the default device before constructing the lazy decoding expressions.
+  With return_packed, also returns `{name: (packed, shape, ggml_type)}` for quantized tensors.
   """
   kv, entries = gguf_parse(fn)
   packed = {name: data.to(None) for name, (data, _, _) in entries.items()}
   if packed: Tensor.realize(*packed.values())
-  return kv, {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
+  state_dict = {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
+  if return_packed: return kv, state_dict, {n: (packed[n], s, t) for n, (_, s, t) in entries.items() if t in _GGML_QUANT}
+  return kv, state_dict
