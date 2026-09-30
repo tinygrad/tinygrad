@@ -522,19 +522,23 @@ class TestCustomKernel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render on CPU")
 class TestCallInKernel(unittest.TestCase):
   def test_nested_call(self):
+    @uopfunc
     def incr(out:UOp, A:UOp):
       i = UOp.range(A.shape[0], 0)
       return out[i].store(A[i]+1).end(i).sink()
 
+    @uopfunc
     def square(out:UOp, A:UOp):
-      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
-      call = incr(UOp.param(0, tmp.dtype, tmp.shape, addrspace=AddrSpace.REG), A.param_like(1)).call(tmp, A, name="incr")
+      tmp0, tmp1 = (UOp.alloc_like(A, addrspace=AddrSpace.REG) for _ in range(2))
+      call0 = incr(tmp0, A)
+      call1 = incr(tmp1, A.after(call0))
+      assert call0.body is call1.body
       i = UOp.range(A.shape[0], 1)
-      return out[i].store(tmp.after(call)[i]**2).end(i).sink()
+      return out[i].store(tmp1.after(call1)[i]**2).end(i).sink()
 
     def kernel(C:UOp, A:UOp):
       tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
-      call = square(UOp.param(0, tmp.dtype, tmp.shape, addrspace=AddrSpace.REG), A.param_like(1)).call(tmp, A, name="square")
+      call = square(tmp, A)
       i = UOp.range(A.shape[0], 2)
       return C[i].store(tmp.after(call)[i]+10).end(i).sink(arg=KernelInfo(name="nested_calls"))
 
@@ -543,11 +547,12 @@ class TestCallInKernel(unittest.TestCase):
     self.assertEqual(out.tolist(), [11, 14, 19, 26])
 
   def test_call_loop_mini(self, apply_opts=False):
+    @uopfunc
+    def mul(p:UOp, q:UOp): return p[0].store(q[0]*3).sink()
+
     def kernel(C:UOp, A:UOp):
       i = UOp.range(4, 0)
-      p = UOp.param(0, dtypes.int, (1,))
-      q = UOp.param(1, dtypes.int, (1,))
-      call = p[0].store(q[0]*3).sink().call(C[i], A[i], name="mul")
+      call = mul(C[i], A[i])
       return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=None if apply_opts else ()))
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
