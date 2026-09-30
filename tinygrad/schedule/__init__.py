@@ -122,8 +122,7 @@ schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = graph_rewrite(call.body, pm_schedule)
-  call = call.replace(src=(function,)+call.src[1:])
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return call
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return call.replace(src=(function,)+call.src[1:])
   st = time.perf_counter()
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk
