@@ -968,9 +968,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def _buffer_view(self) -> tuple[UOp, int]:
-    # Cache only the base UOp and byte offset, never an allocated Buffer view.
+    # Cache only the UOp and byte offset, never an allocated Buffer view.
     if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
-    return cv[0].base, cv[1]*cv[0].dtype.itemsize
+    return cv[0], cv[1]*cv[0].dtype.itemsize
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
@@ -980,8 +980,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # this buffer can process disk tensors and simple movement ops.
     # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage
     if self is not self.base or self.op is Ops.BITCAST:
-      base, offset = self._buffer_view
-      if isinstance(buf:=base.buffer, MultiBuffer):
+      src, offset = self._buffer_view
+      if isinstance(buf:=src.buffer, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset) for x in buf.bufs]
         return mbuf
