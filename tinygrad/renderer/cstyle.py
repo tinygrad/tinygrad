@@ -542,9 +542,9 @@ class HIPRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16", **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-      lambda ctx,x: x.replace(src=tuple(s.bitcast(dtypes.uint32 if ctx.tensor_cores == tc.amd_rdna4 else dtypes.uint64)
+      lambda x: x.replace(src=tuple(s.bitcast(dtypes.uint32 if x.max_numel() == 8 else dtypes.uint64)
                                        for s in x.src[:2]) + (x.src[2],))
-      if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8s else None),
+      if x.max_numel() in (4, 8) and x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8s else None),
   ])
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
