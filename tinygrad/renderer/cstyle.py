@@ -68,7 +68,7 @@ base_rewrite = PatternMatcher([
 
   # call an external function by symbol: the CUSTOM_FUNCTION body names the callee, the srcs are the args and set the types
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
-   f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg}))"
+   f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
   (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
@@ -264,7 +264,7 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def render(self, uops:list[UOp]) -> str:
     prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
-    prefix += [f"extern void {f}();" for f in dedup(u.arg for u in UOp.sink(*uops).toposort() if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
+    prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in UOp.sink(*uops).toposort() if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
     for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
       self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)

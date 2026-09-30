@@ -26,7 +26,7 @@ from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
-from tinygrad.uop.ops import Ops, UPat, PatternMatcher
+from tinygrad.uop.ops import Ops, UPat, PatternMatcher, CustomFunction
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
@@ -839,8 +839,10 @@ class AMDDevice(Compiled):
   sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute"), UPat()), name="s"), lambda s: encode_submit(amd_compute_queue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy"), UPat()), name="s"), lambda s: encode_submit(AMDSDMAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction("submit_amd_compute")), UPat()), name="s"),
+     lambda s: encode_submit(amd_compute_queue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction("submit_amd_copy")), UPat()), name="s"),
+     lambda s: encode_submit(AMDSDMAQueue(s))),
   ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]

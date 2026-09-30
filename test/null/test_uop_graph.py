@@ -431,8 +431,8 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_external_call_preserves_ranges(self):
     r = UOp.range(4, 0, dtype=dtypes.int)
-    fn = UOp.custom_function("external")
-    call = fn.call(UOp.const(0, dtypes.uint64), r + 1, ret_dtype=dtypes.int)
+    fn = UOp.custom_function("external", dtype=dtypes.int)
+    call = fn.call(UOp.const(0, dtypes.uint64), r + 1)
     self.assertEqual(set(call.ranges), {r})
 
   def test_backedge_preserves_outer_range(self):

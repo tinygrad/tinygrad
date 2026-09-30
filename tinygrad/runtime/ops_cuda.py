@@ -3,7 +3,7 @@ import ctypes, functools, mmap, struct, time
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, CustomFunction
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
@@ -96,8 +96,10 @@ class CUDAAllocator(Allocator['CUDADevice']):
 
 class CUDADevice(Compiled):
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_compute"), UPat()), name="s"), lambda s: encode_submit(CUDAQueue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_copy"), UPat()), name="s"), lambda s: encode_submit(CUDAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction("submit_cuda_compute")), UPat()), name="s"),
+     lambda s: encode_submit(CUDAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction("submit_cuda_copy")), UPat()), name="s"),
+     lambda s: encode_submit(CUDAQueue(s))),
   ])
 
   def __init__(self, device:str=""):

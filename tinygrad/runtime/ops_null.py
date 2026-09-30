@@ -2,7 +2,7 @@ import inspect, functools, itertools
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Compiled, HostAllocator, MMIOInterface, Program, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, CustomFunction
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, dedup, prod, panic, cpu_events, perf_counter_us, NULL_ALLOW_COPYOUT, PROFILE
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
@@ -52,7 +52,7 @@ class NullAllocator(HostAllocator):
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
 
 class NullDevice(Compiled):
-  pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=f"submit_null_{q}"), UPat()), name="submit"),
+  pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction(f"submit_null_{q}")), UPat()), name="submit"),
                                lambda submit: encode_submit(NullQueue(submit))) for q in ("compute", "copy")])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))
