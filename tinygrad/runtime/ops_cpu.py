@@ -16,9 +16,9 @@ from tinygrad.runtime.autogen import libc
 MAP_JIT = 0x0800
 
 class CPUProgram(Program['CPUDevice']):
-  rt_lib, libm = DLL('rt', 'System' if OSX else 'kernel' if WIN else 'gcc_s'), DLL('m', 'm')
+  rt_lib, libm = DLL('rt', 'System' if OSX else 'kernel' if WIN else 'gcc_s'), DLL('m', 'ucrtbase' if WIN else 'm')
 
-  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=[self.libm, self.rt_lib])
+  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key

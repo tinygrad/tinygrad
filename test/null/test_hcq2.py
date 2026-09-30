@@ -39,7 +39,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   return batches
 
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
-  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.without_after.src[0] for s in batch.body.src)}
+  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.without_after.src[1] for s in batch.body.src)}
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
 

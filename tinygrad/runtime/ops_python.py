@@ -11,6 +11,8 @@ from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
+from tinygrad.runtime.support.elf import link_sym
+from tinygrad.runtime.support.c import DLL
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
@@ -44,8 +46,9 @@ def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
   return out
 
 class PythonProgram(Program['PythonDevice']):
-  def __init__(self, dev:'PythonDevice', obj:TinyELF):
-    self.uops: list[UOp] = pickle.loads(obj.lib)
+  def __init__(self, dev:'PythonDevice', obj:TinyELF, uops:list[UOp]|None=None):
+    self.uops: list[UOp] = uops or pickle.loads(obj.lib)
+    self.fxns = {u: PythonProgram(dev, obj, list(u.body.src)) for u in self.uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
     self.tensor_cores = PythonRenderer(obj.target).tensor_cores
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
@@ -54,7 +57,7 @@ class PythonProgram(Program['PythonDevice']):
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      values: dict[UOp, Any] = {}
+      values: dict[UOp, Any] = dict(env:=kw.get("env", ())) # a function runs with its params bound to the caller's args
       pbufs: list[int] = list(bufs)
       pvals: list[int] = list(vals)
       exec_masks = [[True] * warp_size]
@@ -78,7 +81,7 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env:
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -140,13 +143,14 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
-        elif u.op is Ops.CALL:
+        elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
+        elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
-          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values[1:]))
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg, list(DLL._loaded_.values())))
           values[u] = []
-          for (fptr,*args),gate in zip(zip(*src_values), exec_masks[-1]):
-            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes[1:])]
-            values[u].append(cfunc(fptr)(*call_args) if gate else None)
+          for args,gate in zip(zip(*src_values), exec_masks[-1]):
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
+            values[u].append(cfunc(*call_args) if gate else None)
         elif u.op is Ops.WMMA: values[u] = wmma(self.tensor_cores, u.arg, src_values, warp_size)
         elif u.op in GroupOp.ALU:
           assert all_same([len(x) for x in src_values]), f"{[len(x) for x in src_values]} doesn't match on {u.op}"

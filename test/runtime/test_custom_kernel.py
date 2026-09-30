@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
-from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -522,19 +522,23 @@ class TestCustomKernel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render on CPU")
 class TestCallInKernel(unittest.TestCase):
   def test_nested_call(self):
+    @uopfunc
     def incr(out:UOp, A:UOp):
       i = UOp.range(A.shape[0], 0)
       return out[i].store(A[i]+1).end(i).sink()
 
+    @uopfunc
     def square(out:UOp, A:UOp):
-      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
-      call = incr(UOp.param(0, tmp.dtype, tmp.shape, addrspace=AddrSpace.REG), A.param_like(1)).call(tmp, A, name="incr")
+      tmp0, tmp1 = (UOp.alloc_like(A, addrspace=AddrSpace.REG) for _ in range(2))
+      call0 = incr(tmp0, A)
+      call1 = incr(tmp1, A.after(call0))
+      assert call0.body is call1.body
       i = UOp.range(A.shape[0], 1)
-      return out[i].store(tmp.after(call)[i]**2).end(i).sink()
+      return out[i].store(tmp1.after(call1)[i]**2).end(i).sink()
 
     def kernel(C:UOp, A:UOp):
       tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
-      call = square(UOp.param(0, tmp.dtype, tmp.shape, addrspace=AddrSpace.REG), A.param_like(1)).call(tmp, A, name="square")
+      call = square(tmp, A)
       i = UOp.range(A.shape[0], 2)
       return C[i].store(tmp.after(call)[i]+10).end(i).sink(arg=KernelInfo(name="nested_calls"))
 
@@ -542,19 +546,70 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [11, 14, 19, 26])
 
-  def test_call_loop_mini(self, apply_opts=False):
+  def test_call_loop_mini(self, opts=()):
+    @uopfunc
+    def mul(p:UOp, q:UOp): return p[0].store(q[0]*3).sink()
+
     def kernel(C:UOp, A:UOp):
       i = UOp.range(4, 0)
-      p = UOp.param(0, dtypes.int, (1,))
-      q = UOp.param(1, dtypes.int, (1,))
-      call = p[0].store(q[0]*3).sink().call(C[i], A[i], name="mul")
-      return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=None if apply_opts else ()))
+      call = mul(C[i], A[i])
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=opts))
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3, 6, 9, 12])
 
+  def test_call_with_gated_store(self):
+    @uopfunc
+    def gated_store(out:UOp, idx:UOp):
+      i = idx[0]
+      return out[i.valid((i >= 0) & (i < out.shape[0]))].store(7).sink()
+
+    def kernel(C:UOp, A:UOp):
+      tmp = UOp.alloc_like(C, addrspace=AddrSpace.REG)
+      i = UOp.range(C.shape[0], 0)
+      init = tmp[i].store(0).end(i)
+      call = gated_store(tmp.after(init), A)
+      j = UOp.range(C.shape[0], 1)
+      return C[j].store(tmp.after(call)[j] + 1).end(j).sink(arg=KernelInfo(name="call_with_gated_store", opts_to_apply=()))
+
+    a = Tensor([2], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [1, 1, 8, 1])
+
   @unittest.expectedFailure
-  def test_call_loop_mini_opts(self): self.test_call_loop_mini(apply_opts=True)
+  def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)
+
+  @unittest.expectedFailure
+  def test_call_loop_split(self): self.test_call_loop_mini((Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),))
+
+  @unittest.expectedFailure
+  def test_call_loop_pad(self):
+    @uopfunc
+    def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
+
+    def kernel(C:UOp, A:UOp):
+      i = UOp.range(3, 0)
+      call = add(C[i], A[i])
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_padto", opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [1, 2, 3, 0])
+
+  def test_uopfunc(self):
+    @uopfunc
+    def axpy(out:UOp, x:UOp, a:int) -> UOp: # a is a trace-time constant: two bodies, two C functions
+      i = UOp.range(x.shape[0], 0)
+      return out[i].store(out[i] + x[i] * a).end(i).sink()
+
+    def kernel(C:UOp, A:UOp) -> UOp:
+      C = C.after(axpy(C.after(axpy(C, A, 2)), A, 3))
+      i = UOp.range(A.shape[0], 1) # a loop after the calls
+      return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [6, 11, 16, 21])
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

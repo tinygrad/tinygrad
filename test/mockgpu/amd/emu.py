@@ -1821,6 +1821,10 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 
 _canonical_runner_cache: list[tuple[type, int, int, int, tuple[UOp, object]]] = []  # [(inst_type, base, mask, size, (prg, runtime)), ...]
 
+def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes) -> tuple[int, int, int, str]:
+  base, mask, size = ctx.canonical_mask(inst_bytes)
+  return base, mask, size, f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+
 @functools.cache
 def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   """Build and compile instruction to (prg, runtime). Cached by instruction bytes, with canonical dedup."""
@@ -1834,8 +1838,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
 
   ctx = _Ctx(inst_size, _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
-  base, mask, size = ctx.canonical_mask(inst_bytes)
-  canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+  base, mask, size, canonical_name = _canonical_info(inst, ctx, inst_bytes)
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
   # NOTE: renderer output is not reproducible because of _MXCSRContext.
