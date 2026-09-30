@@ -279,6 +279,8 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) ->
   return hcq_link(linear, input_uops=input_uops, allow_cache=allow_cache)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
+  assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
+  if len(linear.src) == 0: return
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
