@@ -87,7 +87,7 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
-  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  const labels = nodes.selectAll("g.label").data(d => d.source == null ? [d] : []).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
@@ -114,6 +114,9 @@ const drawGraph = (data) => {
   tokens.on("click", (e, { keys }) => {
     tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
   });
+  nodes.selectAll("foreignObject.source-node").data(d => d.source != null ? [d] : []).join("foreignObject").attr("class", "source-node")
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("width", d => d.width).attr("height", d => d.height)
+    .each((d, i, nodes) => nodes[i].replaceChildren(codeBlock(d.source, d.lang)));
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
