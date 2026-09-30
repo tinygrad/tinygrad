@@ -166,17 +166,8 @@ pm_split = PatternMatcher([
   (UPat((Ops.STAGE, Ops.STORE, Ops.COPY), name="x"), split_kernel),
 ])
 
-def unbind_and_var_val(ctx:dict[str, int], x:UOp):
-  if x.arg.val is None: return None
-  if ctx.get(x.arg.name, x.arg.val) != x.arg.val:
-    raise RuntimeError(f"bind mismatch in {x.arg.name}, {ctx[x.arg.name]} != {x.arg.val}")
-  ctx[x.arg.name] = x.arg.val
-  # TODO: do we just want the const here?
-  return x.unbind()[0]
-
-pm_alloc_to_buffer_unbind = PatternMatcher([
+pm_alloc_to_buffer = PatternMatcher([
   (UPat(Ops.ALLOC, name="x"), lambda x: UOp.new_buffer(x.device, x.max_numel(), x.dtype)),
-  (UPat(Ops.PARAM, name="x"), unbind_and_var_val),
 ])
 
 @rewrite_group(lambda _,ret: f"Schedule2 {pluralize('Kernel', len(ret[0].src))}")
@@ -218,14 +209,13 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Rangeify")
 
-  var_vals: dict[str, int] = {}
   linear = UOp(Ops.LINEAR, src=tuple([u for u in sink.toposort() if u.op == Ops.CALL]))
-  linear = graph_rewrite(linear, pm_alloc_to_buffer_unbind+pm_drop_after, ctx=var_vals, name="Drop After + ALLOC + unbind")
+  linear = graph_rewrite(linear, pm_alloc_to_buffer+pm_drop_after, name="Drop After + ALLOC")
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
-    capturing[0].add_linear(linear, var_vals)
-    return UOp(Ops.LINEAR, src=()), var_vals
+    capturing[0].add_linear(linear)
+    return UOp(Ops.LINEAR, src=()), {}
 
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View Output")
-  return linear, var_vals
+  return linear, {}
