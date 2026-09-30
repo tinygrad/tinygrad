@@ -187,7 +187,7 @@ class MetalAllocator(Allocator['MetalDevice']):
 class MetalDevice(Compiled):
   has_copy_queue = False
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_metal_compute"), UPat()), name="s"), lambda s: encode_submit(MetalQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_metal_compute"), UPat()), name="s"), lambda s: encode_submit(MetalQueue(s))),
   ])
   pm_lower = PatternMatcher([
     (UPat.var("tl").index(UPat(Ops.CONST, arg=0)).load(), lambda tl: mtl_poll(tl) if tl.without_after.tag == "timeline" else None),

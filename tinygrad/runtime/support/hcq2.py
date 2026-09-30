@@ -39,7 +39,7 @@ def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for
 
 def get_enqueue_devs(call:UOp) -> Any|None:
   if call.op is not Ops.CALL: return None # entries can be AFTER-wrapped calls
-  if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg == "encdec"): return None
+  if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return None
   if not (bufs:=get_call_arg_uops(call)): return None
   if call.body.op is Ops.STORE: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
@@ -85,7 +85,7 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
 def ccall(fn:Any, *args:UOp|int) -> UOp:
   ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
     next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
-  return UOp.custom_function(fn.__name__).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args], ret_dtype=ret)
+  return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
 
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 
@@ -312,7 +312,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   num_queues = max(1, getenv("HCQ_NUM_SDMA", min(len(peers), 8) if ALL2ALL >= 1 else 1))
   queues = ["COMPUTE:0" if c.op is Ops.CALL and c.body.op is Ops.PROGRAM else "COPY:0" for c in l.src]
   for i, c in enumerate(l.src):
-    if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION and c.body.arg == "encdec": queues[i] = "ENCDEC:0"
+    if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION and c.body.arg.name == "encdec": queues[i] = "ENCDEC:0"
     if c.op is Ops.CALL and c.body.op is Ops.STORE and all(b.device in peers for b in get_call_arg_uops(c)):
       queues[i] = f"COPY:{(peers.index(c.src[1].device) - peers.index(c.src[2].device) - 1) % len(peers) % num_queues}"
 
@@ -333,7 +333,7 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
     (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
      lambda ctx, dst, src: ctx.copy(dst, src, src.max_numel() * src.dtype.itemsize)),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="s"),), name="c", allow_any_len=True), lambda ctx, c, s: ctx.encdec(c, s)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("encdec", name="s"),), name="c", allow_any_len=True), lambda ctx, c, s: ctx.encdec(c, s)),
 
     # ins
     (UPat(Ops.INS, arg=("copy", dtypes.void), src=(UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
@@ -426,7 +426,7 @@ def hcq_fence(f:UOp) -> UOp:
   return last[0].barrier(*last[1:])
 
 pm_hcq_encode = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence"),), allow_any_len=True, name="f"), hcq_fence),
+  (UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), hcq_fence),
 
   # after blocks are lowered, rechain stores saving original order
   (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),

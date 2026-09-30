@@ -305,7 +305,7 @@ def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, 
 class QCOMDevice(Compiled):
   timestamp_divider = 19.2
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_qcom_compute"), UPat()), name="s"), lambda s: encode_submit(QCOMComputeQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_qcom_compute"), UPat()), name="s"), lambda s: encode_submit(QCOMComputeQueue(s))),
   ])
 
   @property

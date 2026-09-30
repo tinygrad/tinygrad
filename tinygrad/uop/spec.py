@@ -1,6 +1,7 @@
 import math, functools
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
+  CustomFunction
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -106,11 +107,10 @@ spec_shared = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[0], str) and isinstance(x.arg[1], DType)),
 
-  # a CUSTOM_FUNCTION is the body of an external call
-  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
-  # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
-  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
-   lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype),
+  # a CUSTOM_FUNCTION names an external function: the arg is a CustomFunction stating the return dtype
+  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),
+  # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
@@ -156,9 +156,6 @@ spec_tensor = PatternMatcher([
 
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
-
-  # custom function
-  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -290,7 +287,7 @@ def pyrender_globals() -> dict[str, Any]:
   return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
           "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
           "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates, "CallInfo": CallInfo}
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates, "CallInfo": CallInfo, "CustomFunction": CustomFunction}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, pyrender_globals(), lcls)

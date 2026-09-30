@@ -6,11 +6,11 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 
 # an external call is a CALL on a CUSTOM_FUNCTION body naming the symbol, the program links against the loaded libraries
 def call_out_kernel(C:UOp) -> UOp: # frexp writes the exponent through its pointer arg
-  call = UOp.custom_function("frexp").call(UOp.const(8.0, dtypes.float64), C[0], ret_dtype=dtypes.float64)
+  call = UOp.custom_function("frexp", dtype=dtypes.float64).call(UOp.const(8.0, dtypes.float64), C[0])
   return C.after(call)[1].store(C.after(call)[0].load() + 1).sink(arg=KernelInfo(name="call_out"))
 
 def call_ret_kernel(C:UOp) -> UOp:
-  val = UOp.custom_function("sqrt").call(UOp.const(16.0, dtypes.float64), ret_dtype=dtypes.float64)
+  val = UOp.custom_function("sqrt", dtype=dtypes.float64).call(UOp.const(16.0, dtypes.float64))
   return C[0].store(val.cast(dtypes.int) * 2).sink(arg=KernelInfo(name="call_ret"))
 
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "TODO: CALL is rendered in C style only")

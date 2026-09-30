@@ -839,8 +839,8 @@ class AMDDevice(Compiled):
   sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute"), UPat()), name="s"), lambda s: encode_submit(amd_compute_queue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy"), UPat()), name="s"), lambda s: encode_submit(AMDSDMAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_compute"), UPat()), name="s"), lambda s: encode_submit(amd_compute_queue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_copy"), UPat()), name="s"), lambda s: encode_submit(AMDSDMAQueue(s))),
   ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
