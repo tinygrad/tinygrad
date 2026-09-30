@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, round_up
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, TinyELF, HCQ_RUNTIME_DEV
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.schedule.prepare import pm_mops
@@ -404,29 +404,29 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
     stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
   return buf.after(*dep, *stores)
 
-def hcq_fence(f:UOp) -> UOp:
+@uopfunc
+def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
+  # TODO: timeout?
+  done = tl.after(target:=slots.index(last).load(), loop:=UOp.loop(0)).index(0).load()
+  bumped = tl.after(done.backedge(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
+  return slots.after(bumped).index(last).store(nxt).sink()
+
+def encode_fence(f:UOp) -> UOp:
   devs = dedup(to_tuple(s.device)[0] for s in f.src[1:])
   lasts, sigs = f.src[1:1 + len(devs)], f.src[1 + len(devs):]
   last:tuple[UOp, ...] = ()
 
-  # wait for prev schedule to not collide
-  # TODO: timeout?
-  for i, dev in enumerate(devs):
-    slots, off = unwrap_view(lasts[i])
-    slots = patch(slots, [], bytes(slots.max_numel() * slots.dtype.itemsize)) # zeroed at link
-    target = slots.after(*last, tv:=timeline_value((dev,))).index(off // slots.dtype.itemsize).load()
-    done = timeline((dev,)).after(target, loop:=UOp.loop(i)).index(0).load()
-    bumped = timeline((dev,)).after(done.backedge(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
-    last = (slots.after(bumped).index(off // slots.dtype.itemsize).store(nxt),)
+  # wait for prev schedule to not collide, the slots are zeroed at link
+  for dev, (slots, off) in zip(devs, map(unwrap_view, lasts)):
+    slots = patch(slots, [], bytes(slots.nbytes())).after(*last)
+    last = (hcq_fence(slots, timeline((dev,)), timeline_value((dev,)), off // slots.dtype.itemsize),)
 
   # re-arm the signals
-  for sig in sigs:
-    base, off = unwrap_view(sig)
-    last = (base.after(*last).index(off // sig.dtype.itemsize).store(0),)
-  return last[0].barrier(*last[1:])
+  for slots, off in map(unwrap_view, sigs): last = (slots.after(*last).index(off // slots.dtype.itemsize).store(0),)
+  return last[0].barrier()
 
 pm_hcq_encode = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), hcq_fence),
+  (UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence),
 
   # after blocks are lowered, rechain stores saving original order
   (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),
@@ -485,8 +485,8 @@ def lower_call(call:UOp) -> UOp|None:
   body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
                        ctx=(lt_patches:=list[UOp]()), bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])),
-                       ctx=lt_patches, bpm=pm_patches, name="lower")
-  body = graph_rewrite(body, pm_renumber, ctx=itertools.count(), walk=True, name="renumber")
+                       ctx=lt_patches, bpm=pm_patches, enter_calls=True, name="lower")
+  body = graph_rewrite(body, pm_renumber, ctx=itertools.count(), walk=True, enter_calls=True, name="renumber")
 
   if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")
 

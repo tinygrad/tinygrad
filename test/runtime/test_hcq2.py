@@ -6,7 +6,7 @@ from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
@@ -89,7 +89,7 @@ class TestHCQ2Schedule(unittest.TestCase):
         self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
 # the fence and the ffi run on the CPU runtime, which is always available
-@unittest.skipIf(isinstance(Device["CPU"].renderer, NIRRenderer), "segfaults compiling the fence loop with LVP")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, LLVMRenderer)), "CALL is rendered in C style and LLVM only")
 class TestHCQ2Fence(unittest.TestCase):
   def setUp(self):
     self.enterContext(Context(HCQ_RUNTIME_DEV="CPU"))
