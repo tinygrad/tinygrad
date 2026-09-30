@@ -165,5 +165,5 @@ def rdma_submit(ctx, submit:UOp, lin:UOp) -> UOp|None:
   for q in dict.fromkeys(queues.values()):
     positions = [i for i in queues if queues[i] == q]
     for i, copy_ops in zip(positions, rdma_copies(lin.arg[0], [lin.src[i] for i in positions])): ops[i] = copy_ops
-  return submit.replace(src=(lin.replace(src=tuple(flatten(ops))),))
-pm_rdma_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), rdma_submit)])
+  return submit.replace(src=(submit.body, lin.replace(src=tuple(flatten(ops)))))
+pm_rdma_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(Ops.LINEAR, name="lin")), name="submit"), rdma_submit)])

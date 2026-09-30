@@ -101,7 +101,7 @@ class TestHCQ2Fence(unittest.TestCase):
 
   def test_a_schedule_waits_for_its_previous_run(self):
     slots = UOp.placeholder((4,), dtypes.uint64, device=("CPU",), volatile=True, tag="slots")
-    program = lower_and_compile(UOp(Ops.LINEAR, src=(lower_hcq(UOp.custom_function("hcq_fence", slots[0:2], slots[2:4])),)))
+    program = lower_and_compile(UOp(Ops.LINEAR, src=(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])),)))
     linked = hcq2.hcq_link(program, allow_cache=False)
     (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.arg.name == "slots"]
     slots_mv = linked.src[0].without_after.src[1 + i].buffer.host.view(fmt='Q')

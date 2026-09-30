@@ -560,10 +560,10 @@ class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda submit: encode_submit(NVComputeQueue(submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda submit: encode_submit(NVCopyQueue(submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec", name="submit"), lambda submit: encode_submit(NVEncDecQueue(submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw", name="submit"), lambda submit: encode_submit(NVQueue(submit))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute"), UPat()), name="s"), lambda s: encode_submit(NVComputeQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy"), UPat()), name="s"), lambda s: encode_submit(NVCopyQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec"), UPat()), name="s"), lambda s: encode_submit(NVEncDecQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw"), UPat()), name="s"), lambda s: encode_submit(NVQueue(s))),
   ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
@@ -680,7 +680,7 @@ class NVDevice(Compiled):
     submit = make_submit(
       UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
       UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
-      UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue).replace(arg="submit_nv_raw")
+      UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue, fn="submit_nv_raw")
     call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)
