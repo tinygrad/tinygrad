@@ -535,7 +535,9 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_shrink(self): self._check(UOp.empty(10)[1:8], 1)
   def test_2d(self): self._check(UOp.empty(2,5)[1, 2:4], 7)
   def test_shrink_to_one(self): self._check(UOp.empty(10)[1], 1)
+  def test_bitcast_shrink_to_one(self): self._check(UOp.empty(2, dtype=dtypes.uint32).bitcast(dtypes.uint8)[4:8], 1)
   def test_expand_is_none(self): self._check(UOp.empty(1).expand(2), None)
+  def test_expand_const_is_none(self): self._check(UOp.const(5.0).reshape((1,)).expand((4,)), None)
   def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
 

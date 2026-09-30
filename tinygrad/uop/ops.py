@@ -942,10 +942,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # by relevant CL runtimes at time of writing.
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((dev,) if isinstance(dev, str) else dev)): return None
 
-    idx = self.flatten().index(UOp.range(self.numel(), 0))
-    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
-    if out.op is not Ops.INDEX or not (b:=out.src[0]).tag or (c:=out.src[1]).op is not Ops.CONST or not isinstance(c.val, int): return None
-    return b.rtag(None), c.val
+    rng = UOp.range(self.numel(), 0)
+    out = graph_rewrite(self.flatten().index(rng), pm_mops+symbolic, name="contiguous_view_offset")
+    if out.op is not Ops.INDEX or len(out.src)-1 != len((b:=out.src[0]).shape): return None
+    offset = (sum(i*s for i,s in zip(out.src[1:], strides_for_shape(b.shape))) - rng).ssimplify()
+    if not isinstance(offset, int): return None
+    if b.op is not Ops.BITCAST: return b, offset
+    osz, isz = b.element_size(), b.src[0].element_size()
+    if (offset*osz) % isz or (self.numel()*osz) % isz: return b, offset
+    return b.src[0].flatten()[offset*osz//isz:(offset+self.numel())*osz//isz].contiguous_view()
 
   def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
 
@@ -1903,22 +1908,6 @@ def gate_kernel_sink(x:UOp) -> bool:
   if x.op is Ops.SINK and isinstance(x.arg, KernelInfo): return False
   return True
 
-
-def contiguous_bitcast_index(ctx:UOp, b:UOp, idx:UOp):
-  if len(idx.src)-1 != len(b.shape): return None
-  offset = (sum(i*s for i,s in zip(idx.src[1:], strides_for_shape(b.shape))) - UOp.range(ctx.numel(), 0)).ssimplify()
-  osz, isz = b.element_size(), b.src[0].element_size()
-  if not isinstance(offset, int) or (offset*osz) % isz or (ctx.numel()*osz) % isz: return None
-  return b.src[0].flatten().index(UOp.range(ctx.numel()*osz//isz, 0) + offset*osz//isz)
-
-# ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
-pm_contiguous_view_offset = PatternMatcher([
-  (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), contiguous_bitcast_index),
-  (UPat(Ops.INDEX, src=(UPat.var("b"),)), lambda b: b.rtag().index(0)),
-  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE))), lambda b: b.rtag().index(0)),
-  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c)),
-  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c) if resolve(ctx.numel() == 1, False) else None),
-])
 
 # *** what was symbolic.py ***
 

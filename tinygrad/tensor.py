@@ -165,7 +165,7 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda *tensors,ret: f"Bufferize {len(tensors)}")
+  @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
