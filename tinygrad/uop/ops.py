@@ -1332,6 +1332,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
 def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(*args): uop args become params
   def param(i:int, n:str, a:UOp) -> UOp:
+    if (b:=a.without_after).op is Ops.PARAM and b.tag: return b # a placeholder is global, the body names it
     shape = None if a.addrspace in (None, AddrSpace.ALU) else 1 if a.op is Ops.INDEX else a.max_numel()
     return UOp.param(i, a.dtype, shape, name=n, addrspace=a.addrspace or AddrSpace.ALU)
   def outlined(*args, **kwargs) -> UOp:

@@ -268,7 +268,8 @@ class CStyleLanguage(Renderer):
     for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
       self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)
-      params = ', '.join(f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
+      params = ', '.join(("volatile " if p.arg.volatile else "") +
+                         f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
       prefix.append(f"static inline void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
       call_bodies.extend(body.src)
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
