@@ -11,9 +11,28 @@ class RemoteCmd(enum.IntEnum):
 class RemoteMMIOInterface(MMIOInterface):
   def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', off=0, rd_cmd=RemoteCmd.MMIO_READ, wr_cmd=RemoteCmd.MMIO_WRITE):
     self.dev, self.residx, self.nbytes, self.fmt, self.off, self.el_sz = dev, residx, nbytes, fmt, off, struct.calcsize(fmt)
-    self.rd_cmd, self.wr_cmd = rd_cmd, wr_cmd
+    self.rd_cmd, self.wr_cmd, self._remapped = rd_cmd, wr_cmd, False
 
   def __getitem__(self, index):
+    result = self._get(index)
+    # the RM firmware reprograms BAR windows mid-boot (NV90F1 COPY_SERVER_RESERVED_PDES);
+    # established mappings can then read all-ones while the GPU stays healthy (issue #18523).
+    # Re-map once and retry: a fresh IOConnectMapMemory64 reads the new window.
+    if self.rd_cmd == RemoteCmd.MMIO_READ and not self._remapped and self._all_ones(result, index):
+      self._remapped = True
+      self.dev.resize_bar(self.residx)
+      result = self._get(index)
+    return result
+
+  def _all_ones(self, result, index) -> bool:
+    # page-table reads are >=8 bytes of all-ones (memory.py:140 signature); single 8-byte values too
+    if isinstance(result, (bytes, bytearray, memoryview)): return len(result) >= 8 and all(b == 0xFF for b in result)
+    if isinstance(result, int): return result == 0xFFFFFFFFFFFFFFFF
+    if isinstance(result, list): return len(result) >= 1 and all(v == 0xFFFFFFFFFFFFFFFF for v in result if isinstance(v, int)) \
+      and any(isinstance(v, int) for v in result)
+    return False
+
+  def _get(self, index):
     sl = index if isinstance(index, slice) else slice(index, index + 1)
     start, stop = (sl.start or 0) * self.el_sz, (sl.stop or len(self)) * self.el_sz
     data = self.dev._bulk_read(self.rd_cmd, self.residx, self.off + start, stop - start)

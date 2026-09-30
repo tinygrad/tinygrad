@@ -225,8 +225,17 @@ static void handle_client(int fd) {
       break;
     }
 
-    case CMD_RESIZE_BAR:
+    case CMD_RESIZE_BAR: {
+      // re-map on demand: the RM firmware reprograms BAR windows mid-boot
+      // (NV90F1 COPY_SERVER_RESERVED_PDES); established mappings go stale
+      // while the GPU and the new window stay healthy (see issue #18523).
+      if (req.bar >= MAX_BARS) { resp.status = 1; break; }
+      if (g_bars[req.bar].addr)
+        IOConnectUnmapMemory64(g_conn, req.bar, mach_task_self(), g_bars[req.bar].addr);
+      g_bars[req.bar].addr = 0;
+      resp.status = map_bar(req.bar, &resp) ? 1 : 0;
       break;
+    }
 
     case CMD_RESET:
       resp.status = dext_rpc(2, NULL, 0, NULL) ? 1 : 0;
