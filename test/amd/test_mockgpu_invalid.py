@@ -18,7 +18,7 @@ recursive_substitute = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lambda ctx,call: substitute_call_body(ctx, call)),
 ])+_substitute
 
-def substitute_enter_calls(sink, dvars): return graph_rewrite(linear, recursive_substitute, {binary:binary.replace(arg=lib)}, bottom_up=True)
+def substitute_enter_calls(sink, dvars): return graph_rewrite(sink, recursive_substitute, dvars, bottom_up=True)
 
 linear = lower_and_compile((Tensor.empty(1) + 1).schedule_linear())
 binary = linear.src[-1].src[0].src[3]

@@ -54,9 +54,7 @@ def benchmark(fxn:Callable, cb=None, **kwargs):
   if cb: cb(end-start)
   return [t.numpy().copy() for t in get_parameters(kwargs.get('output_buffers', output))]
 
-def retarget_call(call):
-  body = graph_rewrite(call.body, pm_retargetable, walk=True)
-  return call.replace(src=(body,)+call.src[1:])
+def retarget_call(call): return call.replace(src=(graph_rewrite(call.body, pm_retargetable, walk=True),)+call.src[1:])
 
 pm_retargetable = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lambda call: retarget_call(call)),
