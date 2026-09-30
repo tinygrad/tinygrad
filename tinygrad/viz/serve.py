@@ -133,8 +133,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op in GroupOp.Movement and u.marg: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
-    wrap_len = 200 if u.op is Ops.SOURCE else 80
-    label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''), wrap=wrap_len)) if u.arg is not None else ''}"
+    if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
+    label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
       if x in excluded:
@@ -164,9 +164,6 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
-    # limit SOURCE labels line count
-    if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
-      label = "\n".join(lines[:30]) + "\n..."
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
