@@ -513,7 +513,7 @@ pm_views = PatternMatcher([
 # unwrap to base and byte offset. drops afters (an address has no deps) and merges views into one slot
 def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes.uint8)[v[1]:v[0].nbytes()].getaddr(to_tuple(g.arg)[0])
 
-def fish_addrs(call:UOp, body:UOp) -> UOp: # in a function the address of a param is the address of its arg, in a program addrs load from a table
+def lift_addrs(call:UOp, body:UOp) -> UOp: # in a function the address of a param is the address of its arg, in a program addrs load from a table
   params = [p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.addrspace is AddrSpace.GLOBAL and p.tag is p.device is None]
   addrs = {g: g.substitute({p: call.src[1 + p.arg.slot] for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
   if body.arg is None or not addrs: return call.replace(src=(body.substitute(addrs, enter_calls=True), *call.src[1:]))
@@ -526,9 +526,9 @@ def fish_addrs(call:UOp, body:UOp) -> UOp: # in a function the address of a para
   slot_of = {g: i for i, g in enumerate(input_addrs + link_addrs)}
   body = body.substitute({g: table.index(slot_of[normalize(a)]).load() for g, a in addrs.items()}, enter_calls=True)
   return call.replace(src=(body, *call.src[1:], patch(table, [(8 * slot_of[g], g) for g in link_addrs])), arg=replace(call.arg, aux=info))
-pm_fish_addrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_addrs)])
+pm_lift_addrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), lift_addrs)])
 
-def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders a body uses merge by kind and become its params, args of the call
+def lift_placeholders(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders a body uses merge by kind and become its params, args of the call
   bufs, alus = partition([u for u in body.toposort(enter_calls=False) if u.op is Ops.PARAM and (u.tag or u.is_variable)], lambda u: u.tag)
   if not bufs: return call
 
@@ -547,13 +547,13 @@ def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders
   params = {b: UOp.param(i:=slots[b], b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for b in final}
   vals = {a: a.replace(arg=replace(a.arg, slot=slots[a.arg.name])) for a in alus}
   return call.replace(src=(body.substitute(views, extra_pm=pm_mops+pm_views).substitute(params | vals), *args, *new))
-pm_fish_bufs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_bufs)])
+pm_lift_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), lift_placeholders)])
 
 def runtime_rewrites(linear:UOp) -> UOp:
   if not any(u.op is Ops.GETADDR or (u.op is Ops.PARAM and u.tag) for u in linear.toposort()): return linear # nothing to rewrite
 
-  linear = graph_rewrite(linear, pm_fish_addrs, walk=True, enter_calls=True, name="fish addrs")
-  return graph_rewrite(linear, pm_fish_bufs, ctx=(views:=dict[UOp, UOp]()), walk=True, enter_calls=True, name="fish bufs").substitute(views)
+  linear = graph_rewrite(linear, pm_lift_addrs, walk=True, enter_calls=True, name="lift addrs")
+  return graph_rewrite(linear, pm_lift_placeholders, ctx=(views:=dict[UOp, UOp]()), walk=True, enter_calls=True, name="lift placeholders").substitute(views)
 
 # *****************
 # 5. compile
