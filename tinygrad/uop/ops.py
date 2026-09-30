@@ -276,7 +276,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
-    res: dict[UOp, None] = self.toposort()
+    res: dict[UOp, None] = self.toposort(enter_calls=False)
     res.pop(self)
     return res
 
@@ -301,7 +301,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
+          for s in reversed(node.src if enter_calls else node.src_without_body):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -468,7 +468,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
-    if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION and self.body.src: return ()
+    if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION: return ()
     if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE)
     if self.op is Ops.BACKEDGE: return self.src[1:2]  # the condition's other ranges remain live
     if self.op in range_start: return self.src[range_start[self.op]:]
@@ -748,11 +748,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.EXPAND: return src_axis + len(self.marg) if src_axis is not None else None
     return src_axis
 
-  def _unshard(self, axis:int) -> UOp:
-    bsz, dcount = self.shape[axis], len(self.device)
-    dnum = UOp.range(dcount, -1, AxisType.DEVICE)
-    return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
-
   def _shard(self, axis:int, rng:UOp) -> UOp:
     if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
     dcount = int(rng.vmax)+1
@@ -862,7 +857,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     buf = MultiBuffer(device, size, dtype) if isinstance(device, tuple) else Buffer(device, size, dtype)
     return UOp(Ops.BUFFER, src=UOp.device_range_src(device), arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
   @staticmethod
-  def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
+  def from_buffer(opaque:Buffer|MultiBuffer, device:str|tuple[str, ...]|None=None):
     # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
     return UOp(Ops.BUFFER, src=UOp.device_range_src(device or opaque.device),
                arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
@@ -1269,7 +1264,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
-    # body holding the callee (a function pointer), rendered as an indirect call
+    # body holding CUSTOM_FUNCTION op, the callee (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
                                                         ret_dtype if ret_dtype is not None else dtypes.void))
 
@@ -1328,6 +1323,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           tuple((v.arg.name, len(self.arg.globals)+j, v.dtype, v._shape) for j, v in enumerate(self.arg.vars))
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
+  @property
+  def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
+
+def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(*args): uop args become params
+  def param(i:int, n:str, a:UOp) -> UOp:
+    shape = None if a.addrspace in (None, AddrSpace.ALU) else 1 if a.op is Ops.INDEX else a.max_numel()
+    return UOp.param(i, a.dtype, shape, name=n, addrspace=a.addrspace or AddrSpace.ALU)
+  def outlined(*args, **kwargs) -> UOp:
+    bound = inspect.signature(fn).bind(*args, **kwargs).arguments
+    ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
+    return fn(**(bound | {n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})).call(*ins.values(), name=fn.__name__)
+  return functools.wraps(fn)(outlined)
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
@@ -1365,7 +1373,7 @@ class ProgramInfo:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
-    for u in sink.toposort():
+    for u in sink.toposort(enter_calls=False):
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -1677,7 +1685,8 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
       if CAPTURE_PROCESS_REPLAY and replay:
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
-        while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+        while (f_back:=frm.f_back) is not None and f_back.f_globals.get("__name__", "").split(".")[0] not in ("unittest", "_pytest"):
+          frm = f_back
         replay_loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
         inputs = (fn, args, kwargs, ContextVar._cache)

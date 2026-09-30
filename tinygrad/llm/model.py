@@ -20,7 +20,7 @@ class YaRNConfig:
   beta_slow: float
 
 @functools.cache
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None, yarn:YaRNConfig|None=None) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|tuple[str, ...]|None=None, yarn:YaRNConfig|None=None) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2) / dim))
   concentration = 1.0
   if yarn is not None and yarn.factor > 1.0:

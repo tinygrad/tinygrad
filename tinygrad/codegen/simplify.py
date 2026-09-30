@@ -2,14 +2,14 @@ import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  return r.replace(src=r.src[:off]+tuple(UOp.sink(*rngs).ranges))
+  return r.replace(src=r.src[:off]+tuple(dedup(x for s in rngs for x in ((s,) if s.op is Ops.RANGE else s.ranges))))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only

@@ -106,7 +106,7 @@ spec_shared = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[0], str) and isinstance(x.arg[1], DType)),
 
-  # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
+  # a CUSTOM_FUNCTION is the body of an external call
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
   # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),

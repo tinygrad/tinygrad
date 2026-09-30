@@ -69,13 +69,10 @@ def create_schedule(sched_sink:UOp) -> UOp:
     linearized: list[UOp] = []
     while len(queue):
       rk = queue.popleft()
-      if rk.op is Ops.LINEAR:
-        linearized.extend(rk.src)
-      else:
-        k = rk.src[0] if rk.op is Ops.END else rk
-        assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-        linearized.append(k.replace(src=(k.body, *buf_uops)))
+      k = rk.src[0] if rk.op is Ops.END else rk
+      assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
+      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+      linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -113,7 +110,7 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
-    subs = {v:binds[v.arg.slot] for v in si.variables() if v.arg.slot in binds}
+    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
@@ -300,5 +297,5 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}
   return memory_plan_rewrite(linear, held_bufs), var_vals

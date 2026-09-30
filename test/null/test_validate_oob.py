@@ -97,9 +97,40 @@ class TestValidateOOB(unittest.TestCase):
       to_uops_list([buf.index((r & -4).valid(r < 16)).load()])  # 0..12 valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(r & -2).load()])  # 0..100 oob
-      # other masks can't be modeled as mod
-      with self.assertRaisesRegex(RuntimeError, "z3 int AND only supports"):
+      # any mask is modeled now, and r&21 can hit 16..21
+      with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(r & 21).load()])
+
+  def test_or(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf = UOp.param(0, dtypes.int, 512)
+      r = UOp.range(256, 0, AxisType.GLOBAL)
+      # disjoint bits: a byte | high bits << 8
+      to_uops_list([buf.index((r & 255) | ((r & 1) << 8)).load()])  # 0..511 valid
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index((r & 255) | ((r & 3) << 8)).load()])  # 0..1023 oob
+      # overlapping bits
+      to_uops_list([buf.index(r | (r << 1)).load()])  # 0..511 valid
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(r | (r << 3)).load()])  # 0..2047 oob
+
+  def test_or_negative(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf = UOp.param(0, dtypes.int, 16)
+      v, u = Variable("v", -16, -1), Variable("u", 0, 15)
+      # or with a negative side is negative, the mask is never true
+      w = v | u
+      to_uops_list([buf.index(w.valid(w >= 0)).load()])
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(w).load()])
+
+  def test_or_in_mask(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf = UOp.param(0, dtypes.int, 32)
+      r = UOp.range(64, 0, AxisType.GLOBAL)
+      to_uops_list([buf.index(r.valid((r < 8) | ((r >= 16) & (r < 32)))).load()])  # 0..7,16..31 valid
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(r.valid((r < 8) | (r >= 56))).load()])  # 8..55 unmasked
 
   def test_max(self):
     with Context(CHECK_OOB=1, SPEC=2):

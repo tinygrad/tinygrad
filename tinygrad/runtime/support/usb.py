@@ -325,13 +325,13 @@ def usb_reap(h:UOp, xfer:UOp) -> UOp: # poll while pending (0xff); idle transfer
   loop = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,))
   events = ccall(libusb.libusb_handle_events_timeout, h.after(loop).index(1).load(), usb_stack(dtypes.uint64, 0, 0).index(0)) # zero timeout
   status = cfield(xfer.after(events), libusb.struct_libusb_transfer, "status").load()
-  return events.backedge(loop, status.eq(0xff))
+  return events.backedge(loop, status.eq(0xff) & ((events >= 0) | events.eq(libusb.LIBUSB_ERROR_INTERRUPTED)))
 
 def usb_drained(h:UOp, need:UOp) -> UOp: # wait for fence == need - 1 or need, mod 256. one byte read avoids tearing
-  loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,)), usb_stack(dtypes.uint32)
-  read = usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_fence(h.device).getaddr("CPU"), 0, slot.index(0), 1)
+  loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,)), usb_stack(dtypes.uint32, 0)
+  read = usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_fence(h.device).getaddr("CPU"), 0, slot.index(0), 1).src[0]
   fence = slot.after(read).index(0).load()
-  return read.backedge(loop, ((need - fence.cast(dtypes.uint64)) & 0xff) > 1)
+  return read.backedge(loop, (read >= 0) & (((need - fence.cast(dtypes.uint64)) & 0xff) > 1))
 
 def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i, numbered run + i
   addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
@@ -349,7 +349,10 @@ def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i
   field = functools.partial(cfield, xfer:=xfer.after(h), libusb.struct_libusb_transfer)
   xfer = xfer.after(field("status").store(0xff), field("length").store(wire.cast(dtypes.uint)),
                     field("buffer").store(stage.getaddr("CPU") + (end - wire).cast(dtypes.uint64)))
-  return ccall(libusb.libusb_submit_transfer, xfer.index(0)).cast(dtypes.void)
+  ret = ccall(libusb.libusb_submit_transfer, xfer.index(0))
+
+  # clear pending if failed to submit
+  return cfield(xfer.after(ret), libusb.struct_libusb_transfer, "status").src[0].index(UOp.const(0).valid(ret < 0)).store(ret.cast(dtypes.uint32))
 
 def usb_copyin(h:UOp, table:UOp, n:int, run:int) -> UOp: # pipeline writes through two halves
   h = h.after(usb_drained(h, UOp.const(run + 1, dtypes.uint64))) # both halves must be free
@@ -405,16 +408,16 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
 
   # each control transfer writes 32 bits
   h, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
-  loop, value = None, v
-  if v.dtype.itemsize == 8 and str(unwrap_view(b)[0].tag).startswith("kernargs"):
-    cache = UOp.placeholder((1,), v.dtype, device=HCQ_RUNTIME_DEV.value, volatile=True, tag="usb_arg_cache")
-    cache = cache.after(cache.store(UOp(Ops.BINARY, arg=bytes(v.dtype.itemsize)).bitcast(v.dtype)))
-    loop = UOp.range(cache.index(0).load().ne(v).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int,
+  loop, v = None, v.bitcast(dtypes.uint32 if v.dtype.itemsize == 4 else dtypes.uint64)
+  if str(unwrap_view(b)[0].tag).startswith("kernargs"):
+    cache = UOp.placeholder((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.value, volatile=True, tag="usb_arg_cache")
+    cache = cache.after(cache.store(UOp(Ops.BINARY, arg=bytes(v.dtype.itemsize * cache.max_numel())).bitcast(v.dtype)))
+    loop = UOp.range(cache.index(idx - idx.vmin).load().ne(v).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int,
                      src=(h, v.cast(dtypes.uint32).cast(dtypes.uint64), (v >> 32).cast(dtypes.uint32).cast(dtypes.uint64)))
     h = h.after(loop)
   ret = usb_poke(h, addr, v) if v.dtype.itemsize == 4 else \
     usb_poke(h.after(usb_poke(h, addr, v.cast(dtypes.uint32))), addr + 4, (v >> 32).cast(dtypes.uint32))
-  return cache.after(ret.end(loop)).index(0).store(value) if loop is not None else ret
+  return cache.after(ret.end(loop)).index(idx - idx.vmin).store(v) if loop is not None else ret
 
 def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   if not is_remote(dst): return None

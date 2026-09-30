@@ -194,30 +194,40 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
-  # TODO: remove the need for copy to default device
-  tensor = tensor.to(None).realize()
-  r = io.BufferedReader(TensorIO(tensor), 1_000_000)
-  magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
-  if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
+def gguf_parse(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, tuple[Tensor, tuple[int, ...], int]]]:
+  """
+  Parses a .gguf file, returning metadata and `(data, shape, ggml_type)` entries without decoding the weights.
+  Each `data` tensor is a bounded byte view on the source device; paths yield lazy DISK views.
+  Multi-part splits are auto-merged when loaded by path.
+  """
+  files, state_dict = [fn], {}
+  for i, file in enumerate(files):
+    tensor = file if isinstance(file, Tensor) else Tensor(pathlib.Path(file))
+    r = io.BufferedReader(TensorIO(tensor), 1_000_000)
+    magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
+    if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
 
-  kv_data = {}
-  for _ in range(n_kv):
-    k, typ = read_str(r), read_int32(r)
-    kv_data[k] = readers[typ](r)
+    kv = {}
+    for _ in range(n_kv):
+      k, typ = read_str(r), read_int32(r)
+      kv[k] = readers[typ](r)
+    if i == 0:
+      kv_data = kv
+      if (total := kv.get('split.count', 1)) > 1:
+        if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
+        if kv.get('split.no', 0) != 0: raise ValueError(f"multi-part GGUF must be loaded from the first split, got split.no={kv['split.no']}")
+        if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(fn))): raise ValueError(f"first split must end with -00001-of-NNNNN.gguf: {fn}")
+        files.extend(pathlib.Path(f"{m.group(1)}-{part:05d}-of-{total:05d}.gguf") for part in range(2, total+1))
 
-  t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
-  alignment, pos = kv_data.get("general.alignment", 32), r.tell()
-  data_start = round_up(pos, alignment)
-
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+    t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
+    data_start = round_up(r.tell(), kv.get("general.alignment", 32))
+    for name, dims, typ, off in t_infos:
+      if typ in _GGML_NATIVE: block, size = 1, _GGML_NATIVE[typ].itemsize
+      elif typ in _GGML_QUANT: block, size = _GGML_QUANT[typ]
+      else: raise ValueError(f"GGML type '{typ}' is not supported!")
+      start, nbytes = data_start + off, prod(dims)//block*size
+      state_dict[name] = (tensor[start:start+nbytes], tuple(reversed(dims)), typ)
   return kv_data, state_dict
-
-def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
-  if (total := kv.get('split.count', 1)) <= 1: return [path]
-  if kv.get('split.no', 0) != 0: raise ValueError(f"multi-part GGUF must be loaded from the first split, got split.no={kv['split.no']}")
-  if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
-  return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
 
 def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   """
@@ -232,10 +242,9 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv_data, state_dict = gguf_load(gguf_tensor)
   ```
 
-  NOTE: The provided tensor must be on a device that supports execution.
+  Packed weights are copied to the default device before constructing the lazy decoding expressions.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
-  if kv.get('split.count', 1) <= 1: return kv, sd
-  if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
-  return kv, sd
+  kv, entries = gguf_parse(fn)
+  packed = {name: data.to(None) for name, (data, _, _) in entries.items()}
+  if packed: Tensor.realize(*packed.values())
+  return kv, {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}

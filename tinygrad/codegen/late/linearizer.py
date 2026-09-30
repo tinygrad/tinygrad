@@ -3,18 +3,18 @@ from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, getenv, TUPLE_ORDER
+from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort())
+  lst = list(sink.toposort(enter_calls=False))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    for s in u.src: out_degree[s] += 1
+    for s in u.src_without_body: out_degree[s] += 1
 
     # we place UOps with higher run_counts later
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
@@ -40,7 +40,7 @@ def linearize(sink:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in u.src:
+    for v in u.src_without_body:
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]
@@ -86,7 +86,8 @@ pm_add_control_flow = PatternMatcher([
 
 def do_split_ends(e:UOp):
   ret = e.src[0]
-  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  rngs = dedup(r for s in e.src[1:] for r in ((s,) if s.op is Ops.RANGE else s.ranges))
+  for r in sorted(rngs, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
   return ret
 
 pm_split_ends = PatternMatcher([

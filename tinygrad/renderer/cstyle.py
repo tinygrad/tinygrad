@@ -67,9 +67,12 @@ base_rewrite = PatternMatcher([
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
   # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(name="fptr"),)),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
-   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
-   f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(name="fptr"),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
+   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[2:])}))({ctx[fptr]}))" +
+   f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[2:])}))" + (";" if x.dtype is dtypes.void else "")),
+
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
+   f"{ctx.fn_names[body]}({', '.join(ctx[x.src[s+1]] for s in sorted(u.arg.slot for u in body.src if u.op is Ops.PARAM))});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -170,10 +173,9 @@ class CStyleLanguage(Renderer):
     return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
   def render_buffer(self, x:UOp):
-    lanes = 1
     prefix = f"{self.smem_align}{self.smem_prefix}" if x.addrspace == AddrSpace.LOCAL else ""
     suffix = f"[{x.max_numel()}]"
-    return f"{prefix}{self._render_dtype(x.dtype, sz=lanes)} {self[x]}{suffix};"
+    return f"{prefix}{self._render_dtype(x.dtype)} {self[x]}{suffix};"
 
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):
     if is_image_shape(shape): return f"{'write_only' if mutable else 'read_only'} image2d_t"
@@ -260,7 +262,15 @@ class CStyleLanguage(Renderer):
 
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
-  def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
+  def render(self, uops:list[UOp]) -> str:
+    prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
+    for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
+      self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
+      _, call, bufs = self._render(body.src)
+      params = ', '.join(f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
+      prefix.append(f"static inline void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
+      call_bodies.extend(body.src)
+    return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -280,11 +290,8 @@ class ClangRenderer(CStyleLanguage):
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
 
-  # LLVM legalizes double => half/bf16 cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
-  # there is also no native bfl16 <-> fp16 conversion on those CPUs
-  extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
-                                 (UPat.var("x", dtypes.float64).cast(dtypes.bfloat16), lambda x: x.cast(dtypes.float32).cast(dtypes.bfloat16)),
-                                 (UPat.var("x", dtypes.bfloat16).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) \
+  # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
+  extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) \
     + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   if sys.platform == 'win32':

@@ -34,16 +34,14 @@ jobs:
       with:
         key: unittest-macos
         deps: testing_unit
-    - name: Run opt tests
-      run: DEV=METAL python -m pytest -n=auto test/runtime/test_kernel_opts.py test/runtime/test_tensor_cores.py test/runtime/test_search.py --durations=20
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/runtime/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: DEV=METAL DEBUG=3 python test/runtime/test_ops.py TestOps.test_big_gemm
     - name: Test Beam Search
       run: DEV=METAL IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-    - name: Test Device Specific
-      run: DEV=METAL python3 -m pytest -n=auto test/device/metal
+    - name: Run opt and device tests
+      run: DEV=METAL python3 -m pytest -n=auto test/runtime/test_kernel_opts.py test/runtime/test_tensor_cores.py test/runtime/test_search.py test/device/metal --durations=20
     #- name: Fuzz Test linearizer
     #  run: DEV=METAL DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     - name: Run process replay tests
