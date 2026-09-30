@@ -96,6 +96,7 @@ class TestContiguous(unittest.TestCase):
     a = Tensor.empty(4)
     b = a.contiguous()
     check_schedule(b, 0)
+    self.assertIs(b, a)
 
   def test_contiguous_buffer_view(self):
     a = Tensor.empty(4)

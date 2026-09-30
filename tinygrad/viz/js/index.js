@@ -87,7 +87,7 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
-  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  const labels = nodes.selectAll("g.label").data(d => d.source == null ? [d] : []).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
@@ -114,6 +114,9 @@ const drawGraph = (data) => {
   tokens.on("click", (e, { keys }) => {
     tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
   });
+  nodes.selectAll("foreignObject.source-node").data(d => d.source != null ? [d] : []).join("foreignObject").attr("class", "source-node")
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("width", d => d.width).attr("height", d => d.height)
+    .each((d, i, nodes) => nodes[i].replaceChildren(codeBlock(d.source, d.lang)));
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
@@ -228,7 +231,7 @@ const waveColor = (op) => {
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
-const colorScheme = {TINY:new Map([["Bufferize","#1b5745"],["do_to_program","#1d2e62"],["DEFAULT","#354f52"]]),
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["do_to_program","#1d2e62"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
