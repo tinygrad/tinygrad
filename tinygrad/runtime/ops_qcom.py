@@ -12,7 +12,7 @@ from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, CustomFunction
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -305,8 +305,7 @@ def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, 
 class QCOMDevice(Compiled):
   timestamp_divider = 19.2
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction("submit_qcom_compute")), UPat()), name="s"),
-     lambda s: encode_submit(QCOMComputeQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_qcom_compute"), UPat()), name="s"), lambda s: encode_submit(QCOMComputeQueue(s))),
   ])
 
   @property

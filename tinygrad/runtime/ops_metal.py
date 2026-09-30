@@ -8,7 +8,7 @@ from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, ccall, patch, layout_args
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, CustomFunction
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
@@ -187,8 +187,7 @@ class MetalAllocator(Allocator['MetalDevice']):
 class MetalDevice(Compiled):
   has_copy_queue = False
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction("submit_metal_compute")), UPat()), name="s"),
-     lambda s: encode_submit(MetalQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_metal_compute"), UPat()), name="s"), lambda s: encode_submit(MetalQueue(s))),
   ])
   pm_lower = PatternMatcher([
     (UPat.var("tl").index(UPat(Ops.CONST, arg=0)).load(), lambda tl: mtl_poll(tl) if tl.without_after.tag == "timeline" else None),
