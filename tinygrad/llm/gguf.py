@@ -2,6 +2,7 @@ import functools, io, pathlib, re, struct
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
@@ -248,3 +249,30 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   packed = {name: data.to(None) for name, (data, _, _) in entries.items()}
   if packed: Tensor.realize(*packed.values())
   return kv, {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
+
+def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
+               shard_map:dict[str, tuple[int, tuple[int, ...]]]) -> dict[str, Tensor]:
+  """
+  Places the parsed `entries` on `devices` and returns the shard of every device, each device only gets and decodes its own packed data.
+  `shard_map` maps a tensor name to `(axis, parts)`: `parts` are the relative sizes of the fused parts along the axis, each part is split evenly.
+  Tensors that are not in `shard_map` are copied to every device.
+  """
+  n, ret = len(devices), {}
+  def split(name:str, data:Tensor, shape:tuple[int, ...], typ:int) -> list[Tensor]:
+    storage = data.reshape(*shape[:-1], shape[-1]//(block:=_GGML_QUANT[typ][0] if typ in _GGML_QUANT else 1), -1)
+    if (s:=shard_map.get(name)) is None: return [storage]*n
+    (axis, parts), scale = s, block if s[0] == len(shape)-1 else 1
+    if any(shape[axis]*p % (sum(parts)*n*scale) for p in parts): raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
+    # DISK reads one contiguous range per device, other splits are cut on the host
+    if prod(shape[:axis]) > 1 or len(parts) > 1: storage = storage.to("CPU")
+    pieces = storage.split([shape[axis]*p//sum(parts)//scale for p in parts], dim=axis)
+    return [c[0] if len(c) == 1 else Tensor.cat(*c, dim=axis) for c in zip(*(p.chunk(n, dim=axis) for p in pieces))]
+  # shards need their own buffers to be stacked below, a single device keeps the view
+  moved = [(name, [(p.flatten() if n == 1 else p.flatten().contiguous()).to(d) for p,d in zip(split(name, *entry), devices)])
+           for name, entry in entries.items()]
+  if moved: Tensor.realize(*(p for _,ps in moved for p in ps))
+  for name, ps in moved:
+    local = tuple(sz//n if (s:=shard_map.get(name)) and i == s[0] else sz for i,sz in enumerate(entries[name][1]))
+    packed = ps[0] if n == 1 else Tensor(UOp.from_buffer(UOp.mstack(*(p.uop for p in ps)).buffer))
+    ret[name] = ggml_data_to_tensor(packed, prod(local), entries[name][2]).reshape(local)
+  return ret
