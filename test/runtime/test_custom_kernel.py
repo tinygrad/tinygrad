@@ -546,20 +546,37 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [11, 14, 19, 26])
 
-  def test_call_loop_mini(self, apply_opts=False):
+  def test_call_loop_mini(self, opts=()):
     @uopfunc
     def mul(p:UOp, q:UOp): return p[0].store(q[0]*3).sink()
 
     def kernel(C:UOp, A:UOp):
       i = UOp.range(4, 0)
       call = mul(C[i], A[i])
-      return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=None if apply_opts else ()))
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=opts))
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3, 6, 9, 12])
 
   @unittest.expectedFailure
-  def test_call_loop_mini_opts(self): self.test_call_loop_mini(apply_opts=True)
+  def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)
+
+  @unittest.expectedFailure
+  def test_call_loop_split(self): self.test_call_loop_mini((Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),))
+
+  @unittest.expectedFailure
+  def test_call_loop_pad(self):
+    @uopfunc
+    def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
+
+    def kernel(C:UOp, A:UOp):
+      i = UOp.range(3, 0)
+      call = add(C[i], A[i])
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_padto", opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [1, 2, 3, 0])
 
   def test_uopfunc(self):
     @uopfunc
