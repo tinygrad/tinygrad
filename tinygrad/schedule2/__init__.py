@@ -141,13 +141,14 @@ debug_tag_factor = PatternMatcher([
 # ***** split ****
 
 def gather_param(ctx:dict[UOp, UOp], x:UOp):
+  if x.op is Ops.PARAM and x.arg.val is None: return None
   if x in ctx: return ctx[x]
   ret = x.param_like(len(ctx))
   ctx[x] = ret
   return ret
 
 pm_gather = PatternMatcher([
-  (UPat((Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.COPY), name="x"), gather_param),
+  (UPat((Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.COPY, Ops.PARAM), name="x"), gather_param),
 ])
 
 def split_kernel(x:UOp):
@@ -165,8 +166,16 @@ pm_split = PatternMatcher([
   (UPat((Ops.STAGE, Ops.STORE, Ops.COPY), name="x"), split_kernel),
 ])
 
-pm_alloc_to_buffer = PatternMatcher([
-  (UPat(Ops.ALLOC, name="x"), lambda x: UOp.new_buffer(x.device, x.max_numel(), x.dtype))
+def unbind_and_var_val(ctx:dict[str, int], x:UOp):
+  if x.arg.val is None: return None
+  if ctx.get(x.arg.name, x.arg.val) != x.arg.val:
+    raise RuntimeError(f"bind mismatch in {x.arg.name}, {ctx[x.arg.name]} != {x.arg.val}")
+  ctx[x.arg.name] = x.arg.val
+  return x.unbind()[0]
+
+pm_alloc_to_buffer_unbind = PatternMatcher([
+  (UPat(Ops.ALLOC, name="x"), lambda x: UOp.new_buffer(x.device, x.max_numel(), x.dtype)),
+  (UPat(Ops.PARAM, name="x"), unbind_and_var_val),
 ])
 
 @rewrite_group(lambda _,ret: f"Schedule2 {pluralize('Kernel', len(ret[0].src))}")
@@ -208,10 +217,9 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Rangeify")
 
-  var_vals = {}
-
+  var_vals: dict[str, int] = {}
   linear = UOp(Ops.LINEAR, src=tuple([u for u in sink.toposort() if u.op == Ops.CALL]))
-  linear = graph_rewrite(linear, pm_alloc_to_buffer+pm_drop_after, name="Drop After + ALLOC")
+  linear = graph_rewrite(linear, pm_alloc_to_buffer_unbind+pm_drop_after, ctx=var_vals, name="Drop After + ALLOC + unbind")
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
