@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops, UOp, uopfunc
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.nir import NIRRenderer
@@ -174,8 +174,9 @@ class TestHostCalls(unittest.TestCase):
   @staticmethod
   def _buf(n:int, dtype=dtypes.uint64) -> Buffer: return Buffer("CPU", n, dtype, initial_value=bytes(n * dtype.itemsize))
   @staticmethod
-  def _run(fxn, *bufs:Buffer) -> list: # the first buffer is the output
-    run_linear(UOp(Ops.LINEAR, src=(fxn(*[UOp.from_buffer(b) for b in bufs]),)))
+  def _run(fxn, *bufs:Buffer) -> list: # the first buffer is the output. the sink gets its KernelInfo by hand: it is the program
+    call = fxn(*[UOp.from_buffer(b) for b in bufs])
+    run_linear(UOp(Ops.LINEAR, src=(call.replace(src=(call.body.replace(arg=KernelInfo(call.arg.name)), *call.src[1:])),)))
     return bufs[0].host.view(fmt=bufs[0].dtype.fmt)[:]
 
   def test_no_addrs_no_placeholders(self):

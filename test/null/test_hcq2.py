@@ -13,7 +13,7 @@ from tinygrad.runtime.support.hcq2 import HCQInfo
 
 def lower_hcq(*body:UOp) -> UOp: # a sink of the body through hcq2's lower and the host rules, as a one call linear
   call = UOp.sink(*body, arg=KernelInfo("test"), tag=1).call(aux=HCQInfo(("CPU",)))
-  return hcq2.host_calls(UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(call)),)))
+  return hcq2.runtime_rewrites(UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(call)),)))
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
