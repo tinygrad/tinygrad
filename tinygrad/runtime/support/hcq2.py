@@ -298,8 +298,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
                          for host in to_tuple(buf.device) if host not in ctx.queues))
   info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, written_bufs=written_bufs,
-                 estimates=sum(estimates, start=Estimates()).simplify(), host_deps=host_deps)
-  return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=info)
+                 estimates=sum(estimates, start=Estimates()).simplify(), host_deps=host_deps, slots=tuple((d, i) for i, d in enumerate(ctx.slots)))
+  return sink.call(*ctx.slots.values(), aux=info)
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -497,8 +497,7 @@ def lower_call(call:UOp) -> UOp|None:
   # if touched, go to args
   touched = body.toposort(gate=lambda u: u.op is not Ops.GETADDR)
   args, refs = dedup([*call.src[1:], *[b for b in patched if b in touched]]), [w for b, w in patched.items() if b not in touched]
-  info = replace(call.arg.aux, slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(args) if b.tag == "slots"))
-  return call.replace(src=(body, *[patched.get(b, b) for b in args]), arg=replace(call.arg, aux=info)).after(*refs)
+  return call.replace(src=(body, *[patched.get(b, b) for b in args])).after(*refs)
 
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
@@ -520,22 +519,17 @@ pm_views = PatternMatcher([
 # unwrap to base and byte offset. drops afters (an address has no deps) and merges views into one slot
 def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes.uint8)[v[1]:v[0].nbytes()].getaddr(to_tuple(g.arg)[0])
 
-def host_function(call:UOp, body:UOp) -> UOp|None: # a bare function runs on the host
-  if call.arg.aux is not None or body.arg is not None: return None
-  return body.replace(arg=KernelInfo(call.arg.name or "fxn")).call(*call.src[1:], name=call.arg.name, aux=HCQInfo((HCQ_RUNTIME_DEV.value,)))
-
-def addr_args(call:UOp, body:UOp) -> UOp|None: # in a function the address of a param is the address of its arg
+def fish_addrs(call:UOp, body:UOp) -> UOp: # in a function the address of a param is the address of its arg, in a program addrs load from a table
   params = [p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.addrspace is AddrSpace.GLOBAL and p.tag is p.device is None]
   addrs = {g: g.substitute({p: call.src[1 + p.arg.slot] for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
-  return call.replace(src=(body.substitute(addrs, enter_calls=True), *call.src[1:])) if addrs else None
+  if call.arg.aux is None or not addrs: return call.replace(src=(body.substitute(addrs, enter_calls=True), *call.src[1:]))
 
-def fish_addrs(call:UOp, body:UOp) -> UOp|None: # runtime addrs load from a table arg: inputs filled per call, the rest at link
-  if not (normalized:={g: normalize(g) for g in body.toposort() if g.op is Ops.GETADDR}): return None
-  input_addrs, link_addrs = partition(rt_addrs:=dedup(normalized.values()), _is_input_addr)
+  # runtime addrs: inputs filled per call, the rest patched at link
+  input_addrs, link_addrs = partition(rt_addrs:=dedup([normalize(g) for g in addrs.values()]), _is_input_addr)
   info = replace(call.arg.aux, table=len(call.src) - 1, inputs=tuple((*unwrap_view(g.src[0]), g.arg) for g in input_addrs))
   table = UOp.placeholder((len(rt_addrs),), dtypes.uint64, device=Device[info.device[0]].host, tag="inputs")
   slot_of = {g: i for i, g in enumerate(input_addrs + link_addrs)}
-  body = body.substitute({g: table.index(slot_of[n]).load() for g, n in normalized.items()}, enter_calls=True)
+  body = body.substitute({g: table.index(slot_of[normalize(a)]).load() for g, a in addrs.items()}, enter_calls=True)
   return call.replace(src=(body, *call.src[1:], patch(table, [(8 * slot_of[g], g) for g in link_addrs])), arg=replace(call.arg, aux=info))
 
 def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders a body uses merge by kind and become its params, args of the call
@@ -543,8 +537,7 @@ def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders
 
   # combine placeholders of a kind into one and replace with views, each 128-byte aligned
   kinds = {u: (u.tag, u.device, u.dtype, u.arg.volatile) for u in bufs if u.tag != "program" and u.arg.slot}
-  order = {k: i for i, k in enumerate(dedup(kinds.values()))}
-  groups = [list(g) for _, g in itertools.groupby(sorted(kinds, key=lambda u: order[kinds[u]]), key=lambda u: kinds[u])]
+  groups = [[u for u in kinds if kinds[u] == k] for k in dedup(kinds.values())]
   offs = {g[0]: list(itertools.accumulate([round_up(u.nbytes(), 128) // u.dtype.itemsize for u in g], initial=0)) for g in groups}
   merged = {u: g[0].replace(arg=replace(g[0].arg, size=offs[g[0]][-1])) for g in groups if len(g) > 1 for u in g}
   ctx.update(views:={u: merged[u][o:o + u.max_numel()] for g in groups if len(g) > 1 for u, o in zip(g, offs[g[0]])})
@@ -558,17 +551,14 @@ def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders
   vals = {a: a.replace(arg=replace(a.arg, slot=slots[a.arg.name])) for a in alus}
   return call.replace(src=(body.substitute(views, extra_pm=pm_mops+pm_views).substitute(params | vals), *args, *new))
 
-# the rules see a call on a sink. a pass that enters calls reaches the functions a sink calls, one that does not only the calls of the linear
-pm_addr_args = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), addr_args)])
-pm_host = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), host_function),
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_addrs)])
+# the rules see a call on a sink. a bare function in a linear runs on the host
+pm_function = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="c"), lambda c: None if c.arg.aux or c.body.arg else
+  c.body.replace(arg=KernelInfo(c.arg.name or "fxn")).call(*c.src[1:], name=c.arg.name, aux=HCQInfo((HCQ_RUNTIME_DEV.value,))))])
+pm_fish_addrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_addrs)])
 pm_fish_bufs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_bufs)])
 
-def host_calls(linear:UOp) -> UOp: # works on any sink: without addresses and placeholders nothing changes
-  linear = graph_rewrite(linear, pm_addr_args, walk=True, enter_calls=True, name="addr args") # callees first
-  linear = graph_rewrite(linear, pm_host, name="host calls")
-  # callees first. the refs after a call see the merged placeholders too
+def host_calls(linear:UOp) -> UOp: # works on any sink, callees first. the refs after a call see the merged placeholders too
+  linear = graph_rewrite(linear, pm_fish_addrs, walk=True, enter_calls=True, name="fish addrs")
   return graph_rewrite(linear, pm_fish_bufs, ctx=(views:=dict[UOp, UOp]()), walk=True, enter_calls=True, name="fish bufs").substitute(views)
 
 # *****************
@@ -584,7 +574,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
     use_rt = len(linear.src) < HCQ_CACHE_THRESH # small schedules use runtime address patches so linked schedules can be cached without input buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
-  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, ctx=tuple(input_uops or ()), name="prep calls")
+  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear+pm_function, ctx=tuple(input_uops or ()), name="prep calls")
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = host_calls(graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode"))
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
