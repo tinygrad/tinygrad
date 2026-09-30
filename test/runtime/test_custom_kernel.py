@@ -561,7 +561,8 @@ class TestCallInKernel(unittest.TestCase):
   def test_call_with_gated_store(self):
     @uopfunc
     def gated_store(out:UOp, idx:UOp):
-      return out[idx[0].valid(idx[0] < out.shape[0])].store(7).sink()
+      i = idx[0]
+      return out[i.valid((i >= 0) & (i < out.shape[0]))].store(7).sink()
 
     def kernel(C:UOp, A:UOp):
       tmp = UOp.alloc_like(C, addrspace=AddrSpace.REG)
