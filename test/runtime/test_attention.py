@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, nn, Device
+from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
