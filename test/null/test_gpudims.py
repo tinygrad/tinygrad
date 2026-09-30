@@ -10,9 +10,9 @@ from tinygrad.helpers import flatten, dedup, Target
 class TestGroupedDims(unittest.TestCase):
   def _check_grouped_dims(self, prefix, dims, max_sizes, reverse, expected_sizes, assert_same_length=True):
     idxs = get_grouped_dims(prefix, dims, max_sizes, reverse)
-    loop_idxs = dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs]))
-    loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg)
-    sizes = [x.src[0].val for x in loop_idxs]
+    loop_idxs = dedup(flatten([[y for y in x.toposort() if y.is_special] for x in idxs]))
+    loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg.name)
+    sizes = [x.vmax+1 for x in loop_idxs]
     assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
     if assert_same_length:
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
@@ -22,19 +22,19 @@ class TestGroupedDims(unittest.TestCase):
   def _verify_indices_z3(self, idxs, dims):
     """Use z3 to prove bijectivity: bounds (0 <= flat < total) + injectivity (different inputs => different flat)."""
     total = math.prod(dims)
-    specials = sorted(dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs])), key=lambda u: u.arg)
+    specials = sorted(dedup(flatten([[y for y in x.toposort() if y.is_special] for x in idxs])), key=lambda u: u.arg.name)
     # build flat index and primed flat (same expression with renamed SPECIALs)
     flat = UOp.const(0)
     for i, idx in enumerate(idxs):
       flat = flat + idx * int(math.prod(dims[i+1:]))
-    flat_p = flat.substitute({s: UOp(Ops.SPECIAL, src=s.src, arg=s.arg+"_p") for s in specials})
+    flat_p = flat.substitute({s: UOp.special(s.vmax+1, s.arg.name+"_p") for s in specials})
     solver = z3.Solver()
     [z3_flat, z3_flat_p] = uops_to_z3(solver, flat, flat_p)
     # bounds
     self.assertEqual(solver.check(z3_flat < 0), z3.unsat, f"flat can be negative: {dims=}")
     self.assertEqual(solver.check(z3_flat >= total), z3.unsat, f"flat can be >= {total}: {dims=}")
     # injectivity: flat == flat' but inputs differ => unsat
-    inputs_differ = z3.Or(*[z3.Int(s.arg) != z3.Int(s.arg+"_p") for s in specials])
+    inputs_differ = z3.Or(*[z3.Int(s.arg.name) != z3.Int(s.arg.name+"_p") for s in specials])
     self.assertEqual(solver.check(z3.And(z3_flat == z3_flat_p, inputs_differ)), z3.unsat, f"not injective: {dims=}")
 
   def test_grouped_dims(self):
@@ -91,8 +91,8 @@ class TestGroupedDims(unittest.TestCase):
   def test_grouped_direct_dims_are_special(self):
     # when (2,3) are merged into 6, the unmerged dims (4,5) should map directly to SPECIAL ops (no div/mod)
     idxs = get_grouped_dims("gidx", (2,3,4,5), (16,16,16), False)
-    assert idxs[2].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[2].op}"
-    assert idxs[3].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[3].op}"
+    assert idxs[2].is_special, f"expected special PARAM for direct-mapped dim, got {idxs[2].op}"
+    assert idxs[3].is_special, f"expected special PARAM for direct-mapped dim, got {idxs[3].op}"
 
   def test_grouped_dims_high_rank(self):
     # 4D collapsed onto 2 axes
@@ -100,7 +100,7 @@ class TestGroupedDims(unittest.TestCase):
     # 4D untouched
     self._check_grouped_dims("gidx", (2,3,4,5), None, False, [2,3,4,5])
     idxs = get_grouped_dims("gidx", (2,3,4,5), None, False)
-    assert all(u.op is Ops.SPECIAL for u in idxs), f"expected all-SPECIAL when untouched, got {[u.op for u in idxs]}"
+    assert all(u.is_special for u in idxs), f"expected all-special when untouched, got {[u.op for u in idxs]}"
     # 5D and 6D collapsed onto 3 axes
     self._check_grouped_dims("gidx", (2,2,2,2,2), (4,4,4), False, [4,4,2])
     self._check_grouped_dims("gidx", (2,2,2,2,2,2), (8,8,8), False, [8,4,2])
@@ -113,9 +113,9 @@ class TestGroupedDims(unittest.TestCase):
     g, l = UOp.range(256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
     sink = UOp.param(0, dtypes.float, 512).index(g + l).store(UOp.const(1.0)).end(g, l).sink(arg=KernelInfo())
     class R(Renderer): global_max, local_max, global_prod_max = (256, 256, 256), (128, 128, 128), (128, 128, 128)
-    specials = [u for u in add_gpudims(R(Target()), sink).toposort() if u.op is Ops.SPECIAL]
-    self.assertGreater(len([s for s in specials if "lidx" in s.arg]), 1)
-    self.assertGreater(len([s for s in specials if "gidx" in s.arg]), 1)
+    specials = [u for u in add_gpudims(R(Target()), sink).toposort() if u.is_special]
+    self.assertGreater(len([s for s in specials if "lidx" in s.arg.name]), 1)
+    self.assertGreater(len([s for s in specials if "gidx" in s.arg.name]), 1)
 
   def test_max_sizes_none(self):
     self._check_grouped_dims("gidx", (2,3,4), None, False, [2,3,4])

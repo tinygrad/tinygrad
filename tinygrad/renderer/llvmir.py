@@ -5,7 +5,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, OSX
+from tinygrad.helpers import prod, Target, OSX, unwrap
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
@@ -174,7 +174,7 @@ class LLVMRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op is Ops.PARAM:
+      if u.op is Ops.PARAM and not u.is_special:
         r[u] = f"%data{u.arg.slot}"
         args.append((r[u], u))
       elif u.op is Ops.BUFFER:
@@ -230,7 +230,8 @@ class AMDLLVMRenderer(LLVMRenderer):
   abi = "amdgpu_kernel"
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
+    (UPat(Ops.PARAM, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[(n:=unwrap(x.arg.name))[0]](n[-1])}; "
+     if x.is_special else None),
     (UPat(tuple(llvm_intrinsics), name="x"),
     lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
@@ -264,8 +265,8 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     return "\n".join((k:=self._render_kernel(uops, prefix))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     # TODO: this is copied from cstyle
-    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
-    requiredMaxThreadsPerBlock = prod([d.vmax for d in local_dims])
+    local_dims = [int(u.vmax)+1 for u in uops if u.is_special and (u.arg.name or "")[0] == "l"]
+    requiredMaxThreadsPerBlock = prod(local_dims)
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'

@@ -1,4 +1,5 @@
 import math
+from typing import cast
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
@@ -41,7 +42,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
   s_topo = list(s.toposort())
-  if any(x.op is Ops.SPECIAL for x in s_topo): return None
+  if any(x.is_special for x in s_topo): return None
 
   # get ranges
   all_ranges = {x.axis_id:x for x in s_topo if x.op is Ops.RANGE}
@@ -60,7 +61,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   local_max = (local_shape[0],)+ctx.local_max[1:] if ctx.local_max is not None and local_dims and \
     all_ranges[local_dims[0]].axis_type is AxisType.WARP else ctx.local_max
   local_idxs = get_grouped_dims("lidx", local_shape, local_max)
-  hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
+  hw_local = [cast(int, u.vmax)+1 for u in local_idxs if u.is_special]
   global_max = ctx.global_max if ctx.global_prod_max is None else \
     tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
   idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
@@ -83,7 +84,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   return s.substitute(subs)
 
 pm_device_to_var = PatternMatcher([
-  # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like SPECIAL for devices)
+  # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like a special for devices)
   (UPat(Ops.RANGE, name="r"),
    lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype) if r.axis_type is AxisType.DEVICE else None),
   # ENDs that closed a DEVICE range no longer close it

@@ -42,7 +42,7 @@ pm_commit_weak = PatternMatcher([
 
 # consumers absorb the weak CAST off their srcs and default underivable consts; dtype-producing ops settle here.
 # a weakfloat Unary (sin/exp2/...) must resolve before the transcendental decomposition.
-_lower_weak_ops = GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}
+_lower_weak_ops = GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK}
 
 # a weak CAST states a width, which the consumer restates. a weakint over a bool or float is a conversion, it commits here
 def absorb_weak_src(s:UOp) -> UOp:

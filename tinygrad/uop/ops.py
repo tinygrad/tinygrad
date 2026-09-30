@@ -146,7 +146,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return b.dtype
     case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
-         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL | Ops.END:
+         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.END:
       # pass through first
       return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
@@ -363,7 +363,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # some ops init the shape
       case Ops.GETADDR: return ()
-      case Ops.RANGE | Ops.SPECIAL: return ()
+      case Ops.RANGE: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
         # these don't have a shape input, they have a size in the arg: int gives shape (size,), None gives ()
@@ -647,7 +647,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(axis_id, AxisType.WEAK))
   @staticmethod
-  def special(end:sint, name:str): return UOp(Ops.SPECIAL, src=(sint_to_uop(end),), arg=name)
+  def special(end:sint, name:str):
+    # a SPECIAL is a hw dimension index: an ALU PARAM in [0, end-1] named like gidx0/lidx1.
+    # slot -1 means it's not a call input arg, the launch dims provide it. it's born weak and commits to int32 like the RANGE it replaces
+    return UOp(Ops.PARAM, src=(), arg=ParamArg(-1, dtypes.weakint, vmin_vmax=(0, (sint_to_uop(end)-1).vmax), multiple_of=1,
+                                               name=name, addrspace=AddrSpace.ALU))
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], threads:int, tc_upcast_axes=None):
     # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
@@ -910,7 +914,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
-    if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
+    if self.op in {Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
     if self.op is Ops.BINARY: return AddrSpace.GLOBAL
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
@@ -1020,9 +1024,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of,
                                        addrspace=AddrSpace.ALU))
   @property
+  def is_special(self) -> bool:
+    # a SPECIAL is an ALU PARAM for a hw dimension index, named gidx{i}/lidx{i}; it's provided by the launch, not the call args
+    return self.op is Ops.PARAM and isinstance(self.arg.name, str) and self.arg.name[:4] in {"gidx", "lidx"}
+  @property
   def is_variable(self) -> bool:
     # a Variable is a scalar ALU PARAM that carries a value range
-    return self.op is Ops.PARAM and isinstance(self.arg, ParamArg) and \
+    return self.op is Ops.PARAM and isinstance(self.arg, ParamArg) and not self.is_special and \
            self.arg.vmin_vmax is not None and self.arg.addrspace is AddrSpace.ALU and self._shape == ()
   @property
   def is_bound_var(self) -> bool:
@@ -1147,7 +1155,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.WHERE: return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
-    if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
+    if self.op is Ops.RANGE and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # a load from a constant table is one of its values
     if self.op is Ops.LOAD and (b:=self.src[0].buf_uop).op is Ops.BINARY:
@@ -1171,7 +1179,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if (x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU) or x.is_variable))
+    varnames = tuple(dedup(x.expr for x in sself.toposort() if
+                           ((x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU) or x.is_variable) and not x.is_special))
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
@@ -1379,12 +1388,12 @@ class ProgramInfo:
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
     for u in sink.toposort(enter_calls=False):
-      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
+      if u.op is Ops.PARAM and not u.is_special and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+      if u.is_special: (local_size if (sname:=unwrap(u.arg.name))[0] == 'l' else global_size)[int(sname[-1])] = cast(int, u.vmax+1)
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
                        tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),

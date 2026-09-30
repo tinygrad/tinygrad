@@ -83,7 +83,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmax, 8)
 
   def test_vmin_vmax_variable_inside_special(self):
-    uop = UOp(Ops.SPECIAL, arg='gidx0', src=(UOp.variable('i', 1, 10, dtypes.int),))
+    uop = UOp.special(UOp.variable('i', 1, 10, dtypes.int), 'gidx0')
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 9)
 

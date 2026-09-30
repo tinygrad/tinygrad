@@ -46,10 +46,10 @@ class Estimates:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
           mults *= cast(sint, u.src[0].ssimplify())
-          # SPECIAL are already counted in mults
-          mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
+          # specials are already counted in mults
+          mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.is_special}) if isinstance(mults, UOp) else mults
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
-      elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
+      elif u.is_special: mults *= cast(sint, u.vmax+1) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
@@ -68,8 +68,8 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
-  local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: hw dimension indexes are int32 right now
+  local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: hw dimension indexes are int32 right now
   global_prod_max: tuple[int, ...]|None = None
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []

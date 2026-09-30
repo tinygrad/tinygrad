@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address
+from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address, unwrap
 from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
@@ -94,6 +94,10 @@ class PythonProgram(Program['PythonDevice']):
           i += 1
           continue
         if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
+        elif u.is_special:
+          name = unwrap(u.arg.name)
+          if name[0] == 'g': values[u] = [idxs[2-int(name[-1])]] * warp_size
+          elif name[0] == 'l': values[u] = [x[2-int(name[-1])] for x in warp]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
@@ -107,9 +111,6 @@ class PythonProgram(Program['PythonDevice']):
             buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.BINARY: values[u] = [memoryview(u.arg)] * warp_size
-        elif u.op is Ops.SPECIAL:
-          if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
-          elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
         elif u.op is Ops.CONST: values[u] = [u.val] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []

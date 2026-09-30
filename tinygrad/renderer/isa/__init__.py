@@ -19,8 +19,8 @@ class Register:
 class IselContext:
   def __init__(self, sink:UOp):
     self.reg_n = itertools.count()
-    def arg_key(u:UOp): return (1, u.arg) if u.op is Ops.SPECIAL else (0, u.arg.slot)
-    self.func_args = sorted([u for u in sink.toposort() if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
+    def arg_key(u:UOp): return (1, u.arg.name or "") if u.is_special else (0, u.arg.slot)
+    self.func_args = sorted([u for u in sink.toposort() if u.op is Ops.PARAM], key=arg_key)
 
   def vreg(self, cons:tuple[Register, ...]|Register, size:int=0):
     cons = cons if isinstance(cons, tuple) else (cons,)

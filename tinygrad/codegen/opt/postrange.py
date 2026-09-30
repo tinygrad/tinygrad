@@ -41,8 +41,8 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.ast.backward_slice if x.op is Ops.SPECIAL], key=lambda x: x.arg)
-      special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
+      special_uops = sorted([x for x in self.ast.backward_slice if x.is_special], key=lambda x: x.arg.name)
+      special_ops = [colored(str(x.vmax+1), "blue" if (x.arg.name or "")[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)

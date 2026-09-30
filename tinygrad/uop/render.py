@@ -47,7 +47,6 @@ renderer = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
    x.arg.name if isinstance(x.arg, ParamArg) and x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
   (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
-  (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.val)),
@@ -88,7 +87,8 @@ sugar = {Ops.SINK, Ops.END, Ops.BACKEDGE, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.IND
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
-  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)})"),
+  (UPat(Ops.PARAM, src=(), name="x"),
+   lambda x: f"UOp.special({x.vmax+1}, {repr(x.arg.name)})" if x.is_special and x.arg.dtype is dtypes.weakint else None),
   # NOTE: multi-device buffers carry the DEVICE range in src, new_buffer recreates it
   (UPat(Ops.BUFFER, name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
@@ -145,7 +145,7 @@ def pyrender(ast:UOp) -> str:
 
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST}
-  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.STACK,
+  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.RANGE, Ops.STACK,
                      Ops.BUFFER, Ops.ALLOC, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END, Ops.BACKEDGE}
 
   to_render: set[UOp] = {ast}

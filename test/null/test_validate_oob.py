@@ -213,7 +213,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool, 16)
       buf_int = UOp.param(1, dtypes.int, 8)
-      gidx = UOp(Ops.SPECIAL, src=(UOp.const(16),), arg="gidx0")
+      gidx = UOp.special(16, "gidx0")
       ld_bool = buf_bool.index(gidx).load()
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool)).load()])  # gidx 0..15, buf_int size 8
@@ -223,8 +223,8 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       gbuf = UOp.param(0, dtypes.uint, 400)
       sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
-      gidx = UOp(Ops.SPECIAL, src=(UOp.const(416),), arg="gidx0")
-      lidx = UOp(Ops.SPECIAL, src=(UOp.const(10),), arg="lidx0")
+      gidx = UOp.special(416, "gidx0")
+      lidx = UOp.special(10, "lidx0")
       store = sbuf.index(lidx.valid(lidx < 8)).store(UOp.const(1))
       load = sbuf.after(store).index(lidx.valid(lidx < 8)).load()
       to_uops_list([gbuf.index(gidx.valid(gidx < 400)).store(load)])  # valid: local store and load gated to 8, global store gated to 400

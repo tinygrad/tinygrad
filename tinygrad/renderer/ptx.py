@@ -81,7 +81,8 @@ def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.i
 string_rewrite = PatternMatcher([
   (UPat.cvar("c").cast(dtypes.bool, name="x"), lambda ctx, x, c: f"setp.ne.s16 {ctx.r[x]}, {render_val(c.val, x.dtype)}, 0;"),
   (UPat.cvar("c").cast(name="x"), lambda ctx, x, c: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(c.val, x.dtype)};"),
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: f"mov.u32 %{x.arg.name}, %{'ctaid' if x.arg.name[0] == 'g' else 'tid'}.{chr(120+int(x.arg.name[-1]))};"
+    if x.is_special else None),
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
    f"ld.param.{ctx.types[dtypes.ulong] if x.addrspace is AddrSpace.GLOBAL else ctx.mem_types[x.dtype]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
   # address computation: addr = buf + idx*itemsize
@@ -163,8 +164,8 @@ class PTXRenderer(Renderer):
   def render_kernel(self, kernel, function_name, bufs, regs, uops) -> str:
     def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
     kernel = '\n'.join(map(fmt, [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"]))
-    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
-    launch_bounds = prod([d.vmax for d in local_dims])
+    local_dims = [int(u.vmax)+1 for u in uops if u.is_special and (u.arg.name or "")[0] == "l"]
+    launch_bounds = prod(local_dims)
     params = ',\n\t'.join([f".param .{'u64' if u.addrspace is AddrSpace.GLOBAL else self.types[u.dtype]} {name}" for name,u in bufs])
     return f"{self.kernel_prefix.format(launch_bounds=launch_bounds)} {function_name} (\n\t{params}\n)\n.maxntid {launch_bounds}\n{{\n{kernel}\n}}"
 
@@ -203,7 +204,7 @@ class PTXRenderer(Renderer):
           raise RuntimeError(f"PTX does not support dynamic register indexing: {u}")
         r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].src[0].val]
         continue
-      if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
+      if u.is_special: r[u] = "%" + str(u.arg.name)
       elif u.op is Ops.LOAD:
         r[u] = [ssa('val', dtype=self.types[u.dtype]) for _ in range(u.max_numel())] if u.max_numel() > 1 else ssa('val', u)
       elif u.op is Ops.PARAM: bufs.append((f"data{u.arg.slot}", u))
@@ -217,14 +218,14 @@ class PTXRenderer(Renderer):
         Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if u.op is Ops.RANGE and u.dtype == dtypes.void: prefix = None  # loop headers don't have a register
-      if prefix: r[u] = ssa(prefix, u, dtype)
+      if prefix and not u.is_special: r[u] = ssa(prefix, u, dtype)
 
       l: str|list[str]|None = string_rewrite.rewrite(u, ctx=self)
       if l is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
-      if u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg};"] + kernel
+      if u.is_special: kernel = [f".reg .u32 %{u.arg.name};"] + kernel
     return self.render_kernel(kernel, name, bufs, c.items(), uops)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()

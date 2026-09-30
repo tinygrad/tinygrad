@@ -31,7 +31,7 @@ from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 def do_number_param(ctx:list[int], x:UOp):
-  if x.arg.slot != -1: return None
+  if x.arg.slot != -1 or x.is_special: return None  # specials keep slot -1: they're provided by the launch, not the call args
   ctx[0] += 1
   return x.replace(arg=replace(x.arg, slot=ctx[0]-1))
 

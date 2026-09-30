@@ -160,8 +160,7 @@ spec_tensor = PatternMatcher([
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
-  # SPECIAL is index before index lowering. custom_kernel currently has this
-  (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
+  # hw dimension index(es) created by custom_kernel are special PARAMs now
 
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
@@ -223,8 +222,6 @@ spec_program = PatternMatcher([
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
-  # SPECIAL is int32 after index lowering
-  (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.int32),), name="s"), lambda s: isinstance(s.arg, str)),
 ])+spec_shared
 
 spec_hcq = PatternMatcher([
@@ -238,7 +235,7 @@ spec_hcq = PatternMatcher([
 spec_full = PatternMatcher([
   (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
 
-  # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
+  # codegen may end ranges after gpudims has replaced RANGE with special PARAMs.
   (UPat(Ops.END, src=(UPat(dtype=dtypes.void), UPat()), allow_any_len=True, name="x"),
    lambda x: x.arg is None and all(dtypes.is_int(u.dtype) for u in x.src[1:])),
 

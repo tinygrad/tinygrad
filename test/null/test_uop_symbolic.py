@@ -9,7 +9,7 @@ from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid,
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
-  sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.RANGE, Ops.SPECIAL, Ops.PARAM)}
+  sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.RANGE, Ops.PARAM)}
   s_eval = eval(s, sym_vars)
   if isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(s_eval)
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")

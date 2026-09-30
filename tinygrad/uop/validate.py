@@ -62,8 +62,7 @@ z3_renderer = PatternMatcher([
   # the valid condition is a constraint
   (UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid)), lambda x,cond,ctx: ctx[0].add(ctx[1][cond]) or ctx[1][x]),
   # variables
-  (UPat((Ops.SPECIAL, Ops.RANGE), name="x"), lambda x,ctx:
-   create_bounded(x.arg if x.op is Ops.SPECIAL else f"r{range_str(x)}", 0, ctx[1][x.src[0]]-1, ctx[0])),
+  (UPat(Ops.RANGE, name="x"), lambda x,ctx: create_bounded(f"r{range_str(x)}", 0, ctx[1][x.src[0]]-1, ctx[0])),
   # unknown values are variables bounded by their vmin/vmax: params, loads (non-pointer INDEX is a LOAD) and anything from floats
   (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.LOAD, Ops.INDEX), name="x"), create_var),
   (UPat((Ops.CAST, Ops.BITCAST)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),

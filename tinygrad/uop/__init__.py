@@ -11,10 +11,7 @@ class FastEnum(IntEnum):
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
-  # ** 1 -- defines/special **
-
-  # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
-  SPECIAL = auto()
+  # ** 1 -- defines **
 
   # BUFFER references bound storage; ALLOC declares unbound global storage
   BUFFER = auto(); ALLOC = auto()
@@ -114,7 +111,7 @@ class GroupOp:
 
   Defines = {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}
 
-  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
+  Irreducible = {Ops.CONST, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   # BinaryOps that can be flipped

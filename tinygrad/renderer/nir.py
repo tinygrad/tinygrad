@@ -144,8 +144,9 @@ class NIRRenderer(Renderer):
 
   def_rewrite = PatternMatcher([
     (UPat.cvar("c").cast(name="x"), lambda ctx,x,c: nimm(ctx.b, c.val, x.dtype)),
+    (UPat(Ops.PARAM, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid}[unwrap(x.arg.name)[0]](ctx.b), int(unwrap(x.arg.name)[-1]))
+     if x.is_special else None),
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)),
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),UPat.var("off")), allow_any_len=True), UPat.var("val"))),
      lambda ctx,buf,off,val: nstore(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.addrspace, buf.dtype.itemsize), ctx.r[val])),
     (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True), UPat.var("alt"),
@@ -183,8 +184,8 @@ class NIRRenderer(Renderer):
 
   def render(self, uops:list[UOp]):
     self.prerender(uops)
-    for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]:
-      self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].src[0].val
+    for u in [u for u in uops if u.is_special and (u.arg.name or "")[0] == "l"]:
+      self.b.shader.contents.info.workgroup_size[int(unwrap(u.arg.name)[-1])] = int(u.vmax)+1
     self.r: dict[UOp, Any] = {}
     self.param_idx = 0
     ranges: list[mesa.nir_def|None] = []

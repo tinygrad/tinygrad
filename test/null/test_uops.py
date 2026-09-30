@@ -434,7 +434,7 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(list(var_vals)[0], a.expr)
 
   def test_const_factor(self):
-    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(8),), arg='gidx0')
+    gidx0 = UOp.special(8, 'gidx0')
     self.assertEqual(UOp.const(17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)

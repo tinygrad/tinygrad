@@ -144,11 +144,11 @@ class TestLinearizer(unittest.TestCase):
     t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
     ast = helper_linearizer_opt(t+1)
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
-    idxs = sorted(idxs, key=lambda uop: uop.arg)
-    assert (idxs[0].arg, idxs[0].src[0].src[0].val) == ('gidx0', 6), idxs[0]
-    assert (idxs[1].arg, idxs[1].src[0].src[0].val) == ('gidx1', 5), idxs[1].arg
-    assert (idxs[2].arg, idxs[2].src[0].src[0].val) == ('gidx2', 4), idxs[2].arg
+    idxs = dedup([uop for uop in uops if uop.is_special])
+    idxs = sorted(idxs, key=lambda uop: uop.arg.name)
+    assert (idxs[0].arg.name, idxs[0].vmax+1) == ('gidx0', 6), idxs[0]
+    assert (idxs[1].arg.name, idxs[1].vmax+1) == ('gidx1', 5), idxs[1].arg.name
+    assert (idxs[2].arg.name, idxs[2].vmax+1) == ('gidx2', 4), idxs[2].arg.name
 
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
@@ -178,7 +178,7 @@ class TestLinearizer(unittest.TestCase):
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
-      assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
+      assert len(set([u.op for u in uops if u.op is Ops.RANGE or u.is_special])) == 1, "has either specials or ranges, not both"
       reg_stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace == AddrSpace.REG]
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
