@@ -1,19 +1,10 @@
-import ctypes, itertools
+import ctypes
 from tinygrad.viz.serve import amd_decode
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, KernelInfo
-from tinygrad.schedule.prepare import resolve_function
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
 from tinygrad.helpers import Context
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size
-
-def inline_call(ctx, c:UOp):
-  # renumber the ranges per call body
-  body = c.body.substitute({r:r.replace(arg=(next(ctx), *r.arg[1:])) for r in c.body.toposort() if r.op is Ops.RANGE})
-  if (sink:=resolve_function(c.replace(src=(body, *c.src[1:])))) is not None: return UOp.group(*sink.src)
-  return None
-
-pm_lift = PatternMatcher([(UPat(Ops.CALL, name="c"), inline_call)])
 
 def lift(lib: int, lib_sz: int, arch: str = "rdna3") -> UOp:
   # decode
@@ -30,6 +21,6 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3") -> UOp:
     args = [afters.get(b, b) for b in bufs]
     call = body.call(*args)
     afters.update((b, arg.after(call)) for b, arg in zip(bufs, args))
-  sink = graph_rewrite(UOp.sink(*afters.values()), pm_lift, ctx=itertools.count(), name="pm_lift").replace(arg=KernelInfo(name="asm_call"))
+  sink = UOp.sink(*afters.values(), arg=KernelInfo(name="asm_call", opts_to_apply=()))
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device['CPU'].renderer)
