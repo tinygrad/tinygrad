@@ -2,9 +2,10 @@ import itertools
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, rewrite_group, Ops, PatternMatcher, ParamArg, UPat, graph_rewrite, GroupOp, _broadcast_shape, AxisType
 from tinygrad.uop.ops import remove_all_tags, KernelInfo, pm_drop_after
-from tinygrad.helpers import pluralize, prod, all_same, panic, all_int, VIZ, Context
+from tinygrad.helpers import pluralize, prod, all_same, panic, all_int, VIZ, Context, CAPTURING
 from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.uop.movement import mop_cleanup
+from tinygrad.engine.realize import capturing
 
 # ************************** CANONICALIZE **************************
 
@@ -207,12 +208,15 @@ def create_linear_with_vars(sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Rangeify")
 
-  lin = []
-  for u in sink.toposort():
-    if u.op == Ops.CALL:
-      lin.append(u)
-  sink = UOp(Ops.LINEAR, src=tuple(lin))
-  sink = graph_rewrite(sink, pm_alloc_to_buffer+pm_drop_after, name="Drop After + ALLOC")
+  var_vals = {}
 
-  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output")
-  return sink, {}
+  linear = UOp(Ops.LINEAR, src=tuple([u for u in sink.toposort() if u.op == Ops.CALL]))
+  linear = graph_rewrite(linear, pm_alloc_to_buffer+pm_drop_after, name="Drop After + ALLOC")
+
+  # jit captures this schedule, no need to execute.
+  if len(capturing) and CAPTURING:
+    capturing[0].add_linear(linear, var_vals)
+    return UOp(Ops.LINEAR, src=()), var_vals
+
+  if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View Output")
+  return linear, var_vals
