@@ -189,7 +189,8 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
 stack_pointer = def_reg(RSP)
 
 # ***** X86 instruction selection *****
-def alloc_reg(dt:DType, pin:Register|None=None): return UOp.alloc((1,), dt, addrspace=AddrSpace.REG).replace(tag=None if pin is None else (pin,))
+def alloc_reg(dt:DType, pin:Register|tuple[Register, ...]|None=None):
+  return UOp.alloc((1,), dt, addrspace=AddrSpace.REG).replace(tag=(pin,) if isinstance(pin, Register) else pin)
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -224,19 +225,15 @@ def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
   op = {2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD}[x.dtype.itemsize]
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, srcs[i], imm(dtypes.uint8, i))), range(len(srcs)), undef())
 
-# we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
 def idiv(ctx:IselContext, x:UOp) -> UOp:
-  ext = []
-  if x.dtype not in dtypes.int8s:
-    val = imm(min(dtypes.uint32, x.dtype), 0) if x.dtype in dtypes.uints else \
-      (x.src[0].bitcast(dtypes.int) >> imm(dtypes.int, x.dtype.itemsize*8-1))
-    ext = [alloc_reg(x.dtype, RDX)[0].set(val)]
-
-  dividend = x.ins(X86Ops.MOV, src=(x.src[0].bitcast(dtypes.int16),), tag=(RAX,))
-  # dividend = alloc_reg(dtypes.int, RAX)[0].set(x.src[0].bitcast(dtypes.int16))
-  divisor = alloc_reg(x.src[1].dtype)[0].set(x.src[1])
-  defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][1+(x.dtype in dtypes.int8s)]
-  idiv = x.ins(X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV, src=(dividend, divisor) + tuple(ext), tag=defs)
+  op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
+  val = UOp.cconst(0, x.dtype) if x.dtype in dtypes.uints else x.src[0] >> UOp.cconst(x.dtype.itemsize*8-1, x.dtype)
+  ext = [] if x.dtype in dtypes.int8s else [alloc_reg(x.dtype, RDX)[0].set(val)]
+  dividend_dtype = dtypes.int16 if x.dtype in dtypes.int8s else x.dtype
+  dividend = alloc_reg(dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
+  defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][:1+(x.dtype not in dtypes.int8s)]
+  divisor = alloc_reg(x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
+  idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=tuple(defs))
   # this move "cleanses" the register constraints (rax/rdx) of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
@@ -268,12 +265,10 @@ def is_address(x:UOp):
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   i = ctx.func_args.index(x)
-  # the shape srcs of a PARAM are not values, tag them so they aren't materialized into registers
-  def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(src=tuple(s.rtag() for s in x.src), tag=(r,)),)
   def _stack_arg(disp:int):
     return (stack_pointer, UOp(Ops.NOOP), UOp(Ops.INS, arg=(X86Ops.FRAME_INDEX, dtypes.int32), src=(imm(dtypes.int32, disp),)))
-  if sys.platform == "win32": src = _reg_arg((RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
-  else: src = _reg_arg((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
+  if sys.platform == "win32": src = (x.replace(tag=((RCX, RDX, GPR[8], GPR[9])[i],)),) if i < 4 else _stack_arg((i-3)*8+32)
+  else: src = (x.replace(tag=((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i],)),) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
   return x.ins(X86Ops.MOV, src=src)
 
@@ -311,12 +306,8 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return x.replace(tag=tuple(defs))
 
-def copy_op(dt:DType):
-  if dt is dtypes.float32: return X86Ops.VMOVSS
-  if dt is dtypes.float64: return X86Ops.VMOVSD
-  if dt is dtypes.bool: return X86Ops.MOVZX
-  if dt in dtypes.ints: return X86Ops.MOV
-  raise NotImplementedError(f"no x86 copy op specified for: {dt}")
+def copy_op(dt:DType) -> X86Ops:
+  return {dtypes.float32:X86Ops.VMOVSS, dtypes.float64:X86Ops.VMOVSD, dtypes.bool:X86Ops.MOVZX}.get(dt, X86Ops.MOV)
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -441,8 +432,8 @@ isel_matcher = PatternMatcher([
   # lower register mops: a store is just a copy, load is just the value
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
     buf.ins(copy_op(val.dtype), src=(val.after(buf),), tag=buf.tag)
-      if (buf := a.src[0].without_after if a.op in {Ops.INDEX, Ops.SHRINK} else a.without_after).addrspace is AddrSpace.REG
-      and isinstance(buf.tag, tuple) else None),
+    if (buf := a.src[0].without_after if a.op is Ops.INDEX else a).addrspace is AddrSpace.REG
+      and isinstance(buf.tag, tuple) and buf.tag[0]._cons else None),
   (UPat.var("buf").load().named("x"), lambda ctx,buf,x: buf if buf.op in {Ops.BUFFER, Ops.ALLOC} else buf.src[0]
     if buf.addrspace is AddrSpace.REG else None),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
