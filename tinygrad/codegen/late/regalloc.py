@@ -28,7 +28,6 @@ class LinearScanRegallocContext:
         if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
-
     # allocate registers
     self.locals: dict[UOp, UOp] = {}
     self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
@@ -66,8 +65,6 @@ class LinearScanRegallocContext:
       # allocate defs
       if isinstance(u.tag, tuple):
         for j,v in enumerate(u.tag):
-          # register should only be defined once
-          # assert isinstance(v, Register) and lr[v][0] == i
           if v not in live:
             cons = v.cons
             # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
@@ -104,8 +101,10 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
-    if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.spills:
-      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), replace(ctx.reals[i][v], size=v.size)))
+    if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
+      reg = replace(ctx.reals[i][v], size=v.size)
+      def retag(x:UOp, r:Register) -> UOp: return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else x.replace(tag=(r,))
+      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg) if v in ctx.spills else retag(s, reg))
     else: nsrc.append(s)
   ndefs = tuple(replace(ctx.reals[i][v], size=v.size) for v in x.tag) if isinstance(x.tag, tuple) else x.tag
   nx = x.replace(src=tuple(nsrc), tag=ndefs)

@@ -239,7 +239,9 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
 
 # a variable shift count implicitly reads cl so it goes in rcx
 def shift(x:UOp, op:X86Ops) -> UOp:
-  return x.ins(op, src=(x.src[0], alloc_reg(x.src[1].dtype, RCX)[0].set(x.src[1])))
+  val = alloc_reg(x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
+  cnt = alloc_reg(x.src[1].dtype, RCX)[0].set(x.src[1])
+  return x.ins(op, src=(val, cnt))
 
 # a memory address operand is (base, index, displacement). the element size of the base pointer scales the index and is the memory operand width
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
