@@ -171,6 +171,7 @@ def unbind_and_var_val(ctx:dict[str, int], x:UOp):
   if ctx.get(x.arg.name, x.arg.val) != x.arg.val:
     raise RuntimeError(f"bind mismatch in {x.arg.name}, {ctx[x.arg.name]} != {x.arg.val}")
   ctx[x.arg.name] = x.arg.val
+  # TODO: do we just want the const here?
   return x.unbind()[0]
 
 pm_alloc_to_buffer_unbind = PatternMatcher([
