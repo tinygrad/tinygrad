@@ -1,10 +1,11 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, TinyJit, Variable, dtypes, nn, Device
+from tinygrad import Tensor, dtypes, nn, Device
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
+from test.helpers import slow
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
@@ -243,7 +244,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(prefill_conv, decode_conv, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
+  @slow
   def test_varied_chunk_sizes_match_decode(self):
     # full prefill is proven equivalent to decode by test_gatedeltanet_reference_and_reset (delta rule) and
     # test_kda_prefill_matches_decode (kda), so use it as the baseline and only exercise multi-chunk handoffs here
@@ -256,34 +257,18 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
           p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
       else: block = self._make_block(config)
       x = self._tensor_linspace(-0.5, 0.5, (1, 4, config.dim))
-      x_np = x.numpy()
-      block._init_state(x)
-
-      @TinyJit
-      def run_attention(chunk:Tensor, start_pos:Variable):
-        return block._attention(block.attn_norm(chunk), start_pos).realize()
-
-      def run_chunk(start:int, size:int) -> np.ndarray:
-        # A fixed-capacity backing buffer gives every chunk the same symbolic shape, allowing one JIT to serve all chunk sizes.
-        padded = np.zeros_like(x_np)
-        padded[:, :size] = x_np[:, start:start+size]
-        chunk_size = Variable("chunk_size", 1, x.shape[1]).bind(size)
-        start_pos = Variable("start_pos", 0, config.max_context-1).bind(start)
-        chunk = Tensor(padded, device=x.device)[:, :chunk_size].clone()
-        return run_attention(chunk, start_pos)[:, :size].numpy()
-
-      prefill = run_chunk(0, x.shape[1])
-      prefill_conv, prefill_recurrent = self._cache_views(block)
+      decode = self._run_attention(block, x, 0)
+      decode_conv, decode_recurrent = self._cache_views(block)
       for chunking in ([2, 2], [1, 3]):
         self._reset_state(block)
         outs, start = [], 0
         for size in chunking:
-          outs.append(run_chunk(start, size))
+          outs.append(self._run_attention(block, x[:, start:start+size], start))
           start += size
         chunked_conv, chunked_recurrent = self._cache_views(block)
-        np.testing.assert_allclose(np.concatenate(outs, axis=1), prefill, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
-        np.testing.assert_allclose(chunked_conv, prefill_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
-        np.testing.assert_allclose(chunked_recurrent, prefill_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+        np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+        np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+        np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
 
   def test_start_zero_resets_realized_state(self):
     config = self._make_config(max_context=3)
