@@ -153,6 +153,13 @@ class TestMainOnnxOps(TestOnnxOps):
           outputs = ["out"]
           self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
+  def test_resize_axes(self):
+    X, roi = np.arange(24, dtype=np.float32).reshape(1, 2, 3, 4), np.array([], dtype=np.float32)
+    self.helper_test_single_op("Resize", {"X": X, "roi": roi, "scales": np.array([2.0], dtype=np.float32)}, {"axes": [3]}, ["y"])
+    self.helper_test_single_op("Resize", {"X": X, "roi": roi, "scales": np.array([1.0, 2.0, 1.0, 1.0], dtype=np.float32)}, {}, ["y"])
+    from tinygrad.nn.onnx import onnx_ops
+    self.assertEqual(onnx_ops["Resize"](Tensor(X), sizes=[1, 2, 6, 6], keep_aspect_ratio_policy="not_smaller").shape, (2, 4, 6, 8))
+
   def test_resize_linear_mode(self):
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="linear")
 
@@ -294,6 +301,7 @@ class TestMainOnnxOps(TestOnnxOps):
     x = np.array([-np.inf, -1, 1, np.inf, np.nan], dtype=np.float32)
     self.helper_test_single_op("Shrink", {"x": x}, {}, ["y"])
     self.helper_test_single_op("Shrink", {"x": x}, {"lambd": -1.0, "bias": 0.5}, ["y"])
+    self.helper_test_single_op("Shrink", {"x": np.array([-3, -1, 1, 3], dtype=np.int32)}, {"lambd": 1.5, "bias": 1.5}, ["y"])
 
   def test_quantize_linear(self):
     test_cases = [
