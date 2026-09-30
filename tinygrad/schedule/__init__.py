@@ -294,7 +294,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
-    capturing[0].add_linear(linear, var_vals)
+    capturing[0].add_linear(linear)
     return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}
