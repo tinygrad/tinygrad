@@ -106,8 +106,7 @@ def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, dev:MetalDe
   c = mtl_msg(cb.after(c), "computeCommandEncoder", out=enc)
   c = mtl_msg(enc.after(c), "waitForFence:", fence)
   if dev.residency.value is None: # no residency set: declare the buffers
-    resources, count = [mtl_handle(devs, h).index(0).load() for h in ("resources", "count")]
-    c = mtl_msg(enc.after(c), "useResources:count:usage:", resources, count, 3)
+    c = mtl_msg(enc.after(c), "useResources:count:usage:", *[mtl_handle(devs, h).index(0).load() for h in ("resources", "count")], 3)
 
   # before apple9 the encoder must use the pipelines
   if not dev.arch.startswith("Apple") or int(dev.arch[5:]) < 9:
