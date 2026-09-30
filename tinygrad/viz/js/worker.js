@@ -5,7 +5,8 @@ const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 const monoCanvas = new OffscreenCanvas(0, 0);
 const monoCtx = monoCanvas.getContext("2d");
-monoCtx.font = "14px monospace";
+const LINE_HEIGHT = 16;
+monoCtx.font = `14px/${LINE_HEIGHT}px monospace`;
 const sourceLineLength = monoCtx.measureText("x".repeat(150)).width;
 
 onmessage = (e) => {
@@ -57,7 +58,9 @@ const layoutUOp = (g, { graph, change }, opts) => {
     if (label.startsWith("SOURCE\n")) {
       source = label.slice("SOURCE\n".length); lang = "cpp";
       const lines = source.split("\n");
-      dims = rectDims(Math.min(Math.max(...lines.map(line => monoCtx.measureText(line).width), 0), sourceLineLength), Math.max(lines.length, 1)*16);
+      let width = 0;
+      for (const line of lines) width = Math.max(width, monoCtx.measureText(line).width);
+      dims = rectDims(Math.min(width, sourceLineLength), lines.length*LINE_HEIGHT);
     } else {
       let [width, height] = [0, 0];
       for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
