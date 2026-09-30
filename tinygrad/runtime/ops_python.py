@@ -57,7 +57,7 @@ class PythonProgram(Program['PythonDevice']):
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      values: dict[UOp, Any] = dict(kw.get("bound", ())) # a function's params are bound by its caller
+      values: dict[UOp, Any] = dict(env:=kw.get("env", ())) # a function runs with its params bound to the caller's args
       pbufs: list[int] = list(bufs)
       pvals: list[int] = list(vals)
       exec_masks = [[True] * warp_size]
@@ -81,7 +81,7 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env:
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -93,8 +93,7 @@ class PythonProgram(Program['PythonDevice']):
               if g: _store(m, o+j*_step(m, src_dtypes[1]), v, src_dtypes[1])
           i += 1
           continue
-        if u.op is Ops.PARAM and u in values: pass
-        elif u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
+        if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
@@ -144,9 +143,7 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
-        elif u.op is Ops.CALL and u in self.fxns: # a function is a program with its params bound to the args
-          bound = {p: values[u.src[1 + p.arg.slot]] for p in u.body.src if p.op is Ops.PARAM}
-          values[u] = [self.fxns[u](bound=bound) if exec_masks[-1][0] else None]
+        elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
           cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg, list(DLL._loaded_.values())))
