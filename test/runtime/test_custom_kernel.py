@@ -558,6 +558,18 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3, 6, 9, 12])
 
+  def test_call_with_gated_store(self):
+    @uopfunc
+    def gated_store(out:UOp, idx:UOp):
+      return out[idx[0].valid(idx[0] < out.shape[0])].store(7).sink()
+
+    def kernel(C:UOp, A:UOp):
+      return gated_store(C, A).sink(arg=KernelInfo(name="call_with_gated_store", opts_to_apply=()))
+
+    a = Tensor([2], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [0, 0, 7, 0])
+
   @unittest.expectedFailure
   def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)
 
