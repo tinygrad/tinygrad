@@ -237,7 +237,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   # this move "cleanses" the register constraints (rax/rdx) of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
-# a variable shift count implicitly reads cl so it goes in rcx
+# a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
 def shift(x:UOp, op:X86Ops) -> UOp:
   val = alloc_reg(x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
   cnt = alloc_reg(x.src[1].dtype, RCX)[0].set(x.src[1])
@@ -309,7 +309,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   return x.replace(tag=tuple(defs))
 
 def copy_op(dt:DType) -> X86Ops:
-  return {dtypes.float32:X86Ops.VMOVSS, dtypes.float64:X86Ops.VMOVSD, dtypes.bool:X86Ops.MOVZX}.get(dt, X86Ops.MOV)
+  return {dtypes.float16:X86Ops.VMOVSS, dtypes.float32:X86Ops.VMOVSS, dtypes.float64:X86Ops.VMOVSD, dtypes.bool:X86Ops.MOVZX}.get(dt, X86Ops.MOV)
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -455,8 +455,9 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
-  # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(src=tuple(s.rtag() for s in x.src)) if any(s.tag is not True for s in x.src) else None),
+  # tag shape srcs so they aren't materialized into registers
+  (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
+    x.replace(src=tuple(s.rtag() for s in x.src)) if any(s.tag is not True for s in x.src) else None),
 ])
 
 # ***** pre register allocation *****
@@ -725,6 +726,7 @@ class X86Renderer(ISARenderer):
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.INS and x.arg[0] in X86GroupOp.TwoAddress
   def copy(self, x:UOp, reg:Register) -> UOp: return x.ins(X86Ops.MOV, src=(x,), tag=reg)
+
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)

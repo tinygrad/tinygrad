@@ -67,7 +67,8 @@ class LinearScanRegallocContext:
         for j,v in enumerate(u.tag):
           if v not in live:
             cons = v.cons
-            # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
+            # two address instructions (src is reused by def) can only coalesce reused src.
+            # reused src goes first to get priority in case of a tiebreak
             if ren.is_two_address(u) and j == 0:
               uses = tuple(live.get(rdef(s)) for s in u.src)
               cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
@@ -99,11 +100,12 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
   nsrc = []
+  def retag(x:UOp, r:Register) -> UOp:
+    return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else x.replace(tag=(r,))
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
     if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
       reg = replace(ctx.reals[i][v], size=v.size)
-      def retag(x:UOp, r:Register) -> UOp: return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else x.replace(tag=(r,))
       nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg) if v in ctx.spills else retag(s, reg))
     else: nsrc.append(s)
   ndefs = tuple(replace(ctx.reals[i][v], size=v.size) for v in x.tag) if isinstance(x.tag, tuple) else x.tag
