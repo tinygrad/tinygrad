@@ -226,28 +226,23 @@ def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
 
 # we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
 def idiv(ctx:IselContext, x:UOp) -> UOp:
-  op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
-  # for >8bit need to zero/sign extend rax to rdx
-  if x.dtype in dtypes.int8s: ext = []
-  elif x.dtype in dtypes.uints: ext = [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=(RDX,))]
-  else: ext = [x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=(RDX,))]
-  # for 8bit need to zero/sign extend al to ah
-  if x.dtype is dtypes.uint8: dividend = UOp(Ops.INS, arg=(X86Ops.MOVZX, dtypes.int16), src=(x.src[0],), tag=(RAX,))
-  elif x.dtype is dtypes.int8: dividend = UOp(Ops.INS, arg=(X86Ops.MOVSX, dtypes.int16), src=(x.src[0],), tag=(RAX,))
-  else: dividend = x.ins(X86Ops.MOV, src=(x.src[0],), tag=(RAX,))
-  # divisor can't be in rax or rdx
-  divisor = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
-  # for >8bit both rax and rdx are written to
-  defs = (ctx.vreg(RAX, x.dtype.itemsize),) if x.dtype in dtypes.int8s else (ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize))
-  idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=defs)
-  # this move "cleanses" the register constraints (rax/rdx) of idiv as that only applies on definition and not on the uses of idiv
+  ext = []
+  if x.dtype not in dtypes.int8s:
+    val = imm(min(dtypes.uint32, x.dtype), 0) if x.dtype in dtypes.uints else \
+      (x.src[0].bitcast(dtypes.int) >> imm(dtypes.int, x.dtype.itemsize*8-1))
+    ext = [alloc_reg(x.dtype, RDX)[0].set(val)]
+
+  dividend = x.ins(X86Ops.MOV, src=(x.src[0].bitcast(dtypes.int16),), tag=(RAX,))
+  # dividend = alloc_reg(dtypes.int, RAX)[0].set(x.src[0].bitcast(dtypes.int16))
+  divisor = alloc_reg(x.src[1].dtype)[0].set(x.src[1])
+  defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][1+(x.dtype in dtypes.int8s)]
+  idiv = x.ins(X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV, src=(dividend, divisor) + tuple(ext), tag=defs)
+  # this move "cleanses" the register constraints (rax/rdx) of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
-# a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
+# a variable shift count implicitly reads cl so it goes in rcx
 def shift(x:UOp, op:X86Ops) -> UOp:
-  val = alloc_reg(x.src[0].dtype)[0].set(x.src[0])
-  cnt = alloc_reg(x.src[0].dtype, RCX)[0].set(x.src[1])
-  return x.ins(op, src=(val,cnt))
+  return x.ins(op, src=(x.src[0], alloc_reg(x.src[1].dtype, RCX)[0].set(x.src[1])))
 
 # a memory address operand is (base, index, displacement). the element size of the base pointer scales the index and is the memory operand width
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
@@ -317,10 +312,10 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   return x.replace(tag=tuple(defs))
 
 def copy_op(dt:DType):
-  if dt in dtypes.ints: return X86Ops.MOV
   if dt is dtypes.float32: return X86Ops.VMOVSS
   if dt is dtypes.float64: return X86Ops.VMOVSD
   if dt is dtypes.bool: return X86Ops.MOVZX
+  if dt in dtypes.ints: return X86Ops.MOV
   raise NotImplementedError(f"no x86 copy op specified for: {dt}")
 
 isel_matcher = PatternMatcher([
@@ -445,7 +440,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is just the value
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
-    x.ins(copy_op(val.dtype), src=(val.after(buf),), tag=buf.tag)
+    buf.ins(copy_op(val.dtype), src=(val.after(buf),), tag=buf.tag)
       if (buf := a.src[0].without_after if a.op in {Ops.INDEX, Ops.SHRINK} else a.without_after).addrspace is AddrSpace.REG
       and isinstance(buf.tag, tuple) else None),
   (UPat.var("buf").load().named("x"), lambda ctx,buf,x: buf if buf.op in {Ops.BUFFER, Ops.ALLOC} else buf.src[0]
