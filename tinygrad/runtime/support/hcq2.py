@@ -426,7 +426,7 @@ def hcq_fence(f:UOp) -> UOp:
   return last[0].barrier(*last[1:])
 
 pm_hcq_encode = PatternMatcher([
-  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence").f(Ops.CALL, allow_any_len=True, name="f"), hcq_fence),
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence"),), allow_any_len=True, name="f"), hcq_fence),
 
   # after blocks are lowered, rechain stores saving original order
   (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),

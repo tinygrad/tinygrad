@@ -560,10 +560,10 @@ class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(NVComputeQueue(s))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(NVCopyQueue(s))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(NVEncDecQueue(s))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(NVQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute"), UPat()), name="s"), lambda s: encode_submit(NVComputeQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy"), UPat()), name="s"), lambda s: encode_submit(NVCopyQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec"), UPat()), name="s"), lambda s: encode_submit(NVEncDecQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw"), UPat()), name="s"), lambda s: encode_submit(NVQueue(s))),
   ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)

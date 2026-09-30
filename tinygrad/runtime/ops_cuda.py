@@ -96,8 +96,8 @@ class CUDAAllocator(Allocator['CUDADevice']):
 
 class CUDADevice(Compiled):
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_compute").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(CUDAQueue(s))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_copy").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(CUDAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_compute"), UPat()), name="s"), lambda s: encode_submit(CUDAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cuda_copy"), UPat()), name="s"), lambda s: encode_submit(CUDAQueue(s))),
   ])
 
   def __init__(self, device:str=""):
