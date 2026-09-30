@@ -272,13 +272,6 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
-def lower_call_weak_dtypes(call:UOp) -> UOp:
-  return call.replace(src=(graph_rewrite(call.body, pm_lower_weak+indexing_simplify+pm_lower_weak_calls),)+call.src[1:])
-
-pm_lower_weak_calls = PatternMatcher([
-  (UPat(Ops.CALL, name="call"), lambda call: lower_call_weak_dtypes(call)),
-])
-
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -346,7 +339,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # the boundary: required compute dtypes settle here; derivable const edges may stay bare
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   # NOTE: symbolic must NOT be composed here -- pm_data_invalid pushes the weak result CAST into a gated WHERE, remaking the weak node, and it cycles
-  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify+pm_lower_weak_calls, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify, name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
