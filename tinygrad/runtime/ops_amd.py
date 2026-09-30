@@ -520,7 +520,7 @@ class AMDSDMAQueue(HWQueue):
     return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
 
 def amd_compute_queue(submit:UOp) -> HWQueue:
-  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].arg[0][0]]).is_aql else AMDComputeQueue)(submit)
+  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].without_after.arg[0][0]]).is_aql else AMDComputeQueue)(submit)
 
 @dataclass(frozen=True)
 class AMDProgramData:
