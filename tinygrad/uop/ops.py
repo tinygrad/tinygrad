@@ -333,10 +333,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
         return None
 
-      # a void CALL has no shape, the return value of a CALL has the shape of its dtype
-      case Ops.CALL:
-        return None if self.dtype is dtypes.void else ()
-
       # INS shape is always scalar, vector width is in the instruction encoding
       case Ops.INS:
         if self.dtype is dtypes.void: return None
@@ -386,7 +382,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
-           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
+           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL:
         return self.src[0]._shape
 
       case Ops.BITCAST:
