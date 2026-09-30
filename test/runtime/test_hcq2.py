@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, unwrap
-from tinygrad.uop.ops import Ops, UOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.nir import NIRRenderer
@@ -132,6 +132,18 @@ class TestHCQ2FFI(unittest.TestCase):
       out = cpu_buf(dtype=dtypes.int32, slot=1, volatile=True, tag="ffi_result")
       bufs = self._run(out.index(0).store(hcq2.ccall(libc.dll.ffs, 0x10)))
     self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int).host.view(fmt='i')[0], 5)
+
+  def test_nested_ffi_call(self): # a function calls a C function: no pointer to pass, the symbol links
+    @uopfunc
+    def copy(dst:UOp, src:UOp): return hcq2.ccall(libc.memcpy, dst.index(0), src.index(0), 4).sink()
+    @uopfunc
+    def copy_pair(dst:UOp, src:UOp): return copy(dst.after(copy(dst, src)).index(1), src).sink()
+
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      src = hcq2.cstruct(init_c_struct_t(4, (("value", ctypes.c_uint32, 0),)), value=42)
+      out = cpu_buf(2, dtypes.uint32, tag="ffi_result")
+      bufs = self._run(copy_pair(out, src.bitcast(dtypes.uint32)))
+    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.uint32).host.view(fmt='I')), [42, 42])
 
   def test_ffi_cstruct(self):
     struct_t = init_c_struct_t(16, (("u8", ctypes.c_uint8, 0), ("u16", ctypes.c_uint16, 2),
