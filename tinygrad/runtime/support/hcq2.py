@@ -488,12 +488,11 @@ def lower_call(call:UOp) -> UOp|None:
                        ctx=lt_patches, bpm=pm_patches, name="lower")
   body = graph_rewrite(body, pm_renumber, ctx=itertools.count(), walk=True, name="renumber")
 
-  patches = dedup(lt_patches)
-  if VIZ: graph_rewrite(UOp.sink(*patches), PatternMatcher([]), name="View Link-Time Patches")
+  if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")
 
   # link patches wait on the buffer they write: an arg if the sink touches it, a ref after the call if it is only addressed
-  order = {b: i for i, b in enumerate(dedup([p.buf_uop for p in patches]))}
-  patched = {b: b.after(*ps) for b, ps in itertools.groupby(sorted(patches, key=lambda p: order[p.buf_uop]), key=lambda p: p.buf_uop)}
+  order = {b: i for i, b in enumerate(dedup([p.buf_uop for p in lt_patches]))}
+  patched = {b: b.after(*ps) for b, ps in itertools.groupby(sorted(dedup(lt_patches), key=lambda p: order[p.buf_uop]), key=lambda p: p.buf_uop)}
 
   # if touched, go to args
   touched = body.toposort(gate=lambda u: u.op is not Ops.GETADDR)
@@ -504,7 +503,7 @@ def lower_call(call:UOp) -> UOp|None:
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
 # *****************
-# 4. host calls: addresses and placeholders of any body, no hcq here
+# 4. host calls
 
 def bitcast_view(x:UOp, v:UOp, b:UOp) -> UOp|None:
   (o, n), k, m = v.marg[0], x.dtype.itemsize, b.dtype.itemsize
@@ -540,7 +539,7 @@ def fish_addrs(call:UOp, body:UOp) -> UOp|None: # runtime addrs load from a tabl
   return call.replace(src=(body, *call.src[1:], patch(table, [(8 * slot_of[g], g) for g in link_addrs])), arg=replace(call.arg, aux=info))
 
 def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders a body uses merge by kind and become its params, args of the call
-  bufs = [b for b in body.toposort(enter_calls=False) if b.op is Ops.PARAM and b.tag is not None]
+  bufs, alus = partition([u for u in body.toposort(enter_calls=False) if u.op is Ops.PARAM and (u.tag or u.is_variable)], lambda u: u.tag)
 
   # combine placeholders of a kind into one and replace with views, each 128-byte aligned
   kinds = {u: (u.tag, u.device, u.dtype, u.arg.volatile) for u in bufs if u.tag != "program" and u.arg.slot}
@@ -550,19 +549,14 @@ def fish_bufs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp: # the placeholders
   merged = {u: g[0].replace(arg=replace(g[0].arg, size=offs[g[0]][-1])) for g in groups if len(g) > 1 for u in g}
   ctx.update(views:={u: merged[u][o:o + u.max_numel()] for g in groups if len(g) > 1 for u, o in zip(g, offs[g[0]])})
 
-  # a placeholder is an arg of the call, appended if not there
+  # a placeholder is an arg of the call, appended if not there. variables bind by name after the args
   args, final = [a.substitute(views) for a in call.src[1:]], dedup([merged.get(b, b) for b in bufs])
   old = {a.without_after: i for i, a in reversed(list(enumerate(args)))}
   new = [b for b in final if b not in old]
-  slots = old | {b: len(args) + i for i, b in enumerate(new)}
-  params = {b: UOp.param(slots[b], b.dtype, b.shape, volatile=b.arg.volatile, name=f"{b.arg.name}_{slots[b]}") for b in final}
-  return call.replace(src=(body.substitute(views, extra_pm=pm_mops+pm_views).substitute(params), *args, *new))
-
-def bind_vars(call:UOp, body:UOp) -> UOp: # variables bind by name after the args
-  alus = [u for u in body.toposort(enter_calls=False) if u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU]
-  slots = {n: len(call.src) - 1 + i for i, n in enumerate(dedup([a.arg.name for a in alus]))}
+  slots = old | {b: len(args) + i for i, b in enumerate(new)} | {n: len(args) + len(new) + i for i, n in enumerate(dedup([a.arg.name for a in alus]))}
+  params = {b: UOp.param(i:=slots[b], b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for b in final}
   vals = {a: a.replace(arg=replace(a.arg, slot=slots[a.arg.name])) for a in alus}
-  return call.replace(src=(body.substitute(vals), *call.src[1:]))
+  return call.replace(src=(body.substitute(views, extra_pm=pm_mops+pm_views).substitute(params | vals), *args, *new))
 
 # the rules see a call on a sink. a pass that enters calls reaches the functions a sink calls, one that does not only the calls of the linear
 pm_addr_args = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), addr_args)])
@@ -570,14 +564,12 @@ pm_host = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), host_function),
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_addrs)])
 pm_fish_bufs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), fish_bufs)])
-pm_bind_vars = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), bind_vars)])
 
 def host_calls(linear:UOp) -> UOp: # works on any sink: without addresses and placeholders nothing changes
   linear = graph_rewrite(linear, pm_addr_args, walk=True, enter_calls=True, name="addr args") # callees first
   linear = graph_rewrite(linear, pm_host, name="host calls")
-  linear = graph_rewrite(linear, pm_fish_bufs, ctx=(views:=dict[UOp, UOp]()), walk=True, enter_calls=True, name="fish bufs") # callees first
-  linear = linear.substitute(views) # the refs after a call see the merged placeholders too
-  return graph_rewrite(linear, pm_bind_vars, walk=True, name="bind vars")
+  # callees first. the refs after a call see the merged placeholders too
+  return graph_rewrite(linear, pm_fish_bufs, ctx=(views:=dict[UOp, UOp]()), walk=True, enter_calls=True, name="fish bufs").substitute(views)
 
 # *****************
 # 5. compile
@@ -653,7 +645,7 @@ pm_link = PatternMatcher([
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
   # a call keeps the deps that are not written yet
   (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"), lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
-  (UPat(Ops.AFTER, name="a"), lambda a: None if a.src[0].op is Ops.CALL else
+  (UPat(Ops.AFTER, name="a"), lambda a: None if a.without_after.op is Ops.CALL else
    a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
 
@@ -668,8 +660,6 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
-  if ctx.refs: # attach refs to linear, next to the ones its first call keeps
-    first, rest = linked.src[0], linked.src[1:]
-    linked = linked.replace(src=(first.without_after.after(*dedup([*(first.src[1:] if first.op is Ops.AFTER else ()), *ctx.refs])), *rest))
+  if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked

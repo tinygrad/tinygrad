@@ -121,6 +121,7 @@ class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
   def _run(body:UOp) -> list[Buffer]:
     linear = hcq2.hcq_link(lower_and_compile(lower_hcq(body)), allow_cache=False)
+    assert hcq2.hcq_link(linear, allow_cache=False) is linear, "a linked linear links to itself, with the refs its call keeps"
     run_linear(linear, jit=True)
     return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
