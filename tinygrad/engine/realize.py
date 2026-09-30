@@ -233,6 +233,8 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   return None
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
+  linear = runtime_rewrites(linear)
+
   # collect the kernels to lower and compile, deduped by their compile cache key
   if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 
@@ -259,7 +261,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   return linear.substitute({c: c.replace(src=(c.body.substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
                            name="precompile kernels")
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, runtime_rewrites, HCQInfo # noqa: E402 # down here, hcq2 imports realize
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE, name="ast"),), name="call", allow_any_len=True), exec_copy),
