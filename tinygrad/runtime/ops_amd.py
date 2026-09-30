@@ -520,7 +520,7 @@ class AMDSDMAQueue(HWQueue):
     return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
 
 def amd_compute_queue(submit:UOp) -> HWQueue:
-  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[0].arg[0][0]]).is_aql else AMDComputeQueue)(submit)
+  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].arg[0][0]]).is_aql else AMDComputeQueue)(submit)
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -839,8 +839,8 @@ class AMDDevice(Compiled):
   sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda submit: encode_submit(amd_compute_queue(submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda submit: encode_submit(AMDSDMAQueue(submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(amd_compute_queue(s))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy").f(Ops.CALL, allow_any_len=True, name="s"), lambda s: encode_submit(AMDSDMAQueue(s))),
   ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]

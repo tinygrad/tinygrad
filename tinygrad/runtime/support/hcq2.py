@@ -65,9 +65,9 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
-  fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
-  return UOp.custom_function(fn, UOp(Ops.LINEAR, src=tuple(cmds), arg=(devs, queue)))
+def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None) -> UOp:
+  lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue))
+  return UOp.custom_function(fn or to_name("submit", lin.arg[0][0].split(":")[0], queue.split(":")[0])).call(lin)
 
 # C FFI
 
@@ -281,7 +281,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   submits:list[UOp] = []
   timelines = [ctx.sched_timeline((dev,)) for dev in ctx.queues]
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
-  fence = UOp.custom_function("hcq_fence", *timelines, *signals)
+  fence = UOp.custom_function("hcq_fence").call(*timelines, *signals)
   for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue).after(fence, *submits[-1:]))
   sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
@@ -350,7 +350,7 @@ class HWQueue:
   ])
 
   def __init__(self, submit:UOp):
-    self.lin = submit.src[0]
+    self.lin = submit.src[1]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
@@ -405,8 +405,8 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
   return buf.after(*dep, *stores)
 
 def hcq_fence(f:UOp) -> UOp:
-  devs = dedup(to_tuple(s.device)[0] for s in f.src)
-  lasts, sigs = f.src[:len(devs)], f.src[len(devs):]
+  devs = dedup(to_tuple(s.device)[0] for s in f.src[1:])
+  lasts, sigs = f.src[1:1 + len(devs)], f.src[1 + len(devs):]
   last:tuple[UOp, ...] = ()
 
   # wait for prev schedule to not collide
@@ -426,7 +426,7 @@ def hcq_fence(f:UOp) -> UOp:
   return last[0].barrier(*last[1:])
 
 pm_hcq_encode = PatternMatcher([
-  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence").f(Ops.CALL, allow_any_len=True, name="f"), hcq_fence),
 
   # after blocks are lowered, rechain stores saving original order
   (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),
