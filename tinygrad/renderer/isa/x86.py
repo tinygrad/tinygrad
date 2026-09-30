@@ -316,6 +316,13 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return x.replace(tag=tuple(defs))
 
+def copy_op(dt:DType):
+  if dt in dtypes.ints: return X86Ops.MOV
+  if dt is dtypes.float32: return X86Ops.VMOVSS
+  if dt is dtypes.float64: return X86Ops.VMOVSD
+  if dt is dtypes.bool: return X86Ops.MOVZX
+  raise NotImplementedError(f"no x86 copy op specified for: {dt}")
+
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
@@ -428,7 +435,7 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.MOVZX) if x.src[0].dtype.itemsize < x.dtype.itemsize else None),
   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVSXD)),
   (UPat(dtype=dtypes.sints).cast(dtypes.ints, name="x"), lambda x: x.ins(X86Ops.MOVSX) if x.src[0].dtype.itemsize < x.dtype.itemsize else None),
-  (UPat(dtype=dtypes.ints).cast(dtypes.ints, name="x"), lambda x: x.ins(X87Ops.MOV)),
+  (UPat(dtype=dtypes.ints).cast(dtypes.ints, name="x"), lambda x: x.ins(X86Ops.MOV)),
   # bitcasts between scalar floats and ints
   (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, 0)))),
   (UPat(dtype=dtypes.int16s).bitcast(dtypes.float16).named("x"), lambda x: vpins(x, x.src)),
@@ -438,10 +445,11 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is just the value
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
-    x.ins(X86Ops.MOV if val.dtype in dtypes.ints else X86Ops.VMOVSS, src=(val,), tag=buf.tag)
+    x.ins(copy_op(val.dtype), src=(val.after(buf),), tag=buf.tag)
       if (buf := a.src[0].without_after if a.op in {Ops.INDEX, Ops.SHRINK} else a.without_after).addrspace is AddrSpace.REG
       and isinstance(buf.tag, tuple) else None),
-  (UPat.var("buf").load().named("x"), lambda ctx,buf,x: base(x,1) if buf.addrspace is AddrSpace.REG else None),
+  (UPat.var("buf").load().named("x"), lambda ctx,buf,x: buf if buf.op in {Ops.BUFFER, Ops.ALLOC} else buf.src[0]
+    if buf.addrspace is AddrSpace.REG else None),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: lea(x) if not _is_vec_xmm(x.src[0]) and x.addrspace is not AddrSpace.REG else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
