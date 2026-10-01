@@ -112,10 +112,10 @@ extra_matcher = PatternMatcher([
   (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op,
    src=tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   (UPat(GroupOp.Comparison, src=[UPat(dtype=dtypes.float16), UPat()], name="x"),
-   lambda x: UOp(x.op, src=tuple(s.cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
+    lambda x: UOp(x.op, src=tuple(s.cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
   # a float WHERE blends at the width of its value, so it needs a comparison at that width to make the mask
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
-   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
+    lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
@@ -129,7 +129,8 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
 
 def is_regbuf(x:UOp) -> bool: return x.without_after.addrspace is AddrSpace.REG and x.max_numel() == 1
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  if is_regbuf((buf := addr.src[0])): return gate.where(buf.load(), alt).after(buf)
+  dt = to_int(x.dtype) if x.dtype in dtypes.floats else x.dtype
+  if is_regbuf((buf := addr.src[0])): return gate.where(buf.load().bitcast(dt), alt.bitcast(dt)).bitcast(x.dtype).after(buf)
   local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
@@ -137,7 +138,9 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
-  if is_regbuf((buf := addr.src[0])): return UOp(Ops.AFTER, src=(addr.store(gate.where(val, buf.load())),))
+  dt = to_int(val.dtype) if val.dtype in dtypes.floats else val.dtype
+  if is_regbuf((buf := addr.src[0])):
+    return UOp(Ops.AFTER, src=(addr.store(gate.where(val.bitcast(dt), buf.load().bitcast(dt)).bitcast(val.dtype)),))
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return UOp(Ops.AFTER, src=(sel,)).store(val)
@@ -151,8 +154,8 @@ def flag_gate(m:UOp) -> UOp|None:
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # vector BUFFERs get modeled in STACK space
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
-    x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL)) if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL))
+    if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
   (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
@@ -167,8 +170,6 @@ pre_isel_matcher = PatternMatcher([
 
 # ***** X86 registers *****
 def def_reg(reg:Register) -> UOp: return UOp(Ops.INS, arg=(X86Ops.DEFINE, dtypes.void), tag=(reg,))
-# undefined operand, used for VEX instructions
-def undef(): return UOp(Ops.NOOP)
 
 RAX = Register("rax", 0)
 RCX = Register("rcx", 1)
@@ -220,13 +221,13 @@ def vinsertps(x:UOp) -> UOp:
   def _insert(ret:UOp, i:int) -> UOp:
     s, v = base(x, i), lane(x, i)
     return x.ins(X86Ops.VINSERTPS, src=(ret, s, imm(dtypes.uint8, v << 6 | i << 4)))
-  return functools.reduce(_insert, range(len(x.src)), undef())
+  return functools.reduce(_insert, range(len(x.src)), UOp(Ops.NOOP))
 
 # vpinsrd xmm2, xmm0, eax, imm
 # inserts the element in eax into any position in xmm0, result is written to xmm2 according to imm
 def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
   op = {2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD}[x.dtype.itemsize]
-  return functools.reduce(lambda ret,i: x.ins(op, src=(ret, srcs[i], imm(dtypes.uint8, i))), range(len(srcs)), undef())
+  return functools.reduce(lambda ret,i: x.ins(op, src=(ret, srcs[i], imm(dtypes.uint8, i))), range(len(srcs)), UOp(Ops.NOOP))
 
 def idiv(ctx:IselContext, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
@@ -420,8 +421,8 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).cast(dtypes.int32s+dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.VCVTTSD2SI)),
   (UPat.var("y", dtypes.float32).cast(dtypes.float64, name="x"), lambda y,x: x.ins(X86Ops.VCVTSS2SD, src=(y, y))),
   (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSD2SS, src=(y, y))),
-  (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SS, src=(undef(), y))),
-  (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float64, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SD, src=(undef(), y))),
+  (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SS, src=(UOp(Ops.NOOP), y))),
+  (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float64, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SD, src=(UOp(Ops.NOOP), y))),
   (UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.bool)).cast(dtypes.ints, name="x"), lambda x:
    x.ins(X86Ops.MOVZX) if x.src[0].dtype.itemsize < x.dtype.itemsize else None),
   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVSXD)),
@@ -437,16 +438,15 @@ isel_matcher = PatternMatcher([
   # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
     buf.ins(copy_op(val.dtype), src=(val.after(buf),), tag=(rdef(buf),))
-    if (buf := a.src[0] if a.op is Ops.INDEX else a).without_after.addrspace is AddrSpace.REG
-    and isinstance(rdef(buf), Register) and rdef(buf)._cons else None),
-  (UPat.var("buf").load().named("x"), lambda ctx,buf,x:
-    x.ins(copy_op(x.dtype), src=((buf if buf.op in {Ops.BUFFER, Ops.ALLOC} else buf.src[0]),)) if buf.addrspace is AddrSpace.REG else None),
+    if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) and isinstance(rdef(buf), Register) and rdef(buf)._cons else None),
+  (UPat.var("a").load().named("x"), lambda ctx,a,x:
+    x.ins(copy_op(x.dtype), src=(buf,)) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: lea(x) if not _is_vec_xmm(x.src[0]) and x.addrspace is not AddrSpace.REG else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # load, store
   (UPat(Ops.LOAD, dtypes.floats, src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
-   x.ins(X86Ops.VPINSRW, src=(undef(),) + fold_address(a) + (imm(dtypes.uint8, 0),)) if x.max_numel() * x.dtype.itemsize == 2 else
+   x.ins(X86Ops.VPINSRW, src=(UOp(Ops.NOOP),) + fold_address(a) + (imm(dtypes.uint8, 0),)) if x.max_numel() * x.dtype.itemsize == 2 else
    x.ins(_xmm_sz(x), src=fold_address(a))),
   (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
    x.ins(X86Ops.MOV, src=fold_address(a)) if x.max_numel() == 1 else x.ins(_xmm_sz(x), src=fold_address(a))),
