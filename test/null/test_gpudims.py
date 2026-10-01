@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite
 from tinygrad.uop.validate import uops_to_z3
 from tinygrad.dtype import dtypes
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import flatten, dedup, Target
+from tinygrad.helpers import flatten, dedup, Target, Context
 
 class TestGroupedDims(unittest.TestCase):
   def _check_grouped_dims(self, prefix, dims, max_sizes, reverse, expected_sizes, assert_same_length=True):
@@ -134,7 +134,7 @@ class TestGroupedDims(unittest.TestCase):
           idx = sum(r*math.prod(dims[i+1:]) for i,r in enumerate(ranges))
           return out[idx].store(idx*3+7).end(*ranges).sink(arg=KernelInfo(opts_to_apply=()))
         out = Tensor.full((math.prod(dims),), -1, device="PYTHON").contiguous().realize()
-        with patch.object(ren, "global_max", (8,4,4)), patch.object(ren, "local_max", (8,4,4)):
+        with patch.object(ren, "global_max", (8,4,4)), patch.object(ren, "local_max", (8,4,4)), Context(CAPTURE_PROCESS_REPLAY=0):
           self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), [i*3+7 for i in range(math.prod(dims))])
 
   def test_grouped_mask_ranges(self):
