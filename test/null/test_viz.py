@@ -1175,5 +1175,23 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
     assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
 
+  @needs_tracked_pm
+  def test_nested_calls_ls(self):
+    from tinygrad.uop.ops import uopfunc
+    @uopfunc
+    def inner(out:UOp): return out[0].store(1).sink()
+    @uopfunc
+    def outer(out:UOp):
+      # call inner twice, it should not codegen inner twice
+      call = inner(out)
+      return inner(out.after(call)).sink()
+    def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
+    with save_viz() as viz, Context(SCACHE=0):
+      Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
+    with write_files(viz) as files:
+      rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+    codegen_count = [s for s in rewrites if "View Output AST" in s]
+    self.assertEqual(len(codegen_count), 4)
+
 if __name__ == "__main__":
   unittest.main()
