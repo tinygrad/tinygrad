@@ -381,7 +381,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   pc_map = {addr:str(inst) for addr,inst in decoded.items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
-  curr_barrier:dict[int, ProfileRangeEvent] = {}
+  curr_barrier:dict[tuple[int|None, int], ProfileRangeEvent] = {}
   exec_pending:dict[str, list[tuple[str, str]]] = {}
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
@@ -428,8 +428,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
-      if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
-      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[wave] = e
+      if (barrier:=curr_barrier.pop((simd, wave), None)) is not None: barrier.en = Decimal(p._time)
+      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd, wave)] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
@@ -445,13 +445,15 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       if name == "VALU_MAI" and unwrap(info).inst.op_name.startswith(("V_MFMA_F", "V_MFMA_I", "V_MFMA_SCALE_")): name += "_MFMA"
+      if isinstance(p, CDNA_INST) and unwrap(info).inst.op_name == "S_BARRIER": name = "BARRIER"
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
-    if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
-    if isinstance(p, WAVERDY):
+    if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)) and info is not None: yield from add("IMMEDIATE", p, wave=info.wave, info=info)
+    if isinstance(p, WAVERDY) or isinstance(p, CDNA_ISSUE) and info is None:
+      mask = p.mask if isinstance(p, WAVERDY) else sum(1<<w for w in range(10) if (p.inst >> (w*2)) & 3 == 3)
       for wave in range(16):
-        if p.mask & (1 << wave):
-          if wave in curr_barrier: yield from add("WAVERDY", p, wave=wave)
+        if mask & (1 << wave):
+          if (getattr(p, "simd", None), wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
