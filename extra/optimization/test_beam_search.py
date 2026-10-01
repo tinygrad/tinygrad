@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.helpers import BEAM, Timing, prod
 from tinygrad import Variable, Device, Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.uop.ops import AxisType, Ops
+from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.codegen.opt.search import get_kernel_actions
@@ -92,6 +92,29 @@ class TestBeamSearch(unittest.TestCase):
     upcasted = [s for s in actions.values() if any(o.op is OptOps.SPLIT and o.arg[1] is AxisType.UPCAST
                                                   for o in s.applied_opts)]
     assert len(upcasted) > 0, f"expected upcast/unroll actions after TC with max_up={up}, but got none"
+
+  def test_reduce_upcast_actions(self):
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
+    s = Scheduler(ast, Device[Device.DEFAULT].renderer)
+    output_axis, reduce_axis = s.axes_of(reduce=False)[0], s.axes_of(reduce=True)[0]
+    actions = get_kernel_actions(s, include_0=False, max_up=32)
+    up_opts = {(o.axis, o.arg[0]) for candidate in actions.values()
+               if (o:=candidate.applied_opts[-1]).op is OptOps.SPLIT and o.arg[1] is AxisType.UPCAST}
+    self.assertIn((output_axis, 4), up_opts)
+    self.assertIn((reduce_axis, 4), up_opts)
+    self.assertIn((reduce_axis, 0), up_opts)  # full reduction unroll of 32 is allowed
+    self.assertNotIn((output_axis, 0), up_opts)  # full output upcast of 32 exceeds its limit
+
+  def test_reduce_upcast_budget(self):
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
+    s = Scheduler(ast, Device[Device.DEFAULT].renderer)
+    s.apply_opt(Opt(OptOps.SPLIT, s.axes_of(reduce=False)[0], (2, AxisType.UPCAST)))
+    reduce_axis = s.axes_of(reduce=True)[0]
+    actions = get_kernel_actions(s, include_0=False, max_up=4)
+    reduce_amounts = {o.arg[0] for candidate in actions.values() if (o:=candidate.applied_opts[-1]).op is OptOps.SPLIT
+                      and o.arg[1] is AxisType.UPCAST and o.axis == reduce_axis}
+    self.assertEqual(reduce_amounts, {2})  # output and reduction upcasts share the same budget
+    for candidate in actions.values(): self.assertLessEqual(candidate.upcast_size(), 4)
 
   def test_max_up(self):
     a = Tensor.rand(16, 16)
