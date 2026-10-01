@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, sint_to_uop, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, sint_to_uop, AxisType, axis_to_pos
 from tinygrad.codegen.late.linearizer import pm_split_ends
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
@@ -25,8 +25,8 @@ def _split_dims(dims, max_sizes):
       _dims[i], _dims[(i+1)%len(_dims)] = _dims[i]//div, _dims[(i+1)%len(_dims)]*div
   return tuple(_dims[:2] if _dims[2] == 1 else _dims)
 
-def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False, start=0) -> list[UOp]:
-  if reverse: return get_grouped_dims(prefix, dims[::-1], max_sizes, start=start)[::-1]
+def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
+  if reverse: return get_grouped_dims(prefix, dims[::-1], max_sizes)[::-1]
   if max_sizes is None: limited = dims
   else:
     # try to group first: (a, b, c, d) -> (ab, c, d)
@@ -37,7 +37,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if limited == dims: limited = _split_dims(dims, max_sizes)
   # Keep hardware axes as ranges through index lowering. The last axis id is the hardware dimension.
   axis_type = AxisType.GLOBAL if prefix == "gidx" else AxisType.LOCAL
-  raw_idxs = [UOp(Ops.RANGE, src=(sint_to_uop(s),), arg=(start, i, axis_type)) for i,s in enumerate(limited)]
+  raw_idxs = [UOp(Ops.RANGE, src=(sint_to_uop(s),), arg=(axis_to_pos[axis_type], i, axis_type)) for i,s in enumerate(limited)]
   flat = sum(idx * math.prod(limited[i+1:]) for i,idx in enumerate(raw_idxs))
   return [ssimplify(flat // math.prod(dims[i+1:])) if i == 0 else ssimplify((flat // math.prod(dims[i+1:])) % dims[i]) for i in range(len(dims))]
 
@@ -62,12 +62,11 @@ def group_gpudims(ctx:Renderer, s:UOp):
   # if we got a WARP, set the local_max to it so it does not fold with other dims
   local_max = (local_shape[0],)+ctx.local_max[1:] if ctx.local_max is not None and local_dims and \
     all_ranges[local_dims[0]].axis_type is AxisType.WARP else ctx.local_max
-  start = max(r.arg[0] for r in all_ranges.values())+1
-  local_idxs = get_grouped_dims("lidx", local_shape, local_max, start=start)
+  local_idxs = get_grouped_dims("lidx", local_shape, local_max)
   hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.RANGE]
   global_max = ctx.global_max if ctx.global_prod_max is None else \
     tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
-  idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True, start=start+1) + local_idxs
+  idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
 
   # apply to multiple ranges
   subs = {}

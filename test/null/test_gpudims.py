@@ -1,7 +1,7 @@
 import unittest, math
 import z3
 from tinygrad.codegen.gpudims import get_grouped_dims, group_gpudims, pm_add_gpudims
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite, axis_to_pos
 from tinygrad.uop.weak import pm_lower_weak
 from tinygrad.uop.validate import uops_to_z3
 from tinygrad.dtype import dtypes
@@ -118,9 +118,21 @@ class TestGroupedDims(unittest.TestCase):
     class R(Renderer): global_max, local_max, global_prod_max = (256, 256, 256), (128, 128, 128), (128, 128, 128)
     grouped = group_gpudims(R(Target()), sink)
     self.assertFalse(any(u.op is Ops.SPECIAL for u in grouped.toposort()))
+    ranges = [u for u in grouped.toposort() if u.op is Ops.RANGE]
+    self.assertLess(max(r.axis_id for r in ranges if r.axis_type is AxisType.GLOBAL),
+                    min(r.axis_id for r in ranges if r.axis_type is AxisType.LOCAL))
     specials = [u for u in graph_rewrite(grouped, pm_add_gpudims).toposort() if u.op is Ops.SPECIAL]
     self.assertGreater(len([s for s in specials if "lidx" in s.arg]), 1)
     self.assertGreater(len([s for s in specials if "gidx" in s.arg]), 1)
+
+  def test_hardware_axis_ids(self):
+    self.assertEqual([axis_to_pos[t] for t in (AxisType.DEVICE, AxisType.GLOBAL, AxisType.LOCAL, AxisType.WARP)], [-10, -9, -8, -7])
+    device, = UOp.device_range_src(("NULL:0", "NULL:1"))
+    global_dims = get_grouped_dims("gidx", (2, 3), None)
+    local_dims = get_grouped_dims("lidx", (4, 5), None)
+    self.assertEqual(device.axis_id, (-10,))
+    self.assertEqual([r.axis_id for r in global_dims], [(-9, 0), (-9, 1)])
+    self.assertEqual([r.axis_id for r in local_dims], [(-8, 0), (-8, 1)])
 
   def test_late_special_preserves_lowered_bound(self):
     grouped = UOp.sink(*get_grouped_dims("lidx", (3,), (1024, 1024, 64)))
