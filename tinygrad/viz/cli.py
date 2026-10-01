@@ -116,7 +116,7 @@ def main(args) -> None:
     pkt_idxs:dict[str, itertools.count] = {}
     dispatch_to_inst:dict[str, tuple[str, int]] = {}
     inst_st:int|None = None
-    for e in list(viz.sqtt_timeline(*unwrap(data))):
+    for e in viz.sqtt_timeline(*unwrap(data)):
       if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
       if not isinstance(e, ProfileRangeEvent): continue
       if inst_st is None: inst_st = int(e.st)

@@ -415,7 +415,13 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
-    yield (e:=ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time)))
+    e = ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time))
+    # barrier on this wave extends to fill the time it was waiting
+    if wave is not None and (barrier:=curr_barrier.pop((simd, wave), None)) is not None:
+      barrier.en = Decimal(p._time)
+      yield barrier
+    if wave is not None and name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd, wave)] = e
+    else: yield e
     row_ends[row] = unwrap(e.en)
     if name == "VALU_MAI_MFMA" and info is not None and info.inst.op_name.startswith("V_MFMA_"):
       from tinygrad.runtime.autogen.amd.cdna.ins import VOP3PX2, VOP3P_MFMA
@@ -426,10 +432,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
          (ss[-1] == "F8F6F4" and isinstance(info.inst, (VOP3P_MFMA, VOP3PX2)) and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
       yield ProfileRangeEvent(f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
-    # barrier on this wave extends to fill the time it was waiting
-    if wave is not None:
-      if (barrier:=curr_barrier.pop((simd, wave), None)) is not None: barrier.en = Decimal(p._time)
-      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd, wave)] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
@@ -461,6 +463,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
         yield from add("SALU", p)
       else:
         yield from add(name, p)
+  yield from curr_barrier.values()
 
 def device_sort_fn(k:str) -> tuple:
   special = {"GC": 0, "USER": 1, "TINY": 2, "ALLDEVS":100, "DISK": 999}
