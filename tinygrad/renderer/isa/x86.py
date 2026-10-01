@@ -88,6 +88,10 @@ class X86GroupOp:
 
 # ***** X86 legalization *****
 
+def safe_where(x:UOp) -> UOp:
+  if x.dtype not in dtypes.floats or promo_dtype(x.src[0].src) is x.dtype: return x
+  return x.replace(src=(x.src[0].cast(x.dtype).ne(imm(x.dtype,0)), *x.src[1:]))
+
 extra_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPEQ is XOR+XOR, bool CMPLT is XOR+AND
   (UPat.var('x', dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
@@ -114,8 +118,7 @@ extra_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, src=[UPat(dtype=dtypes.float16), UPat()], name="x"),
    lambda x: UOp(x.op, src=tuple(s.cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
   # a float WHERE blends at the width of its value, so it needs a comparison at that width to make the mask
-  (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
-   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
+  (UPat(Ops.WHERE, dtypes.floats+(dtypes.weakfloat,), name="x"), safe_where),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
@@ -129,8 +132,7 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
 
 def is_regbuf(x:UOp) -> bool: return x.without_after.addrspace is AddrSpace.REG and x.max_numel() == 1
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  dt = to_int(x.dtype) if x.dtype in dtypes.floats else x.dtype
-  if is_regbuf((buf := addr.src[0])): return gate.where(buf.load().bitcast(dt), alt.bitcast(dt)).bitcast(x.dtype).after(buf)
+  if is_regbuf((buf := addr.src[0])): return safe_where(gate.where(buf.load(), alt)).after(buf)
   local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
@@ -138,9 +140,7 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
-  dt = to_int(val.dtype) if val.dtype in dtypes.floats else val.dtype
-  if is_regbuf((buf := addr.src[0])):
-    return UOp(Ops.AFTER, src=(addr.store(gate.where(val.bitcast(dt), buf.load().bitcast(dt)).bitcast(val.dtype)),))
+  if is_regbuf((buf := addr.src[0])): return UOp(Ops.AFTER, src=(addr.store(safe_where(gate.where(val, buf.load()))),))
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return UOp(Ops.AFTER, src=(sel,)).store(val)
