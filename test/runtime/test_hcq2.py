@@ -174,9 +174,9 @@ class TestHostCalls(unittest.TestCase):
   @staticmethod
   def _buf(n:int, dtype=dtypes.uint64) -> Buffer: return Buffer("CPU", n, dtype, initial_value=bytes(n * dtype.itemsize))
   @staticmethod
-  def _run(fxn, *bufs:Buffer) -> list: # the first buffer is the output. the sink gets its KernelInfo by hand: it is the program
+  def _run(fxn, *bufs:Buffer, **var_vals:int) -> list: # the first buffer is the output. the sink gets its KernelInfo by hand: it is the program
     call = fxn(*[UOp.from_buffer(b) for b in bufs])
-    run_linear(UOp(Ops.LINEAR, src=(call.replace(src=(call.body.replace(arg=KernelInfo(call.arg.name)), *call.src[1:])),)))
+    run_linear(UOp(Ops.LINEAR, src=(call.replace(src=(call.body.replace(arg=KernelInfo(call.arg.name)), *call.src[1:])),)), var_vals)
     return bufs[0].host.view(fmt=bufs[0].dtype.fmt)[:]
 
   def test_no_addrs_no_placeholders(self):
@@ -236,6 +236,21 @@ class TestHostCalls(unittest.TestCase):
       s = hcq2.cstruct(init_c_struct_t(8, (("pad", ctypes.c_uint32, 0), ("value", ctypes.c_uint32, 4))), value=42)
       return o.index(0).store(s.bitcast(dtypes.uint32).index(1).load().cast(dtypes.uint64)).sink()
     self.assertEqual(self._run(read, self._buf(1)), [42])
+
+  def test_variable_in_function(self): # a function gets a variable from its caller, the program binds it by name
+    @uopfunc
+    def scale(o:UOp, a:UOp): return o.index(0).store(a.index(0).load() * UOp.variable("k", 0, 10, dtypes.uint64)).sink()
+    @uopfunc
+    def top(o:UOp, a:UOp): return scale(o, a).sink()
+    a = Buffer("CPU", 1, dtypes.uint64, initial_value=struct.pack("Q", 7))
+    self.assertEqual(self._run(top, self._buf(1), a, k=6), [42])
+
+  def test_one_function_for_any_placeholder(self): # a function names its params: what it is called on does not make another function
+    @uopfunc
+    def put(out:UOp, v:UOp): return out.index(0).store(v).sink()
+    a, b = [cpu_buf(dtype=dtypes.uint64, tag=t) for t in ("cb", "enc")]
+    lowered = lower_hcq(put(a, UOp.const(1, dtypes.uint64)), put(b, UOp.const(2, dtypes.uint64)))
+    self.assertEqual(len({c.body for c in lowered.toposort() if c.op is Ops.CALL and c.arg.name == "put"}), 1)
 
 if __name__ == "__main__":
   unittest.main()

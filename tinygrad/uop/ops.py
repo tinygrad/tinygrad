@@ -1332,10 +1332,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 
 def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(*args): uop args become params
-  def param(i:int, n:str, a:UOp) -> UOp:
-    if (b:=a.without_after).op is Ops.PARAM and b.tag: return b # a placeholder is global, the body names it
-    shape = None if a.addrspace in (None, AddrSpace.ALU) else 1 if a.op is Ops.INDEX else a.max_numel()
-    return UOp.param(i, a.dtype, shape, name=n, addrspace=a.addrspace or AddrSpace.ALU)
+  def param(i:int, n:str, a:UOp) -> UOp: # a pointer keeps the device and the volatility of what it points to
+    if a.addrspace in (None, AddrSpace.ALU): return UOp.param(i, a.dtype, name=n, addrspace=AddrSpace.ALU)
+    shape, volatile = 1 if a.op is Ops.INDEX else a.max_numel(), getattr(a.buf_uop.arg, "volatile", False)
+    return UOp.param(i, a.dtype, shape, a.device, name=n, addrspace=a.addrspace, volatile=volatile)
   def outlined(*args, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
