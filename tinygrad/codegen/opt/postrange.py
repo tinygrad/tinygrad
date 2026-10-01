@@ -111,7 +111,7 @@ class Scheduler:
       if is_reduce and new_type is AxisType.LOCAL:
         reduces = [u for u in self.reduceops if rng in u.src[1:]]
         # We currently don't support a group within another reduce, TODO: fix if-contexts
-        check(not any(u in self.reduce_ranges and u.axis_type in (AxisType.WEAK, AxisType.UPCAST) for u in reduces[0].ranges),
+        check(not any(u in self.reduce_ranges and u.axis_type is AxisType.WEAK for u in reduces[0].ranges),
               "cannot have a group inside another reduce")
       ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
