@@ -93,8 +93,12 @@ class LinearScanRegallocContext:
       if u.op in (Ops.END, Ops.BACKEDGE):
         # TODO: if a uop is in a different reg in live out vs live in move between registers instead of loading
         # TODO: don't reload if first use in loop is a load
-        for v,r in live_ins.pop().items():
+        live_in = live_ins.pop()
+        for v,r in live_in.items():
           if v not in live or live[v] != r: live[v] = fill(v, i, (r,))
+        # a spilled var that only got a register inside the loop must be forced to reload from spill slot
+        for v in list(live.keys()):
+          if v in self.spills and v not in live_in: live.pop(v)
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)

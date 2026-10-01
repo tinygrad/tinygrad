@@ -127,7 +127,9 @@ extra_matcher = PatternMatcher([
 def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
   return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
+def is_regbuf(x:UOp) -> bool: return x.without_after.addrspace is AddrSpace.REG and x.max_numel() == 1
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
+  if is_regbuf((buf := addr.src[0])): return gate.where(buf.load(), alt).after(buf)
   local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
@@ -135,6 +137,7 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
+  if is_regbuf((buf := addr.src[0])): return UOp(Ops.AFTER, src=(addr.store(gate.where(val, buf.load())),))
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return UOp(Ops.AFTER, src=(sel,)).store(val)
@@ -259,7 +262,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x))
 def is_address(x:UOp):
-  if (x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG) or x.op is Ops.PARAM \
+  if (x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG) or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL) \
     or (x.op is Ops.INS and x.arg[0] in {X86Ops.LEA, X86Ops.DEFINE}): return True
   if x.op is Ops.INS and x.arg[0] is X86Ops.MOV: return (len(x.src) == 1 or x.src[0] is stack_pointer) and is_address(x.src[0])
   return x.op is Ops.INS and x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])
