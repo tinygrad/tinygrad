@@ -387,8 +387,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
-    simd = getattr(p, "simd", 0)
-    if hasattr(p, "simd"): row += f" SIMD:{p.simd}"
+    if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
     # extend packets to the architectural instruction issue interval
     start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
     # exec links to dispatch, dispatch links to PC
@@ -416,13 +415,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
-    e = ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time))
-    # barrier on this wave extends to fill the time it was waiting
-    if wave is not None and (barrier:=curr_barrier.pop((simd, wave), None)) is not None:
-      barrier.en = Decimal(p._time)
-      yield barrier
-    if wave is not None and name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd, wave)] = e
-    else: yield e
+    yield (e:=ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time)))
     row_ends[row] = unwrap(e.en)
     if name == "VALU_MAI_MFMA" and info is not None and info.inst.op_name.startswith("V_MFMA_"):
       from tinygrad.runtime.autogen.amd.cdna.ins import VOP3PX2, VOP3P_MFMA
@@ -433,6 +426,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
          (ss[-1] == "F8F6F4" and isinstance(info.inst, (VOP3P_MFMA, VOP3PX2)) and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
       yield ProfileRangeEvent(f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
+    # barrier on this wave extends to fill the time it was waiting
+    if wave is not None:
+      if (barrier:=curr_barrier.pop((simd or 0, wave), None)) is not None: barrier.en = Decimal(p._time)
+      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd or 0, wave)] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
@@ -451,11 +448,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       if isinstance(p, CDNA_INST) and unwrap(info).inst.op_name == "S_BARRIER": name = "BARRIER"
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
-    if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)) and info is not None: yield from add("IMMEDIATE", p, wave=info.wave, info=info)
+    if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
         if p.mask & (1 << wave):
-          if (getattr(p, "simd", 0), wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
+          if (0, wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
@@ -463,7 +460,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
         yield from add("SALU", p)
       else:
         yield from add(name, p)
-  yield from curr_barrier.values()
 
 def device_sort_fn(k:str) -> tuple:
   special = {"GC": 0, "USER": 1, "TINY": 2, "ALLDEVS":100, "DISK": 999}
