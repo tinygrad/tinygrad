@@ -378,6 +378,7 @@ class HWQueue:
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
+  def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
 # *****************
 # 3.1. hcq special functions
@@ -425,15 +426,7 @@ def encode_fence(f:UOp) -> UOp:
   # re-arm the signals
   for slots, off in map(unwrap_view, sigs): last = (slots.after(*last).index(off // slots.dtype.itemsize).store(0),)
   return last[0].barrier()
-
-pm_hcq_encode = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence),
-
-  # TODO: remove that
-  (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"), lambda root, a: None if root.op is Ops.LINEAR else
-    root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort().keys() - UOp.sink(*a.src[1:]).toposort().keys()
-                     if s.op is Ops.STORE}, walk=True)),
-])
+pm_hcq_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence)])
 
 # *****************
 # 3.2. split
@@ -445,7 +438,8 @@ def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
   return a.src[0].after(*rest)
 pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
 
-def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
+def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|tuple[str, ...]|None=None) -> UOp:
+  for u in lin.src if lin is not None else (): hq.q_rewrite.rewrite(u, ctx=hq) # the commands of the linear go to the stream
   stream, patches = bytes(hq.blob), hq.patches
 
   # loop over pathes with the same value
@@ -462,16 +456,12 @@ def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   for lname, ls in itertools.groupby(sorted(nested, key=lambda l: l.arg), key=lambda l: l.arg):
     hq.blob, hq.patches = bytearray(), []
     offs = {l: (hq.q(UOp(Ops.BINARY, arg=bytes(-len(hq.blob) % 128))), hq.q(*l.src)) for l in ls}
-    bufs.append((offs, bufferize_cmdbuf(hq, lname, hq.devs)))
+    bufs.append((offs, encode_cmdbuf(hq, name=lname)))
   views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
 
-  buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device, tag=to_name(name, hq.queue)).after(*hq.deps)
+  buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device or hq.devs, tag=to_name(name, hq.queue)).after(*hq.deps)
   words = UOp.sink(*[w for _, w in patches]).substitute(views).src
   return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*[b for _, b in bufs])
-
-def encode_submit(hq:HWQueue) -> UOp: # TODO: remove?
-  for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
-  return ret if (ret:=hq.submit(bufferize_cmdbuf(hq, "cmdbuf", hq.devs))).op is Ops.CALL else ret.after(*hq.deps)
 
 pm_renumber = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
