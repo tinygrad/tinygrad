@@ -3,7 +3,7 @@ import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, data
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.device import BufferStorage, Buffer, Device
-from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
+from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV, to_mv
 from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
@@ -49,6 +49,54 @@ class FileIOInterface:
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
+
+class LazyMMIOInterface(MMIOInterface):
+  """
+  MMIO interface that maps the backing fd lazily, in chunk_sz pieces, on first access.
+
+  A sysfs PCI BAR mmap is populated eagerly (io_remap_pfn_range), so mapping a multi-hundred-GB BAR costs seconds of
+  kernel time to install 4K PTEs at mmap and again to tear them down at exit. Map only the chunks that are touched.
+  NOTE: accessing .mv or .addr directly bypasses the lazy mapping, use view()/[] instead (view() returns an eagerly
+  mapped interface whose .addr is safe to hand out as a raw pointer).
+  """
+  def __init__(self, fd:FileIOInterface, addr:int, nbytes:int, fmt='B', off:int=0, chunk_sz:int=(2 << 20)):
+    super().__init__(addr, nbytes, fmt)
+    self.fd, self.off, self.esz, self.chunk_sz, self.mapped_chunks = fd, off, struct.calcsize(fmt), chunk_sz, set[int]()
+
+  def _ensure_mapped(self, offset:int, size:int):
+    assert 0 <= offset and offset + size <= self.nbytes, f"out of bounds access {offset=:#x} {size=:#x} (nbytes={self.nbytes:#x})"
+    if size == 0: return
+    mapped = False
+    for chunk in range(offset // self.chunk_sz, (offset + size - 1) // self.chunk_sz + 1):
+      if chunk not in self.mapped_chunks:
+        self.mapped_chunks.add(chunk)
+        chunk_off, chunk_size = chunk * self.chunk_sz, min(self.chunk_sz, self.nbytes - chunk * self.chunk_sz)
+        loc = self.fd.mmap(self.addr + chunk_off, chunk_size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED,
+                           self.off + chunk_off)
+        assert loc == self.addr + chunk_off, f"MAP_FIXED failed to map at requested address {loc=:#x}"
+        libc.madvise(loc, chunk_size, libc.MADV_DONTFORK)
+        mapped = True
+    if mapped: self.mv = to_mv(self.addr, self.nbytes).cast(self.fmt) # recreate so tracked memoryviews (mockgpu) pick up the new chunk
+
+  def _ensure_item(self, k):
+    if isinstance(k, slice):
+      start, stop, step = k.indices(len(self))
+      assert step == 1, "step is not supported"
+      self._ensure_mapped(start * self.esz, (stop - start) * self.esz)
+    else: self._ensure_mapped((k % len(self)) * self.esz, self.esz)
+
+  def __getitem__(self, k):
+    self._ensure_item(k)
+    return super().__getitem__(k)
+
+  def __setitem__(self, k, v):
+    self._ensure_item(k)
+    super().__setitem__(k, v)
+
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
+    size = (self.nbytes - offset) if size is None else size
+    self._ensure_mapped(offset, size)
+    return MMIOInterface(self.addr + offset, size, fmt=fmt or self.fmt)
 
 def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
@@ -260,8 +308,9 @@ class PCIDevice:
     return (int(s, 16), int(e, 16) - int(s, 16) + 1)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
-    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    return MMIOInterface(loc, sz, fmt=fmt)
+    # reserve the address range, map chunks of the BAR on demand
+    loc = FileIOInterface.anon_mmap(addr, sz, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE|(MAP_FIXED if addr else 0), 0)
+    return LazyMMIOInterface(fd, loc, sz, fmt=fmt, off=off)
   def resize_bar(self, bar_idx:int):
     rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
     try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))

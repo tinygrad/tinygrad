@@ -1,5 +1,5 @@
 from __future__ import annotations
-import mmap, functools
+import functools, os
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.am.amgpu import MockAMGPU, VRAM_SIZE
@@ -42,10 +42,15 @@ class PCIBarFileDesc(VirtFileDesc):
     return addr
 
 class PCIMMIOBarFileDesc(VirtFileDesc):
-  def __init__(self, fd, bar5_addr):
+  def __init__(self, fd, memfd, driver):
     super().__init__(fd)
-    self.bar5_addr = bar5_addr
-  def mmap(self, start, sz, prot, flags, fd, off): return self.bar5_addr + off
+    self.memfd, self.driver = memfd, driver
+  def mmap(self, start, sz, prot, flags, fd, off):
+    loc = libc.mmap(start, sz, prot, flags, self.memfd, off)
+    mmio = self.driver.gpu.mmio
+    self.driver.track_address(loc, loc + sz,
+      lambda mv, idx: _bar5_sync_read(mv, idx, mmio), lambda mv, idx: _bar5_sync_write(mv, idx, mmio))
+    return loc
 
 class PCIConfigFileDesc(VirtFileDesc):
   def __init__(self, fd):
@@ -69,10 +74,8 @@ class AMDriver(VirtDriver):
     self.gpus[0] = self.gpu
     self.next_fd = 1 << 30
 
-    self._bar5_addr = libc.mmap(0, MMIO_SIZE, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, -1, 0)
-    mmio = self.gpu.mmio
-    self.track_address(self._bar5_addr, self._bar5_addr + MMIO_SIZE,
-      lambda mv, idx: _bar5_sync_read(mv, idx, mmio), lambda mv, idx: _bar5_sync_write(mv, idx, mmio))
+    self._bar5_memfd = libc.memfd_create(b"mmio", libc.MFD_CLOEXEC)
+    os.ftruncate(self._bar5_memfd, MMIO_SIZE)
 
     p = f"/sys/bus/pci/devices/{PCIBUS}"
     self.tracked_files += [
@@ -87,7 +90,7 @@ class AMDriver(VirtDriver):
       VirtFile(f"{p}/resource", functools.partial(TextFileDesc, text="\n".join(_resource_lines) + "\n")),
       VirtFile(f"{p}/resource0", functools.partial(PCIBarFileDesc, memfd=self.gpu.vram_fd)),
       VirtFile(f"{p}/resource2", functools.partial(PCIBarFileDesc, memfd=self.gpu.doorbell_fd, driver=self)),
-      VirtFile(f"{p}/resource5", functools.partial(PCIMMIOBarFileDesc, bar5_addr=self._bar5_addr)),
+      VirtFile(f"{p}/resource5", functools.partial(PCIMMIOBarFileDesc, memfd=self._bar5_memfd, driver=self)),
     ]
 
   def _alloc_fd(self):

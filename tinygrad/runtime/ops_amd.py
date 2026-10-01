@@ -775,7 +775,8 @@ class PCIIface(PCIIfaceBase):
         gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
     put_value = Buffer(host:=self.dev.host, 1, dtypes.uint64, initial_value=bytes(8))
-    doorbell = Buffer(host, 1, dtypes.uint64, options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
+    doorbell = Buffer(host, 1, dtypes.uint64,
+      options=BufferSpec(external_ptr=self.dev_impl.doorbell64.view(doorbell_index*8, 8).addr), preallocate=True)
     return AMDQueueDesc(ring=ring, doorbell=doorbell, read_ptr=gart.view(1, dtypes.uint64, rptr).ensure_allocated(),
       write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), put_value=put_value, eop_buffer=eop_buffer, params=rcvr_params)
 
