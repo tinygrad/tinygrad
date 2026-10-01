@@ -20,7 +20,7 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3") -> UOp:
     sink = _get_handler(inst)(inst, ctx)
     *_, canonical_name = _canonical_info(inst, ctx, lib_bytes[off:])
     bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
-    body = sink.substitute({b:b.param_like(i) for i,b in enumerate(bufs)})
+    body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
     args = [afters.get(b, b) for b in bufs]
     call = body.call(*args, name=canonical_name)
     afters.update((b, arg.after(call)) for b, arg in zip(bufs, args))
