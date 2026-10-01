@@ -20,7 +20,8 @@ from test.runtime.test_linearizer import helper_realized_ast, helper_linearizer_
 
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
-def _tc_rand(*shape, dtype:DType) -> Tensor:
+def _tc_rand(*shape, dtype:DType, signed:bool=False) -> Tensor:
+  if signed and dtypes.is_float(dtype): return Tensor.randn(*shape).cast(dtype).realize()
   return Tensor.randint(*shape, low=dtype.min, high=dtype.max+1, dtype=dtype) if dtypes.is_int(dtype) else Tensor.rand(*shape, dtype=dtype)
 
 def run_program(prg:UOp, bufs:list[Buffer]):
@@ -59,9 +60,9 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
     except KernelOptError: pass
 
 def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1,
-                       extra_opts:list[Opt]=[]):
+                       extra_opts:list[Opt]=[], signed:bool=False):
   _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
-  a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
+  a, b = _tc_rand(M, K, dtype=dtype_in, signed=signed), _tc_rand(K, N, dtype=dtype_in, signed=signed)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
   if dtype_in == dtypes.bfloat16: r = r.float()
@@ -81,19 +82,11 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   np.testing.assert_allclose(c, ref, atol=tc_atol, rtol=tc_rtol)
 
 class TestTensorCores(unittest.TestCase):
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.target.arch in ("gfx1200", "gfx1201"), "requires RDNA4")
-  def test_rdna4_fp8(self):
-    for dtype in dtypes.fp8_ocp:
-      with self.subTest(dtype=dtype):
-        self.assertIn(dtype, Device[Device.DEFAULT].renderer.supported_dtypes())
-        a, b = Tensor.randn(32, 64).cast(dtype).realize(), Tensor.randn(48, 64).cast(dtype).realize()
-        expected = a.float().numpy() @ b.float().numpy().T
-        ast, bufs = helper_realized_ast(a.matmul(b.T, dtype=dtypes.float))
-        optimized = replace_opts(ast, [Opt(OptOps.TC, 0, (-1, 0, 1))])
-        prg = to_program(optimized, Device[Device.DEFAULT].renderer)
-        self.assertTrue(any(u.op is Ops.WMMA for u in prg.src[1].src))
-        run_program(optimized, bufs)
-        np.testing.assert_allclose(bufs[0].numpy().reshape(32, 48), expected, atol=1e-4, rtol=1e-4)
+  def test_tensor_cores_fp8_signed(self):
+    for i, tc in enumerate(Device[Device.DEFAULT].renderer.tensor_cores):
+      if tc.dtype_in not in dtypes.fp8s: continue
+      with self.subTest(tc=tc):
+        helper_tc_allclose(tc.dims[0]*3, tc.dims[1]*2, tc.dims[2]*4, tc.dtype_in, tc.dtype_out, tc_select=i, signed=True)
 
   # TODO: don't skip bf16 for real device (METAL, AMD)
   @Context(ALLOW_TF32=1)

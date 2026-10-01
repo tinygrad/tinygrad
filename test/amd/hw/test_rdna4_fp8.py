@@ -1,8 +1,7 @@
 import itertools, unittest
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.dtype import dtypes, fp8_to_float
-from test.amd.hw.helpers import f2i
-from test.amd.hw.test_rdna4_permlane_var import run_rdna4
+from test.amd.hw.helpers import f2i, run_rdna4
 
 class TestFP8RDNA4(unittest.TestCase):
   def test_cvt_f32_fp8(self):
@@ -23,9 +22,9 @@ class TestFP8RDNA4(unittest.TestCase):
       with self.subTest(a=a_fmt, b=b_fmt):
         out = run_rdna4([
           *[r4.v_mov_b32_e32(r4.v[i], 0xB8B8B8B8) for i in (0, 1)],
-          *[r4.v_mov_b32_e32(r4.v[i], 0x40404040) for i in (4, 5)],
+          *[r4.v_mov_b32_e32(r4.v[i], 0x3C3C3C3C) for i in (4, 5)],
           getattr(r4, f'v_wmma_f32_16x16x16_{a_fmt}_{b_fmt}')(r4.v[8:15], r4.v[0:1], r4.v[4:5], 0),
         ], out_reg=8)
-        self.assertEqual(out, [f2i(16 * fp8_to_float(0xB8, a_dt) * fp8_to_float(0x40, b_dt))] * 32)
+        self.assertEqual(out, [f2i(16 * fp8_to_float(0xB8, a_dt) * fp8_to_float(0x3C, b_dt))] * 32)
 
 if __name__ == '__main__': unittest.main()

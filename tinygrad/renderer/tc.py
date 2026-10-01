@@ -112,6 +112,13 @@ pm_validate_wmma_rdna3 = PatternMatcher([
     if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
 ])
 
+def pm_wmma_fp8(dtype:DType) -> PatternMatcher:
+  return PatternMatcher([
+    (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+      lambda x, dtype=dtype: x.replace(src=(x.src[0].bitcast(dtype), x.src[1].bitcast(dtype), x.src[2]))
+      if x.src[0].dtype in dtypes.fp8s and x.src[0].max_numel() == 8 else None),
+  ])
+
 pm_validate_wmma_rdna4 = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: x.replace(
     src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2].bitcast(dtypes.uint16)))
@@ -119,10 +126,7 @@ pm_validate_wmma_rdna4 = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
-  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
-    if x.max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp and x.src[0].max_numel() == 8 else None),
-])
+]) + pm_wmma_fp8(dtypes.uint32)
 
 pm_validate_wmma_cdna = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
@@ -131,10 +135,7 @@ pm_validate_wmma_cdna = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
-  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
-    if x.max_numel() == 4 and x.src[0].dtype in dtypes.fp8s and x.src[0].max_numel() == 8 else None),
-])
+]) + pm_wmma_fp8(dtypes.uint64)
 
 # ***** Apple Metal *****
 

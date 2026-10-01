@@ -514,6 +514,7 @@ class HIPRenderer(CStyleLanguage):
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
       ]) + self.string_rewrite
     if amd_fp8s(target.arch):
+      self.extra_matcher += tc.pm_wmma_fp8(dtypes.uint64 if self.is_cdna(target.arch) else dtypes.uint32)
       self.string_rewrite = PatternMatcher([
         (UPat.cvar("c").cast(dtypes.fp8s, name="x"), lambda ctx,x,c:
           f"f32_to_fp8({ctx.nan if math.isnan(v:=c.val) else ctx.infinity if v == math.inf else f'-{ctx.infinity}' if v == -math.inf else f'{v}f'},"
@@ -540,12 +541,7 @@ class HIPRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16", **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
-    (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-      lambda x: x.replace(src=tuple(s.bitcast(dtypes.uint32 if x.max_numel() == 8 else dtypes.uint64)
-                                       for s in x.src[:2]) + (x.src[2],))
-      if x.max_numel() in (4, 8) and x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8s else None),
-  ])
+  extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear

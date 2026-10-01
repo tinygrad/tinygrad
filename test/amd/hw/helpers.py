@@ -1,10 +1,11 @@
-"""Test infrastructure for hardware-validated RDNA3 emulator tests.
+"""Test infrastructure for hardware-validated RDNA emulator tests.
 
 Uses run_asm() with memory output, so tests can run on both emulator and real hardware.
 Set USE_HW=1 to run on both emulator and hardware, comparing results.
 """
-import ctypes, math, os, struct
+import ctypes, math, os, struct, unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
+import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 
 from test.mockgpu.amd.emu import run_asm
 from tinygrad.renderer.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
@@ -75,6 +76,45 @@ def i642f(i: int) -> float: return struct.unpack('<d', struct.pack('<Q', i))[0]
 
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
+
+def run_rdna4(instructions: list, out_reg: int = 2) -> list[int]:
+  instructions = [
+    r4.s_mov_b32(r4.s[80], r4.s[0]),
+    r4.s_mov_b32(r4.s[81], r4.s[1]),
+    r4.v_mov_b32_e32(r4.v[255], r4.v[0]),
+    *instructions,
+    r4.s_load_b64(r4.s[92:93], r4.s[80:81], soffset=NULL),
+    r4.s_wait_kmcnt(simm16=0),
+    r4.v_lshlrev_b32_e32(r4.v[240], 2, r4.v[255]),
+    r4.v_mov_b32_e32(r4.v[241], 0),
+    r4.global_store_b32(vaddr=r4.v[240:241], saddr=r4.s[92:93], vsrc=r4.v[out_reg]),
+    r4.s_endpgm(),
+  ]
+  out_buf = (ctypes.c_uint32 * WAVE_SIZE)()
+  args = (ctypes.c_uint64 * 1)(ctypes.addressof(out_buf))
+  code = assemble(instructions)
+  kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
+  result = run_asm(ctypes.addressof(kernel_buf), len(code), 1, 1, 1, WAVE_SIZE, 1, 1, ctypes.addressof(args), arch='rdna4')
+  assert result == 0, f"run_asm failed with {result}"
+  emu = list(out_buf)
+  if not USE_HW: return emu
+
+  from tinygrad.device import Device, Buffer
+  from tinygrad.dtype import dtypes
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.engine.realize import run_linear
+
+  dev = Device['AMD']
+  if not dev.renderer.target.arch.startswith('gfx12'): raise unittest.SkipTest('requires RDNA4 hardware')
+  out_gpu = Buffer(dev.device, WAVE_SIZE, dtypes.uint32).ensure_allocated()
+  sink = UOp.sink(UOp.param(0, dtypes.uint32, (WAVE_SIZE,)), UOp.special(WAVE_SIZE, 'lidx0'), arg=KernelInfo('test'))
+  prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in instructions))))
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu)),)), wait=True)
+  hw = list(out_gpu.as_memoryview().cast('I'))
+  if emu != hw:
+    diffs = [f"lane {i}: emu=0x{e:08x} hw=0x{h:08x}" for i, (e, h) in enumerate(zip(emu, hw)) if e != h]
+    raise AssertionError("Emulator vs Hardware mismatch:\n" + '\n'.join(diffs[:16]))
+  return hw
 
 # Simple WaveState class for test output parsing (mirrors test/mockgpu/amd/emu.py interface for tests)
 class WaveState:
