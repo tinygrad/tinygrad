@@ -669,8 +669,8 @@ async function renderProfiler(path, opts) {
           }
           if (splitRects && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
         }
-        for (const end of ends) {
-          if (end<st || end>et) continue;
+        for (let i=0; i<ends.length; i++) {
+          const end = ends[i]; if (end<st || end>et) continue;
           const x = xscale(end)+0.5;
           drawLine(ctx, [x, x], [offsetY-padding/2-0.5, offsetY+trackHeight-padding/2-0.5], { color:"#22232a" });
         }
