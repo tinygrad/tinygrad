@@ -390,6 +390,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
     # extend packets to the architectural instruction issue interval
     start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
+    if isinstance(p, CDNA_WAVEEND): start_time, end_time = start_time+4, end_time+4
     # exec links to dispatch, dispatch links to PC
     link:dict|None = {"pc":info.pc} if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
