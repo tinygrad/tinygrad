@@ -7,7 +7,6 @@ const monoCanvas = new OffscreenCanvas(0, 0);
 const monoCtx = monoCanvas.getContext("2d");
 const LINE_HEIGHT = 16;
 monoCtx.font = `14px/${LINE_HEIGHT}px monospace`;
-const sourceLineLength = monoCtx.measureText("x".repeat(150)).width;
 
 onmessage = (e) => {
   try {
@@ -60,7 +59,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const lines = source.split("\n");
       let width = 0;
       for (const line of lines) width = Math.max(width, monoCtx.measureText(line).width);
-      dims = rectDims(Math.min(width, sourceLineLength), lines.length*LINE_HEIGHT);
+      dims = rectDims(width, lines.length*LINE_HEIGHT);
     } else {
       let [width, height] = [0, 0];
       for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
