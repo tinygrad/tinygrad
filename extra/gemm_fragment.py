@@ -38,7 +38,7 @@ def alloc_shared(shape:tuple[int, ...], dtype:DType, slot:int) -> UOp:
 def alloc_fragment(shape:tuple[int, ...], dtype:DType, slot:int, axes:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
   """T.alloc_fragment: per-thread REG fragment + UNSHARD over the LOCAL thread grid."""
   assert len(axes) == len(rngs)
-  assert all(tnum.op is Ops.RANGE and tnum.arg[-1] is AxisType.LOCAL for tnum in rngs), "fragments shard over LOCAL ranges"
+  assert all(tnum.op is Ops.RANGE and tnum.axis_type is AxisType.LOCAL for tnum in rngs), "fragments shard over LOCAL ranges"
   by_axis = dict(zip(axes, rngs))
   shard_shape = tuple(s // (int(by_axis[i].vmax)+1) if i in by_axis else s for i, s in enumerate(shape))
   fragment = UOp.placeholder(shard_shape, dtype, slot, AddrSpace.REG)

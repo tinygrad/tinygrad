@@ -353,7 +353,7 @@ class TestUOpGraph(unittest.TestCase):
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
     c4 = c3.index(c1)
-    c5 = UOp.range(UOp.const(240), 0, AxisType.REDUCE)
+    c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
     c8 = c7.index(c6)
@@ -370,7 +370,7 @@ class TestUOpGraph(unittest.TestCase):
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
     c4 = c3.index(c1)  # c4 is a load
-    c5 = UOp.range(UOp.const(240), 0, AxisType.REDUCE)
+    c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
     c8 = c7.index(c6)
@@ -461,7 +461,7 @@ class TestReduceCollapse(unittest.TestCase):
   def test_reduce_shapeless_const_unroll(self):
     """a REDUCE over a shapeless CONST (e.g. x*0 folded late in codegen) must collapse before the expander"""
     out = UOp.param(0, dtypes.float, 1)
-    red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UNROLL), arg=(Ops.ADD, 0))
+    red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UPCAST), arg=(Ops.ADD, 0))
     ast = UOp.sink(out.index(UOp.const(0)).store(red)).replace(arg=KernelInfo())
     uops = full_rewrite(ast).toposort()
     self.assertNotIn(Ops.REDUCE, [u.op for u in uops])

@@ -68,7 +68,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UNROLL))]),
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (0, 0)
@@ -84,7 +84,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
-                                                    Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UNROLL))]),
+                                                    Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
