@@ -15,10 +15,10 @@ class IndexingContext:
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
-  def new_range(self, s:sint, axistype:AxisType=AxisType.WEAK) -> UOp:
+  def new_range(self, s:sint) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
     # if a range has a 1 src, it's the same as UOp.const(0)
-    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
+    return UOp.range(s, next(self.range_idx)) if resolve(s!=1) else UOp.const(0)
 
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.ALLOC,

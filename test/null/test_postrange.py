@@ -21,8 +21,9 @@ class TestReductionAxes(unittest.TestCase):
     self.assertIs(r.axis_type, AxisType.WEAK)
     self.assertEqual(k.rngs, [i, r])
     self.assertEqual(k.reduce_ranges, {r})
-    self.assertEqual(k.upcastable_dims, [0])
-    self.assertEqual(k.unrollable_dims, [1])
+    self.assertEqual(k.upcastable_dims(), [0])
+    self.assertEqual(k.upcastable_dims(reduce=True), [1])
+    self.assertEqual(k.upcastable_dims(reduce=None), [0, 1])
     k.convert_loop_to_global()
     self.assertEqual(k.axis_types, [AxisType.GLOBAL, AxisType.WEAK])
     self.assertEqual(k.reduce_ranges, {r})
@@ -34,6 +35,8 @@ class TestReductionAxes(unittest.TestCase):
     k = self.scheduler(out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo()))
     self.assertEqual(k.reduce_ranges, {r})
     self.assertEqual(k.axes_of(reduce=True), [1])
+    k.apply_opt(Opt(OptOps.PADTO, 0, 8))
+    self.assertIs(k.reduceop.src[0].op, Ops.INDEX)  # padding a bound dependency must not mask the reduction's input
 
   def test_upcast_both_roles(self):
     k, _, _ = self.reduction()

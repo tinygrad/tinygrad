@@ -49,22 +49,15 @@ class Scheduler:
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
-  def _globalizable_rngs(self) -> list[UOp]:
+  def convert_loop_to_global(self) -> None:
+    if not self.ren.has_local: return
     red = self.reduce_ranges
-    ret = [r for s in self.ast.src if s.op is Ops.END for r in s.src[1:] if r.axis_type is AxisType.WEAK and r not in red]
+    rngs = [r for s in self.ast.src if s.op is Ops.END for r in s.src[1:] if r.axis_type is AxisType.WEAK and r not in red]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.backward_slice:
       if x.op is Ops.STAGE:
-        ret = [r for r in ret if r in x.ranges]
-    return ret
-
-  def convert_loop_to_global(self) -> None:
-    if not self.ren.has_local: return
-
-    globalizible_rngs = self._globalizable_rngs()
-    rng = [x.replace(arg=(AxisType.GLOBAL,)+x.axis_id) if x in globalizible_rngs else x for x in self.rngs]
-
-    self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
+        rngs = [r for r in rngs if r in x.ranges]
+    self.ast = self.ast.substitute({r:r.replace(arg=(AxisType.GLOBAL,)+r.axis_id) for r in self.rngs if r in rngs})
 
   def colors(self) -> list[str]: return [axis_colors[t] for t in self.axis_types]
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -88,12 +81,8 @@ class Scheduler:
 
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST))
 
-  @property
-  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK, reduce=False) \
-                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
-  @property
-  def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.LOCAL, AxisType.WEAK, reduce=True) \
-                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
+  def upcastable_dims(self, reduce:bool|None=False) -> list[int]:
+    return [i for i in self.axes_of(*split_targets[AxisType.UPCAST], reduce=reduce) if isinstance(self.full_shape[i], int)]
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.TC: rng = UOp(Ops.NOOP)
@@ -150,7 +139,7 @@ class Scheduler:
       for b in self.bufs:
         if rng in (i:=b.src[1]).ranges: replaces[b] = b.replace(src=(b.src[0], i.get_idx().valid(valid&i.get_valid())))
       for r in self.reduceops:
-        if any(rng in y.ranges for y in r.src[1:]):
+        if rng in r.src[1:]:
           replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
       self.ast = self.ast.substitute(replaces, f"padto {rng.axis_id} {opt.arg}")
       ret = replaced_rng
@@ -229,7 +218,7 @@ class Scheduler:
                               tc.dims, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
-            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in [ne[c] for c in ne if c[0] == "k"]]
+            reduce_ranges = [x for x in reduceop.src[1:] if x not in [ne[c] for c in ne if c[0] == "k"]]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, src=(tc_uop,)+tuple(reduce_ranges), arg=(Ops.ADD, 0))
             self.ast = self.ast.substitute({reduceop: tc_uop})
           return axes
