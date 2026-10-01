@@ -671,7 +671,7 @@ async function renderProfiler(path, opts) {
         }
         for (const end of ends) {
           if (end<st || end>et) continue;
-          const x = xscale(end)-0.5;
+          const x = xscale(end)+0.5;
           drawLine(ctx, [x, x], [offsetY-padding/2-0.5, offsetY+trackHeight-padding/2-0.5], { color:"#22232a" });
         }
       }
