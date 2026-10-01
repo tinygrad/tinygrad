@@ -511,7 +511,7 @@ def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes
 def resolve_getaddrs(call:UOp, body:UOp) -> UOp:
   # a batch's params are the inputs of its kernels
   params = [p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.addrspace is AddrSpace.GLOBAL and not (p.tag or call.arg.aux)]
-  addrs = {g: g.substitute({p: call.src[1 + p.arg.slot] for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
+  addrs = {g: g.substitute({p: call.src[1 + p.arg.slot].without_after for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
   if body.arg is None or not addrs: return call.replace(src=(body.substitute(addrs, enter_calls=True), *call.src[1:]))
 
   # runtime addrs: inputs filled per call, the rest patched at link
