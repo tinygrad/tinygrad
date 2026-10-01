@@ -61,7 +61,7 @@ def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   fxn = _dequant_fwd_fxn(w_q.as_param(0).uop, w_scale.as_param(1).uop, w_q.device)
   return Tensor(fxn.uop.call_with_output(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd))
 
-def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Tensor:
+def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor, *, padded_output:bool=False) -> Tensor:
   if isinstance(x, tuple):
     assert ASM_GEMM, "pre-quantized MXFP8 input requires ASM_GEMM"
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
@@ -79,6 +79,7 @@ def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Ten
       ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
     assert can_use_asm_gemm(x_q, wq.T)
     out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(mx_pack(x_e8), x_e8, mx_pack(ws), ws), mx_w_stored=True)
+    if padded_output: return out
     return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
   l_shape = x.shape[:-1]
   if ASM_GEMM:
@@ -100,7 +101,9 @@ def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Ten
     else: x_q, x_e8, x_si = quantize_mxfp8(x2)
     if x_si is not None and can_use_asm_gemm(x_q, wq.T):
       out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(ws), ws), mx_w_stored=True)
+      if padded_output: return out
       return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
+  assert not padded_output, "padded output requires an ASM GEMM"
   x_phys = quant_dequant_mx(x.reshape(-1, x.shape[-1])).reshape(*l_shape, x.shape[-1])
   w_phys = dequant_weight(w_q, w_scale)
   return (x_phys @ w_phys.T).cast(dtypes.bfloat16)
@@ -261,8 +264,9 @@ class GPTOSS:
       w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
       attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
-    out = matmul_mx(attn, wo, wo_scale) + wo_bias
-    return out, [attn] + norm_saves + fa_saves
+    proj = matmul_mx(attn, wo, wo_scale, padded_output=bool(getenv("GPTOSS_RESIDUAL_HIP", 0)))
+    out = (proj[:, :self.dim].reshape(x.shape) if getenv("GPTOSS_RESIDUAL_HIP", 0) else proj) + wo_bias
+    return out, [attn] + norm_saves + fa_saves, proj
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
                    w_gate_up:Tensor, w_gate_up_scale:Tensor, w_gate_up_bias:Tensor,
@@ -320,11 +324,15 @@ class GPTOSS:
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
-    attn, attn_saves = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
+    attn, attn_saves, proj = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
     h = x + attn
     ffn, ffn_saves = self.feed_forward(h, **ffn_kwargs)
     if save: ffn_saves.append(h)
-    h = h + ffn
+    if getenv("GPTOSS_RESIDUAL_HIP", 0):
+      from extra.gptoss_kernels.residual import residual_join
+      h = residual_join(h, x, proj, attn_kwargs["wo_bias"], ffn)
+    else:
+      h = h + ffn
     if save: return (h, *attn_saves, *ffn_saves)
     return (h,)
 
