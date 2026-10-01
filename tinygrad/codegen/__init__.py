@@ -11,7 +11,7 @@ from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
-from tinygrad.codegen.gpudims import pm_add_gpudims
+from tinygrad.codegen.gpudims import pm_group_gpudims, pm_range_to_special
 from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid, invalid_gate
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
@@ -39,11 +39,11 @@ pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
 ])
 
-def build_range_map(sink:UOp) -> dict[tuple[int, ...], int]:
-  ctx: dict[tuple[int, ...], int] = {}
+def build_range_map(sink:UOp) -> dict[tuple, int]:
+  ctx: dict[tuple, int] = {}
   for x in sink.toposort():
-    if x.op is Ops.RANGE and x.axis_type in {AxisType.UNROLL, AxisType.UPCAST}:
-      ctx[x.axis_id] = len(ctx)
+    if x.op is Ops.RANGE and x.axis_type is AxisType.UPCAST:
+      ctx[x.arg] = len(ctx)
   return ctx
 
 def expand_reduce(r:UOp):
@@ -69,7 +69,7 @@ def unroll_axis(u:UOp, dims:list[int], sizes:list[int]) -> UOp:
   out = u.unflatten(-1, tuple(sizes))
   return out.permute(argsort([i for i in range(out.ndim) if i not in dims]+dims))
 
-def expand_wmma(ctx:dict[tuple[int, ...], int], u:UOp):
+def expand_wmma(ctx:dict[tuple, int], u:UOp):
   if u.arg[3] is None: return None
   in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[3]]
   wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
@@ -79,7 +79,7 @@ expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
-    .reshape(tuple([r.vmax+1 if i == ctx[r.axis_id] else 1 for i in range(len(ctx))])) if r.axis_id in ctx else None),
+    .reshape(tuple([r.vmax+1 if i == ctx[r.arg] else 1 for i in range(len(ctx))])) if r.arg in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
@@ -167,7 +167,7 @@ def fix_group_for_reduce(x:UOp):
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
-  reduce_loop = [x.replace(arg=(x.arg[0]+100, *x.arg[1:-1], AxisType.REDUCE)) for x in reduce_gfr]
+  reduce_loop = [x.replace(arg=(AxisType.WEAK, x.axis_id[0]+100, *x.axis_id[1:])) for x in reduce_gfr]
   buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
   # do the final reduce (if/barrier are added in gpudims step)
@@ -181,13 +181,13 @@ def merge_reduce_ends(sink:UOp):
   for u in sink.backward_slice:
     if u.op is Ops.END and u.tag == "mergeable": range_to_ends.setdefault(u.src[1:], []).append(u)
   subs: dict[UOp, UOp] = {}
-  next_axis = max((u.arg[0] for u in sink.backward_slice if u.op is Ops.RANGE), default=-1) + 1
+  next_axis = max((u.axis_id[0] for u in sink.backward_slice if u.op is Ops.RANGE), default=-1) + 1
   for r, ends in range_to_ends.items():
     if len(ends) <= 1: continue
     by_ctx: dict[frozenset[UOp], list[UOp]] = {}
     for e in ends: by_ctx.setdefault(frozenset(e.ranges), []).append(e)
     for i, group in enumerate(by_ctx.values()):
-      tr = r if i == 0 else tuple(rr.replace(arg=(next_axis + j, *rr.arg[1:])) for j, rr in enumerate(r))
+      tr = r if i == 0 else tuple(rr.replace(arg=(rr.axis_type, next_axis + j, *rr.axis_id[1:])) for j, rr in enumerate(r))
       if i > 0: next_axis += len(r)
       mapped = [e.substitute(dict(zip(r, tr))) if i > 0 else e for e in group]
       merged = mapped[0] if len(mapped) == 1 else UOp.group(*(e.src[0] for e in mapped)).end(*tr)
@@ -258,7 +258,7 @@ def add_raw_barrier(after:UOp):
 
 def add_war_barrier(end:UOp):
   # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
-  rngs = [r for r in end.ended_ranges if r.axis_type in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
+  rngs = [r for r in end.ended_ranges if r.axis_type in (AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
   if not rngs or end.src[0].op is Ops.BARRIER: return None
   sl = end.src[0].backward_slice_with_self
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
@@ -314,8 +314,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
 
-  # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+  # group GPU dimensions early so their index arithmetic goes through normal lowering
+  sink = graph_rewrite(sink, pm_group_gpudims, ctx=ren, name="group gpudims", walk=True)
 
   # **** optimizations are done, now we lower to actual code ****
 
@@ -371,6 +371,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+
+  # hardware ranges are no longer loops; preserve their already lowered bounds
+  sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

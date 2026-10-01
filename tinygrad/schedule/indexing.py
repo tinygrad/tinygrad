@@ -15,10 +15,10 @@ class IndexingContext:
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
-  def new_range(self, s:sint, axistype:AxisType=AxisType.WEAK) -> UOp:
+  def new_range(self, s:sint) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
     # if a range has a 1 src, it's the same as UOp.const(0)
-    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
+    return UOp.range(s, next(self.range_idx)) if resolve(s!=1) else UOp.const(0)
 
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
@@ -181,7 +181,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
-      sub_array = {r:r.replace(src=r.src[:1], arg=(i, AxisType.PLACEHOLDER)) for i,r in enumerate(sink.ranges)}
+      sub_array = {r:r.replace(src=r.src[:1], arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
@@ -298,7 +298,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE and x.arg[1]:
-      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
+      rngs = tuple(rctx.new_range(s) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)

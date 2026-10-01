@@ -18,7 +18,7 @@ def hand_spec_tc_cores():
   a = UOp.placeholder((N, N), dtypes.float, slot=1).reshape((N//8, 8, N//8, 8))
   b = UOp.placeholder((N, N), dtypes.float, slot=2).reshape((N//8, 8, N//8, 8))
 
-  gk = UOp.range(N // 8, 0, AxisType.REDUCE)
+  gk = UOp.range(N // 8, 0, AxisType.LOOP)
 
   a_tc = UOp.stack(*[mat_idx(a, gx, gk, warp, i) for i in range(2)])
   b_tc = UOp.stack(*[mat_idx(b, gk, gy, warp, i) for i in range(2)])

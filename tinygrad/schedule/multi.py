@@ -57,7 +57,7 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   assert all_same(devices), f"all buffers must have the same device {devices}"
   # without devices the sharding range comes from the UNSHARD itself (e.g. a LOCAL thread range);
   # device shards range over the devices instead
-  if len(devices): sharding_rng = UOp.range(len(devices[0]), -1, AxisType.DEVICE)
+  if len(devices): sharding_rng = UOp.range(len(devices[0]), 0, AxisType.DEVICE)
   else:
     sharding_rng = next((m.src[1] for m in msrcs if m.op is Ops.UNSHARD), None)
     assert sharding_rng is not None, "shard_srcs requires a device or a sharding range"

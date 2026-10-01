@@ -80,7 +80,7 @@ spec_shared = PatternMatcher([
 
   # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
   (UPat(Ops.RANGE, src=(UPat(),), allow_any_len=True, name="rng"), lambda rng: isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
-      all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
+      isinstance(rng.arg[0], AxisType) and all(isinstance(ra, int) for ra in rng.arg[1:])),
   (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.is_invalid for y in x.src[1:]) or None),
   # END closes bounded RANGEs around a void effect; it does not discard a value. Conditional loops use BACKEDGE.
   (UPat(Ops.END, src=(UPat(dtype=dtypes.void),), allow_any_len=True, name="x"),

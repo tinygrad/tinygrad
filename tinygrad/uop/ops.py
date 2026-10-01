@@ -16,8 +16,10 @@ if TYPE_CHECKING:
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
-  DEVICE = auto(); GLOBAL = auto(); WARP = auto(); LOCAL = auto(); WEAK = auto(); REDUCE = auto(); UPCAST = auto() # noqa: E702
-  UNROLL = auto(); PLACEHOLDER = auto(); LOOP = auto() # noqa: E702
+  def __lt__(self, other:AxisType): return self.value < other.value
+  # Nesting order: RANGE args sort by axis type, then axis id.
+  DEVICE = auto(); GLOBAL = auto(); LOCAL = auto(); WARP = auto(); WEAK = auto(); LOOP = auto() # noqa: E702
+  UPCAST = auto(); PLACEHOLDER = auto() # noqa: E702
 
 @dataclass(frozen=True, order=True)
 class ParamArg:
@@ -47,13 +49,9 @@ class ParamArg:
       args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.size}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
-                AxisType.LOOP: "L", AxisType.UPCAST: "u", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
+                AxisType.LOOP: "L", AxisType.UPCAST: "u"}
 axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
-               AxisType.WEAK: "WHITE", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow", AxisType.REDUCE: "red",
-               AxisType.UNROLL: "magenta"}
-
-axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1,
-               AxisType.LOCAL: 2, AxisType.UPCAST: 3, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
+               AxisType.WEAK: "red", AxisType.LOOP: "red", AxisType.UPCAST: "yellow"}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
 
@@ -500,12 +498,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def axis_id(self) -> tuple[int, ...]:
     assert self.op is Ops.RANGE, f"axis_id is only for RANGE, not {self.op}"
-    return self.arg[0:-1]
+    return self.arg[1:]
 
   @property
   def axis_type(self) -> AxisType:
     assert self.op is Ops.RANGE, f"axis_type is only for RANGE, not {self.op}"
-    return self.arg[-1]
+    return self.arg[0]
 
   # *** uop evaluation ***
 
@@ -642,9 +640,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *, dtype=dtypes.weakint, src=(), **kwargs):
-    return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type), **kwargs)
+    return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_type, axis_id), **kwargs)
   @staticmethod
-  def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(axis_id, AxisType.WEAK))
+  def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(AxisType.WEAK, axis_id))
   @staticmethod
   def special(end:sint, name:str): return UOp(Ops.SPECIAL, src=(sint_to_uop(end),), arg=name)
   @staticmethod
@@ -696,7 +694,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(axis, int): axis = (axis,)
     if device_range is None:
       assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
-      device_range = (UOp.range(len(self.device), -1, AxisType.DEVICE),)
+      device_range = (UOp.range(len(self.device), 0, AxisType.DEVICE),)
     if isinstance(device_range, UOp): device_range = (device_range,)
     assert isinstance(device_range, tuple) and len(axis) == len(device_range) and len(set(axis)) == len(axis)
     axis, device_range = map(tuple, zip(*sorted(zip(axis, device_range))))
@@ -755,7 +753,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.shrink(tuple((0,s) if i != axis else (rng*sz,rng*sz+sz) for i,s in enumerate(self.shape)))
   def shard(self, devices:tuple[str, ...], axis:int|None=None) -> UOp:
     copied = self.copy_to_device(devices)
-    return copied if axis is None else copied._shard(axis, UOp.range(len(devices), -1, AxisType.DEVICE)).unshard(axis)
+    return copied if axis is None else copied._shard(axis, UOp.range(len(devices), 0, AxisType.DEVICE)).unshard(axis)
 
   def copy_to_device(self, device:str|tuple[str, ...], arg=None):
     if is_disk_device(device):
@@ -847,7 +845,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def device_range_src(device:str|tuple[str, ...]|None) -> tuple[UOp, ...]:
     # BUFFER/ALLOC/COPY carry a DEVICE range when targeting multiple devices
-    return (UOp.range(len(device), -1, AxisType.DEVICE),) if isinstance(device, tuple) else ()
+    return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
@@ -1332,9 +1330,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
 def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(*args): uop args become params
   def param(i:int, n:str, a:UOp) -> UOp:
-    if (b:=a.without_after).op is Ops.PARAM and b.tag: return b # a placeholder is global, the body names it
-    shape = None if a.addrspace in (None, AddrSpace.ALU) else 1 if a.op is Ops.INDEX else a.max_numel()
-    return UOp.param(i, a.dtype, shape, name=n, addrspace=a.addrspace or AddrSpace.ALU)
+    if a.addrspace in (None, AddrSpace.ALU): return UOp.param(i, a.dtype, name=n, addrspace=AddrSpace.ALU)
+    return UOp.param(i, a.dtype, 1 if a.op is Ops.INDEX else a.max_numel(), a.device, name=n, addrspace=a.addrspace)
   def outlined(*args, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}

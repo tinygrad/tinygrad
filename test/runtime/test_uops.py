@@ -255,7 +255,7 @@ class TestUOpPrograms(unittest.TestCase):
     # Axes: i,j are spatial; k is a reduction axis over the shared dim K
     i = UOp.range(M, axis_id=0)                             # rows of A/C
     j = UOp.range(N, axis_id=1)                             # cols of B/C
-    k = UOp.range(K, axis_id=2, axis_type=AxisType.REDUCE)  # reduction over K
+    k = UOp.range(K, axis_id=2, axis_type=AxisType.LOOP)  # reduction over K
 
     # Zero-init: write a scalar 0 to each (i,j).
     C = C[i, j].set(0.0)
@@ -274,7 +274,7 @@ class TestUOpPrograms(unittest.TestCase):
     with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
 
     A, B, C = a.uop.placeholder_like(0), b.uop.placeholder_like(1), c.uop.placeholder_like(2)
-    i, j, k = UOp.range(10, 0), UOp.range(10, 1), UOp.range(10, 2, axis_type=AxisType.REDUCE)
+    i, j, k = UOp.range(10, 0), UOp.range(10, 1), UOp.range(10, 2, axis_type=AxisType.LOOP)
 
     C = C[i, j].set(0.0)
     C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
