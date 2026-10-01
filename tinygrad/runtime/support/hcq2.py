@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, round_up
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, TinyELF, HCQ_RUNTIME_DEV
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, _substitute
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.schedule.prepare import pm_mops
@@ -438,10 +438,15 @@ pm_hcq_encode = PatternMatcher([
 # *****************
 # 3.2. split
 
-def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
+@dataclass
+class HCQLowerCtx:
+  patches:list[UOp]
+  pm:PatternMatcher
+
+def hoist_links(ctx:HCQLowerCtx, a:UOp) -> UOp|None:
   links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
   if not links: return None
-  ctx.extend(links)
+  ctx.patches.extend(links)
   return a.src[0].after(*rest)
 pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
 
@@ -473,10 +478,16 @@ def encode_submit(hq:HWQueue) -> UOp: # TODO: remove?
   for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
   return ret if (ret:=hq.submit(bufferize_cmdbuf(hq, "cmdbuf", hq.devs))).op is Ops.CALL else ret.after(*hq.deps)
 
-pm_renumber = PatternMatcher([
+pm_renumber:PatternMatcher = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), lambda ctx,call: call.replace(src=(graph_rewrite(call.body, pm_renumber, ctx=ctx, walk=True),)+call.src[1:])),
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
 ])
+
+def lower_call_body(ctx:HCQLowerCtx, call:UOp) -> UOp:
+  return call.replace(src=(graph_rewrite(call.body, ctx.pm, ctx=ctx, bpm=pm_patches),)+call.src[1:])
+
+pm_lower_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), lower_call_body)])
 
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo): return None
@@ -484,16 +495,17 @@ def lower_call(call:UOp) -> UOp|None:
   # encode bodies
   from tinygrad.runtime.ops_rdma import pm_rdma_encode
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
+  lower_pm = pm_lower_calls + sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([]))
+  ctx = HCQLowerCtx([], lower_pm)
   body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
-                       ctx=(lt_patches:=list[UOp]()), bpm=pm_patches, name="encode")
-  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])),
-                       ctx=lt_patches, bpm=pm_patches, enter_calls=True, name="lower")
-  body = graph_rewrite(body, pm_renumber, ctx=itertools.count(), walk=True, enter_calls=True, name="renumber")
+                       ctx=ctx, bpm=pm_patches, name="encode")
+  body = graph_rewrite(body, lower_pm, ctx=ctx, bpm=pm_patches, name="lower")
+  body = graph_rewrite(body, pm_renumber, ctx=itertools.count(), walk=True, name="renumber")
 
-  if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")
+  if VIZ: graph_rewrite(UOp.sink(*dedup(ctx.patches)), PatternMatcher([]), name="View Link-Time Patches")
 
   # link patches wait after the call
-  return call.replace(src=(body, *call.src[1:])).after(*dedup(lt_patches))
+  return call.replace(src=(body, *call.src[1:])).after(*dedup(ctx.patches))
 
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
@@ -512,13 +524,25 @@ pm_views = PatternMatcher([
   (UPat((Ops.PARAM, Ops.BUFFER)).or_after("x").f(Ops.SHRINK, allow_any_len=True, name="v").bitcast().named("b"), bitcast_view),
 ])
 
+def substitute_hcq_call(ctx:dict[UOp, UOp], call:UOp) -> UOp:
+  return call.replace(src=(graph_rewrite(call.body, pm_hcq_substitute, ctx, bottom_up=True),)+call.src[1:])
+
+pm_hcq_substitute:PatternMatcher = PatternMatcher([(UPat(Ops.CALL, name="call"), substitute_hcq_call)]) + _substitute
+def substitute_hcq(sink:UOp, replaces:dict[UOp, UOp]) -> UOp: return graph_rewrite(sink, pm_hcq_substitute, replaces, bottom_up=True)
+
+def substitute_hcq_call_views(ctx:dict[UOp, UOp], call:UOp) -> UOp:
+  return call.replace(src=(call.body.substitute(ctx, extra_pm=pm_mops+pm_views+pm_hcq_substitute_calls),)+call.src[1:])
+
+pm_hcq_substitute_calls:PatternMatcher = PatternMatcher([(UPat(Ops.CALL, name="call"), lambda ctx,call: substitute_hcq_call_views(ctx, call))])
+
 # unwrap to base and byte offset. drops afters (an address has no deps) and merges views into one slot
 def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes.uint8)[v[1]:v[0].nbytes()].getaddr(to_tuple(g.arg)[0])
 
 def resolve_getaddrs(call:UOp, body:UOp) -> UOp:
+  body = graph_rewrite(body, pm_resolve_getaddrs, walk=True)
   params = [p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.addrspace is AddrSpace.GLOBAL and p.tag is p.device is None]
   addrs = {g: g.substitute({p: call.src[1 + p.arg.slot] for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
-  if body.arg is None or not addrs: return call.replace(src=(body.substitute(addrs, enter_calls=True), *call.src[1:]))
+  if body.arg is None or not addrs: return call.replace(src=(substitute_hcq(body, addrs), *call.src[1:]))
 
   # runtime addrs: inputs filled per call, the rest patched at link
   input_addrs, link_addrs = partition(rt_addrs:=dedup([normalize(g) for g in addrs.values()]), _is_input_addr)
@@ -526,11 +550,13 @@ def resolve_getaddrs(call:UOp, body:UOp) -> UOp:
   info = replace(call.arg.aux or HCQInfo((HCQ_RUNTIME_DEV.value,)), table=len(call.src) - 1, inputs=inputs)
   table = UOp.placeholder((len(rt_addrs),), dtypes.uint64, device=Device[info.device[0]].host, tag="inputs")
   slot_of = {g: i for i, g in enumerate(input_addrs + link_addrs)}
-  body = body.substitute({g: table.index(slot_of[normalize(a)]).load() for g, a in addrs.items()}, enter_calls=True)
+  body = substitute_hcq(body, {g: table.index(slot_of[normalize(a)]).load() for g, a in addrs.items()})
   return call.replace(src=(body, *call.src[1:], patch(table, [(8 * slot_of[g], g) for g in link_addrs])), arg=replace(call.arg, aux=info))
-pm_resolve_getaddrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), resolve_getaddrs)])
+pm_resolve_getaddrs:PatternMatcher = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"),
+                                                      lambda call,body: resolve_getaddrs(call, body))])
 
 def resolve_allocs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp:
+  body = graph_rewrite(body, pm_resolve_allocs, ctx=ctx, walk=True)
   bufs, alus = partition([u for u in body.toposort(enter_calls=False) if u.op is Ops.PARAM and (u.tag or u.is_variable)], lambda u: u.tag)
   if not bufs: return call
 
@@ -548,17 +574,19 @@ def resolve_allocs(ctx:dict[UOp, UOp], call:UOp, body:UOp) -> UOp:
   slots = old | {b: len(args) + i for i, b in enumerate(new)} | {n: len(args) + len(new) + i for i, n in enumerate(dedup([a.arg.name for a in alus]))}
   params = {b: UOp.param(i:=slots[b], b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for b in final}
   vals = {a: a.replace(arg=replace(a.arg, slot=slots[a.arg.name])) for a in alus}
-  return call.replace(src=(body.substitute(views, extra_pm=pm_mops+pm_views).substitute(params | vals), *args, *new))
-pm_resolve_allocs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"), resolve_allocs)])
+  body = body.substitute(views, extra_pm=pm_mops+pm_views+pm_hcq_substitute_calls)
+  return call.replace(src=(substitute_hcq(body, params | vals), *args, *new))
+pm_resolve_allocs:PatternMatcher = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="body"),), allow_any_len=True, name="call"),
+                                                    lambda ctx,call,body: resolve_allocs(ctx, call, body))])
 
 def runtime_rewrites(linear:UOp) -> UOp:
   if not any(u.op is Ops.GETADDR or (u.op is Ops.PARAM and u.tag) for u in linear.toposort()): return linear # nothing to rewrite
 
   # getaddrs are replaced with reads from the table
-  linear = graph_rewrite(linear, pm_resolve_getaddrs, walk=True, enter_calls=True, name="resolve getaddrs")
+  linear = graph_rewrite(linear, pm_resolve_getaddrs, walk=True, name="resolve getaddrs")
 
   # allocs are moved into args and will be resolved by pm_link
-  return graph_rewrite(linear, pm_resolve_allocs, ctx=(views:=dict[UOp, UOp]()), walk=True, enter_calls=True, name="resolve allocs").substitute(views)
+  return substitute_hcq(graph_rewrite(linear, pm_resolve_allocs, ctx=(views:=dict[UOp, UOp]()), walk=True, name="resolve allocs"), views)
 
 # *****************
 # 5. compile
