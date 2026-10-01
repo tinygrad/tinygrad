@@ -662,15 +662,10 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   pc_map = amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)
   wave_pc:dict[tuple[int, int], int] = {}
   cdna_imm_queue:dict[tuple[int, int], list[CDNA_ISSUE]] = {}
-  cdna_barriers:set[tuple[int, int]] = set()
-  def cdna_imm_dequeue(key:tuple[int, int]) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
+  def cdna_imm_dequeue(key:tuple[int, int]) -> Iterator[tuple[PacketType, InstructionInfo]]:
     pending = cdna_imm_queue[key]
     while pending and ((p:=pending[0]).inst >> (key[1]*2)) & 3 == 3:
       pending.pop(0)
-      if key in cdna_barriers:
-        cdna_barriers.remove(key)
-        yield (p, None)
-        continue
       if (inst:=pc_map[pc:=wave_pc[key]]).op_name not in {'S_NOP', 'S_WAITCNT', 'S_SETPRIO'}: continue
       wave_pc[key] += inst.size()
       yield (p, InstructionInfo(pc, key[1], inst))
@@ -705,7 +700,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         wave_pc[(p.simd, p.wave)] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
         wave_pc[(p.simd, p.wave)] += inst.size()
-      if inst.op_name == 'S_BARRIER': cdna_barriers.add((p.simd, p.wave))
       yield (p, InstructionInfo(pc, p.wave, inst))
       yield from cdna_imm_dequeue((p.simd, p.wave))
     # map INST events on this SIMD to the program counter, we know the waves

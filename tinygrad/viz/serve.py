@@ -381,13 +381,14 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   pc_map = {addr:str(inst) for addr,inst in decoded.items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
-  curr_barrier:dict[tuple[int|None, int], ProfileRangeEvent] = {}
+  curr_barrier:dict[tuple[int, int], ProfileRangeEvent] = {}
   exec_pending:dict[str, list[tuple[str, str]]] = {}
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
-    if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
+    simd = getattr(p, "simd", 0)
+    if hasattr(p, "simd"): row += f" SIMD:{p.simd}"
     # extend packets to the architectural instruction issue interval
     start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
     # exec links to dispatch, dispatch links to PC
@@ -451,11 +452,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
     if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)) and info is not None: yield from add("IMMEDIATE", p, wave=info.wave, info=info)
-    if isinstance(p, WAVERDY) or isinstance(p, CDNA_ISSUE) and info is None:
-      mask = p.mask if isinstance(p, WAVERDY) else sum(1<<w for w in range(10) if (p.inst >> (w*2)) & 3 == 3)
+    if isinstance(p, WAVERDY):
       for wave in range(16):
-        if mask & (1 << wave):
-          if (getattr(p, "simd", None), wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
+        if p.mask & (1 << wave):
+          if (getattr(p, "simd", 0), wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
