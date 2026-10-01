@@ -33,7 +33,7 @@ class TestReductionAxes(unittest.TestCase):
     inp, out = UOp.param(0, dtypes.float, (4, 4)), UOp.param(1, dtypes.float, (4,))
     k = self.scheduler(out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo()))
     self.assertEqual(k.reduce_ranges, {r})
-    self.assertEqual(k.reduce_axes, [1])
+    self.assertEqual(k.axes_of(reduce=True), [1])
 
   def test_upcast_both_roles(self):
     k, _, _ = self.reduction()
@@ -42,7 +42,7 @@ class TestReductionAxes(unittest.TestCase):
     self.assertEqual(k.axis_types, [AxisType.WEAK, AxisType.UPCAST, AxisType.WEAK, AxisType.UPCAST])
     self.assertEqual(k.axes_of(AxisType.UPCAST, reduce=False), [1])
     self.assertEqual(k.axes_of(AxisType.UPCAST, reduce=True), [3])
-    self.assertEqual(k.colors()[1::2], ["yellow", "magenta"])
+    self.assertEqual(k.colors()[1::2], ["yellow", "yellow"])
 
   def test_upcast_limits_follow_reduction_role(self):
     for axis, amount, allowed in [(0, 16, True), (0, 32, False), (1, 32, True), (1, 64, False)]:

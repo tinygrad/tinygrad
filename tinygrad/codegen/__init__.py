@@ -223,19 +223,6 @@ pm_reduce_local = pm_wmma_add+PatternMatcher([
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
 ])+pm_clean_up_group_sink
 
-# Once reductions are stores, software ranges are just loops. Renumber the first id to avoid aliasing ranges that
-# previously differed only by axis type, retaining the remaining ids for split ranges. Run once, after reduction lowering.
-pm_lower_loop_types = PatternMatcher([
-  (UPat(Ops.RANGE, name="r"), lambda ctx,r:
-   r.replace(arg=(AxisType.LOOP, ctx[r.arg[:2]], *r.axis_id[1:]))
-   if r.axis_type in (AxisType.WEAK, AxisType.LOOP) else None),
-])
-
-def lower_loop_types(sink:UOp) -> UOp:
-  # Preserve numeric id order rather than imposing the old axis type order on loops.
-  loop_ids = sorted({r.arg[:2] for r in sink.toposort() if r.op is Ops.RANGE}, key=lambda a: (a[1], a[0]))
-  return graph_rewrite(sink, pm_lower_loop_types, ctx={a:i for i,a in enumerate(loop_ids)}, name="lower loop types", walk=True)
-
 def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != u.src[0].shape
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_add_loads = PatternMatcher([
@@ -271,7 +258,7 @@ def add_raw_barrier(after:UOp):
 
 def add_war_barrier(end:UOp):
   # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
-  rngs = [r for r in end.ended_ranges if r.axis_type is AxisType.LOOP and r.vmax > 0]
+  rngs = [r for r in end.ended_ranges if r.axis_type in (AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
   if not rngs or end.src[0].op is Ops.BARRIER: return None
   sl = end.src[0].backward_slice_with_self
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
@@ -323,7 +310,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
-  sink = lower_loop_types(sink)
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")

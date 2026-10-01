@@ -25,7 +25,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   TC_MIN_GLOBALS -- do not upcast N when it would drop the specified global count
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
-  if USE_TC > 0 and (len(k.reduce_axes) == 1 or (TC_OPT.value >= 1)):
+  if USE_TC > 0 and (len(k.axes_of(reduce=True)) == 1 or (TC_OPT.value >= 1)):
     for axis in range(3):
       tk = k.copy()
       # check TC first and apply hand-coded opts if successful
@@ -119,8 +119,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
-      if any(rng not in b.src[1].get_idx().backward_slice and all(r2 in b.src[1].get_idx().backward_slice
-          for r2 in k.ranges_of(AxisType.UPCAST)) for b in k.bufs):
+      if any(rng not in b.src[1].get_idx().backward_slice and all(k.rngs[a] in b.src[1].get_idx().backward_slice
+          for a in k.axes_of(AxisType.UPCAST)) for b in k.bufs):
         num_strides, sum_strides = 0, 0
         for b in k.bufs:
           idx = b.src[1].get_idx()
@@ -155,7 +155,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
-    if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
+    if not k.axes_of(AxisType.UPCAST) and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
       k.apply_opt(Opt(OptOps.SPLIT, k.upcastable_dims[-1], (splits, AxisType.UPCAST)))
 
   # **** local groups ****

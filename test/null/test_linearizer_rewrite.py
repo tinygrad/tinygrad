@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.codegen import to_program, lower_loop_types
+from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.late.linearizer import do_split_ends
 from tinygrad.uop.ops import KernelInfo, AxisType, UOp, Ops
@@ -21,24 +21,6 @@ class TestLinearizerRewrite(unittest.TestCase):
       end = end.src[0]
     self.assertIs(end.op, Ops.NOOP)
 
-  def test_lower_loop_types(self):
-    # Erasing the type must not alias ranges with the same ids, or discard split ids.
-    ranges = [UOp.range(4, 0, t).replace(arg=(t, 0, j))
-              for t in (AxisType.WEAK, AxisType.LOOP) for j in (0, 1)]
-    hardware = [UOp.range(4, 1, t) for t in (AxisType.DEVICE, AxisType.GLOBAL, AxisType.LOCAL, AxisType.WARP)]
-    lowered = lower_loop_types(UOp.sink(*ranges, *hardware)).src
-    self.assertEqual([r.arg for r in lowered[:4]], [(AxisType.LOOP, i, j) for i in range(2) for j in (0, 1)])
-    self.assertEqual(lowered[4:], tuple(hardware))
-
-  def test_lower_dependent_loop_types(self):
-    outer = UOp.range(4, 0, AxisType.LOOP)
-    inner = UOp.range(outer+1, 0, AxisType.WEAK)
-    outer, inner = lower_loop_types(UOp.sink(outer, inner)).src
-    self.assertIs(outer.axis_type, AxisType.LOOP)
-    self.assertIs(inner.axis_type, AxisType.LOOP)
-    self.assertIn(outer, inner.src[0].ranges)
-    self.assertIsNot(outer, inner)
-
   def test_reduction(self):
     t = Tensor.ones((64,64), device="NULL").contiguous().realize()
     out = (t*2).sum(axis=1)
@@ -53,7 +35,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       self.assertNotIn(Ops.REDUCE, [u.op for u in prg.src[1].src])
       ranges = [u for u in prg.src[1].src if u.op is Ops.RANGE]
       self.assertTrue(ranges)
-      self.assertTrue(all(r.axis_type is AxisType.LOOP for r in ranges))
+      self.assertTrue(all(r.axis_type is AxisType.WEAK for r in ranges))
 
   def test_arange(self):
     out = Tensor.arange(32).clone("NULL")
