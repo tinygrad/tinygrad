@@ -3,7 +3,8 @@ import unittest, time, gc
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.helpers import GlobalCounters, Context, all_same
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
+from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
 from test.helpers import check_schedule, assert_kernel_count, KernelCountException, jit_cache_count
@@ -721,7 +722,7 @@ class TestSchedule(unittest.TestCase):
       for call in linear.src:
         if call.src[0].op is not Ops.SINK: continue
         sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
-        reduce_kernels += any(u.op is Ops.RANGE and u.axis_type is AxisType.REDUCE for u in sink.toposort())
+        reduce_kernels += any(u.op is Ops.STORE and u.addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
       self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):

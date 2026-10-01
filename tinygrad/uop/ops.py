@@ -19,7 +19,7 @@ class AxisType(Enum):
   def __lt__(self, other:AxisType): return self.value < other.value
   # Nesting order: RANGE args sort by axis type, then axis id.
   DEVICE = auto(); GLOBAL = auto(); LOCAL = auto(); WARP = auto(); WEAK = auto(); LOOP = auto() # noqa: E702
-  UPCAST = auto(); REDUCE = auto(); UNROLL = auto(); PLACEHOLDER = auto() # noqa: E702
+  UPCAST = auto(); PLACEHOLDER = auto() # noqa: E702
 
 @dataclass(frozen=True, order=True)
 class ParamArg:
@@ -49,10 +49,9 @@ class ParamArg:
       args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.size}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
-                AxisType.LOOP: "L", AxisType.UPCAST: "u", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
+                AxisType.LOOP: "L", AxisType.UPCAST: "u"}
 axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
-               AxisType.WEAK: "WHITE", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow", AxisType.REDUCE: "red",
-               AxisType.UNROLL: "magenta"}
+               AxisType.WEAK: "WHITE", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow"}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
 

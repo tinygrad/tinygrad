@@ -15,7 +15,7 @@ def _custom_quantize_mxfp8_qe8(fp8_out:UOp, e8_out:UOp, x:UOp) -> UOp:
   x, fp8_out, e8_out = x.reshape(n_elems), fp8_out.reshape(n_elems), e8_out.reshape(n_blocks)
   wg = UOp.range(n_blocks // THREADS_PER_WG, 0, AxisType.GLOBAL)
   tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  lane = UOp.range(BLK, 3, AxisType.UNROLL)
+  lane = UOp.range(BLK, 3, AxisType.UPCAST)
   block = wg * THREADS_PER_WG + tid
   idx = block * BLK + lane
   x_f = x[idx].cast(dtypes.float)

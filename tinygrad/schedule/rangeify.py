@@ -188,7 +188,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
     srcs = []
     for s in root.src:
       if s.op in GroupOp.Elementwise and s.device is not None:
-        # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.WEAK, the DEVICE range stays a launched axis
+        # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
         orig_ranges = s.ranges
         end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
                       for x in s.ranges]
