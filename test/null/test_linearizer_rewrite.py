@@ -2,10 +2,25 @@ import unittest
 from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.late.linearizer import do_split_ends
 from tinygrad.uop.ops import KernelInfo, AxisType, UOp, Ops
 from test.helpers import to_uops_list
 
 class TestLinearizerRewrite(unittest.TestCase):
+  def test_range_order(self):
+    types = [AxisType.DEVICE, AxisType.GLOBAL, AxisType.LOCAL, AxisType.WARP, AxisType.WEAK, AxisType.LOOP,
+             AxisType.UPCAST, AxisType.REDUCE, AxisType.UNROLL, AxisType.PLACEHOLDER]
+    # Axis type wins over numeric ids, including multi-part ids.
+    ranges = [UOp.range(4, 10-i, t).replace(arg=(t, 10-i, j)) for i,t in enumerate(types) for j in (0, 1)]
+    self.assertEqual(sorted(ranges[::-1], key=lambda r: r.arg), ranges)
+    self.assertEqual(ranges[0].axis_id, (10, 0))
+    self.assertEqual(ranges[0].axis_type, AxisType.DEVICE)
+    end = do_split_ends(UOp(Ops.NOOP).end(*ranges[::-1]))
+    for r in ranges:
+      self.assertIs(end.src[1], r)
+      end = end.src[0]
+    self.assertIs(end.op, Ops.NOOP)
+
   def test_reduction(self):
     t = Tensor.ones((64,64), device="NULL").contiguous().realize()
     out = (t*2).sum(axis=1)

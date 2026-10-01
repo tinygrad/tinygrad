@@ -39,11 +39,11 @@ pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
 ])
 
-def build_range_map(sink:UOp) -> dict[tuple[int, ...], int]:
-  ctx: dict[tuple[int, ...], int] = {}
+def build_range_map(sink:UOp) -> dict[tuple, int]:
+  ctx: dict[tuple, int] = {}
   for x in sink.toposort():
     if x.op is Ops.RANGE and x.axis_type in {AxisType.UNROLL, AxisType.UPCAST}:
-      ctx[x.axis_id] = len(ctx)
+      ctx[x.arg] = len(ctx)
   return ctx
 
 def expand_reduce(r:UOp):
@@ -69,7 +69,7 @@ def unroll_axis(u:UOp, dims:list[int], sizes:list[int]) -> UOp:
   out = u.unflatten(-1, tuple(sizes))
   return out.permute(argsort([i for i in range(out.ndim) if i not in dims]+dims))
 
-def expand_wmma(ctx:dict[tuple[int, ...], int], u:UOp):
+def expand_wmma(ctx:dict[tuple, int], u:UOp):
   if u.arg[3] is None: return None
   in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[3]]
   wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
@@ -79,7 +79,7 @@ expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
-    .reshape(tuple([r.vmax+1 if i == ctx[r.axis_id] else 1 for i in range(len(ctx))])) if r.axis_id in ctx else None),
+    .reshape(tuple([r.vmax+1 if i == ctx[r.arg] else 1 for i in range(len(ctx))])) if r.arg in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
@@ -167,7 +167,7 @@ def fix_group_for_reduce(x:UOp):
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
-  reduce_loop = [x.replace(arg=(x.arg[0]+100, *x.arg[1:-1], AxisType.REDUCE)) for x in reduce_gfr]
+  reduce_loop = [x.replace(arg=(AxisType.REDUCE, x.axis_id[0]+100, *x.axis_id[1:])) for x in reduce_gfr]
   buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
   # do the final reduce (if/barrier are added in gpudims step)
@@ -181,13 +181,13 @@ def merge_reduce_ends(sink:UOp):
   for u in sink.backward_slice:
     if u.op is Ops.END and u.tag == "mergeable": range_to_ends.setdefault(u.src[1:], []).append(u)
   subs: dict[UOp, UOp] = {}
-  next_axis = max((u.arg[0] for u in sink.backward_slice if u.op is Ops.RANGE), default=-1) + 1
+  next_axis = max((u.axis_id[0] for u in sink.backward_slice if u.op is Ops.RANGE), default=-1) + 1
   for r, ends in range_to_ends.items():
     if len(ends) <= 1: continue
     by_ctx: dict[frozenset[UOp], list[UOp]] = {}
     for e in ends: by_ctx.setdefault(frozenset(e.ranges), []).append(e)
     for i, group in enumerate(by_ctx.values()):
-      tr = r if i == 0 else tuple(rr.replace(arg=(next_axis + j, *rr.arg[1:])) for j, rr in enumerate(r))
+      tr = r if i == 0 else tuple(rr.replace(arg=(rr.axis_type, next_axis + j, *rr.axis_id[1:])) for j, rr in enumerate(r))
       if i > 0: next_axis += len(r)
       mapped = [e.substitute(dict(zip(r, tr))) if i > 0 else e for e in group]
       merged = mapped[0] if len(mapped) == 1 else UOp.group(*(e.src[0] for e in mapped)).end(*tr)

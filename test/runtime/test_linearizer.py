@@ -68,7 +68,7 @@ class TestLinearizer(unittest.TestCase):
     # slice at the last loop end
     uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
     # only valid test if outermost range is the reduce
-    if uops[uslice].src[-1].arg[-1] == AxisType.REDUCE:
+    if uops[uslice].src[-1].axis_type == AxisType.REDUCE:
       load_idxs = [u.src[0] for u in uops[uslice+1:] if u.op == Ops.LOAD]
       # assert that there is a global load after the reduce ends
       assert any(u.addrspace == AddrSpace.GLOBAL for u in load_idxs)

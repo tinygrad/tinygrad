@@ -1,7 +1,7 @@
 import unittest, random
 import numpy as np
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable, getenv
-from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite, axis_to_pos
+from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
@@ -69,7 +69,7 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_(devices_2, 0)
     assert X.uop.src[0].shape == (128,)
     # the MULTI carries and ends the DEVICE range as its second src
-    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
+    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].axis_type is AxisType.DEVICE
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
@@ -929,7 +929,7 @@ class Test2DShard(unittest.TestCase):
   @needs_second_gpu
   def setUp(self):
     self.devices_4 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    self.rng = UOp.range(4, axis_to_pos[AxisType.DEVICE], AxisType.DEVICE)
+    self.rng = UOp.range(4, 0, AxisType.DEVICE)
     self.rng0, self.rng1 = self.rng // 2, self.rng % 2
 
   def _shard_2d(self, t:Tensor) -> Tensor:

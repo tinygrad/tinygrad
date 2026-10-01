@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools
 from typing import cast
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
-from tinygrad.uop.ops import axis_colors, axis_to_pos
+from tinygrad.uop.ops import axis_colors
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, merge_dicts, get_single_element, flatten
@@ -18,13 +18,13 @@ class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
-    self.opt_range = count(start=max([x.arg[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
+    self.opt_range = count(start=max([x.axis_id[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
   @property
   def rngs(self):
     # always in order by axistype. void RANGEs are loops, not opt axes. the DEVICE axis is launched, not an opt axis
     return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0
-                   and u.axis_type is not AxisType.DEVICE], key=lambda x: (axis_to_pos[x.axis_type],) + x.axis_id)
+                   and u.axis_type is not AxisType.DEVICE], key=lambda x: x.arg)
   @property
   def shape_len(self) -> int: return len(self.rngs)
   @property
@@ -61,7 +61,7 @@ class Scheduler:
     if not self.ren.has_local: return
 
     globalizible_rngs = self._globalizable_rngs()
-    rng = [x.replace(arg=x.axis_id+(AxisType.GLOBAL,)) if x in globalizible_rngs else x for x in self.rngs]
+    rng = [x.replace(arg=(AxisType.GLOBAL,)+x.axis_id) if x in globalizible_rngs else x for x in self.rngs]
 
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
@@ -164,8 +164,8 @@ class Scheduler:
       check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
       altrng:UOp = self.rngs[cast(int, opt.arg)]
       check(rng.axis_type == AxisType.GLOBAL and altrng.axis_type == AxisType.GLOBAL, "swap only for globals")
-      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.axis_id, rng.axis_type)),
-                                      altrng:altrng.replace(arg=(*rng.axis_id, altrng.axis_type))},
+      self.ast = self.ast.substitute({rng:rng.replace(arg=(rng.axis_type, *altrng.axis_id)),
+                                      altrng:altrng.replace(arg=(altrng.axis_type, *rng.axis_id))},
                                       name=f"swap {rng.axis_id} {altrng.axis_id}", walk=True)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
@@ -184,12 +184,12 @@ class Scheduler:
         if self.ren.target.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
         if tc.dtype_in == in0.dtype and tc.dtype_in == in1.dtype and tc.dtype_out == reduceop.dtype:
           # tensor cores have three ranges. X, Y, and REDUCE
-          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0], reverse=True)
-          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0], reverse=True)
-          red_ranges = sorted(UOp.sink(*reduceop.src[1:]).ranges, key=lambda x: x.arg[0], reverse=True)
+          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg, reverse=True)
+          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
+          red_ranges = sorted(UOp.sink(*reduceop.src[1:]).ranges, key=lambda x: x.arg, reverse=True)
           if DEBUG >= 3:
-            print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
-                              f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
+            print(f"TC({axis}): {[(x.axis_id,x.vmax+1) for x in in0_ranges]}",
+                              f"{[(x.axis_id,x.vmax+1) for x in in1_ranges]} {[(x.axis_id,x.vmax+1) for x in red_ranges]}")
           if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): continue
 
           # pick ranges
@@ -223,7 +223,7 @@ class Scheduler:
             srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 
             # get upcast axes for the tensor cores
-            base_upcast_axes = [ne[c].axis_id for c in tc.base_upcast_axes()]
+            base_upcast_axes = [ne[c].arg for c in tc.base_upcast_axes()]
             upcast_cnt = [len(f[1]) for f in (tc.frag_a, tc.frag_b, tc.frag_c)]
             # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
             tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])

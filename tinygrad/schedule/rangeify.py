@@ -190,7 +190,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
       if s.op in GroupOp.Elementwise and s.device is not None:
         # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.WEAK, the DEVICE range stays a launched axis
         orig_ranges = s.ranges
-        end_ranges = [x.replace(arg=(next(ctx.range_idx), AxisType.WEAK)) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
+        end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
                       for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
@@ -298,7 +298,7 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
+  ret = r.replace(arg=(r.axis_type, ctx.range)+r.axis_id[1:], tag=None)
   ctx.range += 1
   return ret
 
@@ -356,7 +356,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink,
                         symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
-  next_range = max((x.arg[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
+  next_range = max((x.axis_id[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 

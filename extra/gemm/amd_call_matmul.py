@@ -9,7 +9,7 @@ def call(*ranges):
     def wrapper(*args):
       ret = fxn(*ranges, *args).end(*ranges)
       # closing the GLOBAL ranges finishes the kernel
-      if any(r.arg[-1] is AxisType.GLOBAL for r in ranges): ret = ret.sink(arg=KernelInfo(opts_to_apply=()))
+      if any(r.axis_type is AxisType.GLOBAL for r in ranges): ret = ret.sink(arg=KernelInfo(opts_to_apply=()))
       return ret
     return wrapper
   return decorator

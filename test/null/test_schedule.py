@@ -721,7 +721,7 @@ class TestSchedule(unittest.TestCase):
       for call in linear.src:
         if call.src[0].op is not Ops.SINK: continue
         sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
-        reduce_kernels += any(u.op is Ops.RANGE and u.arg[-1] is AxisType.REDUCE for u in sink.toposort())
+        reduce_kernels += any(u.op is Ops.RANGE and u.axis_type is AxisType.REDUCE for u in sink.toposort())
       self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):

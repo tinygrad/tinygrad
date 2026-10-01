@@ -474,7 +474,7 @@ def encode_submit(hq:HWQueue) -> UOp: # TODO: remove?
   return ret if (ret:=hq.submit(bufferize_cmdbuf(hq, "cmdbuf", hq.devs))).op is Ops.CALL else ret.after(*hq.deps)
 
 pm_renumber = PatternMatcher([
-  (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
+  (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(u.axis_type, next(ctx))+u.axis_id[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
 ])
 
