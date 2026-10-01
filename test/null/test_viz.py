@@ -10,7 +10,7 @@ from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRan
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM
 from tinygrad.device import Buffer
 
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_rewrite_meta, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
 from tinygrad.codegen import do_to_program
 
@@ -39,7 +39,7 @@ class VizTrace:
 
 @contextlib.contextmanager
 def save_viz():
-  for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
+  for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_rewrite_meta, active_group, _name_cnt]: lst.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -1135,7 +1135,7 @@ class TestCLI(unittest.TestCase):
       r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
       return x + r
     # turn off scache because this test requires a complete schedule rewrite
-    with save_viz() as viz:
+    with save_viz() as viz, Context(SCACHE=0):
       f(f(Tensor.empty(32, 32, device="NULL"))).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       prgs = [s["name"] for s in run_cli(*files, "-s", "NULL")]
@@ -1174,7 +1174,7 @@ class TestCLI(unittest.TestCase):
     @uopfunc
     def outer(out:UOp): return inner(out).sink()
     def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
-    with save_viz() as viz, Context(SCACHE=0):
+    with save_viz() as viz:
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       print(run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"])

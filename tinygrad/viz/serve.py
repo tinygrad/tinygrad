@@ -39,8 +39,8 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     # pass if client closed connection
     except (BrokenPipeError, ConnectionResetError): source.close()
 
-from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, CallInfo
+from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, UPat, Ops, GroupOp, PatternMatcher, graph_rewrite
+from tinygrad.uop.ops import srender, sint, sym_infer, range_str, range_start, multirange_str, KernelInfo, CallInfo
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
@@ -183,6 +183,19 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None: data.all_uops[a] = ret
   return ret
 
+def recursive_substitute_call(ctx:tuple[dict[UOp, UOp], bool], call:UOp) -> UOp:
+  body = recursive_substitute(call.body, *ctx)
+  args = tuple(recursive_substitute(x, *ctx) for x in call.src[1:]) if ctx[1] else call.src[1:]
+  return call.replace(src=(body,)+args)
+
+pm_recursive_substitute = PatternMatcher([
+  (UPat(tuple(Ops), name="x"), lambda ctx,x: ctx[0].get(x)),
+  (UPat(Ops.CALL, name="call"), recursive_substitute_call),
+])
+
+def recursive_substitute(sink:UOp, replaces:dict[UOp, UOp], walk:bool) -> UOp:
+  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(sink, pm_recursive_substitute, (replaces, walk), bottom_up=True, walk=walk)
+
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
   yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
@@ -190,7 +203,9 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
     replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
-    try: new_sink = next_sink.substitute(replaces, walk=ctx.walk) if update_sink else next_sink
+    try:
+      new_sink = (recursive_substitute(next_sink, replaces, ctx.walk) if getattr(ctx, "recursive", False) else
+                  next_sink.substitute(replaces, walk=ctx.walk)) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],

@@ -1625,7 +1625,7 @@ match_stats:dict[UPat, list[int|float]] = dict()
 ucount = itertools.count()
 uop_fields:dict[int, tuple] = {}
 
-@dataclass(frozen=True)
+@dataclass
 class TrackedGraphRewrite:
   loc:tuple[str, int]                           # location that called graph_rewrite
   sink:int                                      # the sink input to graph_rewrite
@@ -1634,6 +1634,7 @@ class TrackedGraphRewrite:
   depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
   walk:bool
+  recursive:bool = False
 
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
@@ -1653,7 +1654,8 @@ def add_trace_group(kt:TracingKey) -> None:
 
 active_group:list[int] = []
 active_rewrites:list[TrackedGraphRewrite] = []
-def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False, new_ctx:bool=True):
+active_rewrite_meta:list[tuple[Any, UOp]] = []
+def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False, new_ctx:bool=True, recursive_arg:int|None=None):
   if not new_ctx: assert not callable(name) and not replay, "name fxn and replay are only supported for new_ctx groups"
   def _decorator(func):
     def __wrapper(*args, **kwargs):
@@ -1661,6 +1663,7 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
       if TRACK_MATCH_STATS < 2 and not new_ctx: return func(*args, **kwargs)
       fn = key = func.__name__
       idx = -1
+      recursive = False
       if TRACK_MATCH_STATS >= 2:
         if new_ctx:
           add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
@@ -1668,19 +1671,30 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
         else:
           rewrite_name = str(kwargs.get("name", None) or fn)
           assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {rewrite_name} with {args}"
-          loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
-          depth = len(active_rewrites)
-          if not tracked_ctxs: add_trace_group(TracingKey(f"default {fn}"))
-          dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
-          tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], rewrite_name, depth, kwargs.get("bottom_up", False),
-                                                                   kwargs.get("walk", False)))
-          active_rewrites.append(ctx)
-          key = rewrite_name  # profile spans are named after the rewrite step
+          recursive_call = recursive_arg is not None and bool(active_rewrites) and args[recursive_arg] is active_rewrite_meta[-1][0] and \
+                           kwargs.get("name") is None
+          recursive_scope = recursive_call and args[0] in active_rewrite_meta[-1][1].toposort() and \
+                            args[0] not in active_rewrite_meta[-1][1].toposort(enter_calls=False)
+          if recursive_scope:
+            active_rewrites[-1].recursive = recursive = True
+            key = active_rewrites[-1].name
+          else:
+            loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+            depth = len(active_rewrites)
+            if not tracked_ctxs: add_trace_group(TracingKey(f"default {fn}"))
+            dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
+            tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], rewrite_name, depth, kwargs.get("bottom_up", False),
+                                                                     kwargs.get("walk", False)))
+            active_rewrites.append(ctx)
+            active_rewrite_meta.append((args[recursive_arg] if recursive_arg is not None else None, args[0]))
+            key = rewrite_name  # profile spans are named after the rewrite step
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2:
         if new_ctx: active_group.pop()
-        else: active_rewrites.pop()
+        elif not recursive:
+          active_rewrites.pop()
+          active_rewrite_meta.pop()
         if callable(name):
           name_ret = name(*args, **kwargs, ret=ret)
           assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
@@ -1878,7 +1892,7 @@ class RewriteContext:
                          "A replacement may depend on the node being rewritten.\n" + "\n".join(details))
     return self.replace[root]
 
-@rewrite_group(new_ctx=False)
+@rewrite_group(new_ctx=False, recursive_arg=1)
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False) -> UOp:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
