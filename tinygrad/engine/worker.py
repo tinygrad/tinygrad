@@ -1,5 +1,6 @@
 import multiprocessing, multiprocessing.util, atexit, signal, sys, os, threading, contextlib, subprocess
 from multiprocessing.context import SpawnContext, SpawnProcess
+from multiprocessing.queues import SimpleQueue
 from tinygrad.helpers import Context, getenv, PARALLEL
 
 # generic pool of worker processes for parallel compilation, shared by kernel lowering and BEAM search
@@ -33,11 +34,17 @@ def _spawnv_passfds(path, args, passfds):
 multiprocessing.util.spawnv_passfds = _spawnv_passfds
 
 class _WorkerProcess(SpawnProcess):
+  cancelled = False
   @staticmethod
   def _Popen(process_obj):
     with _without_main(): return SpawnProcess._Popen(process_obj)
 
-class _WorkerContext(SpawnContext): Process = _WorkerProcess
+class _WorkerQueue(SimpleQueue):
+  def get(self): return None if isinstance(p:=multiprocessing.current_process(), _WorkerProcess) and p.cancelled else super().get()
+
+class _WorkerContext(SpawnContext):
+  Process = _WorkerProcess
+  def SimpleQueue(self): return _WorkerQueue(ctx=self)
 
 worker_pool = None
 def get_worker_pool():
