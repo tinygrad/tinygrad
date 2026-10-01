@@ -188,8 +188,8 @@ class MetalDevice(Compiled):
     (UPat(Ops.CALL, src=(UPat.custom_function("submit_metal_compute"), UPat()), name="s"), lambda s: MetalQueue(s).encode()),
   ])
   pm_lower = PatternMatcher([
-    (UPat.var("t").index(UPat(Ops.CONST, arg=0)).load(), lambda t: None if t.without_after.tag != "timeline" else \
-     (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(mtl_handle(t.device, "event").after(t), "signaledValue", out=r))[0])
+    (UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), lambda p, t: None if p.arg.name != "tl" else \
+     (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(mtl_handle(p.device, "event").after(t), "signaledValue", out=r))[0])
   ])
 
   def __init__(self, device:str=""):

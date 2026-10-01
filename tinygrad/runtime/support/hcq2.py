@@ -407,9 +407,11 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
   return buf.after(*dep, *stores)
 
 @uopfunc
-def hcq_fence(slots:UOp, tv:UOp, last:int, dev:str) -> UOp: # wait for the previous run of this schedule, then announce and record this one
+def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
+  tl = tl.replace(arg=replace(tl.arg, volatile=True)) # make it volatile, since it's polled
+
   # TODO: timeout?
-  done = (tl:=timeline((dev,))).after(target:=slots.index(last).load(), loop:=UOp.loop(0)).index(0).load()
+  done = tl.after(target:=slots.index(last).load(), loop:=UOp.loop(0)).index(0).load()
   bumped = tl.after(done.backedge(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
   return slots.after(bumped).index(last).store(nxt).sink()
 
@@ -421,7 +423,7 @@ def encode_fence(f:UOp) -> UOp:
   # wait for prev schedule to not collide, the slots are zeroed at link
   for dev, (slots, off) in zip(devs, map(unwrap_view, lasts)):
     slots = patch(slots, [], bytes(slots.nbytes())).after(*last)
-    last = (hcq_fence(slots, timeline_value((dev,)), off // slots.dtype.itemsize, dev),)
+    last = (hcq_fence(slots, timeline((dev,)), timeline_value((dev,)), off // slots.dtype.itemsize),)
 
   # re-arm the signals
   for slots, off in map(unwrap_view, sigs): last = (slots.after(*last).index(off // slots.dtype.itemsize).store(0),)
