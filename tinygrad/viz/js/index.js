@@ -457,8 +457,8 @@ async function renderProfiler(path, opts) {
     if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
-      const levels = [];
-      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor });
+      const levels = [], ends = [];
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor, ends });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), fmt:JSON.parse(strings[u32()])};
@@ -501,6 +501,7 @@ async function renderProfiler(path, opts) {
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
+        if (e.name.includes("WAVEEND")) ends.push(e.st+e.dur);
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
@@ -629,7 +630,7 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor, ends }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
@@ -667,6 +668,11 @@ async function renderProfiler(path, opts) {
             const key = e.arg.key; if (key === focusedShape || key === link0 || key === link1) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); continue; }
           }
           if (splitRects && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
+        }
+        for (let i=0; i<ends.length; i++) {
+          const end = ends[i]; if (end<st || end>et) continue;
+          const x = xscale(end)+0.5;
+          drawLine(ctx, [x, x], [offsetY-padding/2-0.5, offsetY+trackHeight-padding/2-0.5], { color:"#22232a" });
         }
       }
       // draw row line
