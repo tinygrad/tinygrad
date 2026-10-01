@@ -3,11 +3,11 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertool
 assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
+from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
 from tinygrad.runtime.support.hcq2 import layout_args
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType
@@ -113,6 +113,7 @@ class NVQueue(HWQueue):
     self.sem(signal.getaddr(self.devs), value, operation="release", release_wfi="en", release_timestamp="en" if timestamp else "dis")
     if not timestamp: self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
 
+  @uopfunc
   def submit(self, cmdbuf:UOp) -> UOp:
     fifo, ib, off = self.dev.fifos[self.queue], *unwrap_view(cmdbuf)
 
@@ -124,7 +125,7 @@ class NVQueue(HWQueue):
     p = put.index(0).load()
     written = UOp.barrier(ring.after(cmdbuf).index((p % fifo.entries).cast(dtypes.int)).store(gpentry.index(0).load()), put.index(0).store(p + 1))
     queued = UOp.barrier(gpput.after(written).index(0).store(((p + 1) % fifo.entries).cast(dtypes.uint32)))
-    return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32))
+    return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32)).sink()
 
 class NVComputeQueue(NVQueue):
   def __init__(self, submit):
@@ -149,7 +150,7 @@ class NVComputeQueue(NVQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     if self.qmds:
       patches = [(i * self.stride + off, w) for i, q in enumerate(self.qmds) for off, w in q.patches.items()]
-      cmdbuf = cmdbuf.after(patch(self.qmd_buf, patches, b"".join(q.mv for q in self.qmds)))
+      cmdbuf = cmdbuf.after(patch(self.qmd_buf.after(cmdbuf), patches, b"".join(q.mv for q in self.qmds)))
     return super().submit(cmdbuf)
 
   def memory_barrier(self):
@@ -559,10 +560,10 @@ class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_compute"), UPat()), name="s"), lambda s: encode_submit(NVComputeQueue(s))),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_copy"), UPat()), name="s"), lambda s: encode_submit(NVCopyQueue(s))),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_encdec"), UPat()), name="s"), lambda s: encode_submit(NVEncDecQueue(s))),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_raw"), UPat()), name="s"), lambda s: encode_submit(NVQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_compute"), UPat()), name="s"), lambda s: NVComputeQueue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_copy"), UPat()), name="s"), lambda s: NVCopyQueue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_encdec"), UPat()), name="s"), lambda s: NVEncDecQueue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_raw"), UPat()), name="s"), lambda s: NVQueue(s).encode()),
   ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)

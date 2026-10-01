@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, ccall, patch, layout_args
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
@@ -185,7 +185,7 @@ class MetalAllocator(Allocator['MetalDevice']):
 class MetalDevice(Compiled):
   has_copy_queue = False
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_metal_compute"), UPat()), name="s"), lambda s: encode_submit(MetalQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_metal_compute"), UPat()), name="s"), lambda s: MetalQueue(s).encode()),
   ])
   pm_lower = PatternMatcher([
     (UPat.var("t").index(UPat(Ops.CONST, arg=0)).load(), lambda t: None if t.without_after.tag != "timeline" else \
