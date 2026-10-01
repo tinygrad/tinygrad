@@ -527,7 +527,7 @@ pm_views = PatternMatcher([
 def substitute_hcq_call(ctx:dict[UOp, UOp], call:UOp) -> UOp:
   return call.replace(src=(graph_rewrite(call.body, pm_hcq_substitute, ctx, bottom_up=True),)+call.src[1:])
 
-pm_hcq_substitute:PatternMatcher = PatternMatcher([(UPat(Ops.CALL, name="call"), substitute_hcq_call)]) + _substitute
+pm_hcq_substitute = PatternMatcher([(UPat(Ops.CALL, name="call"), substitute_hcq_call)]) + _substitute
 def substitute_hcq(sink:UOp, replaces:dict[UOp, UOp]) -> UOp: return graph_rewrite(sink, pm_hcq_substitute, replaces, bottom_up=True)
 
 def substitute_hcq_call_views(ctx:dict[UOp, UOp], call:UOp) -> UOp:
