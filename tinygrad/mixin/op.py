@@ -810,7 +810,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
     match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * self._tri(n, n)
-    idx = (-(match * type(self).arange(n, 0, -1).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
+    idx = (match * type(self).arange(n).reshape(n, 1)).max(-2).cast(dtypes.int32)
     return values, idx.transpose(-1, axis)
 
   def cummin(self, axis:int=0) -> tuple[Self, Self]:

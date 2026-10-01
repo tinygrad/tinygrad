@@ -109,7 +109,7 @@ class _TinyJit(Generic[ReturnType]):
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
 
-  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
+  def add_linear(self, linear:UOp): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"

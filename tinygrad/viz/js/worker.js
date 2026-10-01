@@ -3,6 +3,11 @@ const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*
 
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
+const monoCanvas = new OffscreenCanvas(0, 0);
+const monoCtx = monoCanvas.getContext("2d");
+const LINE_HEIGHT = 16;
+monoCtx.font = `14px/${LINE_HEIGHT}px monospace`;
+const sourceLineLength = monoCtx.measureText("x".repeat(150)).width;
 
 onmessage = (e) => {
   try {
@@ -49,16 +54,26 @@ const layoutUOp = (g, { graph, change }, opts) => {
   let callCount = 0;
   for (const [k, {label, src, ref, color, tag, exclude, addrspace}] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
-    let [width, height] = [0, 0];
-    for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
-      width = Math.max(width, ctx.measureText(line).width);
-      height += lineHeight;
+    let dims, source, lang;
+    if (label.startsWith("SOURCE\n")) {
+      source = label.slice("SOURCE\n".length); lang = "cpp";
+      const lines = source.split("\n");
+      let width = 0;
+      for (const line of lines) width = Math.max(width, monoCtx.measureText(line).width);
+      dims = rectDims(Math.min(width, sourceLineLength), lines.length*LINE_HEIGHT);
+    } else {
+      let [width, height] = [0, 0];
+      for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
+        width = Math.max(width, ctx.measureText(line).width);
+        height += lineHeight;
+      }
+      dims = rectDims(width, height);
     }
     const op = label.split("\n", 1)[0];
     const callNode = op === "CALL", programNode = op === "PROGRAM";
     const collapsePorts = callNode ? [0] : programNode ? [0, 1] : null;
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, callNode, collapsePorts, exclude, addrspace,
+    g.setNode(k, {...dims, label, labelX:0, ref, id:k, color, callNode, collapsePorts, exclude, addrspace, source, lang,
       className:label.startsWith("REWRITE_ERROR") ? "err" : null, tag:tag?.length > 8 ? tag.substring(0, 8) : tag});
     // add edges
     const edgeCounts = {};

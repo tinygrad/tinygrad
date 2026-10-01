@@ -499,7 +499,7 @@ class TestVizIntegration(unittest.TestCase):
     self.assertIn(type(e.exception).__name__, bin_render)
 
   def test_view_source_alt(self):
-    src = "void E_3(float* data0_3) {}"
+    src = "void E_3(float* data0_3) {"+"\n //" + ("."*200)+"\n}"
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
