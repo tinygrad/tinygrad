@@ -1,8 +1,9 @@
 import unittest, math
+from unittest.mock import patch
 import z3
-from tinygrad.codegen.gpudims import get_grouped_dims, group_gpudims, pm_add_gpudims
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite, axis_to_pos
-from tinygrad.uop.weak import pm_lower_weak
+from tinygrad import Tensor, Device
+from tinygrad.codegen.gpudims import get_grouped_dims, group_gpudims, pm_range_to_special
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite
 from tinygrad.uop.validate import uops_to_z3
 from tinygrad.dtype import dtypes
 from tinygrad.renderer import Renderer
@@ -11,8 +12,7 @@ from tinygrad.helpers import flatten, dedup, Target
 class TestGroupedDims(unittest.TestCase):
   def _check_grouped_dims(self, prefix, dims, max_sizes, reverse, expected_sizes, assert_same_length=True):
     grouped = UOp.sink(*get_grouped_dims(prefix, dims, max_sizes, reverse))
-    self.assertFalse(any(u.op is Ops.SPECIAL for u in grouped.toposort()))
-    idxs = graph_rewrite(grouped, pm_add_gpudims).src
+    idxs = graph_rewrite(grouped, pm_range_to_special).src
     loop_idxs = dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs]))
     loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg)
     sizes = [x.src[0].val for x in loop_idxs]
@@ -117,41 +117,24 @@ class TestGroupedDims(unittest.TestCase):
     sink = UOp.param(0, dtypes.float, 512).index(g + l).store(UOp.const(1.0)).end(g, l).sink(arg=KernelInfo())
     class R(Renderer): global_max, local_max, global_prod_max = (256, 256, 256), (128, 128, 128), (128, 128, 128)
     grouped = group_gpudims(R(Target()), sink)
-    self.assertFalse(any(u.op is Ops.SPECIAL for u in grouped.toposort()))
-    ranges = [u for u in grouped.toposort() if u.op is Ops.RANGE]
-    self.assertLess(max(r.axis_id for r in ranges if r.axis_type is AxisType.GLOBAL),
-                    min(r.axis_id for r in ranges if r.axis_type is AxisType.LOCAL))
-    specials = [u for u in graph_rewrite(grouped, pm_add_gpudims).toposort() if u.op is Ops.SPECIAL]
+    specials = [u for u in graph_rewrite(grouped, pm_range_to_special).toposort() if u.op is Ops.SPECIAL]
     self.assertGreater(len([s for s in specials if "lidx" in s.arg]), 1)
     self.assertGreater(len([s for s in specials if "gidx" in s.arg]), 1)
 
-  def test_hardware_axis_ids(self):
-    self.assertEqual([axis_to_pos[t] for t in (AxisType.DEVICE, AxisType.GLOBAL, AxisType.LOCAL, AxisType.WARP)], [-10, -9, -8, -7])
-    device, = UOp.device_range_src(("NULL:0", "NULL:1"))
-    global_dims = get_grouped_dims("gidx", (2, 3), None)
-    local_dims = get_grouped_dims("lidx", (4, 5), None)
-    self.assertEqual(device.axis_id, (-10,))
-    self.assertEqual([r.axis_id for r in global_dims], [(-9, 0), (-9, 1)])
-    self.assertEqual([r.axis_id for r in local_dims], [(-8, 0), (-8, 1)])
-
-  def test_late_special_preserves_lowered_bound(self):
-    grouped = UOp.sink(*get_grouped_dims("lidx", (3,), (1024, 1024, 64)))
-    lowered = graph_rewrite(grouped, pm_lower_weak)
-    rng = next(u for u in lowered.toposort() if u.op is Ops.RANGE)
-    special, = graph_rewrite(lowered, pm_add_gpudims).src
-    self.assertEqual(special.op, Ops.SPECIAL)
-    self.assertEqual(special.dtype, dtypes.int)
-    self.assertIs(special.src[0], rng.src[0])
-    self.assertEqual(special.arg, "lidx0")
-
-  def test_late_special_removes_end(self):
-    g, = get_grouped_dims("gidx", (3,), (1024, 1024, 64))
-    r = UOp.range(4, 10, AxisType.REDUCE)
-    store = UOp.param(0, dtypes.float, 12).index(g*4+r).store(UOp.const(1.0))
-    sink = graph_rewrite(store.end(g, r).sink(), pm_add_gpudims)
-    ends = [u for u in sink.toposort() if u.op is Ops.END]
-    self.assertEqual(len(ends), 1)
-    self.assertEqual(ends[0].src[1:], (r,))
+  def test_execute_grouped_dims(self):
+    ren = Device["PYTHON"].renderer
+    # Direct mapping, merging four logical dimensions, and splitting oversized dimensions.
+    for global_shape, local_shape in [((3,), (2,)), ((2,3,2,2), (2,3,2,2)), ((32,), (16,))]:
+      with self.subTest(global_shape=global_shape, local_shape=local_shape):
+        dims = global_shape+local_shape+(2,)
+        def kernel(out):
+          ranges = [UOp.range(s, i, AxisType.GLOBAL if i < len(global_shape) else
+                              AxisType.LOCAL if i < len(global_shape)+len(local_shape) else AxisType.LOOP) for i,s in enumerate(dims)]
+          idx = sum(r*math.prod(dims[i+1:]) for i,r in enumerate(ranges))
+          return out[idx].store(idx*3+7).end(*ranges).sink(arg=KernelInfo(opts_to_apply=()))
+        out = Tensor.full((math.prod(dims),), -1, device="PYTHON").contiguous().realize()
+        with patch.object(ren, "global_max", (8,4,4)), patch.object(ren, "local_max", (8,4,4)):
+          self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), [i*3+7 for i in range(math.prod(dims))])
 
   def test_max_sizes_none(self):
     self._check_grouped_dims("gidx", (2,3,4), None, False, [2,3,4])

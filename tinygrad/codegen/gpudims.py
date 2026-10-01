@@ -97,7 +97,7 @@ pm_device_to_var = PatternMatcher([
 # Run once: grouping creates new GLOBAL/LOCAL ranges, which must not be grouped again.
 pm_group_gpudims = PatternMatcher([(UPat(Ops.SINK, name="s"), group_gpudims)])+pm_device_to_var
 
-pm_add_gpudims = PatternMatcher([
+pm_range_to_special = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), lambda r: r.replace(op=Ops.SPECIAL, arg=f"{'g' if r.axis_type is AxisType.GLOBAL else 'l'}idx{r.axis_id[-1]}")
    if r.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) else None),
 ])+pm_split_ends
