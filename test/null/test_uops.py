@@ -592,7 +592,7 @@ class TestAssembly(unittest.TestCase):
     b = Tensor.empty(1024)
     c = (a*b).sum()
     ast = c.schedule_linear().src[-1].src[0]
-    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UNROLL))]
+    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = to_program(ast, self.renderer)
     uops = tuple(program.src[1].src)

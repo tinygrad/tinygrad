@@ -1,6 +1,6 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop
-from tinygrad.uop.ops import sint, ssimplify, axis_to_pos
+from tinygrad.uop.ops import sint, ssimplify
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -57,7 +57,7 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   assert all_same(devices), f"all buffers must have the same device {devices}"
   # without devices the sharding range comes from the UNSHARD itself (e.g. a LOCAL thread range);
   # device shards range over the devices instead
-  if len(devices): sharding_rng = UOp.range(len(devices[0]), axis_to_pos[AxisType.DEVICE], AxisType.DEVICE)
+  if len(devices): sharding_rng = UOp.range(len(devices[0]), 0, AxisType.DEVICE)
   else:
     sharding_rng = next((m.src[1] for m in msrcs if m.op is Ops.UNSHARD), None)
     assert sharding_rng is not None, "shard_srcs requires a device or a sharding range"

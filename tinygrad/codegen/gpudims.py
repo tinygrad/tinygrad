@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, sint_to_uop, AxisType, axis_to_pos
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
 from tinygrad.codegen.late.linearizer import pm_split_ends
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
@@ -35,9 +35,9 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
     # try to split up dims: (a,) -> (b, c)
     if limited == dims: limited = _split_dims(dims, max_sizes)
-  # Keep hardware axes as ranges through index lowering. The last axis id is the hardware dimension.
+  # Keep hardware axes as ranges through index lowering. The axis id is the hardware dimension.
   axis_type = AxisType.GLOBAL if prefix == "gidx" else AxisType.LOCAL
-  raw_idxs = [UOp(Ops.RANGE, src=(sint_to_uop(s),), arg=(axis_to_pos[axis_type], i, axis_type)) for i,s in enumerate(limited)]
+  raw_idxs = [UOp.range(s, i, axis_type) for i,s in enumerate(limited)]
   flat = sum(idx * math.prod(limited[i+1:]) for i,idx in enumerate(raw_idxs))
   return [ssimplify(flat // math.prod(dims[i+1:])) if i == 0 else ssimplify((flat // math.prod(dims[i+1:])) % dims[i]) for i in range(len(dims))]
 
@@ -47,11 +47,13 @@ def group_gpudims(ctx:Renderer, s:UOp):
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
 
   # get ranges
-  all_ranges = {x.axis_id:x for x in s_topo if x.op is Ops.RANGE}
+  all_ranges = {x.arg:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type is AxisType.GLOBAL])
-  local_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL)])
+  global_dims = sorted([x.arg for x in all_ranges.values() if x.axis_type is AxisType.GLOBAL])
+  # WARP maps to hardware dimension zero, independently of nesting order.
+  local_dims = [x.arg for x in sorted((x for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL)),
+                                    key=lambda x: (x.axis_type is not AxisType.WARP, x.axis_id))]
   if not global_dims and not local_dims: return None
 
   # get global and local shape
@@ -69,7 +71,7 @@ def group_gpudims(ctx:Renderer, s:UOp):
   idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
 
   # apply to multiple ranges
-  subs = {}
+  subs, masks = {}, {}
   for r in s_topo:
     # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
     if r.op is Ops.STORE and len((idx := r.src[0]).src) and idx.src[0].addrspace == AddrSpace.GLOBAL:
@@ -77,13 +79,14 @@ def group_gpudims(ctx:Renderer, s:UOp):
       if len(missing_locals):
         assert len(idx.src) == 2, "index has 2 sources"
         mask: UOp = UOp.uprod(*[x.eq(0) for x in missing_locals])
-        subs[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
+        masks[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
     if r.op is not Ops.RANGE: continue
     try:
-      ii = (global_dims+local_dims).index(r.axis_id)
+      ii = (global_dims+local_dims).index(r.arg)
       subs[r] = idxs[ii]
     except ValueError: continue
-  return s.substitute(subs)
+  # Hardware ids may coincide with logical ids: replace ranges simultaneously, including those in the new masks.
+  return s.substitute(masks).substitute(subs, walk=True)
 
 pm_device_to_var = PatternMatcher([
   # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like SPECIAL for devices)

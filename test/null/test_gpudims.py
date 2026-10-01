@@ -124,17 +124,32 @@ class TestGroupedDims(unittest.TestCase):
   def test_execute_grouped_dims(self):
     ren = Device["PYTHON"].renderer
     # Direct mapping, merging four logical dimensions, and splitting oversized dimensions.
-    for global_shape, local_shape in [((3,), (2,)), ((2,3,2,2), (2,3,2,2)), ((32,), (16,))]:
+    for global_shape, local_shape in [((3,), (2,)), ((3,3,3), (2,)), ((2,3,2,2), (2,3,2,2)), ((32,), (16,))]:
       with self.subTest(global_shape=global_shape, local_shape=local_shape):
         dims = global_shape+local_shape+(2,)
         def kernel(out):
-          ranges = [UOp.range(s, i, AxisType.GLOBAL if i < len(global_shape) else
-                              AxisType.LOCAL if i < len(global_shape)+len(local_shape) else AxisType.LOOP) for i,s in enumerate(dims)]
+          # Reuse ids across axis types; global ids may also be permuted onto identical hardware ranges.
+          ranges = [UOp.range(s, i, t) for t,shape in [(AxisType.GLOBAL, global_shape), (AxisType.LOCAL, local_shape),
+                                                     (AxisType.LOOP, (2,))] for i,s in enumerate(shape)]
           idx = sum(r*math.prod(dims[i+1:]) for i,r in enumerate(ranges))
           return out[idx].store(idx*3+7).end(*ranges).sink(arg=KernelInfo(opts_to_apply=()))
         out = Tensor.full((math.prod(dims),), -1, device="PYTHON").contiguous().realize()
         with patch.object(ren, "global_max", (8,4,4)), patch.object(ren, "local_max", (8,4,4)):
           self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), [i*3+7 for i in range(math.prod(dims))])
+
+  def test_grouped_mask_ranges(self):
+    g, l = UOp.range(3, 0, AxisType.GLOBAL), UOp.range(2, 5, AxisType.LOCAL)
+    sink = UOp.param(0, dtypes.int, 3)[g].store((g+l).cast(dtypes.int)).end(g, l).sink(arg=KernelInfo())
+    grouped = group_gpudims(Device["PYTHON"].renderer, sink)
+    self.assertEqual({r.arg for r in grouped.toposort() if r.op is Ops.RANGE}, {(AxisType.GLOBAL, 0), (AxisType.LOCAL, 0)})
+
+  def test_upcast_same_id_as_hardware(self):
+    def kernel(out):
+      g, u = UOp.range(3, 0, AxisType.GLOBAL), UOp.range(2, 0, AxisType.UPCAST)
+      idx = g*2+u
+      return out[idx].store(idx*3+7).end(g, u).sink(arg=KernelInfo(opts_to_apply=()))
+    out = Tensor.full((6,), -1, device="PYTHON").contiguous().realize()
+    self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), [i*3+7 for i in range(6)])
 
   def test_max_sizes_none(self):
     self._check_grouped_dims("gidx", (2,3,4), None, False, [2,3,4])
