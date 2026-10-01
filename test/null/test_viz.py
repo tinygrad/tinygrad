@@ -3,7 +3,7 @@ import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -1176,8 +1176,7 @@ class TestCLI(unittest.TestCase):
     assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
 
   @needs_tracked_pm
-  def test_nested_calls_ls(self):
-    from tinygrad.uop.ops import uopfunc
+  def test_nested_calls_codegen_ls(self):
     @uopfunc
     def inner(out:UOp): return out[0].store(1).sink()
     @uopfunc
