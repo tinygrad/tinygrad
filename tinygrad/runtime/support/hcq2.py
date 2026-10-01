@@ -408,6 +408,8 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
 
 @uopfunc
 def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
+  tl = tl.replace(arg=replace(tl.arg, volatile=True)) # make it volatile, since it's polled
+
   # TODO: timeout?
   done = tl.after(target:=slots.index(last).load(), loop:=UOp.loop(0)).index(0).load()
   bumped = tl.after(done.backedge(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
@@ -466,6 +468,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
 pm_renumber = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(u.axis_type, next(ctx))+u.axis_id[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
+  (UPat(Ops.PARAM, name="u"), lambda u: u.replace(arg=replace(u.arg, device=None)) if u.arg.name and not u.tag else None), # of a lowered function
 ])
 
 def lower_call(call:UOp) -> UOp|None:
@@ -506,8 +509,9 @@ pm_views = PatternMatcher([
 def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes.uint8)[v[1]:v[0].nbytes()].getaddr(to_tuple(g.arg)[0])
 
 def resolve_getaddrs(call:UOp, body:UOp) -> UOp:
-  params = [p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.addrspace is AddrSpace.GLOBAL and p.tag is p.device is None]
-  addrs = {g: g.substitute({p: call.src[1 + p.arg.slot] for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
+  # a batch's params are the inputs of its kernels
+  params = [p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.addrspace is AddrSpace.GLOBAL and not (p.tag or call.arg.aux)]
+  addrs = {g: g.substitute({p: call.src[1 + p.arg.slot].without_after for p in params}) for g in body.toposort() if g.op is Ops.GETADDR}
   if body.arg is None or not addrs: return call.replace(src=(body.substitute(addrs, enter_calls=True), *call.src[1:]))
 
   # runtime addrs: inputs filled per call, the rest patched at link

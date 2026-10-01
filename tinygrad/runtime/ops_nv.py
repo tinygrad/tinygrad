@@ -116,13 +116,12 @@ class NVQueue(HWQueue):
   @uopfunc
   def submit(self, cmdbuf:UOp) -> UOp:
     fifo = self.dev.fifos[self.queue]
-    ring, gpput, doorbell, put, gpentry = [UOp.placeholder((sz,), dt, device=self.devs, volatile=True, tag=to_name(nm, self.queue))
-      for nm, dt, sz in (("ring", dtypes.uint64, fifo.entries), ("gpput", dtypes.uint32, 1), ("doorbell", dtypes.uint32, 1),
-                         ("put_value", dtypes.uint64, 1), ("gpentry", dtypes.uint64, 1))]
-    gpentry = patch(gpentry, [(0, cmdbuf.getaddr(self.devs) + UOp.const((cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64))])
+    bufs = (("ring", dtypes.uint64, fifo.entries), ("gpput", dtypes.uint32, 1), ("doorbell", dtypes.uint32, 1), ("put_value", dtypes.uint64, 1))
+    ring, gpput, doorbell, put = [UOp.placeholder((sz,), dt, device=self.devs, volatile=True, tag=to_name(nm, self.queue)) for nm, dt, sz in bufs]
+    gpentry = cmdbuf.getaddr(self.devs) + UOp.const((cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64)
 
     p = put.index(0).load()
-    written = UOp.barrier(ring.index((p % fifo.entries).cast(dtypes.int)).store(gpentry.index(0).load()), put.index(0).store(p + 1))
+    written = UOp.barrier(ring.index((p % fifo.entries).cast(dtypes.int)).store(gpentry), put.index(0).store(p + 1))
     queued = UOp.barrier(gpput.after(written).index(0).store(((p + 1) % fifo.entries).cast(dtypes.uint32)))
     return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32)).sink()
 
