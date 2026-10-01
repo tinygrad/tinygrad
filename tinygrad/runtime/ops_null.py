@@ -52,7 +52,7 @@ class NullAllocator(HostAllocator):
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
 
 class NullDevice(Compiled):
-  pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg=f"submit_null_{q}"), UPat()), name="submit"),
+  pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function(f"submit_null_{q}"), UPat()), name="submit"),
                                lambda submit: encode_submit(NullQueue(submit))) for q in ("compute", "copy")])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))

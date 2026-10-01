@@ -154,7 +154,8 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op is Ops.REDUCE: to_render.add(u.src[0])
-    if u.op is Ops.CALL and u.body.dtype is dtypes.void and u.body.op is not Ops.CUSTOM_FUNCTION: # a call into C renders, its dtype rides in the arg
+    # a call on a program, or with a grad_fxn or an aux, can't be reconstructed from code
+    if u.op is Ops.CALL and (u.body.op is Ops.PROGRAM or u.arg.grad_fxn is not None or u.arg.aux is not None):
       raise NotImplementedError("call can't be pyrendered")
     # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
     if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")

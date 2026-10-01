@@ -11,6 +11,10 @@ from tinygrad.engine.realize import compile_linear, link_linear, get_call_arg_uo
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
 
+def lower_hcq(*body:UOp) -> UOp: # a sink of the body through hcq2's lower and the host rules, as a one call linear
+  call = UOp.sink(*body, arg=KernelInfo("test"), tag=1).call(aux=HCQInfo(("CPU",)))
+  return hcq2.runtime_rewrites(UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(call)),)))
+
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
   return x
@@ -39,7 +43,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   return batches
 
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
-  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.without_after.src[1] for s in batch.body.src)}
+  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.src[1].without_after for s in batch.body.src)}
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
 
@@ -215,12 +219,12 @@ class TestHCQ2Link(unittest.TestCase):
   def test_repeated_word_loops(self): # for (i..10) cmdbuf[off[i]] = var
     var, offs = UOp.placeholder((1,), dtypes.uint32, device="CPU", volatile=True, tag="var"), [4 * i * i for i in range(10)]
     var = hcq2.patch(var, [], bytes(4)) # initialize at link: the allocator may return a reused buffer
-    hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0")
-    sink = UOp.sink(var.after(hcq2.bufferize_cmdbuf(hq, "cmdbuf", "CPU")).index(0).store(var.index(0).load() + 1), arg=KernelInfo("patch"), tag=1)
-    lowered = hcq2.lower_call(sink.call(aux=HCQInfo(("CPU",))))
-    self.assertEqual(len([u for u in lowered.without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
-    linked = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(lowered,))), allow_cache=False)
-    cmdbuf = next(b.buffer for p, b in zip(lowered.without_after.src[1:], linked.src[0].without_after.src[1:]) if p.tag == "cmdbuf_copy_0")
+    hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0", deps=())
+    lowered = lower_hcq(var.after(hcq2.bufferize_cmdbuf(hq, "cmdbuf", "CPU")).index(0).store(var.index(0).load() + 1))
+    self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
+    linked = hcq2.hcq_link(lower_and_compile(lowered), allow_cache=False)
+    args = zip(lowered.src[0].without_after.src[1:], linked.src[0].without_after.src[1:])
+    cmdbuf = next(b.buffer for p, b in args if p.without_after.tag == "cmdbuf_copy_0")
     for step in range(3):
       run_linear(linked, jit=True)
       self.assertEqual([cmdbuf.host.view(fmt="I")[o // 4] for o in offs], [step] * 10)

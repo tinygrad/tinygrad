@@ -64,8 +64,8 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
-        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
+        src_values = [values[v] for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.BACKEDGE:
           i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
@@ -146,7 +146,7 @@ class PythonProgram(Program['PythonDevice']):
         elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
-          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg, list(DLL._loaded_.values())))
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]

@@ -2,21 +2,18 @@ import unittest, gc, struct, ctypes, threading, numpy as np
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import Context, unwrap
+from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
-from test.null.test_hcq2 import chain, chain_input, compiled_chain
+from test.null.test_hcq2 import chain, chain_input, compiled_chain, lower_hcq
 
 def cpu_buf(size:int=1, dtype=dtypes.uint8, **kwargs) -> UOp: return UOp.placeholder((size,), dtype, device="CPU", **kwargs)
-
-def lower_hcq(body:UOp) -> UOp:
-  return unwrap(hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test")).call(aux=hcq2.HCQInfo(("CPU",)))))
 
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS) and not Device.DEFAULT.startswith("NULL"), "hcq2 device required")
 class TestHCQ2Schedule(unittest.TestCase):
@@ -92,7 +89,7 @@ class TestHCQ2Schedule(unittest.TestCase):
         self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
 # the fence and the ffi run on the CPU runtime, which is always available
-@unittest.skipIf(isinstance(Device["CPU"].renderer, NIRRenderer), "segfaults compiling the fence loop with LVP")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, LLVMRenderer)), "CALL is rendered in C style and LLVM only")
 class TestHCQ2Fence(unittest.TestCase):
   def setUp(self):
     self.enterContext(Context(HCQ_RUNTIME_DEV="CPU"))
@@ -101,9 +98,9 @@ class TestHCQ2Fence(unittest.TestCase):
 
   def test_a_schedule_waits_for_its_previous_run(self):
     slots = UOp.placeholder((4,), dtypes.uint64, device=("CPU",), volatile=True, tag="slots")
-    program = lower_and_compile(UOp(Ops.LINEAR, src=(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])),)))
+    program = lower_and_compile(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])))
     linked = hcq2.hcq_link(program, allow_cache=False)
-    (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.arg.name == "slots"]
+    (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.without_after.arg.name == "slots"]
     slots_mv = linked.src[0].without_after.src[1 + i].buffer.host.view(fmt='Q')
     slots_mv[2], base = 7, self.tl[1]
 
@@ -123,7 +120,8 @@ class TestHCQ2Fence(unittest.TestCase):
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
   def _run(body:UOp) -> list[Buffer]:
-    linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(lower_hcq(body),))), allow_cache=False)
+    linear = hcq2.hcq_link(lower_and_compile(lower_hcq(body)), allow_cache=False)
+    assert hcq2.hcq_link(linear, allow_cache=False) is linear, "a linked linear links to itself, with the refs its call keeps"
     run_linear(linear, jit=True)
     return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
@@ -164,6 +162,80 @@ class TestHCQ2FFI(unittest.TestCase):
       copied = hcq2.ccall(libc.memcpy, out.index(0), outer.bitcast(dtypes.uint64).index(0).load(), 4)
       bufs = self._run(out.after(copied).index(0).load())
     self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32).host.view(fmt='I')[0], 42)
+
+@uopfunc
+def addr_of(o:UOp, b:UOp): return o.index(0).store(b.getaddr("CPU")).sink() # o[0] = &b
+
+# plain functions through the host rules, no hcq: run_linear on a call of a sink
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
+class TestHostCalls(unittest.TestCase):
+  def setUp(self): self.enterContext(Context(HCQ_RUNTIME_DEV="CPU"))
+
+  @staticmethod
+  def _buf(n:int, dtype=dtypes.uint64) -> Buffer: return Buffer("CPU", n, dtype, initial_value=bytes(n * dtype.itemsize))
+  @staticmethod
+  def _run(fxn, *bufs:Buffer) -> list: # the first buffer is the output. the sink gets its KernelInfo by hand: it is the program
+    call = fxn(*[UOp.from_buffer(b) for b in bufs])
+    run_linear(UOp(Ops.LINEAR, src=(call.replace(src=(call.body.replace(arg=KernelInfo(call.arg.name)), *call.src[1:])),)))
+    return bufs[0].host.view(fmt=bufs[0].dtype.fmt)[:]
+
+  def test_no_addrs_no_placeholders(self):
+    @uopfunc
+    def inc(o:UOp, a:UOp): return o.index(0).store(a.index(0).load() + 1).sink()
+    a = Buffer("CPU", 1, dtypes.uint64, initial_value=struct.pack("Q", 41))
+    self.assertEqual(self._run(inc, self._buf(1), a), [42])
+
+  def test_addr_of_arg(self):
+    b = self._buf(16, dtypes.uint8)
+    self.assertEqual(self._run(addr_of, self._buf(1), b), [b.get_buf("CPU")])
+
+  def test_addr_of_view(self):
+    @uopfunc
+    def addr(o:UOp, b:UOp): return o.index(0).store(b[4:8].getaddr("CPU")).sink()
+    b = self._buf(16, dtypes.uint8)
+    self.assertEqual(self._run(addr, self._buf(1), b), [b.get_buf("CPU") + 4])
+
+  def test_sink_calls_function(self): # a bare sink with args calls a function that writes one arg and takes the address of the other
+    def sink(o:UOp, b:UOp): return addr_of(UOp.param(0, dtypes.uint64, 1), UOp.param(1, dtypes.uint8, 16)).sink().call(o, b, name="sink")
+    outs, b = [self._buf(1) for _ in range(2)], self._buf(16, dtypes.uint8)
+    for out in outs: self.assertEqual(self._run(sink, out, b), [b.get_buf("CPU")]) # the second run reuses the program
+
+  def test_nested_functions(self): # the address is taken two calls deep
+    @uopfunc
+    def mid(o:UOp, b:UOp): return addr_of(o, b).sink()
+    @uopfunc
+    def top(o:UOp, b:UOp): return mid(o, b).sink()
+    b = self._buf(16, dtypes.uint8)
+    self.assertEqual(self._run(top, self._buf(1), b), [b.get_buf("CPU")])
+
+  def test_call_sites(self): # one function, called on different args
+    @uopfunc
+    def both(o:UOp, a:UOp, b:UOp): return UOp.sink(addr_of(o[0:1], a), addr_of(o[1:2], b))
+    a, b = self._buf(16, dtypes.uint8), self._buf(16, dtypes.uint8)
+    self.assertEqual(self._run(both, self._buf(2), a, b), [a.get_buf("CPU"), b.get_buf("CPU")])
+
+  def test_nested_placeholders(self): # storage a function keeps for itself. two of a kind, one call deep: they merge and pass through the caller
+    @uopfunc
+    def keep(o:UOp):
+      tmps = [cpu_buf(dtype=dtypes.uint64, volatile=True, tag="tmp") for _ in range(2)]
+      return UOp.sink(*[o.index(i).store(t.after(t.index(0).store(7 + i)).index(0).load()) for i, t in enumerate(tmps)])
+    @uopfunc
+    def top(o:UOp): return keep(o).sink()
+    self.assertEqual(self._run(top, self._buf(2)), [7, 8])
+
+  def test_addr_of_placeholder(self): # the address is the one of the buffer the placeholder links to
+    @uopfunc
+    def keep(o:UOp):
+      tmp = cpu_buf(dtype=dtypes.uint64, volatile=True, tag="tmp")
+      return UOp.sink(tmp.index(0).store(7), o.index(0).store(tmp.getaddr("CPU")))
+    self.assertEqual(ctypes.c_uint64.from_address(self._run(keep, self._buf(1))[0]).value, 7)
+
+  def test_cstruct(self): # a patched placeholder inside a function
+    @uopfunc
+    def read(o:UOp):
+      s = hcq2.cstruct(init_c_struct_t(8, (("pad", ctypes.c_uint32, 0), ("value", ctypes.c_uint32, 4))), value=42)
+      return o.index(0).store(s.bitcast(dtypes.uint32).index(1).load().cast(dtypes.uint64)).sink()
+    self.assertEqual(self._run(read, self._buf(1)), [42])
 
 if __name__ == "__main__":
   unittest.main()

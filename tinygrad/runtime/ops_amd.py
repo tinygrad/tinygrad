@@ -9,7 +9,7 @@ from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
-from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ
+from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ, DEV
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -520,7 +520,7 @@ class AMDSDMAQueue(HWQueue):
     return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
 
 def amd_compute_queue(submit:UOp) -> HWQueue:
-  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].arg[0][0]]).is_aql else AMDComputeQueue)(submit)
+  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].without_after.arg[0][0]]).is_aql else AMDComputeQueue)(submit)
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -736,8 +736,11 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8,0x75b0,0x75b3)),),
-      vram_bar=0, va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
+    pci_ids = {"gfx1100": (0X744C,), "gfx1102": (0x7480,), "gfx1201": (0x7550, 0x7551), "gfx1200": (0x7590,),
+               "gfx942": (0x74A1, 0x74B5), "gfx950": (0x75A0, 0x75A8, 0x75B0, 0x75B3)}
+    devs = ((0xffff, pci_ids[arch.split(',')[0]] if (arch:=DEV.target('AMD').arch) else tuple(i for v in pci_ids.values() for i in v)),)
+    super().__init__(dev, dev_id, vendor=0x1002, devices=devs, vram_bar=0, va_start=AMMemoryManager.va_allocator.base,
+                     va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
@@ -839,8 +842,8 @@ class AMDDevice(Compiled):
   sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute"), UPat()), name="s"), lambda s: encode_submit(amd_compute_queue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy"), UPat()), name="s"), lambda s: encode_submit(AMDSDMAQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_compute"), UPat()), name="s"), lambda s: encode_submit(amd_compute_queue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_copy"), UPat()), name="s"), lambda s: encode_submit(AMDSDMAQueue(s))),
   ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
