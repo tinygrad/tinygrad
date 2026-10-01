@@ -1,5 +1,6 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, sint_to_uop, AxisType, axis_to_pos
+from tinygrad.codegen.late.linearizer import pm_split_ends
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
 
@@ -34,11 +35,13 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
     # try to split up dims: (a,) -> (b, c)
     if limited == dims: limited = _split_dims(dims, max_sizes)
-  raw_idxs = [UOp.special(s, f"{prefix}{i}") for i,s in enumerate(limited)]
+  # Keep hardware axes as ranges through index lowering. The last axis id is the hardware dimension.
+  axis_type = AxisType.GLOBAL if prefix == "gidx" else AxisType.LOCAL
+  raw_idxs = [UOp(Ops.RANGE, src=(sint_to_uop(s),), arg=(axis_to_pos[axis_type], i, axis_type)) for i,s in enumerate(limited)]
   flat = sum(idx * math.prod(limited[i+1:]) for i,idx in enumerate(raw_idxs))
   return [ssimplify(flat // math.prod(dims[i+1:])) if i == 0 else ssimplify((flat // math.prod(dims[i+1:])) % dims[i]) for i in range(len(dims))]
 
-def add_gpudims(ctx:Renderer, s:UOp):
+def group_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
@@ -60,7 +63,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   local_max = (local_shape[0],)+ctx.local_max[1:] if ctx.local_max is not None and local_dims and \
     all_ranges[local_dims[0]].axis_type is AxisType.WARP else ctx.local_max
   local_idxs = get_grouped_dims("lidx", local_shape, local_max)
-  hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
+  hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.RANGE]
   global_max = ctx.global_max if ctx.global_prod_max is None else \
     tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
   idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
@@ -91,7 +94,10 @@ pm_device_to_var = PatternMatcher([
    if any(s.op is Ops.PARAM and s.arg.name == '_device_num' for s in e.src[1:]) else None),
 ])
 
-pm_add_gpudims = PatternMatcher([
-  # add gpudims must be last
-  (UPat(Ops.SINK, name="s"), add_gpudims),
-])+pm_device_to_var
+# Run once: grouping creates new GLOBAL/LOCAL ranges, which must not be grouped again.
+pm_group_gpudims = PatternMatcher([(UPat(Ops.SINK, name="s"), group_gpudims)])+pm_device_to_var
+
+pm_range_to_special = PatternMatcher([
+  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(op=Ops.SPECIAL, arg=f"{'g' if r.axis_type is AxisType.GLOBAL else 'l'}idx{r.axis_id[-1]}")
+   if r.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) else None),
+])+pm_split_ends

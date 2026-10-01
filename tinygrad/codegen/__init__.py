@@ -11,7 +11,7 @@ from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
-from tinygrad.codegen.gpudims import pm_add_gpudims
+from tinygrad.codegen.gpudims import pm_group_gpudims, pm_range_to_special
 from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid, invalid_gate
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
@@ -314,8 +314,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
 
-  # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+  # group GPU dimensions early so their index arithmetic goes through normal lowering
+  sink = graph_rewrite(sink, pm_group_gpudims, ctx=ren, name="group gpudims", walk=True)
 
   # **** optimizations are done, now we lower to actual code ****
 
@@ -371,6 +371,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+
+  # hardware ranges are no longer loops; preserve their already lowered bounds
+  sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
