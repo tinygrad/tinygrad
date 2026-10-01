@@ -162,8 +162,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING LABEL>"
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
-    # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None: label += "\n"+str(u.metadata)
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
