@@ -9,7 +9,7 @@ from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
-from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ, DEV
+from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -736,11 +736,8 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    pci_ids = {"gfx1100": (0X744C,), "gfx1102": (0x7480,), "gfx1201": (0x7550, 0x7551), "gfx1200": (0x7590,),
-               "gfx942": (0x74A1, 0x74B5), "gfx950": (0x75A0, 0x75A8, 0x75B0, 0x75B3)}
-    devs = ((0xffff, pci_ids[arch.split(',')[0]] if (arch:=DEV.target('AMD').arch) else tuple(i for v in pci_ids.values() for i in v)),)
-    super().__init__(dev, dev_id, vendor=0x1002, devices=devs, vram_bar=0, va_start=AMMemoryManager.va_allocator.base,
-                     va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
+    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8,0x75b0,0x75b3)),),
+      vram_bar=0, va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
