@@ -4,11 +4,10 @@ from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
-from tinygrad.helpers import IGNORE_BEAM_CACHE
+from tinygrad.helpers import prod, flatten, IGNORE_BEAM_CACHE, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str, unwrap
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.engine.realize import time_call
-from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
+from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool, _WorkerProcess
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -84,12 +83,12 @@ def _try_compile_timeout(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]
   # did we timeout?
   if thread.is_alive():
     # if we did, retire this worker, let the pool schedule a new one
-    multiprocessing.current_process().cancelled = True
+    if isinstance(p:=multiprocessing.current_process(), _WorkerProcess): p.cancelled = True
     if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
     if getenv("BEAM_STRICT_MODE"): raise TimeoutException()
     return x[0], None
   if err is not None: raise err
-  return ret
+  return unwrap(ret)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
 
