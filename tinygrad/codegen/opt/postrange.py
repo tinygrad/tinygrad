@@ -113,8 +113,6 @@ class Scheduler:
         # We currently don't support a group within another reduce, TODO: fix if-contexts
         check(not any(u in self.reduce_ranges and u.axis_type in (AxisType.WEAK, AxisType.UPCAST) for u in reduces[0].ranges),
               "cannot have a group inside another reduce")
-        check(not any(u.op is Ops.WMMA and u.arg[3] is not None and any(sz == 1 for _,sz in u.arg[3][2]) for u in reduces[0].toposort()),
-              "cannot group tensor cores with input-only upcasts")
       ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps

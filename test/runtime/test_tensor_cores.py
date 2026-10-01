@@ -154,15 +154,17 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_group_reduce(self):
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
-    sche = Scheduler(Tensor.empty(16, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 16, dtype=tc.dtype_in), dtype=tc.dtype_out)
+    N, M, K = tc.dims
+    K *= 4  # leave four tensor core tiles along K so both group sizes divide the remaining reduction
+    sche = Scheduler(Tensor.empty(M, K, dtype=tc.dtype_in).matmul(Tensor.empty(K, N, dtype=tc.dtype_in), dtype=tc.dtype_out)
                       .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
     sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
     axis = sche.axes_of(AxisType.WEAK, reduce=True)[0]
-    if max(len(tc.frag_a[1]), len(tc.frag_b[1])) > len(tc.frag_c[1]):
-      # input-only fragment slots aren't REDUCE axes, but grouping these tensor cores is unsupported
-      with self.assertRaisesRegex(KernelOptError, "input-only upcasts"): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.LOCAL)))
+    if sche.axes_of(AxisType.UPCAST, reduce=True):
+      # this tc keeps an unrolled reduce outside the WMMA, grouping inside it must be rejected
+      with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.LOCAL)))
     else:
-      x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
+      x, y = Tensor.rand(M, K, dtype=tc.dtype_in), Tensor.rand(K, N, dtype=tc.dtype_in)
       helper_linearizer_opt(x.matmul(y, dtype=tc.dtype_out),
                             [[Opt(OptOps.SPLIT, axis, (amt, AxisType.LOCAL, top))] for amt in (2, 4) for top in (False, True)],
                             apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
