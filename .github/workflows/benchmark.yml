@@ -554,7 +554,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD::gfx1201', 'NV']
+        dev: ['AMD', 'NV']
     timeout-minutes: 5
     defaults:
       run:
