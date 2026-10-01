@@ -282,7 +282,7 @@ def usb_copy_slicer(call:UOp, first:int, run:int) -> list[UOp]: # first: chunk i
   return ops
 
 def usb_copy_rewriter(s:UOp) -> UOp|None:
-  lins = [submit.without_after.src[1] for submit in s.src]
+  lins = [submit.without_after.src[1].without_after for submit in s.src]
   if not (copies:=[call for lin in lins for call in lin.src if is_staged(call)]): return None
 
   # group copies

@@ -64,9 +64,9 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None) -> UOp:
-  lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue))
-  return UOp.custom_function(fn or to_name("submit", lin.arg[0][0].split(":")[0], queue.split(":")[0])).call(lin)
+def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, deps:tuple[UOp, ...]=()) -> UOp: # the order is on the arg
+  lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)).after(*deps)
+  return UOp.custom_function(fn or to_name("submit", to_tuple(devs)[0].split(":")[0], queue.split(":")[0])).call(lin)
 
 # C FFI
 
@@ -281,7 +281,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   timelines = [ctx.sched_timeline((dev,)) for dev in ctx.queues]
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
   fence = UOp.custom_function("hcq_fence").call(*timelines, *signals)
-  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue).after(fence, *submits[-1:]))
+  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue, deps=(fence, *submits[-1:])))
   sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
@@ -350,7 +350,7 @@ class HWQueue:
   ])
 
   def __init__(self, submit:UOp):
-    self.lin = submit.src[1]
+    self.lin, self.deps = (lin:=submit.src[1]).without_after, lin.src[1:] if lin.op is Ops.AFTER else ()
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
@@ -396,10 +396,11 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
   keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, type(o) is int and _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
   groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
 
-  dep = [buf.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
-  base, stores = buf.after(*dep), [] # keep buf.after to be sure that link applies patches after the blob
-  for (dt, phase, _, rngs), grp in groups:
-    view = base[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
+  # a link patch writes the bare buffer after the blob, a runtime patch writes it after its deps
+  dep = [buf.without_after.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
+  base, stores = buf.after(*dep), []
+  for (dt, phase, link, rngs), grp in groups:
+    view = (buf.without_after.after(*dep) if link else base)[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
     offs = [UOp.const(i) if isinstance(i:=(o - phase) // dt.itemsize, int) else i for o, _ in grp]
     stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
   return buf.after(*dep, *stores)
@@ -428,9 +429,10 @@ def encode_fence(f:UOp) -> UOp:
 pm_hcq_encode = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence),
 
-  # after blocks are lowered, rechain stores saving original order
-  (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),
-    lambda root, a: root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort() if s.op is Ops.STORE}, walk=True)),
+  # TODO: remove that
+  (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"), lambda root, a: None if root.op is Ops.LINEAR else
+    root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort().keys() - UOp.sink(*a.src[1:]).toposort().keys()
+                     if s.op is Ops.STORE}, walk=True)),
 ])
 
 # *****************
@@ -463,13 +465,13 @@ def bufferize_cmdbuf(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
     bufs.append((offs, bufferize_cmdbuf(hq, lname, hq.devs)))
   views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
 
-  buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device, tag=to_name(name, hq.queue))
+  buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device, tag=to_name(name, hq.queue)).after(*hq.deps)
   words = UOp.sink(*[w for _, w in patches]).substitute(views).src
   return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*[b for _, b in bufs])
 
 def encode_submit(hq:HWQueue) -> UOp: # TODO: remove?
   for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
-  return hq.submit(bufferize_cmdbuf(hq, "cmdbuf", hq.devs))
+  return ret if (ret:=hq.submit(bufferize_cmdbuf(hq, "cmdbuf", hq.devs))).op is Ops.CALL else ret.after(*hq.deps)
 
 pm_renumber = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),

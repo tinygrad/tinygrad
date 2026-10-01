@@ -129,6 +129,21 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(chunks), 0)
     self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
 
+  def test_text_parts_with_string_template(self):
+    import jinja2
+    # Qwen3's template concatenates content with strings, so a content array raises TypeError without normalization.
+    template = jinja2.Template("{% for m in messages %}{{ '<|im_start|>' + m.role + '\n' + m.content + '<|im_end|>\n' }}{% endfor %}")
+    with patch.object(self.server, "template", template), patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
+      response = self.client.chat.completions.create(model="test", messages=[
+        {"role":"user", "content":[{"type":"text", "text":"Hello"}, {"type":"text", "text":" world"}]},
+        {"role":"assistant", "content":None, "tool_calls":[
+          {"id":"call_1", "type":"function", "function":{"name":"read", "arguments":"{}"}}]},
+        {"role":"tool", "tool_call_id":"call_1", "content":"result"},
+      ], stream=True)
+      self.assertEqual(list(response)[-1].choices[0].finish_reason, "stop")
+      self.mock_tok.encode.assert_called_with('<|im_start|>user\nHello world<|im_end|>\n'
+                                              '<|im_start|>assistant\n<|im_end|>\n<|im_start|>tool\nresult<|im_end|>\n')
+
   def test_content_is_streamed(self):
     stream = self.client.chat.completions.create(
       model="test",
