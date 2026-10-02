@@ -2,7 +2,7 @@ import re, sys
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, KernelInfo, range_str, consumer_map_from_toposort, sint
-from tinygrad.helpers import strip_parens, NO_COLOR
+from tinygrad.helpers import strip_parens, colored
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
   def dfs(x:UOp, cache:dict):
@@ -69,10 +69,7 @@ def render_ssa(root:UOp|list[UOp], color:bool=False) -> str:
     return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
   lines = []
   for i,u in enumerate(nodes):
-    op = u.op.name.lower()
-    if color and not NO_COLOR and u.op in uops_colors:
-      r, g, b = int(uops_colors[u.op][1:3], 16), int(uops_colors[u.op][3:5], 16), int(uops_colors[u.op][5:7], 16)
-      op = f"\x1b[38;2;{r};{g};{b}m{op}\x1b[0m"   # viz palette as ANSI truecolor
+    op = colored(u.op.name.lower(), uops_colors.get(u.op)) if color else u.op.name.lower()
     line = f"%{i} = {op}"
     if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
     if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
