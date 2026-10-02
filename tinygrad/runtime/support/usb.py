@@ -439,10 +439,10 @@ def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   return usb_stream(h.after(*loops), addr + off.cast(dtypes.uint64), sb.index(s0.minimum(sb.max_numel() - 1)),
                     (size - off).minimum(USB_MAX_STREAM), True).end(*loops)
 
-def usb_host_params(c:UOp) -> UOp|None: # a function's param is host memory if its arg is, the arg knows
-  host = {p: p.replace(arg=replace(p.arg, device=HCQ_RUNTIME_DEV.value)) for p in c.body.toposort(enter_calls=False)
-          if p.op is Ops.PARAM and p.arg.name and is_remote(p) and not is_remote(c.src[1 + p.arg.slot])}
-  return c.replace(src=(c.body.substitute(host), *c.src[1:])) if host else None
+def usb_host_params(c:UOp) -> UOp|None:
+  params = [p for p in c.body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.arg.name]
+  if not (host:=[p for p in params if is_remote(p) and not is_remote(c.src[1 + p.arg.slot])]): return None
+  return c.replace(src=(c.body.substitute({p: p.replace(arg=replace(p.arg, device=HCQ_RUNTIME_DEV.value)) for p in host}), *c.src[1:]))
 pm_usb_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, arg=None),), allow_any_len=True, name="c"), usb_host_params)])
 
 pm_usb_lower = PatternMatcher([
