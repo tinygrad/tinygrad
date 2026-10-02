@@ -872,6 +872,15 @@ class TestCfg(unittest.TestCase):
     cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
 
+  def test_repeat(self):
+    k = Kernel()
+    for _ in range(3): k.emit(s_add_u32(s[1], s[1], 1))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("repeat", k)["data"]
+    block = next(iter(cfg["blocks"].values()))
+    self.assertEqual(sum(cfg["pc_tokens"][pc][0]["st"] == "s_add_u32" for pc in block), 3)
+
   def test_operands(self):
     k = Kernel()
     k.emit(s_getpc_b64(s[2:3]))
