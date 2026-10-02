@@ -534,6 +534,7 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
 
 class BinIdxDataset:
   def __init__(self, base_path:Path):
+    self.base_path = base_path
     self.idx = np.memmap(base_path.with_name(f"{base_path.name}.idx"), mode="r", dtype=np.uint8)
     assert self.idx[:9].tobytes() == b"MMIDIDX\x00\x00", "invalid index file format"
     version, dtype_code, self.count, doc_count = struct.unpack_from("<QBQQ", self.idx, 9)
@@ -546,7 +547,11 @@ class BinIdxDataset:
     self.pointers = np.frombuffer(self.idx, dtype="<i8", count=self.count, offset=offset)
     offset += self.count * 8
     self.doc_idx = np.frombuffer(self.idx, dtype="<i8", count=doc_count, offset=offset)
-    self.bin_t = np.memmap(base_path.with_name(f"{base_path.name}.bin"), mode="r", dtype=np.uint8)
+
+  @functools.cached_property
+  def bin_t(self):
+    # Index construction is allowed before RUN_START; opening token data is deferred until the first sample read.
+    return np.memmap(self.base_path.with_name(f"{self.base_path.name}.bin"), mode="r", dtype=np.uint8)
 
   def _index(self, idx) -> tuple[int, int]:
     return int(self.pointers[idx]), int(self.sizes[idx])

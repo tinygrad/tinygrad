@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, MXFP4
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, MXFP4, FP8_FA
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
@@ -1337,7 +1337,6 @@ def train_llama3():
       MLLOGGER.start(key=mllog_constants.INIT_START, value=None)
 
     if RUNMLPERF:
-      MLLOGGER.start(key=mllog_constants.RUN_START, value=None)
       MLLOGGER.event(key=mllog_constants.SEED, value=SEED)
 
       MLLOGGER.event(key=mllog_constants.GLOBAL_BATCH_SIZE, value=GBS)
@@ -1359,6 +1358,18 @@ def train_llama3():
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_STEPS, value=MAX_STEPS - WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
       MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=1.0)
+
+      MLLOGGER.event(key=mllog_constants.LOWEST_NUMERICAL_PRECISION_IN_LINEAR, value="mxfp4" if MXFP4 else "bfloat16")
+      MLLOGGER.event(key=mllog_constants.LOWEST_NUMERICAL_PRECISION_IN_ATTN,
+                     value="fp8" if getenv("HK_FLASH_ATTENTION") and FP8_FA else "bfloat16")
+      MLLOGGER.event(key=mllog_constants.LOWEST_NUMERICAL_PRECISION_IN_COMM, value="bfloat16")
+      MLLOGGER.event(key=mllog_constants.TENSOR_PARALLELISM, value=getenv("MP", 1))
+      MLLOGGER.event(key=mllog_constants.PIPELINE_PARALLELISM, value=1)
+      MLLOGGER.event(key=mllog_constants.CONTEXT_PARALLELISM, value=1)
+      MLLOGGER.event(key=mllog_constants.EXPERT_PARALLELISM, value=1)
+      MLLOGGER.event(key=mllog_constants.MICRO_BATCH_SIZE, value=BS // getenv("DP", 1))
+      MLLOGGER.event(key=mllog_constants.CONFIG_FILENAME, value=getenv("CONFIG_FILENAME", "examples/mlperf/model_train.py"))
+      MLLOGGER.event(key="data_seed", value=DATA_SEED)
   else:
     MLLOGGER = None
 
@@ -1531,6 +1542,9 @@ def train_llama3():
   step_times = []
 
   if MLLOGGER and RUNMLPERF:
+    # Dataset indices use metadata only; token reads begin at next(train_iter) below.
+    MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
+    MLLOGGER.start(key=mllog_constants.RUN_START, value=None)
     MLLOGGER.start(key=mllog_constants.EPOCH_START, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
     MLLOGGER.start(key=mllog_constants.BLOCK_START, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
 
@@ -1634,8 +1648,6 @@ def train_llama3():
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           if getenv("BENCHMARK_EVAL_LOSS", 0):
             tqdm.write(f"benchmark eval log perplexity: {sum(eval_losses) / len(eval_losses):.4f}")
-          if MLLOGGER and INITMLPERF:
-            MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
           return
 
       log_perplexity = sum(eval_losses) / len(eval_losses)
