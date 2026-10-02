@@ -1,4 +1,6 @@
-import ctypes, time, os, builtins, fcntl, typing
+import ctypes, time, os, builtins, typing
+try: import fcntl # windows misses that
+except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, dedup, to_tuple
 from tinygrad.device import Compiled
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
