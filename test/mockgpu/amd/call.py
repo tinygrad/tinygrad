@@ -27,18 +27,20 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -
   cfg = get_cfg(insts)
   # construct CALL graph
   afters: dict[UOp, UOp] = {}
-  for off, inst in insts.items():
-    inst_st = str(inst)
-    if inst_st.startswith("s_code_end"): continue
-    if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
-    ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=lib+off)
-    sink = _get_handler(inst)(inst, ctx)
-    *_, canonical_name = _canonical_info(inst, ctx, lib_bytes[off:])
-    bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
-    body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
-    args = [afters.get(b, b) for b in bufs]
-    call = body.call(*args, name=canonical_name)
-    afters.update((b, arg.after(call)) for b, arg in zip(bufs, args))
+  for block_pc, block in cfg.values():
+    for off in block:
+      inst = insts[off]
+      inst_st = str(inst)
+      if inst_st.startswith("s_code_end"): continue
+      if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
+      ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=lib+off)
+      sink = _get_handler(inst)(inst, ctx)
+      *_, canonical_name = _canonical_info(inst, ctx, lib_bytes[off:])
+      bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
+      body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
+      args = [afters.get(b, b) for b in bufs]
+      call = body.call(*args, name=canonical_name)
+      afters.update((b, arg.after(call)) for b, arg in zip(bufs, args))
   sink = UOp.sink(*afters.values(), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
