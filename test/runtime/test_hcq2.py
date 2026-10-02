@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, uopfunc
+from tinygrad.uop.ops import Ops, UOp, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -166,7 +166,7 @@ class TestHCQ2FFI(unittest.TestCase):
 @uopfunc
 def addr_of(o:UOp, b:UOp): return o.index(0).store(b.getaddr("CPU")).sink() # o[0] = &b
 
-# plain functions through the host rules, no hcq: run_linear on a call of a sink
+# host functions in a batch
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
 class TestHostCalls(unittest.TestCase):
   def setUp(self): self.enterContext(Context(HCQ_RUNTIME_DEV="CPU"))
@@ -174,9 +174,8 @@ class TestHostCalls(unittest.TestCase):
   @staticmethod
   def _buf(n:int, dtype=dtypes.uint64) -> Buffer: return Buffer("CPU", n, dtype, initial_value=bytes(n * dtype.itemsize))
   @staticmethod
-  def _run(fxn, *bufs:Buffer, **var_vals:int) -> list: # the first buffer is the output. the sink gets its KernelInfo by hand: it is the program
-    call = fxn(*[UOp.from_buffer(b) for b in bufs])
-    run_linear(UOp(Ops.LINEAR, src=(call.replace(src=(call.body.replace(arg=KernelInfo(call.arg.name)), *call.src[1:])),)), var_vals)
+  def _run(fxn, *bufs:Buffer, **var_vals:int) -> list: # first buffer is the output
+    run_linear(hcq2.hcq_link(lower_and_compile(lower_hcq(fxn(*[UOp.from_buffer(b) for b in bufs]))), allow_cache=False), var_vals, jit=True)
     return bufs[0].host.view(fmt=bufs[0].dtype.fmt)[:]
 
   def test_no_addrs_no_placeholders(self):
@@ -214,7 +213,7 @@ class TestHostCalls(unittest.TestCase):
     a, b = self._buf(16, dtypes.uint8), self._buf(16, dtypes.uint8)
     self.assertEqual(self._run(both, self._buf(2), a, b), [a.get_buf("CPU"), b.get_buf("CPU")])
 
-  def test_nested_placeholders(self): # storage a function keeps for itself. two of a kind, one call deep: they merge and pass through the caller
+  def test_nested_placeholders(self): # storage a function keeps for itself
     @uopfunc
     def keep(o:UOp):
       tmps = [cpu_buf(dtype=dtypes.uint64, volatile=True, tag="tmp") for _ in range(2)]
@@ -244,6 +243,21 @@ class TestHostCalls(unittest.TestCase):
     def top(o:UOp, a:UOp): return scale(o, a, UOp.variable("k", 0, 10, dtypes.uint64)).sink()
     a = Buffer("CPU", 1, dtypes.uint64, initial_value=struct.pack("Q", 7))
     self.assertEqual(self._run(top, self._buf(1), a, k=6), [42])
+
+  def test_weak_variable_in_function(self): # a weak variable reached in a function
+    @uopfunc
+    def put(o:UOp): return o.index(0).store(UOp.variable("n", 1, 10).cast(dtypes.uint64)).sink()
+    self.assertEqual(self._run(put, self._buf(1), n=7), [7])
+
+  def test_addr_of_arg_after_a_write(self): # the arg contains the param it replaces
+    @uopfunc
+    def top(o:UOp, b:UOp): return addr_of(o, b.after(b.index(0).store(2))).sink()
+    b = self._buf(1)
+    self.assertEqual(self._run(top, self._buf(1), b), [b.get_buf("CPU")])
+
+  def test_inputs_out_of_slot_order(self): # inputs reached out of slot order
+    p = [UOp.param(i, dtypes.uint64, 1, "CPU") for i in range(2)]
+    self.assertEqual(lower_hcq(p[1].index(0).load(), p[0].index(0).load()).src[0].without_after.src[1:], (p[1], p[0]))
 
   def test_one_function_for_any_placeholder(self): # a function names its params: what it is called on does not make another function
     @uopfunc

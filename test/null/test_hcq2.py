@@ -11,9 +11,8 @@ from tinygrad.engine.realize import compile_linear, link_linear, get_call_arg_uo
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
 
-def lower_hcq(*body:UOp) -> UOp: # a sink of the body through hcq2's lower and the host rules, as a one call linear
-  call = UOp.sink(*body, arg=KernelInfo("test"), tag=1).call(aux=HCQInfo(("CPU",)))
-  return hcq2.runtime_rewrites(UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(call)),)))
+def lower_hcq(*body:UOp) -> UOp: # body through lower_call, as a linear
+  return UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(UOp.sink(*body, arg=KernelInfo("test"), tag=1).call(aux=HCQInfo(("CPU",))))),))
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()

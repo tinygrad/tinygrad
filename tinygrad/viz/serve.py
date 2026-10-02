@@ -175,8 +175,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
   op, src, arg, *rest = data.trace.uop_fields[a]
   # mirror of the trace_num encoding, viz must not save buffers
   if op is Ops.CALL and isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-    arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs),
-                                   inputs=tuple((_reconstruct(data, u, depth), d, i) for u, d, i in aux.inputs)))
+    arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs)))
   if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
   ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
