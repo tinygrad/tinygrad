@@ -251,6 +251,16 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_stage_in_thread_range(self):
+    # the STAGE is inside the thread range i, so every thread stages its own row
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j, jj = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP), UOp.range(8, 2, AxisType.LOOP)
+      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
   def test_reg_stage_then_reduce(self):
     # the REG buffer of the STAGE and the accumulator of the reduce are different buffers
