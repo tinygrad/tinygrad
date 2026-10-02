@@ -30,7 +30,7 @@ def cuda_run(cmdbuf:UOp, rt_vars:UOp, cmds:tuple, copy:bool) -> UOp: # rt_vars: 
   words, h = cmdbuf.bitcast(dtypes.uint64), ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
   for fn, *args in cmds:
     s = rt_vars.after(h).index(2 if copy else 1).load() # the stream after the last call
-    h = ccall(fn, *[s if a is None else words.index(a[0]) if isinstance(a, tuple) else words.index(a).load() for a in args])
+    h = ccall(fn, *[s if a is None else cmdbuf.index(a[0]) if isinstance(a, tuple) else words.index(a).load() for a in args])
   return rt_vars.after(h).index(3).store(h.cast(dtypes.uint64)).sink()
 
 class CUDAQueue(HWQueue):
@@ -47,7 +47,7 @@ class CUDAQueue(HWQueue):
     addr = UOp(Ops.LINEAR, src=tuple(pack_args([(0, UOp.const(size, dtypes.uint64))] + rows, 8 + size)), arg="kernargs").getaddr(self.devs)
     # extra: [buffer pointer, &args, buffer size, &size, end]
     self.call(cuda.cuLaunchKernel, self.extern((self.dev.tag("function"), obj.lib, obj.name)), *prg.arg.global_size, *prg.arg.local_size, 0, None, 0,
-              (self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr + 8, 2, addr, 0)]) // 8 - 5,))
+              (self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr + 8, 2, addr, 0)]) - 40,))
 
   def copy(self, dst:UOp, src:UOp, sz:int): self.call(cuda.cuMemcpyAsync, dst.getaddr(self.devs), src.getaddr(self.devs), sz, None)
   def wait(self, sig:UOp, val:UOp): self.call(cuda.cuStreamWaitValue64_v2, None, sig.getaddr(self.devs), val, cuda.CU_STREAM_WAIT_VALUE_GEQ)
