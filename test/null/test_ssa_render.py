@@ -8,7 +8,7 @@ from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.render import render_ssa
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, ansistrip
 
 # ***** prototype parse for the uop v1 wire format *****
 
@@ -57,7 +57,7 @@ def parse_ssa(text:str) -> UOp:
     if tok.startswith("%"): return nodes[int(tok[1:])]
     if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in _split_top(tok[1:-1])))
     return _parse_const(tok)
-  for raw in text.splitlines():
+  for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_ssa
     line = raw.strip()
     if not line or line.startswith(";"): continue
     m = _line_re.match(line)

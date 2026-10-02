@@ -1,4 +1,4 @@
-import re, sys
+import re
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, KernelInfo, range_str, consumer_map_from_toposort, sint
@@ -61,7 +61,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
-def render_ssa(root:UOp|list[UOp], color:bool=False) -> str:
+def render_ssa(root:UOp|list[UOp]) -> str:
   nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
@@ -69,15 +69,12 @@ def render_ssa(root:UOp|list[UOp], color:bool=False) -> str:
     return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
   lines = []
   for i,u in enumerate(nodes):
-    op = u.op.name.lower()
-    if color: op = colored(op, uops_colors.get(u.op))
-    line = f"%{i} = {op}"
+    line = f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}"
     if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
     if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
     lines.append(line)
   return "\n".join(lines)
 
-def print_uops(uops:list[UOp]): print(render_ssa(uops, color=sys.stdout.isatty()))
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.FLOORDIV: "//", Ops.FLOORMOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
