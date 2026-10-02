@@ -6,7 +6,7 @@ from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, TinyELF, HCQ_RUNTIME_DEV
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
@@ -391,7 +391,7 @@ def _is_link_patch(w:UOp) -> bool:
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, type(o) is int and _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
+  keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
   groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
 
   # a link patch writes the bare buffer after the blob, a runtime patch writes it after its deps
@@ -459,7 +459,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
 # 3.3. lift
 
 def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
-  links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
+  links, rest = partition(a.src[1:], lambda s: (s.src[0] if s.op is Ops.END else s).op is Ops.STORE and _is_link_patch(s)) # a store or its loop
   if not links: return None
   ctx.extend(links)
   return a.src[0].after(*rest)
@@ -473,15 +473,17 @@ def lift_param(u:UOp, slot:int) -> UOp: # addresses and variables by value
     return UOp.param(slot, u.commit_dtype(dtypes.int), name=u.arg.name if u.is_variable else None, addrspace=AddrSpace.ALU).cast(u.dtype)
   return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.value, volatile=u.arg.volatile, name=u.arg.name and f"{u.arg.name}_{slot}")
 
+def addr_without_after(g:UOp) -> UOp: # the same address on the bare base: an address has no deps
+  base, off = unwrap_view(g.src[0])
+  return (base.bitcast(dtypes.uint8)[off:base.nbytes()] if off else base).getaddr(to_tuple(g.arg)[0])
+
 def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
-  # an address is base + offset
-  body, args = call.body, list(call.src[1:])
-  nodes = body.toposort(gate=lambda u: u.op is not Ops.GETADDR, enter_calls=False)
-  addrs = {g: ((v:=unwrap_view(g.src[0]))[0].getaddr(to_tuple(g.arg)[0]), v[1]) for u in nodes for g in u.src if g.op is Ops.GETADDR}
-  leaves = dedup([u for u in nodes if captured(u, root)] + [a for a, _ in addrs.values()])
+  args, nodes = list(call.src[1:]), call.body.toposort(gate=lambda u: u.op is not Ops.GETADDR, enter_calls=False)
+  addrs = {g: addr_without_after(g) for u in nodes for g in u.src if g.op is Ops.GETADDR}
+  leaves = dedup([u for u in nodes if captured(u, root)] + list(addrs.values()))
   slots = args + (new:=[u for u in leaves if u not in args])
   params = {u: lift_param(u, slots.index(u)) for u in leaves}
-  body = body.substitute({g: params[a] + UOp.const(off, dtypes.uint64) if off else params[a] for g, (a, off) in addrs.items()} | params, walk=True)
+  body = call.body.substitute({g: params[a] for g, a in addrs.items()} | params, walk=True)
 
   # new args in the caller
   own = {p: args[p.arg.slot] for u in new for p in u.toposort() if p.op is Ops.PARAM and not captured(p, root)}
@@ -567,13 +569,21 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
   cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')[off:off + len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp: # a stack or one word
+def write_words(buf:UOp, writes:list[tuple[int, int, int]]) -> UOp: # (word index, size, value)
   base, off = unwrap_view(buf)
   mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
-  offs_ws = zip(offs.src, ws.src) if offs.op is Ops.STACK else [(offs, ws)]
-  writes = [(off + o.val * w.dtype.itemsize, w.dtype.itemsize, w.val) for o, w in offs_ws]
-  for at, n, v in writes: mv[at:at + n] = (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
+  for o, n, v in writes: mv[off + o * n:off + (o + 1) * n] = (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
   return UOp(Ops.NOOP)
+
+def words(offs:UOp, ws:UOp): return zip(*[s.src if s.op is Ops.STACK else (s,) for s in (offs, ws)]) # a stack or one word
+
+def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp: return write_words(buf, [(o.val, w.dtype.itemsize, w.val) for o, w in words(offs, ws)])
+
+def fold_ranged(buf:UOp, offs:UOp, ws:UOp, e:UOp) -> UOp: # the words of every trip
+  vs = {r: UOp.variable(f"r{i}", 0, r.vmax) for i, r in enumerate(e.src[1:])}
+  ows = list(words(offs.substitute(vs), ws.substitute(vs)))
+  trips = [dict(zip([v.expr for v in vs.values()], t)) for t in itertools.product(*[range(r.vmax + 1) for r in vs])]
+  return write_words(buf, [(sym_infer(o, t), w.dtype.itemsize, sym_infer(w, t)) for t in trips for o, w in ows])
 
 pm_link = PatternMatcher([
   # collapse committed const conversions
@@ -588,6 +598,7 @@ pm_link = PatternMatcher([
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
   (UPat(name="buf").index(UPat.cvar("offs")).store(UPat.cvar().or_casted("ws")), fold_words),
+  (UPat(name="buf").index(UPat(name="offs")).store(UPat(name="ws")).end(allow_any_len=True, name="e"), fold_ranged),
   # a call keeps the deps that are not written yet
   (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"), lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.without_after.op is Ops.CALL else
