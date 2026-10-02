@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
-from typing import Callable
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
@@ -26,15 +25,20 @@ def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.value, 1
 # *****************
 # queue
 
-def word(cmdbuf:UOp, i:int) -> UOp: return cmdbuf.bitcast(dtypes.uint64).index(i).load() # a word the caller patched
+@uopfunc
+def cuda_run(cmdbuf:UOp, rt_vars:UOp, cmds:tuple, copy:bool) -> UOp: # rt_vars: [ctx, compute stream, copy stream, status]
+  # an arg of a call is a word of the cmdbuf, (word,) a pointer to it, None the stream
+  words, h = cmdbuf.bitcast(dtypes.uint64), ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
+  for fn, *args in cmds:
+    s = rt_vars.after(h).index(2 if copy else 1).load() # the stream after the last call
+    h = ccall(fn, *[s if a is None else words.index(a[0]) if isinstance(a, tuple) else words.index(a).load() for a in args])
+  return rt_vars.after(h).index(3).store(h.cast(dtypes.uint64)).sink()
 
 class CUDAQueue(HWQueue):
   dev:CUDADevice
-  def __init__(self, submit:UOp):
-    super().__init__(submit)
-    self.cmds:list[Callable[[UOp, UOp], UOp]] = [] # the calls the submit makes, from the cmdbuf and the stream
-
-  def w(self, x:UOp|int) -> int: return self.q(x.cast(dtypes.uint64) if isinstance(x, UOp) else UOp.const(x, dtypes.uint64)) // 8 - 1
+  def call(self, fn, *args): # the values go in the cmdbuf as words
+    vals = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]
+    self.cmds.append((fn, *[a if a is None or isinstance(a, tuple) else self.q(a.cast(dtypes.uint64)) // 8 - 1 for a in vals]))
   def extern(self, tag) -> UOp: return UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, tag=tag).getaddr(self.dev.host)
 
   def exec(self, call:UOp, prg:UOp):
@@ -42,34 +46,20 @@ class CUDAQueue(HWQueue):
     rows = layout_args([bufs[i].getaddr(self.devs) for i in prg.arg.globals] + [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)], 8)
     size = max([o + w.dtype.itemsize for o, w in rows], default=8) - 8
     addr = UOp(Ops.LINEAR, src=tuple(pack_args([(0, UOp.const(size, dtypes.uint64))] + rows, 8 + size)), arg="kernargs").getaddr(self.devs)
-    extra = [self.w(v) for v in (1, addr + 8, 2, addr, 0)][0] # [buffer pointer, &args, buffer size, &size, end]
-    fn, dims = self.w(self.extern((self.dev.tag("function"), obj.lib, obj.name))), [self.w(d) for d in (*prg.arg.global_size, *prg.arg.local_size)]
-    self.cmds.append(lambda cb, s: ccall(cuda.cuLaunchKernel, word(cb, fn), *[word(cb, d).cast(dtypes.uint32) for d in dims], 0, s,
-                                         UOp.const(0, dtypes.uint64), cb.bitcast(dtypes.uint64).index(extra)))
+    # extra: [buffer pointer, &args, buffer size, &size, end]
+    extra = self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr + 8, 2, addr, 0)]) // 8 - 5
+    self.call(cuda.cuLaunchKernel, self.extern((self.dev.tag("function"), obj.lib, obj.name)), *prg.arg.global_size, *prg.arg.local_size, 0, None, 0,
+              (extra,))
 
-  def copy(self, dst:UOp, src:UOp, sz:int):
-    d, sr = self.w(dst.getaddr(self.devs)), self.w(src.getaddr(self.devs))
-    self.cmds.append(lambda cb, s: ccall(cuda.cuMemcpyAsync, word(cb, d), word(cb, sr), UOp.const(sz, dtypes.uint64), s))
+  def copy(self, dst:UOp, src:UOp, sz:int): self.call(cuda.cuMemcpyAsync, dst.getaddr(self.devs), src.getaddr(self.devs), sz, None)
+  def wait(self, sig:UOp, val:UOp): self.call(cuda.cuStreamWaitValue64_v2, None, sig.getaddr(self.devs), val, cuda.CU_STREAM_WAIT_VALUE_GEQ)
+  def signal(self, sig:UOp, val:UOp): self.call(cuda.cuStreamWriteValue64_v2, None, sig.getaddr(self.devs), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)
+  def timestamp(self, sig:UOp): self.call(cuda.cuLaunchHostFunc, None, self.extern(self.dev.tag("stamp")), sig[1:2].getaddr(self.devs)) # [sig][stamp]
 
-  def wait(self, signal:UOp, value:UOp):
-    sig, v = self.w(signal.getaddr(self.devs)), self.w(value)
-    self.cmds.append(lambda cb, s: ccall(cuda.cuStreamWaitValue64_v2, s, word(cb, sig), word(cb, v), cuda.CU_STREAM_WAIT_VALUE_GEQ))
-
-  def signal(self, signal:UOp, value:UOp):
-    sig, v = self.w(signal.getaddr(self.devs)), self.w(value)
-    self.cmds.append(lambda cb, s: ccall(cuda.cuStreamWriteValue64_v2, s, word(cb, sig), word(cb, v), cuda.CU_STREAM_WRITE_VALUE_DEFAULT))
-
-  def timestamp(self, signal:UOp): # a slot is [signal][timestamp]
-    fn, slot = self.w(self.extern(self.dev.tag("stamp"))), self.w(signal[1:2].getaddr(self.devs))
-    self.cmds.append(lambda cb, s: ccall(cuda.cuLaunchHostFunc, s, word(cb, fn), word(cb, slot)))
-
-  @uopfunc
-  def submit(self, cmdbuf:UOp, rt_vars:UOp) -> UOp: # rt_vars: [ctx, compute stream, copy stream, status]
-    h = ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
-    for cmd in self.cmds: h = cmd(cmdbuf, rt_vars.after(h).index(2 if self.queue.startswith("COPY") else 1).load()) # the stream after the last call
-    return rt_vars.after(h).index(3).store(h.cast(dtypes.uint64)).sink()
   def encode(self) -> UOp:
-    return self.submit(encode_cmdbuf(self, self.lin), UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag=self.dev.tag("cuda")))
+    self.cmds:list[tuple] = []
+    rt_vars = UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag=self.dev.tag("cuda"))
+    return cuda_run(encode_cmdbuf(self, self.lin), rt_vars, tuple(self.cmds), self.queue.startswith("COPY"))
 
 # *****************
 # device
