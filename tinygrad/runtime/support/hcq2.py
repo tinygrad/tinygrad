@@ -483,7 +483,7 @@ def _param_for(u:UOp, slot:int) -> UOp:
   return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.value, volatile=u.arg.volatile, name=u.arg.name and f"{u.arg.name}_{slot}")
 
 def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
-  body, args = call.body, list(call.src[1:])
+  body, args = graph_rewrite(call.body, pm_lift_deps, walk=True, name="lift deps"), list(call.src[1:])
   nodes = body.toposort(gate=lambda u: u.op is not Ops.GETADDR, enter_calls=False)
   leaves = dedup([u for u in nodes if _needs_arg(u, root)] + [g for u in nodes for g in u.src if g.op is Ops.GETADDR])
   slots = args + (new:=[u for u in leaves if u not in args])
@@ -511,7 +511,7 @@ def lower_call(call:UOp) -> UOp|None:
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
   body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
                        ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
-  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], pm_lift_deps),
+  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])),
                        ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")
   body = graph_rewrite(body, pm_lift, ctx=itertools.count(), walk=True, enter_calls=True, name="lift")
 
