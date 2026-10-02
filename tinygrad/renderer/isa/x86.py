@@ -126,9 +126,9 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
   # scalar reg gated mops become cmovs
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate")),
-    lambda addr,alt,gate: gate.where(addr.load(), alt) if is_regbuf(addr) else None),
+    lambda addr,alt,gate: gate.where(addr.load(), alt) if is_regbuf(addr.src[0]) else None),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")),
-    lambda addr,val,gate: addr.store(gate.where(val, addr.load())) if is_regbuf(addr) else None),
+    lambda addr,val,gate: addr.store(gate.where(val, addr.load())) if is_regbuf(addr.src[0]) else None),
 ])
 
 # ***** X86 pre instruction selection *****
