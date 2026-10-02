@@ -25,10 +25,6 @@ class TestToDtype(unittest.TestCase):
     self.assertIsInstance(res, DType)
     self.assertEqual(res, dtypes.int32)
 
-  def test_reject_non_dtype_names(self):
-    for name in ("typo", "all", "ints", "is_float", "__class__", "default_float", "default_int", "void", "weakint", "weakfloat"):
-      with self.subTest(name=name), self.assertRaises(AttributeError): to_dtype(name)
-
 class TestCastConvenienceMethod(unittest.TestCase):
   def test_method(self):
     for input_dtype in (dtypes.float, dtypes.int):

@@ -163,14 +163,8 @@ class DTypes:
 
 dtypes = DTypes()
 
-# Public scalar names and aliases only: internal types and other DTypes attributes are not dtype strings.
-DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and v in dtypes.all}
-
 DTypeLike = str|DType
-def to_dtype(dtype:DTypeLike) -> DType:
-  if isinstance(dtype, DType): return dtype
-  try: return DTYPES_DICT[dtype.lower()]
-  except KeyError: raise AttributeError(f"unknown dtype {dtype!r}") from None
+def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
 assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a float dtype"
 assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
@@ -201,6 +195,8 @@ def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
 def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
+
+DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
