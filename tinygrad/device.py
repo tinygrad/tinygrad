@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, ContextVar
+from tinygrad.helpers import cpu_profile, perf_counter_us, ContextVar, to_name
 from tinygrad.dtype import dtypes, DType, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
@@ -387,23 +387,16 @@ class Compiled:
   pm_batch:Any = None
   pm_encode:Any = None
   pm_lower:Any = None
+  pm_bufferize:Any = None # one for all devices: each adds the rules of the placeholders it owns, its tags start with its name
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
-    from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
     self.device, self.allocator, self.runtime_t, self.renderers = device, allocator, runtime, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
     self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
-
-    # hcq2
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
-      (UPat(Ops.PARAM, tag="program", name="b"),
-       lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
-    ])
 
     # profiling
     self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs
@@ -432,6 +425,10 @@ class Compiled:
   def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
     spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
     return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
+
+  def tag(self, *parts:str) -> str: return to_name(self.device, *parts) # of the placeholders it owns
+  def program_buffer(self, b:UOp) -> Buffer:
+    return self.prog_bufs.setdefault(b, Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]

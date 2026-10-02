@@ -1,13 +1,13 @@
 from __future__ import annotations
 import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, array, sys
-from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, dedup
+from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, dedup, to_tuple
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, MMIOInterface
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args, to_name
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
@@ -86,7 +86,8 @@ HANDLES = ("queue", "event", "fence", "resources", "count")
 MSGSEND, SELNAME = [metal.dll.bind(ctypes.c_void_p)(f) for f in (metal.dll.objc_msgSend, metal.dll.sel_registerName)]
 
 # the slot of a handle of the device
-def mtl_handle(d, name:str) -> UOp: return UOp.placeholder((len(HANDLES),), dtypes.uint64, 0, device=d, tag="handles")[(i:=HANDLES.index(name)):i+1]
+def mtl_handle(d, name:str) -> UOp:
+  return UOp.placeholder((len(HANDLES),), dtypes.uint64, 0, device=d, tag=to_name(to_tuple(d)[0], "handles"))[(i:=HANDLES.index(name)):i+1]
 
 @uopfunc
 def mtl_send(obj:UOp, sel:UOp, a:UOp, b:UOp, c:UOp, out:UOp|None=None) -> UOp: # objc_msgSend by the selector's name, the result to out
@@ -151,7 +152,7 @@ class MetalQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     n, zero, pipes = len(self.cmds), round_up(self.nbytes, 8), dedup(c[:2] for c in self.cmds)
     buf = UOp.placeholder((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs, volatile=True,
-                          tag=("mtl_icb", tuple(self.cmds), zero + 24)).after(*self.deps)
+                          tag=(self.dev.tag("mtl_icb"), tuple(self.cmds), zero + 24)).after(*self.deps)
     icb = patch(buf, self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
 
     # symbolic sizes
@@ -212,11 +213,11 @@ class MetalDevice(Compiled):
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
     super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="handles"), lambda ctx: ctx.handles),
-      (UPat(Ops.PARAM, tag="slots", name="b"), lambda ctx, b: ctx.new_slots(b.max_numel()) if b.max_numel() > 4 else None), # with stamps
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.new_icb(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "mtl_icb" else None),
-    ]) + self.pm_bufferize
+    Compiled.pm_bufferize += PatternMatcher([
+      (UPat(Ops.PARAM, tag=self.tag("handles")), lambda d=self: d.handles),
+      (UPat(Ops.PARAM, tag="slots", name="b"), # with stamps
+       lambda b, d=self: d.new_slots(b.max_numel()) if to_tuple(b.device)[0] == d.device and b.max_numel() > 4 else None),
+      (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.new_icb(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("mtl_icb") else None)])
 
   @functools.cached_property
   def handles(self) -> Buffer:

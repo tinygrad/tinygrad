@@ -320,7 +320,7 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr')
+  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'inst_addr')
   sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
@@ -329,8 +329,8 @@ class _Ctx:
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
 
-  def __init__(self, inst_size: int, wave_size: int = 32):
-    self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
+  def __init__(self, inst_size: int, wave_size: int = 32, inst_addr: int | None = None):
+    self.inst_size, self._axis_id, self.wave_size, self.inst_addr = inst_size, 0, wave_size, inst_addr
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
     if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
     self.vgpr = _Ctx._vgpr_cache[wave_size]
@@ -359,8 +359,8 @@ class _Ctx:
 
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
-    pc = self.rpc()
-    addr = pc if dword_idx == 0 else pc + UOp.const(dword_idx * 4, dtypes.uint64)
+    addr = UOp.const(self.inst_addr, dtypes.uint64) if self.inst_addr is not None else self.rpc()
+    if dword_idx != 0: addr = addr + UOp.const(dword_idx * 4, dtypes.uint64)
     return self.vmem.index(addr >> UOp.const(2, dtypes.uint64)).load()
 
   def inst_field(self, field) -> UOp:
@@ -1962,8 +1962,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lifted = None
   if getenv("ASM_CALL"):
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, arch)
-    lifted = (prg, get_runtime('CPU', prg))
+    backend = getenv("ASM_CALL_BACKEND", "CPU")
+    prg = lift(lib, lib_sz, arch, backend)
+    lifted = (prg, get_runtime(backend, prg))
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
@@ -2005,7 +2006,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
     if lifted is not None:
       prg, runtime = lifted
-      for st, c_bufs in waves: runtime.fxn(*[c_bufs[g] for g in prg.arg.globals])
+      for st, c_bufs in waves: runtime(*[c_bufs[g].value for g in prg.arg.globals])
       return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):

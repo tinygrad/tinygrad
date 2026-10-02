@@ -7,7 +7,6 @@ const monoCanvas = new OffscreenCanvas(0, 0);
 const monoCtx = monoCanvas.getContext("2d");
 const LINE_HEIGHT = 16;
 monoCtx.font = `14px/${LINE_HEIGHT}px monospace`;
-const sourceLineLength = monoCtx.measureText("x".repeat(150)).width;
 
 onmessage = (e) => {
   try {
@@ -30,11 +29,17 @@ const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
   const tokenColors = {0:"#7aa2f7", 1:"#9aa5ce"};
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
-    for (const m of members) {
-      const tokens = pc_tokens[m];
-      label.push(tokens.map((t, i) => ({st:t.st, keys:t.keys, color:tokenColors[t.kind]})));
-      width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
+    // show a smaller view for repeated instructions in the graph
+    for (let i=0; i<members.length;) {
+      const tokens = pc_tokens[members[i]], signature = JSON.stringify(tokens);
+      let j = i+1;
+      while (j<members.length && JSON.stringify(pc_tokens[members[j]]) === signature) j++;
+      const line = tokens.map((t) => ({st:t.st, keys:t.keys, color:tokenColors[t.kind]}));
+      if (j-i > 1) line.push({st:`(${j-i}x)`, keys:[], color:tokenColors[0]});
+      label.push(line);
+      width = Math.max(width, ctx.measureText(line.map((t) => t.st).join("")).width);
       height += lineHeight;
+      i = j;
     }
     g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26", addrspace:null });
   }
@@ -60,7 +65,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const lines = source.split("\n");
       let width = 0;
       for (const line of lines) width = Math.max(width, monoCtx.measureText(line).width);
-      dims = rectDims(Math.min(width, sourceLineLength), lines.length*LINE_HEIGHT);
+      dims = rectDims(width, lines.length*LINE_HEIGHT);
     } else {
       let [width, height] = [0, 0];
       for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
