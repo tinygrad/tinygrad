@@ -3,7 +3,7 @@ import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import prod, partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -157,7 +157,7 @@ def main():
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
-        f"and {sum(prod(x.uop.shard_shape) for x in nn.state.get_parameters(model))*args.shard:,} params, "
+        f"and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer

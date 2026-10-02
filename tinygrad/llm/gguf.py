@@ -2,7 +2,7 @@ import functools, io, pathlib, re, struct
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
-from tinygrad.uop.ops import UOp
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
@@ -250,29 +250,24 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   if packed: Tensor.realize(*packed.values())
   return kv, {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
 
-def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, tuple[int, tuple[int, ...]]]) -> dict[str, Tensor]:
+def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int]) -> dict[str, Tensor]:
   """
-  Places the parsed `entries` on `devices` and returns the shard of every device, each device only gets and decodes its own packed data.
-  `shard_map` maps a tensor name to `(axis, parts)`: `parts` are the relative sizes of the fused parts along the axis, each part is split evenly.
-  Tensors that are not in `shard_map` are copied to every device.
+  Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   """
-  n, ret = len(devices), {}
-  def split(name:str, data:Tensor, shape:tuple[int, ...], typ:int) -> list[Tensor]:
-    storage = data.reshape(*shape[:-1], shape[-1]//(block:=_GGML_QUANT[typ][0] if typ in _GGML_QUANT else 1), -1)
-    if (s:=shard_map.get(name)) is None: return [storage]*n
-    (axis, parts), scale = s, block if s[0] == len(shape)-1 else 1
-    if any(shape[axis]*p % (sum(parts)*n*scale) for p in parts): raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
-    # DISK reads one contiguous range per device, other splits are cut on the host
-    if prod(shape[:axis]) > 1 or len(parts) > 1: storage = storage.to("CPU")
-    pieces = storage.split([shape[axis]*p//sum(parts)//scale for p in parts], dim=axis)
-    return [c[0] if len(c) == 1 else Tensor.cat(*c, dim=axis) for c in zip(*(p.chunk(n, dim=axis) for p in pieces))]
-  # shards need their own buffers to be stacked below, a single device keeps the view
-  moved = [(name, [(p.flatten() if n == 1 else p.flatten().contiguous()).to(d) for p,d in zip(split(name, *entry), devices)])
-           for name, entry in entries.items()]
-  if moved: Tensor.realize(*(p for _,ps in moved for p in ps))
-  for name, ps in moved:
-    local = tuple(sz//n if (s:=shard_map.get(name)) and i == s[0] else sz for i,sz in enumerate(entries[name][1]))
-    packed = ps[0] if n == 1 else Tensor(UOp.from_buffer(UOp.mstack(*(p.uop for p in ps)).buffer))
-    ret[name] = ggml_data_to_tensor(packed, prod(local), entries[name][2]).reshape(local)
-  return ret
+  n, packed = len(devices), {}
+  for name, (data, shape, typ) in entries.items():
+    if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
+    else:
+      if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
+        raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
+      parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
+      packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
+  # TODO: shard copies the full tensor to every device
+  for t in packed.values(): t.realize()
+  for d in devices: Device[d].allocator.free_cache()
+  def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
+    decoded = ggml_data_to_tensor(packed[name].flatten(), prod(shape), typ)
+    if (axis:=shard_map.get(name)) is None: return decoded.reshape(shape)
+    local = decoded.reshape(n, *shape[:axis], shape[axis]//n, *shape[axis+1:])
+    return local.permute(*range(1, axis+1), 0, *range(axis+1, local.ndim)).reshape(shape)
+  return {name: decode(name, shape, typ) for name, (_, shape, typ) in entries.items()}
