@@ -588,7 +588,7 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp: return write_words(buf, [(o.va
 def fold_ranged(buf:UOp, offs:UOp, ws:UOp, e:UOp) -> UOp: # the words of every trip
   vs = {r: UOp.variable(f"r{i}", 0, r.vmax) for i, r in enumerate(e.src[1:])}
   ows = list(words(offs.substitute(vs), ws.substitute(vs)))
-  trips = [dict(zip([v.expr for v in vs.values()], t)) for t in itertools.product(*[range(r.vmax + 1) for r in vs])]
+  trips = [dict(zip([v.expr for v in vs.values()], t)) for t in itertools.product(*[range(int(r.vmax) + 1) for r in vs])]
   return write_words(buf, [(sym_infer(o, t), w.dtype.itemsize, sym_infer(w, t)) for t in trips for o, w in ows])
 
 pm_link = PatternMatcher([
