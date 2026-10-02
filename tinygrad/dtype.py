@@ -127,17 +127,16 @@ class DTypes:
   i64: Final[DType] = DType.new(7, 64, "i64", 'q')
   u64: Final[DType] = DType.new(8, 64, "u64", 'Q')
   weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", None)
-  f8e4m3fn: Final[DType] = DType.new(10, 8, "f8e4m3fn", None)
-  f8e5m2: Final[DType] = DType.new(11, 8, "f8e5m2", None)
-  f8e4m3fnuz: Final[DType] = DType.new(10, 8, "f8e4m3fnuz", None)
-  f8e5m2fnuz: Final[DType] = DType.new(11, 8, "f8e5m2fnuz", None)
+  fp8e4m3: Final[DType] = DType.new(10, 8, "fp8e4m3", None)
+  fp8e5m2: Final[DType] = DType.new(11, 8, "fp8e5m2", None)
+  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "fp8e4m3fnuz", None)
+  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "fp8e5m2fnuz", None)
   f16: Final[DType] = DType.new(12, 16, "f16", 'e')
   bf16: Final[DType] = DType.new(13, 16, "bf16", None)
   f32: Final[DType] = DType.new(14, 32, "f32", 'f')
   f64: Final[DType] = DType.new(15, 64, "f64", 'd')
 
   # legacy dtype aliases
-  fp8e4m3 = f8e4m3fn; fp8e5m2 = f8e5m2; fp8e4m3fnuz = f8e4m3fnuz; fp8e5m2fnuz = f8e5m2fnuz # noqa: E702
   float16 = half = f16; bfloat16 = bf16; float32 = float = f32; float64 = double = f64 # noqa: E702
   uint8 = uchar = u8; uint16 = ushort = u16; uint32 = uint = u32; uint64 = ulong = u64 # noqa: E702
   int8 = char = i8; int16 = short = i16; int32 = int = i32; int64 = long = i64 # noqa: E702
