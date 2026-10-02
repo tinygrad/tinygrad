@@ -46,9 +46,6 @@ def _render_arg(x:UOp) -> str:
     case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
     case _: return repr(x.arg) if x.arg is not None else ""
 
-# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
-def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
-
 # the viz node color palette (single source of truth; viz/serve.py renders this in the browser, we're the terminal version)
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
@@ -60,6 +57,9 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
                Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
+
+# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
+def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
 def render_ssa(root:UOp|list[UOp], color:bool=False) -> str:
   nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
