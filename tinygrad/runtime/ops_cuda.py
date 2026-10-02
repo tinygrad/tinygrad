@@ -29,7 +29,7 @@ class CUDAQueue(HWQueue):
   dev:CUDADevice
   def __init__(self, submit:UOp):
     super().__init__(submit)
-    self.rt_vars = UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag="cuda") # [context, compute stream, copy stream, status]
+    self.rt_vars = UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag=self.dev.tag("cuda")) # [ctx, compute stream, copy stream, status]
     self.kernargs = UOp.placeholder((8,), dtypes.uint8, device=self.devs)
     self.h = ccall(cuda.cuCtxSetCurrent, self.rt_vars.after(self.kernargs).index(0).load())
 
@@ -48,7 +48,7 @@ class CUDAQueue(HWQueue):
 
   def exec(self, call:UOp, prg:UOp):
     obj, bufs, vals = prg.to_elf(), get_call_arg_uops(call), get_call_var_uops(call, prg)
-    self.launch(self.extern(("function", obj.lib, obj.name)), prg.arg.global_size, prg.arg.local_size,
+    self.launch(self.extern((self.dev.tag("function"), obj.lib, obj.name)), prg.arg.global_size, prg.arg.local_size,
                 [bufs[i].getaddr(self.devs) for i in prg.arg.globals] + [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)])
 
   def copy(self, dst:UOp, src:UOp, sz:int):
@@ -61,7 +61,7 @@ class CUDAQueue(HWQueue):
     self.h = ccall(cuda.cuStreamWriteValue64_v2, self.stream, signal.getaddr(self.devs), value, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)
 
   def timestamp(self, signal:UOp): # a slot is [signal][timestamp]
-    self.h = ccall(cuda.cuLaunchHostFunc, self.stream, self.extern("stamp"), signal[1:2].getaddr(self.devs))
+    self.h = ccall(cuda.cuLaunchHostFunc, self.stream, self.extern(self.dev.tag("stamp")), signal[1:2].getaddr(self.devs))
 
   def submit(self, ka:UOp) -> UOp: return self.rt_vars.after(self.h).index(3).store(self.h.cast(dtypes.uint64)).substitute({self.kernargs: ka})
 
@@ -108,11 +108,10 @@ class CUDADevice(Compiled):
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major:=ctypes.c_int()), ctypes.byref(minor:=ctypes.c_int()), device_id))
     self.streams = [init_c_var(cuda.CUstream, lambda x: check(cuda.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
     super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], None, arch=f"sm_{major.value}{minor.value}")
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="cuda"), lambda ctx: ctx.handles),
-      (UPat(Ops.PARAM, tag="stamp"), lambda ctx: ctx.stamp),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.function(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "function" else None),
-    ]) + self.pm_bufferize
+    Compiled.pm_bufferize += PatternMatcher([
+      (UPat(Ops.PARAM, tag=self.tag("cuda")), lambda d=self: d.handles),
+      (UPat(Ops.PARAM, tag=self.tag("stamp")), lambda d=self: d.stamp),
+      (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.function(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("function") else None)])
 
   @functools.cached_property
   def handles(self) -> Buffer:

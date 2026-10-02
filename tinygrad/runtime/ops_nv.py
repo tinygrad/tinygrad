@@ -116,8 +116,9 @@ class NVQueue(HWQueue):
   @uopfunc
   def submit(self, cmdbuf:UOp) -> UOp:
     fifo = self.dev.fifos[self.queue]
-    bufs = (("ring", dtypes.uint64, fifo.entries), ("gpput", dtypes.uint32, 1), ("doorbell", dtypes.uint32, 1), ("put_value", dtypes.uint64, 1))
-    ring, gpput, doorbell, put = [UOp.placeholder((sz,), dt, device=self.devs, volatile=True, tag=to_name(nm, self.queue)) for nm, dt, sz in bufs]
+    bufs = (("ring", dtypes.uint64, fifo.entries, self.devs), ("gpput", dtypes.uint32, 1, self.devs), ("doorbell", dtypes.uint32, 1, self.devs),
+            ("put_value", dtypes.uint64, 1, self.dev.host))
+    ring, gpput, doorbell, put = [UOp.placeholder((sz,), dt, device=d, volatile=True, tag=self.dev.tag(nm, self.queue)) for nm, dt, sz, d in bufs]
     gpentry = cmdbuf.getaddr(self.devs) + UOp.const((cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64)
 
     p = put.index(0).load()
@@ -655,8 +656,8 @@ class NVDevice(Compiled):
       gpput=self.gpfifo_buf.view(1, dtypes.uint32, gpput_off).ensure_allocated(),
       doorbell=Buffer("CPU", 1, dtypes.uint32, options=BufferSpec(external_ptr=self.gpu_mmio.addr + 0x90), preallocate=True),
       put_value=Buffer("CPU", 1, dtypes.uint64, initial_value=bytes(8)), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag=to_name(n, name)), lambda ctx, b=getattr(fifo, n): b)
-                                        for n in ("ring", "gpput", "doorbell", "put_value")]) + self.pm_bufferize
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=self.tag(n, name)), lambda b=getattr(fifo, n): b)
+                                             for n in ("ring", "gpput", "doorbell", "put_value")])
     return fifo
 
   def _query_gpu_info(self, *reqs):
