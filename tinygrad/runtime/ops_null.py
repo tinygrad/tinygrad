@@ -12,6 +12,7 @@ class NullRenderer(CStyleLanguage):
   has_local = False
   float4 = "float4"
   barrier = "// BARRIER"
+  type_map = {**CStyleLanguage.type_map, **{dt:dt.name for dt in dtypes.fp8s}}
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
   def asm(self, prg: UOp, lin: UOp) -> bytes:
     assert self.target.arch.startswith("gfx"), "only amd supports assembly"
