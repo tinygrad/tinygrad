@@ -370,7 +370,8 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     # schedule graph CALL nodes have a link to jump to codegen
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
-    viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
+    # steps is the presentation list; use the trace index from the step's query (extra presentation steps break 1:1 alignment)
+    viz_kernel = next(int(s["query"].rsplit("=", 1)[1]) for s in lst[sched_idx]["steps"] if s["name"] == "View Kernel Graph")
     graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
