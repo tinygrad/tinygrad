@@ -249,6 +249,13 @@ class TestHostCalls(unittest.TestCase):
     def put(o:UOp): return o.index(0).store(UOp.variable("n", 1, 10).cast(dtypes.uint64)).sink()
     self.assertEqual(self._run(put, self._buf(1), n=7), [7])
 
+  def test_weak_variable_as_arg(self): # a weak arg commits its dtype, like lift does
+    @uopfunc
+    def put(o:UOp, v:UOp): return o.index(0).store(v.cast(dtypes.uint64)).sink()
+    @uopfunc
+    def top(o:UOp): return put(o, UOp.variable("n", 1, 10)).sink()
+    self.assertEqual(self._run(top, self._buf(1), n=7), [7])
+
   def test_addr_of_arg_after_a_write(self): # the arg contains the param it replaces
     @uopfunc
     def top(o:UOp, b:UOp): return addr_of(o, b.after(b.index(0).store(2))).sink()
