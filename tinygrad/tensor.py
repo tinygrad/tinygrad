@@ -164,7 +164,7 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda *tensors,ret: f"Bufferize {len(tensors)}")
+  @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
@@ -560,7 +560,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.unbound(), *[UOp.const(s) for s in shape]), arg="encdec")
+    fn = UOp.custom_function("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

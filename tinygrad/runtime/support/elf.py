@@ -73,10 +73,10 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) ->
       case libc.R_AARCH64_LDST32_ABS_LO12_NC: return instr | (getbits(tgt, 2, 11) << 10)
       case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
       case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
-      case libc.R_AARCH64_CALL26:
+      case libc.R_AARCH64_CALL26 | libc.R_AARCH64_JUMP26:
         if -(2**25) <= tgt-ploc-base and tgt-ploc-base <= (2**25 - 1) * 4: return instr | getbits(tgt-ploc-base, 2, 27)
         # create trampoline:         LDR x17, 8  BR x17
-        image += struct.pack("<IIQ", 0x58000051, 0xD61F0220, tgt)
+        image += bytes(-len(image) % 4) + struct.pack("<IIQ", 0x58000051, 0xD61F0220, tgt)
         return instr | getbits(len(image)-ploc-16, 2, 27)
     raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
 

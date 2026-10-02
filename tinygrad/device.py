@@ -391,7 +391,6 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
     from tinygrad.uop.ops import Ops, UPat, PatternMatcher
-    from tinygrad.runtime.support.hcq2 import cfunc_buf
 
     self.device, self.allocator, self.runtime_t, self.renderers = device, allocator, runtime, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
@@ -404,7 +403,6 @@ class Compiled:
       (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
       (UPat(Ops.PARAM, tag="program", name="b"),
        lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
-      (UPat(Ops.PARAM, name="b"), lambda b, cfunc_buf=cfunc_buf: cfunc_buf(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "cfunc" else None),
     ])
 
     # profiling

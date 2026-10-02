@@ -9,7 +9,7 @@ def call(*ranges):
     def wrapper(*args):
       ret = fxn(*ranges, *args).end(*ranges)
       # closing the GLOBAL ranges finishes the kernel
-      if any(r.arg[-1] is AxisType.GLOBAL for r in ranges): ret = ret.sink(arg=KernelInfo(opts_to_apply=()))
+      if any(r.axis_type is AxisType.GLOBAL for r in ranges): ret = ret.sink(arg=KernelInfo(opts_to_apply=()))
       return ret
     return wrapper
   return decorator
@@ -48,7 +48,7 @@ def block_128x128_gemm(lane:UOp, wave_m:UOp, wave_n:UOp, c:UOp, a:UOp, b:UOp) ->
   acc = UOp.placeholder((TM, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
   acc = acc.after(acc.store(acc.zeros_like(buffer=False)))
 
-  @call(UOp.range(K // BLOCK_K, 100, AxisType.REDUCE))
+  @call(UOp.range(K // BLOCK_K, 100, AxisType.LOOP))
   def tile_reduce(k_tile:UOp):
     A_local = UOp.placeholder((BLOCK_K, BLOCK_M), a.dtype, slot=0, addrspace=AddrSpace.LOCAL)
     B_local = UOp.placeholder((BLOCK_K, BLOCK_N), b.dtype, slot=1, addrspace=AddrSpace.LOCAL)
@@ -60,7 +60,7 @@ def block_128x128_gemm(lane:UOp, wave_m:UOp, wave_n:UOp, c:UOp, a:UOp, b:UOp) ->
     # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
     A_local, B_local = A_local.after(A_store, B_store), B_local.after(A_store, B_store)
 
-    @call(UOp.range(BLOCK_K, 101, AxisType.REDUCE))
+    @call(UOp.range(BLOCK_K, 101, AxisType.LOOP))
     def inner_reduce(k:UOp):
       # registers for LOCAL -> REG
       a_frag = UOp.placeholder((TM//UNROLL_M, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)

@@ -118,7 +118,7 @@ runs:
       run: |
         uv venv --allow-existing --python ${{ inputs.python-version }} "$VIRTUAL_ENV"
         DEPS="${{ inputs.deps }}"
-        uv pip install --python "$VIRTUAL_ENV" -e ".[${DEPS// /,}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        uv pip install --python "$VIRTUAL_ENV" -e ".[${DEPS// /,}]" ${{ inputs.pydeps }} --torch-backend cpu
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == ''
       shell: bash

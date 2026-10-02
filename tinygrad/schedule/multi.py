@@ -57,7 +57,7 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   assert all_same(devices), f"all buffers must have the same device {devices}"
   # without devices the sharding range comes from the UNSHARD itself (e.g. a LOCAL thread range);
   # device shards range over the devices instead
-  if len(devices): sharding_rng = UOp.range(len(devices[0]), -1, AxisType.DEVICE)
+  if len(devices): sharding_rng = UOp.range(len(devices[0]), 0, AxisType.DEVICE)
   else:
     sharding_rng = next((m.src[1] for m in msrcs if m.op is Ops.UNSHARD), None)
     assert sharding_rng is not None, "shard_srcs requires a device or a sharding range"
@@ -298,7 +298,7 @@ multi_pm = PatternMatcher([
   # rewrite value-producing calls explicitly for UNSHARD
   # NOTE: lambda for late binding, rewrite_into_function references multi_pm
   (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call)),
-  (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
+  (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),

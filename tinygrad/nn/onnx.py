@@ -680,7 +680,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return data.reshape([x if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(shape)])
   def Flatten(x:Tensor, axis:int=1): return x.reshape(prod(x.shape[0:axis]), -1)
   def Expand(x:Tensor, shape:list[int]): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
-  def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0))
+  def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0)).cast(x.dtype)
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
   def Squeeze(data:Tensor, axes:Sequence[int]|None=None):
@@ -800,16 +800,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
     if antialias: raise NotImplementedError("antialias is not implemented")
     axes = axes or list(range(X.ndim))
-    perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
-    # we pre-permute the axes and permute back after resize
-    # the permute aligns X's axes to scales, sizes, and roi
-    X = X.permute(*perm)
-
-    input_shape = cast(tuple[int, ...], X.shape[2:])
-    if scales is not None: assert all(sc==1 for sc in scales[:-len(input_shape)]), "resizing batch_size dim or channel dim not supported"
-    if sizes is not None: assert tuple(sizes[:-2]) == tuple(X.shape[X.ndim-len(sizes):-2]), "resizing batch_size dim or channel dim not supported"
-
-    scales, sizes = (None if scales is None else scales[-len(input_shape):]), (None if sizes is None else sizes[-len(input_shape):])
+    input_shape = [cast(int, X.shape[a]) for a in axes]
     if sizes is not None:
       if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
         scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
@@ -820,7 +811,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       assert scales is not None, "either sizes or scales must be provided"
       sizes = [int(sc * sh) for sc, sh in zip(scales, input_shape)]
 
-    if all(sz == sh for sz, sh in zip(sizes, input_shape)): return X.permute(*argsort(perm)) if perm else X
+    if all(sz == sh for sz, sh in zip(sizes, input_shape)): return X
+    axes, input_shape, sizes, scales = map(list, zip(*[t for t in zip(axes, input_shape, sizes, scales) if t[3] != 1]))
+    perm = [a for a in range(X.ndim) if a not in axes] + axes
+    X = X.permute(*perm)
 
     indexes = []
     for input_sz, output_sz, scale in zip(input_shape, sizes, scales):

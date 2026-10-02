@@ -3,7 +3,7 @@ import os, ctypes, functools, mmap, struct, array, math, sys, contextlib
 assert sys.platform != 'win32'
 from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
-from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, encode_submit, ccall, cstruct, patch, unwrap_view, layout_args, pack_args
+from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, libc
@@ -305,7 +305,7 @@ def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, 
 class QCOMDevice(Compiled):
   timestamp_divider = 19.2
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_qcom_compute", name="submit"), lambda submit: encode_submit(QCOMComputeQueue(submit))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_qcom_compute"), UPat()), name="s"), lambda s: QCOMComputeQueue(s).encode()),
   ])
 
   @property

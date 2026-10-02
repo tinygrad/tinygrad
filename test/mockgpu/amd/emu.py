@@ -322,7 +322,7 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr')
+  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'inst_addr')
   sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
@@ -331,8 +331,8 @@ class _Ctx:
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
 
-  def __init__(self, inst_size: int, wave_size: int = 32):
-    self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
+  def __init__(self, inst_size: int, wave_size: int = 32, inst_addr: int | None = None):
+    self.inst_size, self._axis_id, self.wave_size, self.inst_addr = inst_size, 0, wave_size, inst_addr
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
     if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
     self.vgpr = _Ctx._vgpr_cache[wave_size]
@@ -361,8 +361,8 @@ class _Ctx:
 
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
-    pc = self.rpc()
-    addr = pc if dword_idx == 0 else pc + UOp.const(dword_idx * 4, dtypes.uint64)
+    addr = UOp.const(self.inst_addr, dtypes.uint64) if self.inst_addr is not None else self.rpc()
+    if dword_idx != 0: addr = addr + UOp.const(dword_idx * 4, dtypes.uint64)
     return self.vmem.index(addr >> UOp.const(2, dtypes.uint64)).load()
 
   def inst_field(self, field) -> UOp:
@@ -1631,14 +1631,16 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
 
   def make_srcs(lane: UOp) -> dict:
     addr = make_addr(lane)
+    # acc selects the data register file, not the address registers, for both LDS and global memory.
+    _rvdata = ctx.raccvgpr_dyn if use_acc else ctx.rvgpr_dyn
     if is_lds:
       if data_bits_mem <= 32:
-        data = {'DATA': ctx.rvgpr_dyn(vdata_reg, lane), 'DATA2': ctx.rvgpr_dyn(data1_reg, lane) if has_data1 else UOp.const(0, dtypes.uint32)}
-      elif data_bits_mem == 64:  # DATA/DATA2 are the 64-bit input registers, formed from VGPR pairs
-        data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
-                'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(0, dtypes.uint64)}
-      else:  # 96/128-bit: one VGPR per dword
-        data = {'DATA': ctx.rvgpr_dyn(vdata_reg, lane), **{f'DATA{i}': ctx.rvgpr_dyn(vdata_reg + _c(i), lane) for i in range(1, data_bits_mem // 32)}}
+        data = {'DATA': _rvdata(vdata_reg, lane), 'DATA2': _rvdata(data1_reg, lane) if has_data1 else UOp.const(0, dtypes.uint32)}
+      elif data_bits_mem == 64:  # DATA/DATA2 are the 64-bit input registers, formed from register pairs
+        data = {'DATA': _u64(_rvdata(vdata_reg, lane), _rvdata(vdata_reg + _c(1), lane)),
+                'DATA2': _u64(_rvdata(data1_reg, lane), _rvdata(data1_reg + _c(1), lane)) if has_data1 else UOp.const(0, dtypes.uint64)}
+      else:  # 96/128-bit: one register per dword
+        data = {'DATA': _rvdata(vdata_reg, lane), **{f'DATA{i}': _rvdata(vdata_reg + _c(i), lane) for i in range(1, data_bits_mem // 32)}}
       # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
               'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data}
@@ -1658,8 +1660,6 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
         if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane)
       return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
               'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
-    # acc bit: read/write ACCVGPR instead of VGPR for data operands
-    _rvdata = (lambda r, l, *a: ctx.raccvgpr_dyn(r, l)) if use_acc else ctx.rvgpr_dyn
     vdata = _rvdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
       else _rvdata(vdst_reg, lane) if 'D16' in op_name else UOp.const(0, dtypes.uint32)
     if 'STORE' in op_name and data_bits_mem >= 64:
@@ -1824,6 +1824,10 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 
 _canonical_runner_cache: list[tuple[type, int, int, int, tuple[UOp, object]]] = []  # [(inst_type, base, mask, size, (prg, runtime)), ...]
 
+def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes) -> tuple[int, int, int, str]:
+  base, mask, size = ctx.canonical_mask(inst_bytes)
+  return base, mask, size, f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+
 @functools.cache
 def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   """Build and compile instruction to (prg, runtime). Cached by instruction bytes, with canonical dedup."""
@@ -1837,8 +1841,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
 
   ctx = _Ctx(inst_size, _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
-  base, mask, size = ctx.canonical_mask(inst_bytes)
-  canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+  base, mask, size, canonical_name = _canonical_info(inst, ctx, inst_bytes)
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
   # NOTE: renderer output is not reproducible because of _MXCSRContext.
@@ -1962,8 +1965,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lifted = None
   if getenv("ASM_CALL"):
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, arch)
-    lifted = (prg, get_runtime('CPU', prg))
+    backend = getenv("ASM_CALL_BACKEND", "CPU")
+    prg = lift(lib, lib_sz, arch, backend)
+    lifted = (prg, get_runtime(backend, prg))
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
@@ -2005,7 +2009,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
     if lifted is not None:
       prg, runtime = lifted
-      for st, c_bufs in waves: runtime.fxn(*[c_bufs[g] for g in prg.arg.globals])
+      for st, c_bufs in waves: runtime(*[c_bufs[g].value for g in prg.arg.globals])
       return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):

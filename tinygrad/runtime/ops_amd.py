@@ -3,13 +3,13 @@ from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, bufferize_cmdbuf, to_name, patch, unwrap_view, layout_args
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args
 from tinygrad.runtime.support.hcq2 import pack_args
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
-from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ
+from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ, DEV
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -26,7 +26,7 @@ from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
-from tinygrad.uop.ops import Ops, UPat, PatternMatcher
+from tinygrad.uop.ops import Ops, UPat, PatternMatcher, uopfunc
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
@@ -417,6 +417,7 @@ class AMDComputeQueue(HWQueue):
     ib = UOp.placeholder((16,), dtypes.uint8, device=self.dev.host, tag=to_name("ib", self.queue))
     return self.push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), self.dev.compute_queue)
 
+  @uopfunc
   def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp:
     ring, wptr, doorbell, put = _queue_args(self, q)
     rs, n, p = q.ring.size, words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
@@ -425,7 +426,7 @@ class AMDComputeQueue(HWQueue):
       i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
       cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
     w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit)
-    return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag)
+    return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
   def __init__(self, submit):
@@ -462,7 +463,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     base, off = unwrap_view(cmdbuf)
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
-    return self.push(self.prof_bump(cmdbuf), bufferize_cmdbuf(self, "aql", self.dev.host), self.dev.compute_queue, unit=64, doorbell_lag=1)
+    return self.push(self.prof_bump(cmdbuf), encode_cmdbuf(self, name="aql", device=self.dev.host), self.dev.compute_queue, unit=64, doorbell_lag=1)
 
 # *****************
 # SDMA
@@ -497,14 +498,11 @@ class AMDSDMAQueue(HWQueue):
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
     self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
 
+  @uopfunc
   def submit(self, cmdbuf:UOp) -> UOp:
     # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
     q = unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))
-
     ring, wptr, doorbell, put = _queue_args(self, q)
-    base = unwrap_view(cmdbuf)[0] # in host memory: streamed into the ring, the device never reads it
-    cmdbuf = cmdbuf.substitute({base: base.replace(arg=replace(base.arg, device=self.dev.host))})
-
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
     if size_dw > rs: raise RuntimeError(f"SDMA command buffer ({size_dw*4} bytes) exceeds ring size ({rs*4} bytes)")
     put_b = put.index(0).load()
@@ -517,10 +515,12 @@ class AMDSDMAQueue(HWQueue):
     copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
     next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
     w = wptr.after(copy).index(0).store(next_put)
-    return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
+    return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put).sink()
+
+  def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin, device=self.dev.host))
 
 def amd_compute_queue(submit:UOp) -> HWQueue:
-  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[0].arg[0][0]]).is_aql else AMDComputeQueue)(submit)
+  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].without_after.arg[0][0]]).is_aql else AMDComputeQueue)(submit)
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -736,8 +736,11 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8,0x75b0,0x75b3)),),
-      vram_bar=0, va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
+    pci_ids = {"gfx1100": (0X744C,), "gfx1102": (0x7480,), "gfx1201": (0x7550, 0x7551), "gfx1200": (0x7590,),
+               "gfx942": (0x74A1, 0x74B5), "gfx950": (0x75A0, 0x75A8, 0x75B0, 0x75B3)}
+    devs = ((0xffff, pci_ids[arch.split(',')[0]] if (arch:=DEV.target('AMD').arch) else tuple(i for v in pci_ids.values() for i in v)),)
+    super().__init__(dev, dev_id, vendor=0x1002, devices=devs, vram_bar=0, va_start=AMMemoryManager.va_allocator.base,
+                     va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
@@ -839,8 +842,8 @@ class AMDDevice(Compiled):
   sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda submit: encode_submit(amd_compute_queue(submit))),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda submit: encode_submit(AMDSDMAQueue(submit))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_compute"), UPat()), name="s"), lambda s: amd_compute_queue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_copy"), UPat()), name="s"), lambda s: AMDSDMAQueue(s).encode()),
   ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]

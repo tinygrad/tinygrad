@@ -18,13 +18,11 @@ sys.setrecursionlimit(10000)
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.NOOP}
-
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
   if not b.arg.removable: return None
-  # don't optimize ALWAYS_RUN_OPS or AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
-  if b.src[0].op in ALWAYS_RUN_OPS or b.src[0].op is Ops.AFTER: return None
+  # don't optimize AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
+  if b.src[0].op is Ops.AFTER: return None
 
   new_rng = []
   hit = False
@@ -53,7 +51,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
-  if src.op in ALWAYS_RUN_OPS or not buf.arg.removable: return None
+  if not buf.arg.removable: return None
 
   # *** here is where we compute the cost ***
   # if we return None, the bufferize is kept
@@ -188,9 +186,9 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
     srcs = []
     for s in root.src:
       if s.op in GroupOp.Elementwise and s.device is not None:
-        # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.WEAK, the DEVICE range stays a launched axis
+        # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
         orig_ranges = s.ranges
-        end_ranges = [x.replace(arg=(next(ctx.range_idx), AxisType.WEAK)) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
+        end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
                       for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
@@ -298,7 +296,7 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
+  ret = r.replace(arg=(r.axis_type, ctx.range)+r.axis_id[1:], tag=None)
   ctx.range += 1
   return ret
 
@@ -313,7 +311,7 @@ to_define_global = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
-   None if buf.tag != () or buf.addrspace is AddrSpace.ALU or buf._shape is None else debuf(ctx, buf)),
+   None if buf.tag != () or buf.addrspace is AddrSpace.ALU else debuf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
@@ -356,7 +354,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink,
                         symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
-  next_range = max((x.arg[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
+  next_range = max((x.axis_id[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 

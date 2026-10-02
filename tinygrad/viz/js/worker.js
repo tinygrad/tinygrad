@@ -3,6 +3,10 @@ const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*
 
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
+const monoCanvas = new OffscreenCanvas(0, 0);
+const monoCtx = monoCanvas.getContext("2d");
+const LINE_HEIGHT = 16;
+monoCtx.font = `14px/${LINE_HEIGHT}px monospace`;
 
 onmessage = (e) => {
   try {
@@ -25,11 +29,17 @@ const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
   const tokenColors = {0:"#7aa2f7", 1:"#9aa5ce"};
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
-    for (const m of members) {
-      const tokens = pc_tokens[m];
-      label.push(tokens.map((t, i) => ({st:t.st, keys:t.keys, color:tokenColors[t.kind]})));
-      width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
+    // show a smaller view for repeated instructions in the graph
+    for (let i=0; i<members.length;) {
+      const tokens = pc_tokens[members[i]], signature = JSON.stringify(tokens);
+      let j = i+1;
+      while (j<members.length && JSON.stringify(pc_tokens[members[j]]) === signature) j++;
+      const line = tokens.map((t) => ({st:t.st, keys:t.keys, color:tokenColors[t.kind]}));
+      if (j-i > 1) line.push({st:`(${j-i}x)`, keys:[], color:tokenColors[0]});
+      label.push(line);
+      width = Math.max(width, ctx.measureText(line.map((t) => t.st).join("")).width);
       height += lineHeight;
+      i = j;
     }
     g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26", addrspace:null });
   }
@@ -49,16 +59,26 @@ const layoutUOp = (g, { graph, change }, opts) => {
   let callCount = 0;
   for (const [k, {label, src, ref, color, tag, exclude, addrspace}] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
-    let [width, height] = [0, 0];
-    for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
-      width = Math.max(width, ctx.measureText(line).width);
-      height += lineHeight;
+    let dims, source, lang;
+    if (label.startsWith("SOURCE\n")) {
+      source = label.slice("SOURCE\n".length); lang = "cpp";
+      const lines = source.split("\n");
+      let width = 0;
+      for (const line of lines) width = Math.max(width, monoCtx.measureText(line).width);
+      dims = rectDims(width, lines.length*LINE_HEIGHT);
+    } else {
+      let [width, height] = [0, 0];
+      for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
+        width = Math.max(width, ctx.measureText(line).width);
+        height += lineHeight;
+      }
+      dims = rectDims(width, height);
     }
     const op = label.split("\n", 1)[0];
     const callNode = op === "CALL", programNode = op === "PROGRAM";
     const collapsePorts = callNode ? [0] : programNode ? [0, 1] : null;
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, callNode, collapsePorts, exclude, addrspace,
+    g.setNode(k, {...dims, label, labelX:0, ref, id:k, color, callNode, collapsePorts, exclude, addrspace, source, lang,
       className:label.startsWith("REWRITE_ERROR") ? "err" : null, tag:tag?.length > 8 ? tag.substring(0, 8) : tag});
     // add edges
     const edgeCounts = {};

@@ -25,7 +25,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   TC_MIN_GLOBALS -- do not upcast N when it would drop the specified global count
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
-  if USE_TC > 0 and (len(k.reduce_axes) == 1 or (TC_OPT.value >= 1)):
+  if USE_TC > 0 and (len(k.axes_of(reduce=True)) == 1 or (TC_OPT.value >= 1)):
     for axis in range(3):
       tk = k.copy()
       # check TC first and apply hand-coded opts if successful
@@ -54,9 +54,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         # IMAGE upcasts require one validity shared by all four unit-stride lanes so memory_coalescing can combine them into one vector read.
         unit_stride_axes_mul_4 = [k.rngs.index(c) for c in idx.get_idx().split_uop(Ops.ADD) if
           c.op is Ops.RANGE and (c.vmax+1)%4 == 0 and c not in idx.get_valid().backward_slice]
-        if len(unit_stride_axes_mul_4):
-          if (axis:=unit_stride_axes_mul_4[0]) in (upd:=k.upcastable_dims)+k.unrollable_dims:
-            k.apply_opt(Opt(OptOps.SPLIT, axis, (4, AxisType.UPCAST if axis in upd else AxisType.UNROLL)))
+        if unit_stride_axes_mul_4 and (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims(reduce=None):
+          k.apply_opt(Opt(OptOps.SPLIT, axis, (4, AxisType.UPCAST)))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
@@ -64,25 +63,25 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.ren.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX:
     idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
-    if k.ranges_of(AxisType.REDUCE):
-      first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
+    if reduce_axes:=k.axes_of(AxisType.WEAK, reduce=True):
+      first_reduce_rng = k.rngs[reduce_axes[0]]
       if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
         for global_idx in k.axes_of(AxisType.GLOBAL):
           if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
             try:
-              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.SPLIT, k.axes_of(AxisType.REDUCE)[0], (MV_THREADS_PER_ROW, AxisType.LOCAL)))
+              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.SPLIT, reduce_axes[0], (MV_THREADS_PER_ROW, AxisType.LOCAL)))
             except KernelOptError: pass
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.SPLIT, global_idx, (MV_BLOCKSIZE, AxisType.LOCAL)))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.SPLIT, global_idx, (MV_ROWS_PER_THREAD, AxisType.UPCAST)))
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.full_shape[i] for i in k.upcastable_dims) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
-    for axis, sz in itertools.product(k.axes_of(AxisType.REDUCE)[:3], (16,)):
+  if resolve(prod(k.full_shape[i] for i in k.upcastable_dims()) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
+    for axis in k.axes_of(AxisType.WEAK, reduce=True)[:3]:
       try:
-        k.apply_opt(Opt(OptOps.SPLIT, axis, (sz, AxisType.LOCAL, True)))
+        k.apply_opt(Opt(OptOps.SPLIT, axis, (16, AxisType.LOCAL, True)))
         break
       except KernelOptError: pass
 
@@ -95,7 +94,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   to_upcast: list[int] = []
   where_gate_rngs = {r for u in k.ast.backward_slice if u.op is Ops.WHERE for r in u.src[0].ranges}
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
-  for axis in k.upcastable_dims:
+  for axis in k.upcastable_dims():
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
     is_masked = k.rngs[axis] in where_gate_rngs
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
@@ -112,15 +111,15 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren.target.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.full_shape[i] for i in k.upcastable_dims) >= 1024) and (k.upcast_size() < 32):
+  while resolve(prod(k.full_shape[i] for i in k.upcastable_dims()) >= 1024) and (k.upcast_size() < 32):
     xb_choices = []
     # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
-    for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+    for axis, upcast_amount in itertools.product(k.upcastable_dims(), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
-      if any(rng not in b.src[1].get_idx().backward_slice and all(r2 in b.src[1].get_idx().backward_slice
-          for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
+      if any(rng not in b.src[1].get_idx().backward_slice and all(k.rngs[a] in b.src[1].get_idx().backward_slice
+          for a in k.axes_of(AxisType.UPCAST)) for b in k.bufs):
         num_strides, sum_strides = 0, 0
         for b in k.bufs:
           idx = b.src[1].get_idx()
@@ -140,23 +139,19 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # if last reduce dim is small(ish), loop unroll the reduce
   # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
   try:
-    if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
-      if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
-        k.apply_opt(Opt(OptOps.SPLIT, k.unrollable_dims[-1], (0, AxisType.UNROLL)))
+    if (axes:=k.upcastable_dims(reduce=True)) and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UPCAST, reduce=True)) and k.upcast_size() < 64:
+      if (s:=k.full_shape[axes[-1]]) <= 32:
+        k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (0, AxisType.UPCAST)))
         # if it's small, upcast a second reduce dimension too
-        if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
-          k.apply_opt(Opt(OptOps.SPLIT, k.unrollable_dims[-1], (0, AxisType.UNROLL)))
-      else:
-        for splits in [4]:
-          if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
-            k.apply_opt(Opt(OptOps.SPLIT, axis, (splits, AxisType.UNROLL)))
-            break
+        if (axes:=k.upcastable_dims(reduce=True)) and s <= 3 and k.full_shape[axes[-1]] <= 3:
+          k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (0, AxisType.UPCAST)))
+      elif k.full_shape[axes[-1]] % 4 == 0:
+        k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (4, AxisType.UPCAST)))
   except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
-  for splits in [4]:
-    if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
-      k.apply_opt(Opt(OptOps.SPLIT, k.upcastable_dims[-1], (splits, AxisType.UPCAST)))
+  if not k.axes_of(AxisType.UPCAST) and (axes:=k.upcastable_dims()) and k.full_shape[axes[-1]] % 4 == 0:
+    k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (4, AxisType.UPCAST)))
 
   # **** local groups ****
 
@@ -166,7 +161,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
       workgroup = 1
       opts: list[tuple[int, int]] = []
-      for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
+      for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK, reduce=False) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
         if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), 128 // workgroup if opts else 8) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
           opts.append((axis, sz))
           workgroup *= sz
@@ -177,7 +172,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
-                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[axis].src[0].op is Ops.CONST]
+                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.WEAK, reduce=False) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
