@@ -8,6 +8,7 @@ from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.llvmir import LLVMRenderer
 from test.helpers import assert_kernel_count
 from test.null.test_custom_kernel import custom_elementwise_add_kernel, custom_elementwise_addmul_kernel, custom_gemm
 
@@ -35,7 +36,7 @@ def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   return C[i].store(B[i] + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
 
 def custom_sum(B:UOp, A:UOp) -> UOp:
-  i = UOp.range(A.shape[0], 0, axis_type=AxisType.REDUCE)
+  i = UOp.range(A.shape[0], 0, axis_type=AxisType.LOOP)
   B = B[0].set(0.0)
   B = B[0].set(B.after(i)[0] + A[i], end=i)
   return B.sink(arg=KernelInfo(name=f"custom_sum_{A.shape[0]}", opts_to_apply=()))
@@ -52,7 +53,7 @@ def slice_sum_kernel(dest:UOp, src:UOp):
   slice_src = src[G, :]
   reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
-  R = UOp.range(src.shape[1], 1, AxisType.REDUCE)
+  R = UOp.range(src.shape[1], 1, AxisType.LOOP)
   reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
   ast = dest[G].set(reg[0], end=G)
   return ast.sink(arg=KernelInfo(name=f"slice_sum_{src.shape[0]}_{src.shape[1]}", opts_to_apply=()))
@@ -63,9 +64,9 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
 
   i = UOp.range(N, 0)  # output row
   d_out = UOp.range(d, 1)  # output column
-  j = UOp.range(N, 2, axis_type=AxisType.REDUCE)
+  j = UOp.range(N, 2, axis_type=AxisType.LOOP)
 
-  k_inner = UOp.range(d, 3, axis_type=AxisType.REDUCE)
+  k_inner = UOp.range(d, 3, axis_type=AxisType.LOOP)
   qk_acc = UOp.placeholder((1,), Q.dtype, 0, addrspace=AddrSpace.REG)
   qk_acc = qk_acc.after(i, j)[0].set(0.0)
   qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
@@ -263,7 +264,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_reg_placeholder_then_reduce(self):
     # the accumulator of the reduce does not reuse the slot of a REG placeholder in the kernel
     def kernel(C:UOp, A:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.REDUCE)
+      i, j = UOp.range(4, 0), UOp.range(8, 1)
       reg = UOp.placeholder((1,), dtypes.float, 0, addrspace=AddrSpace.REG)
       reg = reg.after(i)[0].set(A[i, 0])
       return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
@@ -367,7 +368,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_gated_store_2d(self):
     # TODO: broken now, the valid is dropped. the valid on one index of the 2d C gates the whole store, only j == 0 writes C[i, 0]
     def kernel(C:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.REDUCE)
+      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOOP)
       return C[i.valid(j.eq(0)), 0].store((j+1).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), fxn=kernel)[0][:, 0].tolist(), [1.]*4)
 
@@ -376,7 +377,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_gated_local_store_2d(self):
     # TODO: broken now, the valid is dropped. the valid on one index of the 2d LOCAL tmp gates the whole store, only j == 0 writes tmp[i, 0]
     def kernel(C:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.REDUCE)
+      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOOP)
       tmp = UOp.placeholder((4, 4), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       st = tmp[i.valid(j.eq(0)), 0].store((j+1).cast(dtypes.float)).end(j)
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
@@ -482,7 +483,8 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
-  @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT == "CPU"), "calls in kernels render on CPU")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)) and Device.DEFAULT == "CPU",
+                       "calls in kernels render on CPU")
   def test_call_in_kernel(self):
     def call_add(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.numel(), 0)
@@ -519,7 +521,8 @@ class TestCustomKernel(unittest.TestCase):
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
-@unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render on CPU")
+@unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)),
+                     "calls in kernels render on CPU")
 class TestCallInKernel(unittest.TestCase):
   def test_nested_call(self):
     @uopfunc

@@ -1,4 +1,4 @@
-from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort, sint
 from tinygrad.helpers import strip_parens
@@ -48,7 +48,7 @@ renderer = PatternMatcher([
    x.arg.name if isinstance(x.arg, ParamArg) and x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
   (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
-  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
+  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.axis_id[0]}"),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.val)),
   # CAST states the width, the weak CONST carries the value
@@ -89,17 +89,13 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)})"),
-  # NOTE: multi-device buffers carry the DEVICE range in src, new_buffer recreates it
-  (UPat(Ops.BUFFER, name="x"), lambda x:
-    f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
-    if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.COPY, src=(UPat(name="x"),), allow_any_len=True, name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {tuple(range(r.arg[1]))})" if r.arg[1] else None),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
-    "UOp.range("+', '.join([str(c.val)] + [repr(y) for y in x.arg])+
-      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+")"),
+    f"UOp.range({c.val}, {x.axis_id[0]}, {x.axis_type}"+
+      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+")" if len(x.axis_id) == 1 else None),
   # TODO: movement ops simplify stuff, this can break SPEC=2
   #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
@@ -154,7 +150,8 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op is Ops.REDUCE: to_render.add(u.src[0])
-    if u.op is Ops.CALL and u.body.dtype is dtypes.void and u.body.op is not Ops.CUSTOM_FUNCTION: # a call into C renders, its dtype rides in the arg
+    # a call on a program, or with a grad_fxn or an aux, can't be reconstructed from code
+    if u.op is Ops.CALL and (u.body.op is Ops.PROGRAM or u.arg.grad_fxn is not None or u.arg.aux is not None):
       raise NotImplementedError("call can't be pyrendered")
     # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
     if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")

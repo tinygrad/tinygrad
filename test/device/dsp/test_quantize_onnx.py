@@ -79,7 +79,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(64, 32, 1, 1)).astype(np.uint8))
     out = X.conv2d(W, dtype=X.dtype)
-    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UPCAST))]
     sexec(out, opts)
 
   def test_prequant_gemm(self):
@@ -87,7 +87,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     out = X.matmul(W, dtype=X.dtype)
-    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UPCAST))]
     sexec(out, opts)
 
   # TODO: this has to work
@@ -97,7 +97,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
     # this divide is interesting and forces the accumulator to actually be an int
     out = (X.cast("int").matmul(W.cast("int"))//1000).cast("int8")
-    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UPCAST))]
     sexec(out, opts)
 
   def test_prequant_gemm_handcode(self):
@@ -182,10 +182,10 @@ class TestQuantizeOnnx(unittest.TestCase):
 
   def test_prequant_gemm_intacc_32(self):
     opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)),
-            Opt(op=OptOps.SPLIT, axis=3, arg=(0, AxisType.UNROLL))]
+            Opt(op=OptOps.SPLIT, axis=3, arg=(0, AxisType.UPCAST))]
     self.test_prequant_gemm_intacc(np.uint8, np.int8, N=32, opts=opts)
   def test_prequant_gemm_intacc_128(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128,
-    opts=[Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=2, arg=(4, AxisType.UNROLL))])
+    opts=[Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=2, arg=(4, AxisType.UPCAST))])
   def test_prequant_gemm_intacc_256(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=256)
   def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512, clip=True, opts=None):
     X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
@@ -195,7 +195,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     if clip: out = out.clip(tg_dtype.min, tg_dtype.max)
     out = out.cast(tg_dtype)
     opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)),
-            Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))] if opts is None else opts
+            Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UPCAST))] if opts is None else opts
     sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
     mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
@@ -216,7 +216,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     #out = X @ W
     out = X.matmul(W, dtype=X.dtype)
-    opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=2, arg=(4, AxisType.UNROLL))]
+    opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=2, arg=(4, AxisType.UPCAST))]
     sexec(out, opts)
 
 if __name__ == "__main__":

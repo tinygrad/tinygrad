@@ -34,7 +34,7 @@ def copy(dest:UOp, src:UOp, rng:int, set=False, upcast=()):
   return dest.after(copy) if set else copy
 
 def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...], warpgroup, warp) -> UOp:
-  K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.REDUCE)
+  K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.LOOP)
 
   # load from locals into registers
   Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half, slot=1, addrspace=AddrSpace.REG)
@@ -68,7 +68,7 @@ def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   gx, gy = UOp.special(M//BLOCK_M, "gidx0"), UOp.special(N//BLOCK_N, "gidx1")
-  K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
+  K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.LOOP)
 
   # split out the globals into blocks
   C = C.src[0].cast(dtypes.float).reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))

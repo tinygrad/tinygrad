@@ -151,7 +151,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op is Ops.CALL:
         label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
       if u.op in {Ops.INDEX, Ops.STAGE}:
-        if len(u.src) > 1: label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
+        if len(u.src) > 1: label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "\nINDEX TOO LARGE"
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
@@ -162,8 +162,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING LABEL>"
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
-    # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None: label += "\n"+str(u.metadata)
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
@@ -381,7 +380,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   pc_map = {addr:str(inst) for addr,inst in decoded.items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
-  curr_barrier:dict[int, ProfileRangeEvent] = {}
+  curr_barrier:dict[tuple[int, int], ProfileRangeEvent] = {}
   exec_pending:dict[str, list[tuple[str, str]]] = {}
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
@@ -390,6 +389,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
     # extend packets to the architectural instruction issue interval
     start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
+    if isinstance(p, CDNA_WAVEEND): start_time, end_time = start_time+4, end_time+4
     # exec links to dispatch, dispatch links to PC
     link:dict|None = {"pc":info.pc} if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
@@ -428,8 +428,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
-      if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
-      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[wave] = e
+      if (barrier:=curr_barrier.pop((simd or 0, wave), None)) is not None: barrier.en = Decimal(p._time)
+      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd or 0, wave)] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
@@ -445,13 +445,14 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       if name == "VALU_MAI" and unwrap(info).inst.op_name.startswith(("V_MFMA_F", "V_MFMA_I", "V_MFMA_SCALE_")): name += "_MFMA"
+      if isinstance(p, CDNA_INST) and unwrap(info).inst.op_name == "S_BARRIER": name = "BARRIER"
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
     if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
         if p.mask & (1 << wave):
-          if wave in curr_barrier: yield from add("WAVERDY", p, wave=wave)
+          if (0, wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
@@ -583,9 +584,9 @@ def is_acc_operand(inst, name:str) -> bool:
   return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amdgpu_cfg(lib:bytes, target:str) -> dict:
+def amdgpu_cfg(code:bytes, arch:str, off:int=0) -> dict:
   # decode
-  pc_table = amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)
+  pc_table = amd_decode(code, arch, off)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
@@ -617,29 +618,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default:
         tokens.append({"st":repr(val - (1 << 32) if name == "literal" and val >= (1 << 31) else val), "keys":[repr(val)], "kind":1})
-  # show a smaller view for repeated instructions in the graph
   lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pcs in blocks.values():
-    new_pcs:list[int] = []
-    i, n = 0, len(pcs)
-    while i < n:
-      j = i+1
-      while j<n and pc_table[pcs[j]] == pc_table[pcs[i]]: j += 1
-      new_pcs.append(pcs[i])
-      if j-i>1:
-        pc_tokens[pcs[i]].append({"st":f"({j-i}x)", "keys":[], "kind":0})
-        for k in range(i+1, j): del pc_tokens[pcs[k]]
-      lines.append(f"{disasm[pcs[i]]:<{asm_width}}  # {pcs[i]:012X}"+(f"...{pcs[j-1]:012X} ({j-i}x)" if j-i>1 else ""))
-      i = j
-    pcs[:] = new_pcs
-  from tinygrad.runtime.autogen import amdgpu_kd
-  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
-  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python",
-          "metadata":[[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
-                                                                     ("Scratch", kd.private_segment_fixed_size)] if v>0]]}
+    for pc in pcs: lines.append(f"{disasm[pc]:<{asm_width}}  # {pc:012X}")
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python"}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -660,8 +644,15 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     lib:bytes = sink.src[3].arg
-    if renderer.target.arch.startswith("gfx"):
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
+    if (target:=renderer.target.arch).startswith("gfx"):
+      with soft_err(lambda err: ret.update(err)):
+        ret.update(amdgpu_cfg((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr))
+      with soft_err(lambda err: ret.update(err)):
+        from tinygrad.runtime.autogen import amdgpu_kd
+        kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
+        vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
+        ret["metadata"] = [[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
+                                                                          ("Scratch", kd.private_segment_fixed_size)] if v>0]]
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":

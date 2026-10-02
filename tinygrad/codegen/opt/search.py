@@ -12,7 +12,7 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
-actions = [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, at)) for at in (AxisType.UPCAST, AxisType.UNROLL) for amt in [0,2,3,4,5,7] for axis in range(10)]
+actions = [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.UPCAST)) for amt in [0,2,3,4,5,7] for axis in range(10)]
 actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.LOCAL)) for amt in [0,2,3,4,8,13,16,29] for axis in range(8)]
 actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.LOCAL, True)) for amt in [13,16,28,29,32,49,64,256] for axis in range(8)]
 if getenv("BEAM_PADTO", 0): actions += [Opt(op=OptOps.PADTO, axis=axis, arg=amt) for amt in [32] for axis in range(7)]
@@ -93,7 +93,7 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
       s2.apply_opt(a)
       up, lcl, tc_up = 1, 1, next((prod(u.arg[0])//u.arg[2] for u in s2.ast.backward_slice if u.op is Ops.WMMA), 1)
       for x,t in zip(s2.full_shape, s2.axis_types):
-        if t in (AxisType.UPCAST, AxisType.UNROLL): up *= x
+        if t is AxisType.UPCAST: up *= x
         elif t in (AxisType.WARP, AxisType.LOCAL): lcl *= x
       if up//tc_up > max_up or lcl > max_lcl:
         if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")

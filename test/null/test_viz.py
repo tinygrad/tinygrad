@@ -3,7 +3,7 @@ import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -872,6 +872,15 @@ class TestCfg(unittest.TestCase):
     cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
 
+  def test_repeat(self):
+    k = Kernel()
+    for _ in range(3): k.emit(s_add_u32(s[1], s[1], 1))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("repeat", k)["data"]
+    block = next(iter(cfg["blocks"].values()))
+    self.assertEqual(sum(cfg["pc_tokens"][pc][0]["st"] == "s_add_u32" for pc in block), 3)
+
   def test_operands(self):
     k = Kernel()
     k.emit(s_getpc_b64(s[2:3]))
@@ -1174,6 +1183,41 @@ class TestCLI(unittest.TestCase):
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
     assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
+
+  @needs_tracked_pm
+  def test_nested_calls_codegen_ls(self):
+    @uopfunc
+    def inner(out:UOp): return out[0].store(1).sink()
+    @uopfunc
+    def outer(out:UOp):
+      # call inner twice, it should not codegen inner twice
+      call = inner(out)
+      return inner(out.after(call)).sink()
+    def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
+    with save_viz() as viz, Context(SCACHE=0):
+      Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
+    with write_files(viz) as files:
+      rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+    codegen_count = [s for s in rewrites if "View Output AST" in s]
+    self.assertEqual(len(codegen_count), 4)
+
+  @needs_tracked_pm
+  def test_nested_calls_schedule_ls(self):
+    from tinygrad.schedule import schedule_cache
+    @function(precompile=True)
+    def inner(x:Tensor): return (x+x).contiguous()
+    @function(precompile=True)
+    def outer(x:Tensor):
+      # call inner twice, SCACHE should not schedule inner twice
+      return inner(inner(x))
+    schedule_cache.clear()
+    with save_viz() as viz:
+      outer(Tensor.empty(4, device="NULL")).realize()
+    with write_files(viz) as files:
+      schedule = [s["name"] for s in run_cli(*files, "-s", "TINY") if s["name"].startswith("Schedule")][-1]
+      rewrites = run_cli(*files, "-s", "TINY", schedule, "--ls", json_fmt=False)[0]["out"].split("\n")
+    sched_count = [s for s in rewrites if "View Kernel Graph" in s]
+    self.assertEqual(len(sched_count), 3)
 
 if __name__ == "__main__":
   unittest.main()

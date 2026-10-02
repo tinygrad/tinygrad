@@ -35,7 +35,7 @@ def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):
 def tc_reduce_axis(r:Tensor) -> int:
   sche = Scheduler(r.schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
   sche.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1)))
-  return sche.axis_types.index(AxisType.REDUCE)
+  return sche.axes_of(AxisType.WEAK, reduce=True)[0]
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
@@ -154,18 +154,16 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_group_reduce(self):
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
-    sche = Scheduler(Tensor.empty(16, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 16, dtype=tc.dtype_in), dtype=tc.dtype_out)
+    N, M, K = tc.dims
+    K *= 4  # leave four tensor core tiles along K so both group sizes divide the remaining reduction
+    sche = Scheduler(Tensor.empty(M, K, dtype=tc.dtype_in).matmul(Tensor.empty(K, N, dtype=tc.dtype_in), dtype=tc.dtype_out)
                       .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
     sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
-    axis = sche.axis_types.index(AxisType.REDUCE)
-    if AxisType.UNROLL in sche.axis_types:
-      # this tc keeps an unrolled reduce outside the WMMA, grouping inside it must be rejected
-      with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.LOCAL)))
-    else:
-      x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
-      helper_linearizer_opt(x.matmul(y, dtype=tc.dtype_out),
-                            [[Opt(OptOps.SPLIT, axis, (amt, AxisType.LOCAL, top))] for amt in (2, 4) for top in (False, True)],
-                            apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    axis = sche.axes_of(AxisType.WEAK, reduce=True)[0]
+    x, y = Tensor.rand(M, K, dtype=tc.dtype_in), Tensor.rand(K, N, dtype=tc.dtype_in)
+    helper_linearizer_opt(x.matmul(y, dtype=tc.dtype_out),
+                          [[Opt(OptOps.SPLIT, axis, (amt, AxisType.LOCAL, top))] for amt in (2, 4) for top in (False, True)],
+                          apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_failed_padto(self):
@@ -188,7 +186,7 @@ class TestTensorCores(unittest.TestCase):
   def test_tensor_cores_contracted_m(self):
     n, m, k = (tc:=Device[Device.DEFAULT].renderer.tensor_cores[0]).dims
     def kernel(C:UOp, A:UOp, B:UOp) -> UOp:
-      i, j, r = UOp.range(m*2, 0, AxisType.WEAK), UOp.range(n*2, 1), UOp.range(k*2, 2, AxisType.REDUCE)
+      i, j, r = UOp.range(m*2, 0, AxisType.WEAK), UOp.range(n*2, 1), UOp.range(k*2, 2)
       out = (A[i, r]*B[r, j]).cast(tc.dtype_out).reduce(i, r, arg=Ops.ADD)
       return C[j].store(out).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (-1, 0, 1)),)))
     a, b, c = Tensor.empty(m*2, k*2, dtype=tc.dtype_in), Tensor.empty(k*2, n*2, dtype=tc.dtype_in), Tensor.empty(n*2, dtype=tc.dtype_out)
@@ -255,9 +253,9 @@ class TestTensorCores(unittest.TestCase):
     b = Tensor.rand(tc.dims[2]*3-1, tc.dims[0]*2+1, dtype=tc.dtype_in).realize()
     sche = Scheduler(a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
     sche.apply_opt(tc_opt:=Opt(OptOps.TC, 0, (-1, 2, 1)))
-    axis = sche.axis_types.index(AxisType.REDUCE)
-    helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[tc_opt, Opt(OptOps.PADTO, axis, 4), Opt(OptOps.SPLIT, axis, (2, AxisType.UNROLL)),
-                                                            Opt(OptOps.SPLIT, axis, (0, AxisType.UNROLL))]],
+    axis = sche.axes_of(AxisType.WEAK, reduce=True)[0]
+    helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[tc_opt, Opt(OptOps.PADTO, axis, 4), Opt(OptOps.SPLIT, axis, (2, AxisType.UPCAST)),
+                                                            Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST))]],
                           check_default_opt=False, atol=3e-2, rtol=1e-3)
 
   @Context(ALLOW_TF32=1)
@@ -315,7 +313,7 @@ class TestTensorCores(unittest.TestCase):
     # differs from the MFMA path (f32 accumulation), so the baseline-vs-TC numerical gate can't hold for fp8.
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in).realize(), Tensor.rand(64, 16, dtype=tc.dtype_in).realize()
-    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UNROLL))]
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UPCAST))]
     r = x.matmul(y, dtype=tc.dtype_out)
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
     wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
@@ -329,7 +327,7 @@ class TestTensorCores(unittest.TestCase):
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in).realize(), Tensor.rand(64, 16, dtype=tc.dtype_in).realize()
-    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UNROLL))]
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UPCAST))]
     r = x.matmul(y, dtype=tc.dtype_out)
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
     wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
@@ -344,7 +342,7 @@ class TestTensorCores(unittest.TestCase):
     # all STORE children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in).realize(), Tensor.rand(64, 16, dtype=tc.dtype_in).realize()
-    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out).relu()), (2, AxisType.UNROLL))]
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out).relu()), (2, AxisType.UPCAST))]
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
     wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
@@ -367,10 +365,10 @@ class TestTensorCores(unittest.TestCase):
       [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))],
       [Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST))],
       [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST))], # check upcasts
-      [Opt(OptOps.SPLIT, R, (2, AxisType.UNROLL))], # check unroll
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+1, (2, AxisType.UNROLL))], # check combo of unroll and upcast
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (2, AxisType.UNROLL))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (4, AxisType.UNROLL))],
+      [Opt(OptOps.SPLIT, R, (2, AxisType.UPCAST))], # check unroll
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+1, (2, AxisType.UPCAST))], # check combo of unroll and upcast
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (2, AxisType.UPCAST))],
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (4, AxisType.UPCAST))],
     ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),

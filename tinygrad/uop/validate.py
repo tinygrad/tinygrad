@@ -51,7 +51,7 @@ def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
   return s
 def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
-  name = x.arg.name if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC} else f"{x.op.name.lower()}{len(ctx[1])}"
+  name = x.arg.name if x.op is Ops.PARAM else f"{x.op.name.lower()}{len(ctx[1])}"
   return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.vmin, x.vmax, ctx[0])
 # z3 does not model widths: a cast only converts between bool and int
 def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:
@@ -65,7 +65,7 @@ z3_renderer = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.RANGE), name="x"), lambda x,ctx:
    create_bounded(x.arg if x.op is Ops.SPECIAL else f"r{range_str(x)}", 0, ctx[1][x.src[0]]-1, ctx[0])),
   # unknown values are variables bounded by their vmin/vmax: params, loads (non-pointer INDEX is a LOAD) and anything from floats
-  (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.LOAD, Ops.INDEX), name="x"), create_var),
+  (UPat((Ops.PARAM, Ops.LOAD, Ops.INDEX), name="x"), create_var),
   (UPat((Ops.CAST, Ops.BITCAST)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
   # a bitcast between ints wraps into the target range, z3 ints are unbounded
   (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("x", dtypes.ints),), name="c"),
