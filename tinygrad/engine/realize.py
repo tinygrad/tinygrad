@@ -126,7 +126,7 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.MSELECT, Ops.SHRINK, Ops.BITCAST): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
+  if b.op in (Ops.MSELECT, Ops.SHRINK, Ops.BITCAST, Ops.GETADDR): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
@@ -158,9 +158,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return []
 
 def call_vals(ctx:ExecContext, call:UOp, ast:UOp, var_vals:dict[str, int]) -> tuple[int, ...]: # variables by name, the rest from the args
-  def val(a:UOp) -> int: # input or linked address
-    return cast(Buffer, _resolve(a.src[0], ctx.input_uops).buffer).get_buf(to_tuple(a.arg)[0]) if a.op is Ops.GETADDR else a.val
-  try: return tuple(var_vals[v.expr] if v.is_variable else val(call.src[1 + v.arg.slot]) for v in ast.arg.vars)
+  try: return tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
   except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:

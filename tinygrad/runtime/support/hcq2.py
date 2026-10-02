@@ -565,10 +565,9 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
 
 def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
-  buf, off = unwrap_view(g.src[0])
-  if unwrap_lane(buf)[0].op is not Ops.BUFFER: return None # input address, resolved per run
+  if unwrap_lane(buf:=unwrap_view(g.src[0])[0])[0].op is not Ops.BUFFER: return None # input address, resolved per run
   ctx.refs.append(buf) # add to refs
-  return UOp.const(cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0]) + off, dtypes.uint64)
+  return UOp.const(g.val, dtypes.uint64)
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   base, off = unwrap_view(buf)

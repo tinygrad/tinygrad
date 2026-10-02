@@ -259,6 +259,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def val(self):
     if self.op is Ops.CONST: return self.arg
+    if self.op is Ops.GETADDR: return cast("Buffer", self.src[0].buffer).get_buf(to_tuple(self.arg)[0])
     # a casted const CAST(dt, CONST(v)) is one const: .val reads the value through the CAST
     assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
     return self.src[0].val
