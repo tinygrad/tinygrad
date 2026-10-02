@@ -152,7 +152,7 @@ class MetalQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     n, zero, pipes = len(self.cmds), round_up(self.nbytes, 8), dedup(c[:2] for c in self.cmds)
     buf = UOp.placeholder((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs, volatile=True,
-                          tag=(to_name(self.dev.device, "mtl_icb"), tuple(self.cmds), zero + 24)).after(*self.deps)
+                          tag=(self.dev.tag("mtl_icb"), tuple(self.cmds), zero + 24)).after(*self.deps)
     icb = patch(buf, self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
 
     # symbolic sizes
@@ -214,12 +214,10 @@ class MetalDevice(Compiled):
     super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
     Compiled.pm_bufferize += PatternMatcher([
-      (UPat(Ops.PARAM, tag=to_name(self.device, "handles")), lambda d=self: d.handles),
+      (UPat(Ops.PARAM, tag=self.tag("handles")), lambda d=self: d.handles),
       (UPat(Ops.PARAM, tag="slots", name="b"), # with stamps
        lambda b, d=self: d.new_slots(b.max_numel()) if to_tuple(b.device)[0] == d.device and b.max_numel() > 4 else None),
-      (UPat(Ops.PARAM, name="b"), lambda b, d=self, icb=to_name(self.device, "mtl_icb"):
-       d.new_icb(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == icb else None),
-    ])
+      (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.new_icb(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("mtl_icb") else None)])
 
   @functools.cached_property
   def handles(self) -> Buffer:

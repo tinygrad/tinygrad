@@ -465,9 +465,9 @@ def _words(dev) -> Buffer: # zero the read signal and scratch
   b.host.view(fmt='B')[:8] = bytes(8)
   return b
 def usb_bufferize(dev) -> PatternMatcher: # the placeholders a usb gpu owns
-  return PatternMatcher([(UPat(Ops.PARAM, tag=to_name(dev.device, "usb_host")), lambda d=dev: _host_block(d)),
-                         (UPat(Ops.PARAM, tag={to_name(dev.device, f"usb_xfer{h}") for h in (0, 1)}, name="b"), lambda b, d=dev: _xfer(d, b.tag)),
-                         (UPat(Ops.PARAM, tag=to_name(dev.device, "usb_vram")), lambda d=dev: _words(d)),
-                         (UPat(Ops.PARAM, tag=to_name(dev.device, "usb_asm24")), lambda d=dev: d.iface.ctrl)])
+  return PatternMatcher([(UPat(Ops.PARAM, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)),
+                         (UPat(Ops.PARAM, tag={dev.tag(f"usb_xfer{h}") for h in (0, 1)}, name="b"), lambda b, d=dev: _xfer(d, b.tag)),
+                         (UPat(Ops.PARAM, tag=dev.tag("usb_vram")), lambda d=dev: _words(d)),
+                         (UPat(Ops.PARAM, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

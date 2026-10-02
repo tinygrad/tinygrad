@@ -55,7 +55,7 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {device}_{name}_{queue}. put is the host's copy of the write pointer
   shapes = [("ring", (q.ring.size,), q.ring.dtype, hq.devs)] + [(n, (1,), dtypes.uint64, hq.devs) for n in ("write_ptr", "doorbell")]
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
-  return [UOp.placeholder(s, dt, 0, device=d, volatile=True, tag=to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
+  return [UOp.placeholder(s, dt, 0, device=d, volatile=True, tag=hq.dev.tag(n, hq.queue)) for n, s, dt, d in shapes]
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
@@ -153,7 +153,7 @@ class AMDComputeQueue(HWQueue):
   ### profiling: a kernel's slot holds its counters and trace until a synchronize reads them back
 
   def prof_buf(self, name:str) -> UOp:
-    return UOp.placeholder((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs, tag=to_name(self.dev.device, name))
+    return UOp.placeholder((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs, tag=self.dev.tag(name))
 
   def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None:
     if not (self.dev.pmc_enabled or self.dev.sqtt_enabled): return None
@@ -372,8 +372,7 @@ class AMDComputeQueue(HWQueue):
     ka = UOp(Ops.LINEAR, src=tuple(self.kernargs(call, prg, data)), arg="kernargs")
 
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
-    scratch = UOp.placeholder((data.private_segment_size,), dtypes.uint8, 0, device=self.devs).rtag(to_name(self.dev.device, "scratch"))
-    scratch_addr = scratch.getaddr(self.devs)
+    scratch_addr = UOp.placeholder((data.private_segment_size,), dtypes.uint8, 0, device=self.devs).rtag(self.dev.tag("scratch")).getaddr(self.devs)
     args_addr = ka.getaddr(self.devs)
 
     user_regs:list = []
@@ -890,9 +889,8 @@ class AMDDevice(Compiled):
 
     # Scratch setup
     self.max_private_segment_size = 0
-    Compiled.pm_bufferize += PatternMatcher([
-      (UPat(Ops.PARAM, tag=to_name(self.device, "scratch"), name="b"), lambda b, d=self: d.scratch_buffer(b.max_numel())),
-      (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=self.tag("scratch"), name="b"), lambda b, d=self: d.scratch_buffer(b.max_numel())),
+                                             (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
 
     if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
       self.pm_batch, self.pm_lower = pm_usb_batch, pm_usb_lower
@@ -905,7 +903,7 @@ class AMDDevice(Compiled):
       self.prof_slots, self.prof_read, self.sqtt_next_cmd_id = getenv("PROF_SLOTS", 32), 0, itertools.count(0)
       self.pmc_sched:list[PMCSample] = []
       self.sqtt_ses, self.sqtt_win = self.se_cnt * self.xccs, (getenv("SQTT_BUFFER_SIZE", 256) << 20) // self.prof_slots # mb, per shader engine
-      Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=to_name(self.device, n)), lambda n=n, d=self: getattr(d, n))
+      Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=self.tag(n)), lambda n=n, d=self: getattr(d, n))
                                                for n in ("prof_log", "pmc_buf", "sqtt_buf", "sqtt_wptrs")])
     if self.pmc_enabled:
       self.pmc_counters = import_pmc(self.target)
@@ -944,9 +942,8 @@ class AMDDevice(Compiled):
              ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx)
 
   def queue_buffer(self, tag):
-    if not isinstance(tag, str) or not tag.startswith(p:=to_name(self.device, "")): return None
-    if not (tag:=tag[len(p):]).startswith(("ring_", "write_ptr_", "doorbell_", "put_value_")): return None
-    name, queue, idx = tag.rsplit('_', 2)
+    if not isinstance(tag, str) or not (t:=tag.removeprefix(self.tag(""))).startswith(("ring_", "write_ptr_", "doorbell_", "put_value_")): return None
+    name, queue, idx = t.rsplit('_', 2)
     return getattr(self.compute_queue if queue == 'compute' else self.sdma_queue(int(idx)), name)
 
   @functools.cached_property
