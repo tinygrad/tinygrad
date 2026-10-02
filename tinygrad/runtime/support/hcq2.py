@@ -463,37 +463,43 @@ def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
   if not links: return None
   ctx.extend(links)
   return a.src[0].after(*rest)
-pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
+pm_hoist_links = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
 
-def captured(u:UOp, root:bool) -> bool: # reached, not a param of its own
+pm_lift_deps = PatternMatcher([
+  # f(x.after(dep)) -> f(x).after(dep)
+  (UPat((Ops.SHRINK, Ops.BITCAST, Ops.MSELECT, Ops.GETADDR), src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="u"),
+   lambda a, u: u.replace(src=(a.src[0], *u.src[1:])).after(*a.src[1:])),
+
+  # x.after(a).after(b) -> x.after(a, b)
+  (UPat(Ops.AFTER, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="u"), lambda a, u: a.src[0].after(*dedup([*a.src[1:], *u.src[1:]]))),
+])
+
+def _needs_arg(u:UOp, root:bool) -> bool:
   return u.addrspace is AddrSpace.GLOBAL if u.op is Ops.BUFFER else u.op is Ops.PARAM and (u.tag is not None or u.is_variable != root)
 
-def lift_param(u:UOp, slot:int) -> UOp: # addresses and variables by value
+def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:
     return UOp.param(slot, u.commit_dtype(dtypes.int), name=u.arg.name if u.is_variable else None, addrspace=AddrSpace.ALU).cast(u.dtype)
   return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.value, volatile=u.arg.volatile, name=u.arg.name and f"{u.arg.name}_{slot}")
 
-def addr_without_after(g:UOp) -> UOp: # the same address on the bare base: an address has no deps
-  base, off = unwrap_view(g.src[0])
-  return (base.bitcast(dtypes.uint8)[off:base.nbytes()] if off else base).getaddr(to_tuple(g.arg)[0])
-
 def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
-  args, nodes = list(call.src[1:]), call.body.toposort(gate=lambda u: u.op is not Ops.GETADDR, enter_calls=False)
-  addrs = {g: addr_without_after(g) for u in nodes for g in u.src if g.op is Ops.GETADDR}
-  leaves = dedup([u for u in nodes if captured(u, root)] + list(addrs.values()))
+  body, args = call.body, list(call.src[1:])
+  nodes = body.toposort(gate=lambda u: u.op is not Ops.GETADDR, enter_calls=False)
+  leaves = dedup([u for u in nodes if _needs_arg(u, root)] + [g for u in nodes for g in u.src if g.op is Ops.GETADDR])
   slots = args + (new:=[u for u in leaves if u not in args])
-  params = {u: lift_param(u, slots.index(u)) for u in leaves}
-  body = call.body.substitute({g: params[a] for g, a in addrs.items()} | params, walk=True)
+  body = body.substitute({u: _param_for(u, slots.index(u)) for u in leaves}, walk=True)
 
   # new args in the caller
-  own = {p: args[p.arg.slot] for u in new for p in u.toposort() if p.op is Ops.PARAM and not captured(p, root)}
+  own = {p: args[p.arg.slot] for u in new for p in u.toposort() if p.op is Ops.PARAM and not _needs_arg(p, root)}
   return call.replace(src=(body, *args, *UOp.sink(*new).substitute(own, walk=True).src))
 
-# renumber and lift, deepest first
 pm_lift = PatternMatcher([
+  # renumber to cache
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(u.axis_type, next(ctx))+u.axis_id[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
   (UPat(Ops.PARAM, name="u"), lambda u: u.replace(arg=replace(u.arg, device=None)) if u.arg.name and not u.tag else None), # of a lowered function
+
+  # lift allocs and getaddrs
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lift),
 ])
 
@@ -504,9 +510,9 @@ def lower_call(call:UOp) -> UOp|None:
   from tinygrad.runtime.ops_rdma import pm_rdma_encode
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
   body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
-                       ctx=(lt_patches:=list[UOp]()), bpm=pm_patches, name="encode")
-  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])),
-                       ctx=lt_patches, bpm=pm_patches, enter_calls=True, name="lower")
+                       ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
+  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], pm_lift_deps),
+                       ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")
   body = graph_rewrite(body, pm_lift, ctx=itertools.count(), walk=True, enter_calls=True, name="lift")
 
   if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")

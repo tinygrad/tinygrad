@@ -159,7 +159,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def call_vals(ctx:ExecContext, call:UOp, ast:UOp, var_vals:dict[str, int]) -> tuple[int, ...]: # variables by name, the rest from the args
   def val(a:UOp) -> int: # input or linked address
-    return cast(Buffer, _resolve(a.src[0], ctx.input_uops).buffer).get_buf(a.arg) if a.op is Ops.GETADDR else a.val
+    return cast(Buffer, _resolve(a.src[0], ctx.input_uops).buffer).get_buf(to_tuple(a.arg)[0]) if a.op is Ops.GETADDR else a.val
   try: return tuple(var_vals[v.expr] if v.is_variable else val(call.src[1 + v.arg.slot]) for v in ast.arg.vars)
   except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
 
