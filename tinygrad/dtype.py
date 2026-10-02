@@ -57,12 +57,13 @@ class AddrSpace(IntEnum):
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   bitsize: int
-  name: str
+  name: str  # C-style name (legacy alias)
+  sname: str  # modern rust/MLIR-style name: f32/i8/u64/bf16/f8e4m3
   fmt: FmtStr|None
   @property
   def itemsize(self) -> int: return (self.bitsize + 7) // 8
   @staticmethod
-  def new(priority:int, bitsize:int, name:str, fmt:FmtStr|None): return DType(priority, bitsize, name, fmt)
+  def new(priority:int, bitsize:int, name:str, sname:str, fmt:FmtStr|None): return DType(priority, bitsize, name, sname, fmt)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.name]}"
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt) < (o.priority, o.bitsize, o.name, o.fmt)
@@ -115,26 +116,26 @@ class DTypes:
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
             dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
-  void: Final[DType] = DType.new(-1, 0, "void", None)
-  weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # the weak int position in the promo lattice
-  bool: Final[DType] = DType.new(0, 1, "bool", '?')
-  int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
-  uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
-  int16: Final[DType] = DType.new(3, 16, "short", 'h')
-  uint16: Final[DType] = DType.new(4, 16, "unsigned short", 'H')
-  int32: Final[DType] = DType.new(5, 32, "int", 'i')
-  uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
-  int64: Final[DType] = DType.new(7, 64, "long", 'q')
-  uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
-  weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", None)
-  fp8e4m3: Final[DType] = DType.new(10, 8, "float8_e4m3", None)
-  fp8e5m2: Final[DType] = DType.new(11, 8, "float8_e5m2", None)
-  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "float8_e4m3fnuz", None)
-  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "float8_e5m2fnuz", None)
-  float16: Final[DType] = DType.new(12, 16, "half", 'e')
-  bfloat16: Final[DType] = DType.new(13, 16, "__bf16", None)
-  float32: Final[DType] = DType.new(14, 32, "float", 'f')
-  float64: Final[DType] = DType.new(15, 64, "double", 'd')
+  void: Final[DType] = DType.new(-1, 0, "void", "void", None)
+  weakint: Final[DType] = DType.new(0, 800, "weakint", "weakint", None)  # the weak int position in the promo lattice
+  bool: Final[DType] = DType.new(0, 1, "bool", "bool", '?')
+  int8: Final[DType] = DType.new(1, 8, "signed char", "i8", 'b')
+  uint8: Final[DType] = DType.new(2, 8, "unsigned char", "u8", 'B')
+  int16: Final[DType] = DType.new(3, 16, "short", "i16", 'h')
+  uint16: Final[DType] = DType.new(4, 16, "unsigned short", "u16", 'H')
+  int32: Final[DType] = DType.new(5, 32, "int", "i32", 'i')
+  uint32: Final[DType] = DType.new(6, 32, "unsigned int", "u32", 'I')
+  int64: Final[DType] = DType.new(7, 64, "long", "i64", 'q')
+  uint64: Final[DType] = DType.new(8, 64, "unsigned long", "u64", 'Q')
+  weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", "weakfloat", None)
+  fp8e4m3: Final[DType] = DType.new(10, 8, "float8_e4m3", "f8e4m3", None)
+  fp8e5m2: Final[DType] = DType.new(11, 8, "float8_e5m2", "f8e5m2", None)
+  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "float8_e4m3fnuz", "f8e4m3fnuz", None)
+  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "float8_e5m2fnuz", "f8e5m2fnuz", None)
+  float16: Final[DType] = DType.new(12, 16, "half", "f16", 'e')
+  bfloat16: Final[DType] = DType.new(13, 16, "__bf16", "bf16", None)
+  float32: Final[DType] = DType.new(14, 32, "float", "f32", 'f')
+  float64: Final[DType] = DType.new(15, 64, "double", "f64", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702

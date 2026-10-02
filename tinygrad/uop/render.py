@@ -1,5 +1,5 @@
 import re, sys
-from tinygrad.dtype import dtypes, DType, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, KernelInfo, range_str, consumer_map_from_toposort, sint
 from tinygrad.helpers import strip_parens, NO_COLOR
@@ -17,42 +17,32 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
 # ***** SSA wire format (uop v1) *****
 # human-readable, and parse(render(x)) roundtrips structurally. dtypes are rust-style: f32/i32/u8/bf16
 
-def dtname(dt:DType) -> str:
-  if dtypes.is_bool(dt): return "bool"
-  if dt in dtypes.weaks or dt is dtypes.void: return dt.name
-  if dtypes.is_float(dt):
-    if dt is dtypes.bfloat16: return "bf16"
-    return dt.name.replace("float8_", "f8") if dt.bitsize == 8 else f"f{dt.bitsize}"   # float8_e4m3 -> f8e4m3
-  return ("u" if dtypes.is_unsigned(dt) else "i") + str(dt.bitsize)
-
-def _render_const(x:UOp) -> str:
-  if x.is_invalid: return "invalid"
-  dt, v = x.dtype, x.val
-  if dtypes.is_bool(dt): return str(bool(v)).lower()
-  if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
-  if dtypes.is_float(dt): return f"f{dt.bitsize}:{float(v).hex()}"  # float.hex() roundtrips exactly, inf/nan included
-  return f"i{dt.bitsize}:{v}"
-
-def _render_paramarg(x:UOp) -> str:
-  a, opts = x.arg, ""
-  if a.size is not None: opts += f" size={a.size}"
-  if a.vmin_vmax is not None: opts += f" bounds=[{a.vmin_vmax[0]},{a.vmin_vmax[1]}]"
-  if a.multiple_of is not None: opts += f" multiple_of={a.multiple_of}"
-  if a.addrspace not in (None, AddrSpace.GLOBAL): opts += f" addrspace={a.addrspace.name}"
-  if a.device is not None:
-    opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))
-  if a.volatile: opts += " volatile"
-  name = f'"{a.name}" ' if a.name is not None else ""
-  return f"{name}dtype={dtname(x.dtype)} slot={a.slot}{opts}"
 
 def _render_arg(x:UOp) -> str:
+  """arg rendering: bare scalars, keyed fields, mini-grammars for real structures"""
   match x.op:
-    case Ops.CONST: return _render_const(x)
-    case Ops.PARAM | Ops.BUFFER | Ops.ALLOC: return _render_paramarg(x)
+    case Ops.CONST:
+      if x.is_invalid: return "invalid"
+      dt, v = x.dtype, x.val
+      if dtypes.is_bool(dt): return str(bool(v)).lower()
+      if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
+      if dtypes.is_float(dt): return f"f{dt.bitsize}:{float(v).hex()}"   # float.hex() roundtrips exactly, inf/nan included
+      return f"i{dt.bitsize}:{v}"
+    case Ops.PARAM | Ops.BUFFER | Ops.ALLOC:
+      a, opts = x.arg, ""
+      if a.size is not None: opts += f" size={a.size}"
+      if a.vmin_vmax is not None: opts += f" bounds=[{a.vmin_vmax[0]},{a.vmin_vmax[1]}]"
+      if a.multiple_of is not None: opts += f" multiple_of={a.multiple_of}"
+      if a.addrspace not in (None, AddrSpace.GLOBAL): opts += f" addrspace={a.addrspace.name}"
+      if a.device is not None:
+        opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))
+      if a.volatile: opts += " volatile"
+      name = f'"{a.name}" ' if a.name is not None else ""
+      return f"{name}dtype={x.dtype.sname} slot={a.slot}{opts}"
     case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
     case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
     case Ops.REDUCE: return f"op={x.arg[0].name.lower()}" + (f" pop={x.arg[1]}" if x.arg[1] else "")
-    case Ops.CAST | Ops.BITCAST: return dtname(x.arg)   # one scalar -> bare (rule 1)
+    case Ops.CAST | Ops.BITCAST: return x.arg.sname   # one scalar -> bare
     case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
     case _: return repr(x.arg) if x.arg is not None else ""
 
@@ -84,8 +74,9 @@ def render_ssa(root:UOp|list[UOp], header:str="", color:bool=False) -> str:
   toposort = list(root.toposort()) if isinstance(root, UOp) else list(root)
   table = {u:i for i,u in enumerate(u for u in toposort if not _inline(u))}
   def src_str(u:UOp) -> str:
-    if u.op is Ops.CONST: return _render_const(u)
-    if _inline(u): return "(" + ", ".join(src_str(s) for s in u.src) + ")"
+    if _inline(u):
+      if u.op is Ops.CONST: return _render_arg(u)
+      return "(" + ", ".join(src_str(s) for s in u.src) + ")"
     return f"%{table[u]}"
   lines = [l for l in [header] if l]  # optional caller-supplied header line
   for u,(i) in ((u, table[u]) for u in toposort if not _inline(u)):

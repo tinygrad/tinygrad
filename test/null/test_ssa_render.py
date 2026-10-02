@@ -5,14 +5,14 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.uop.render import render_ssa, dtname
+from tinygrad.uop.render import render_ssa
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.helpers import Context
 
 # ***** prototype parse for the uop v1 wire format *****
 
-_DTYPES_BY_NAME: dict[str, DType] = {dtname(d): d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
+_DTYPES_BY_NAME: dict[str, DType] = {d.sname: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
 
 _line_re = re.compile(r"^\s*%(\d+) = (\w+)\s*(.*)$")
 _range_re = re.compile(r"^(\w+) r([\d_]+)$")
