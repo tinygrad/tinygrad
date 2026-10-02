@@ -28,7 +28,7 @@ def run(sz, n_gpus=6, iters=10, ring=0, all2all=0):
   devs = tuple([f"{Device.DEFAULT}:{x}" for x in range(n_gpus)])
   N = sz // dtypes.float32.itemsize
   name = "all2all" if all2all else ("ring" if ring else "naive")
-  with Context(RING=(2 if ring else 0), ALL2ALL=(2 if all2all else 0), JIT_BATCH_SIZE=0, DEBUG=max(DEBUG.value, 2)):
+  with Context(RING=(2 if ring else 0), ALL2ALL=(2 if all2all else 0), DEBUG=max(DEBUG.value, 2)):
     return test(devs, N, iters=iters, name=name)
 
 def main():

@@ -15,9 +15,7 @@ def packed_field(bidx:UOp, dt:DType) -> tuple[UOp, UOp, int]:
 def packed_store(s:UOp):
   bidx, var, *gate = s.src
   idx, shift_am, mask = packed_field(bidx, var.dtype)
-  # bool does its mask math at int32: renderer rewrites run after weak dtypes are lowered, and bool & 0xFF would create a weakint const
-  if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
-  new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
+  new_v, wmask = (var.cast(dtypes.uint32) & mask) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
   buf = idx.cast(dtypes.uint32).load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()))
   return idx.store((buf & wmask) | new_v, *gate)
 
@@ -94,7 +92,14 @@ class WGSLRenderer(CStyleLanguage):
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
   ]) + base_rewrite
 
-  def render_cast(self, u:UOp, val: str) -> str: return f"{self.type_map[u.dtype]}({val})"
+  def render_cast(self, u:UOp, val: str) -> str:
+    ret = f"{self.type_map[u.dtype]}({val})"
+    # Small integers use 32-bit WGSL values, so casts must truncate before subsequent arithmetic.
+    if u.dtype in (dtypes.uint8, dtypes.uint16): return f"({ret}&{(1 << (8*u.dtype.itemsize))-1}u)"
+    if u.dtype in (dtypes.int8, dtypes.int16):
+      bits = 8*u.dtype.itemsize
+      return f"((({ret}&{(1 << bits)-1})^{1 << (bits-1)})-{1 << (bits-1)})"
+    return ret
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False, shape=None): return "var"
   def render_load(self, x:str, u:UOp) -> str: return f"atomicLoad(&{x})" if is_packed(u) else x
   def buf_map(self, u:UOp) -> str: return "atomic<u32>" if is_packed(u) else self.type_map[u.dtype]

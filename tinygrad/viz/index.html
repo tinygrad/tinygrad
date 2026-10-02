@@ -18,6 +18,9 @@
     margin: 0;
     padding: 0;
   }
+  :focus {
+    outline: none;
+  }
   html, body {
     color: #f0f0f5;
     margin: 0;
@@ -82,9 +85,6 @@
     line-height: 1;
     user-select: none;
     cursor: pointer;
-  }
-  input {
-    outline: none;
   }
   #graph svg {
     width: 100%;
@@ -225,12 +225,12 @@
     height: calc(100% - 50px);
     margin-top: 50px;
     margin-left: 15%;
+    margin-right: 20%;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
   }
   #custom {
-    margin-right: 20%;
     z-index: 1;
   }
   .ctx-list-parent {
@@ -271,7 +271,6 @@
     gap: 8px;
   }
   .btn {
-    outline: none;
     background-color: #1a1b26;
     border: 1px solid #4a4b56;
     color: #f0f0f5;
@@ -311,6 +310,14 @@
     padding: 8px;
   }
   pre.full-height code.hljs {
+    max-height: none;
+  }
+  .source-node pre {
+    height: 100%;
+    font: 14px/16px monospace;
+  }
+  .source-node code.hljs {
+    height: 100%;
     max-height: none;
   }
   #progress-message {

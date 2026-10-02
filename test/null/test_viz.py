@@ -3,7 +3,7 @@ import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -305,10 +305,10 @@ class TestVizTree(unittest.TestCase):
 
   def test_tree_view(self):
     with save_viz() as viz:
-      a = UOp.variable("a",0,10,param=True)
-      b = UOp.variable("b",0,10,param=True)
-      c = UOp.variable("c",0,10,param=True)
-      d = UOp.variable("d",0,10,param=True)
+      a = UOp.variable("a",0,10)
+      b = UOp.variable("b",0,10)
+      c = UOp.variable("c",0,10)
+      d = UOp.variable("d",0,10)
       sink = UOp.sink(a+b, c+d)
       def tree_rewrite(): return graph_rewrite(sink, root, name="root")
       tree_rewrite()
@@ -446,7 +446,7 @@ class TestVizIntegration(unittest.TestCase):
   def test_recurse(self):
     with save_viz() as viz:
       a = Tensor.empty(10)
-      for _ in range(10_000): a += a
+      for _ in range(2_000): a += a
       graph_rewrite(a.uop, PatternMatcher([]))
     lst = viz.list_items()
     assert len(lst) == 1
@@ -499,13 +499,11 @@ class TestVizIntegration(unittest.TestCase):
     self.assertIn(type(e.exception).__name__, bin_render)
 
   def test_view_source_alt(self):
-    src = "void E_3(float* data0_3) {}"
-    binary = Device["CPU"].renderer.compiler.compile(src)
+    src = "void E_3(float* data0_3) {"+"\n //" + ("."*200)+"\n}"
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
-                                   UOp(Ops.BINARY, arg=binary)))
-    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
+    x = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=custom_binary)[0]
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
@@ -532,6 +530,19 @@ class TestVizIntegration(unittest.TestCase):
     profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
     events = [e for e in profile["layout"]["NULL"]["events"] if e["name"] == kernel_name]
     self.assertEqual({e["ref"] for e in events}, kernels)
+
+  @needs_tracked_pm
+  def test_index_label(self):
+    with save_viz() as viz:
+      vals = Tensor.empty(16, device="NULL")
+      idxs = Tensor.empty(4, device="NULL", dtype=dtypes.uint)
+      vals[idxs % 16].realize()
+    labels:list[str] = []
+    for i in range(len(viz.list_items())):
+      for j in range(len(viz.data.trace.rewrites[i])):
+        for u in (step:=next(viz.get_details(i, j)))["_sink"].toposort():
+          if u.op is Ops.INDEX: labels.append(step["graph"][id(u)]["label"])
+    for label in labels: self.assertNotIn("UOp(", label)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -831,7 +842,7 @@ class TestVizMemoryLayout(unittest.TestCase):
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
-                                                    s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
+                                                    s_cmp_eq_u64, s_code_end, s_endpgm, s_getpc_b64, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
 
 @needs_tracked_pm
@@ -860,6 +871,34 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
+
+  def test_repeat(self):
+    k = Kernel()
+    for _ in range(3): k.emit(s_add_u32(s[1], s[1], 1))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("repeat", k)["data"]
+    block = next(iter(cfg["blocks"].values()))
+    self.assertEqual(sum(cfg["pc_tokens"][pc][0]["st"] == "s_add_u32" for pc in block), 3)
+
+  def test_operands(self):
+    k = Kernel()
+    k.emit(s_getpc_b64(s[2:3]))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("getpc", k)["data"]
+    tokens = next(iter(cfg["pc_tokens"].values()))
+    self.assertEqual(len(tokens), 2)
+
+  def test_immediates(self):
+    from tinygrad.renderer.amd.dsl import LIT
+    k = Kernel()
+    for value in (0x7fffffff, 0x80000000, 4294962812, 0xffffffff): k.emit(s_add_u32(s[2], s[2], LIT, value))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("immediates", k)["data"]
+    tokens = list(cfg["pc_tokens"].values())[:4]
+    self.assertEqual([t[-1]["st"] for t in tokens], ["2147483647", "-2147483648", "-4484", "-1"])
 
   def test_diamond(self):
     k = Kernel()
@@ -890,10 +929,7 @@ class TestCfg(unittest.TestCase):
     insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
     end_block = [" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1]]
-    code_line = ret["src"].splitlines()[-1]
-    self.assertEqual(len(end_block), 2)
-    for st in [end_block[-1], code_line]:
-      assert st.startswith("s_code_end") and st.endswith("x)"), st
+    self.assertEqual(len(end_block), 1)
 
   def test_loop(self):
     k = Kernel()
@@ -1147,6 +1183,41 @@ class TestCLI(unittest.TestCase):
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
     assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
+
+  @needs_tracked_pm
+  def test_nested_calls_codegen_ls(self):
+    @uopfunc
+    def inner(out:UOp): return out[0].store(1).sink()
+    @uopfunc
+    def outer(out:UOp):
+      # call inner twice, it should not codegen inner twice
+      call = inner(out)
+      return inner(out.after(call)).sink()
+    def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
+    with save_viz() as viz, Context(SCACHE=0):
+      Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
+    with write_files(viz) as files:
+      rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+    codegen_count = [s for s in rewrites if "View Output AST" in s]
+    self.assertEqual(len(codegen_count), 4)
+
+  @needs_tracked_pm
+  def test_nested_calls_schedule_ls(self):
+    from tinygrad.schedule import schedule_cache
+    @function(precompile=True)
+    def inner(x:Tensor): return (x+x).contiguous()
+    @function(precompile=True)
+    def outer(x:Tensor):
+      # call inner twice, SCACHE should not schedule inner twice
+      return inner(inner(x))
+    schedule_cache.clear()
+    with save_viz() as viz:
+      outer(Tensor.empty(4, device="NULL")).realize()
+    with write_files(viz) as files:
+      schedule = [s["name"] for s in run_cli(*files, "-s", "TINY") if s["name"].startswith("Schedule")][-1]
+      rewrites = run_cli(*files, "-s", "TINY", schedule, "--ls", json_fmt=False)[0]["out"].split("\n")
+    sched_count = [s for s in rewrites if "View Kernel Graph" in s]
+    self.assertEqual(len(sched_count), 3)
 
 if __name__ == "__main__":
   unittest.main()

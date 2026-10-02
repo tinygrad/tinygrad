@@ -21,6 +21,7 @@ BASEDIR = pathlib.Path(__file__).parent
 if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
+def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def argfix(*x):
   if x and x[0].__class__ in (tuple, list):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
@@ -235,7 +236,7 @@ class _DEV(ContextVar):
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
-JIT, JIT_BATCH_SIZE = ContextVar("JIT", 1), ContextVar("JIT_BATCH_SIZE", 32)
+JIT = ContextVar("JIT", 1)
 WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
 USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("TC_MIN_GLOBALS", 0)
@@ -282,7 +283,7 @@ TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 CCACHE = ContextVar("CCACHE", 1)
 # allow tf32 to be used on NVIDIA GPUs
 ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
-# set to 0 to disable the scheduler cache
+# set to 0 to disable the scheduler cache, 2 to also persist it to disk
 SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
@@ -400,7 +401,7 @@ if getenv("DEBUG_GC"):
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 23
+VERSION = 24
 _db_connection = threading.local()
 def db_connection():
   if (conn:=getattr(_db_connection, "conn", None)) is None:
@@ -528,9 +529,10 @@ def system(cmd:str, **kwargs) -> str:
   return ret
 
 def cpu_objdump(lib, objdump_tool='objdump'):
-  with tempfile.NamedTemporaryFile(delete=True) as f:
-    pathlib.Path(f.name).write_bytes(lib)
-    print(system(f"{objdump_tool} -d {f.name}"))
+  with tempfile.TemporaryDirectory() as tmpdir:
+    path = pathlib.Path(tmpdir) / "kernel.o"
+    path.write_bytes(lib)
+    print(system(f"{objdump_tool} -d {path}"))
 
 def capstone_flatdump(lib: bytes, arch:str):
   try: import capstone

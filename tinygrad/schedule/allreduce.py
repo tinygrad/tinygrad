@@ -67,9 +67,9 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if output is None:
-    output = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), red.dtype, red.max_numel(), device=red.device))
+    output = UOp(Ops.ALLOC, src=UOp.device_range_src(red.device), arg=ParamArg(next(UOp.unique_num), red.dtype, red.max_numel(), device=red.device))
     output = output.reshape(red.max_shape).shrink_to(red.shape)
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
-  return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))
+  return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output.base, buf.contiguous(), name="allreduce", precompile=True))

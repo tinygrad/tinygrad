@@ -107,7 +107,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -147,7 +147,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -195,7 +195,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -237,7 +237,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -282,7 +282,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -334,7 +334,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -351,14 +351,14 @@ jobs:
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "METAL" ]]; then
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           DEBUG=2 SHOULD_USE_TC=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 HALF=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 BFLOAT16=1 python3 extra/gemm/simple_matmul.py
           M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
         elif [[ "${{ matrix.dev }}" == "NV" ]]; then
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-          DEV=NV:PTX ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+          DEV=NV:PTX ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
           DEV=CUDA SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
@@ -369,9 +369,9 @@ jobs:
           # M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
           # DEV=NV:PTX M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
         else
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           # TODO: this is flaky
-          # DEV=AMD:LLVM python3 test/opt/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/runtime/test_tensor_cores.py
           SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
           # TODO: AMD compiler bug causes this to fail
@@ -554,7 +554,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD', 'NV']
+        dev: ['AMD::gfx1201', 'NV']
     timeout-minutes: 5
     defaults:
       run:
@@ -567,8 +567,8 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids --sudoless
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} rmmod --expect
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
@@ -581,21 +581,21 @@ jobs:
     - name: Test driver cold start time
       run: time DEBUG=3 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       run: time DEBUG=3 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test GPU crash recovery
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       run: python3 -m pytest -rA test/external/external_test_gpu_crash.py
     - name: Test tensor cores
       run: |
-        if [[ "${{ matrix.dev }}" == "AMD" ]]; then
+        if [[ "${{ matrix.dev }}" == "NV" ]]; then
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+        else
           # Fails on 9070
-          # python3 test/test_linearizer.py test/opt/test_tensor_cores.py
-          # DEV=AMD:LLVM python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+          # python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
           # SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
-        else
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
         fi
     - name: Test DISK copy time
       run: TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
@@ -614,9 +614,9 @@ jobs:
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Remote
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       env:
-        DEV: PCI+AMD
+        DEV: PCI+AMD::gfx1201
       run: |
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
         server_pid=$!

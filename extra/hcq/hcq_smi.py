@@ -65,6 +65,13 @@ def cmd_kill_pids(args):
   devs = scan_devs_based_on_lock(prefix:={"amd":"am", "nv":"nv"}[args.backend], args)
   use_sudo = not getattr(args, "sudoless", False)
 
+  # with the kernel driver there are no locks and /proc/<pid>/fd is root-only, so lsof misses them. ask the driver.
+  for _ in range(128 if args.backend == "nv" and _is_module_loaded("nvidia") else 0):
+    if not (pids := set(subprocess.check_output(['nvidia-smi', '--query-compute-apps=pid', '--format=csv,noheader']).decode().split())): break
+    print(f"Killing processes {pids} (which use nvidia)")
+    subprocess.run((['sudo'] if use_sudo else []) + ['kill', '-9', *pids])
+    time.sleep(0.2)
+
   for dev in devs:
     for i in range(128):
       if i > 0: time.sleep(0.2)

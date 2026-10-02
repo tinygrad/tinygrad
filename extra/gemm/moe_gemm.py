@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.helpers import getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-from extra.gemm.cdna_asm_gemm import quantize_mxfp8, _mx_block_scale, _mx_block_scale_3d
+from extra.gemm.cdna_asm_gemm import quantize_mxfp8, mx_pack, _mx_block_scale, _mx_block_scale_3d
 
 ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
 
@@ -109,17 +109,22 @@ def custom_grouped_mx_gemm_bw(gradient:UOp, kernel:UOp, w_stored:bool=False) -> 
 
 _grouped_bw_stored = functools.partial(custom_grouped_mx_gemm_bw, w_stored=True)
 
-def grouped_mx_gemm(x:Tensor, w:Tensor|tuple[Tensor, Tensor], expert_off:Tensor) -> Tensor:
+def grouped_mx_gemm(x:Tensor|tuple[Tensor, Tensor], w:Tensor|tuple[Tensor, Tensor], expert_off:Tensor) -> Tensor:
+  if isinstance(x, tuple):
+    x_q, x_e8 = x
+    x_si, x = mx_pack(x_e8), x_q
+  else:
+    x_q, x_e8, x_si = quantize_mxfp8(x)
   if (pre_quantized := isinstance(w, tuple)):
     w_q, w_e8 = w
     E, N, K2 = w_q.shape
   else:
     E, N, K2 = w.shape
   M, K = x.shape
-  assert K == K2, f"shape mismatch {x.shape} {w.shape}"
-  assert M % 256 == 0 and N % 256 == 0 and K % 128 == 0, f"grouped mxfp8 needs M%256,N%256,K%128, got {x.shape} {w.shape}"
+  assert K == K2, f"shape mismatch K {K} != {K2}"
+  assert x_e8.shape == (M, K // 32)
+  assert M % 256 == 0 and N % 256 == 0 and K % 128 == 0, f"grouped mxfp8 needs M%256,N%256,K%128, got {M,K,N}"
   dname = (x.device[0] if isinstance(x.device, tuple) else x.device).split(":")[0]
-  x_q, x_e8, x_si = quantize_mxfp8(x)
   if not pre_quantized: w_q, w_e8, _ = quantize_mxfp8(w)
   w_si = mx_pack_3d(w_e8)
   xe_in, out_shape = x_e8.reshape(M, K // 32), (M, N)

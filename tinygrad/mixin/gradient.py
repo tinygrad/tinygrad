@@ -27,7 +27,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     git = iter(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return (None,) + tuple(None if i in outputs else next(git) for i in range(len(args)))
   assert outputs, f"expected a CALL with output STOREs or a grad_fxn, got {fxn.op}"
-  params = {p.arg.slot:p for p in fxn.toposort(enter_calls=False) if p.op is Ops.PARAM}
+  params = {p.arg.slot:p for p in fxn.toposort(enter_calls=False) if p.op is Ops.PARAM and p.arg.slot >= 0}
   grad_args = tuple(ctx.src[i] for i in outputs)
   root_grad = UOp.sink(*[g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)])
   grads = compute_gradient(UOp.sink(*[st.src[1] for st in outputs.values()]), root_grad, set(params.values()))
@@ -40,17 +40,19 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     args = tuple(a.after(k) if i in outputs else a for i,a in enumerate(args))
   args += grad_args
   bwd_body = renumber_invalid_outputs(bwd_body)
-  # Compact only this scope's PARAMs, not those of nested calls.
+  # Compact this scope's PARAMs, capturing free Variables as inputs.
   used = sorted((p for p in bwd_body.toposort(enter_calls=False) if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
-  bwd_body = bwd_body.substitute({p:p.replace(arg=dataclasses.replace(p.arg, slot=i)) for i,p in enumerate(used)}, walk=True)
-  bwd_outs = dict(zip(grad_bodies, UOp.call_with_outputs(bwd_body.src, *[args[p.arg.slot] for p in used],
+  bwd_args = [p if p.arg.slot < 0 else args[p.arg.slot] for p in used]
+  bwd_body = bwd_body.substitute({p:p.replace(arg=dataclasses.replace(p.arg, slot=i, name=None, val=None))
+                                  for i,p in enumerate(used)}, walk=True)
+  bwd_outs = dict(zip(grad_bodies, UOp.call_with_outputs(bwd_body.src, *bwd_args,
                                                        name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)))
   return (None,) + tuple(bwd_outs.get(i) for i in range(len(k.src)-1))
 
 def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
   # A write through a non-overlapping view replaces only that region of the returned state.
   path, base = [], view
-  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP}:
+  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD}:
     path.append(base)
     base = base.src[0]
   if base is not dest: return None
@@ -87,7 +89,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
-  (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
+  (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),) + (None,) * (len(ret.src)-1)),
   (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
@@ -97,7 +99,8 @@ pm_gradient = PatternMatcher([
    lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="dest"), UPat())))), lambda ctx,dest: (None, ctx)),
-  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))), partial_store_gradient),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))),
+   lambda ctx, dest, view: partial_store_gradient(ctx, dest, view)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),

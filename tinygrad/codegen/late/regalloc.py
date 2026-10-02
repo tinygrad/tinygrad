@@ -57,7 +57,7 @@ class LinearScanRegallocContext:
       # allocate uses
       for s in u.src:
         # HACK: cause of later hacks to lower range
-        if u.op is Ops.END: continue
+        if u.op in (Ops.END, Ops.BACKEDGE): continue
         if not isinstance(v:=rdef(s), Register): continue
         if v not in live: live[v] = fill(v, i)
         self.reals.setdefault(i, {})[v] = live[v]
@@ -90,7 +90,7 @@ class LinearScanRegallocContext:
         live_ins.append(live_in)
 
       # loop epilogue, reload registers that were live at loop entry
-      if u.op is Ops.END:
+      if u.op in (Ops.END, Ops.BACKEDGE):
         # TODO: if a uop is in a different reg in live out vs live in move between registers instead of loading
         # TODO: don't reload if first use in loop is a load
         for v,r in live_ins.pop().items():
@@ -114,5 +114,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])

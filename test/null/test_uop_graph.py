@@ -1,10 +1,9 @@
-import unittest, pytest
-from tinygrad import dtypes, Variable, Device
+import unittest, pytest, weakref
+from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from test.helpers import full_rewrite, to_uops_list
-from tinygrad.codegen import full_rewrite_to_sink
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.weakint), lambda x: UOp.const(1.0) + UOp.const(2.0)),
@@ -12,6 +11,30 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(x.val*y.val*z.val)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
 ])
+
+class TestTuplize(unittest.TestCase):
+  def test_equality_is_identity(self):
+    # the invariant that makes identity equality correct: tuples are equal iff the UOps are the same object
+    a, b = UOp.const(1), UOp.const(2)
+    pairs = [(a, UOp.const(1)), (a, b), (a, a+b), (a+b, b+a), (UOp.sink(a, b), UOp.sink(a, b))]
+    for x, y in pairs: self.assertEqual(x.tuplize == y.tuplize, x is y)
+    # tags are not part of the order: tag-only differences order neither way, like value-equal plain tuples
+    self.assertFalse(a.tuplize < a.rtag("tagged").tuplize)
+    self.assertFalse(a.rtag("tagged").tuplize < a.tuplize)
+
+  def test_deep_shared_subgraphs(self):
+    # long equal prefixes with a difference at the bottom: correct order, and the pathological case for value equality
+    a, b = UOp.const(1), UOp.const(2)
+    for _ in range(256):
+      a, b = [UOp(Ops.ADD, src=(u, u)) for u in (a, b)]
+    self.assertNotEqual(a.tuplize < b.tuplize, b.tuplize < a.tuplize)
+
+  def test_does_not_retain_uops(self):
+    a = UOp.const(1).rtag(object())
+    ref = weakref.ref(a)
+    _ = a.tuplize
+    del a
+    self.assertIsNone(ref())
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
@@ -140,7 +163,7 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.val, 3.0)
 
   def test_depth_2_fold(self):
-    v = UOp.variable("v", 0, 1, dtypes.float, param=True)
+    v = UOp.variable("v", 0, 1, dtypes.float)
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
@@ -234,7 +257,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 1)
 
   def test_depth_2_const_fold(self):
-    v = UOp.variable("tmp", 0, 1, dtypes.int, param=True)
+    v = UOp.variable("tmp", 0, 1, dtypes.int)
     c2 = UOp.const(2)
     c4 = UOp.const(4)
     vc = v+c2
@@ -330,7 +353,7 @@ class TestUOpGraph(unittest.TestCase):
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
     c4 = c3.index(c1)
-    c5 = UOp.range(UOp.const(240), 0, AxisType.REDUCE)
+    c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
     c8 = c7.index(c6)
@@ -347,7 +370,7 @@ class TestUOpGraph(unittest.TestCase):
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
     c4 = c3.index(c1)  # c4 is a load
-    c5 = UOp.range(UOp.const(240), 0, AxisType.REDUCE)
+    c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
     c8 = c7.index(c6)
@@ -400,7 +423,7 @@ class TestUOpGraph(unittest.TestCase):
     c = r + 1
     self.assertIn(r, c.ranges)
 
-    e = UOp.const(1).end(r)
+    e = UOp(Ops.NOOP).end(r)
     self.assertNotIn(r, e.ranges)
 
     a = c.after(e)
@@ -408,13 +431,13 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_external_call_preserves_ranges(self):
     r = UOp.range(4, 0, dtype=dtypes.int)
-    fn = UOp.custom_function("external", UOp.const(0, dtypes.uint64))
-    call = fn.call(r + 1, ret_dtype=dtypes.int)
+    fn = UOp.custom_function("external", dtype=dtypes.int)
+    call = fn.call(UOp.const(0, dtypes.uint64), r + 1)
     self.assertEqual(set(call.ranges), {r})
 
-  def test_conditional_end_preserves_outer_range(self):
+  def test_backedge_preserves_outer_range(self):
     outer, inner = UOp.range(4, 0), UOp.loop(1)
-    end = UOp.const(1).end(inner, outer < 2)
+    end = UOp.const(1).backedge(inner, outer < 2)
     self.assertEqual(set(end.ranges), {outer})
     self.assertEqual(set((outer + 1).after(end).ranges), {outer})
 
@@ -438,9 +461,9 @@ class TestReduceCollapse(unittest.TestCase):
   def test_reduce_shapeless_const_unroll(self):
     """a REDUCE over a shapeless CONST (e.g. x*0 folded late in codegen) must collapse before the expander"""
     out = UOp.param(0, dtypes.float, 1)
-    red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UNROLL), arg=(Ops.ADD, 0))
+    red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UPCAST), arg=(Ops.ADD, 0))
     ast = UOp.sink(out.index(UOp.const(0)).store(red)).replace(arg=KernelInfo())
-    uops = full_rewrite_to_sink(ast, Device["CPU"].renderer, optimize=False).toposort()
+    uops = full_rewrite(ast).toposort()
     self.assertNotIn(Ops.REDUCE, [u.op for u in uops])
     self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
 
@@ -474,7 +497,7 @@ class TestConstBufferize(unittest.TestCase):
     from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(42.0)
     r1 = UOp.range(3, 0)
-    bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device="CPU"))
+    bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device=None))
     self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
 
     result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
@@ -489,7 +512,7 @@ class TestConstBufferize(unittest.TestCase):
     c = UOp.const(3.14)
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)
-    bufferize_with_ranges = c.bufferize(r1, r2, arg=BufferizeOpts(device="CPU"))
+    bufferize_with_ranges = c.bufferize(r1, r2, arg=BufferizeOpts(device=None))
     self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
 
     result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')

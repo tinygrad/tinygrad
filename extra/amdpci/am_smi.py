@@ -4,7 +4,7 @@ import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections
 from tinygrad.helpers import DEBUG, NO_COLOR, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 

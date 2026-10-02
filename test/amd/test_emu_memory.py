@@ -55,4 +55,33 @@ class TestFlatCDNA(unittest.TestCase):
     expected[1] = expected[4] = 0x12345678
     self.assertEqual(list(mem), expected)
 
+class TestDSCDNA(unittest.TestCase):
+  def test_ds_write_acc(self):
+    for width, count in ((32, 1), (64, 1), (96, 1), (128, 1), (32, 2), (64, 2)):
+      for acc in (0, 1):
+        with self.subTest(width=width, count=count, acc=acc):
+          values = [0x12345678, 0x90ABCDEF, 0xFEDCBA98, 0x76543210]
+          mem = (ctypes.c_uint32 * 4)(*([0xDEADBEEF] * 4))
+          addr = ctypes.addressof(mem)
+          instructions = [rc.v_mov_b32_e32(rc.v[0], addr & 0xFFFFFFFF), rc.v_mov_b32_e32(rc.v[1], addr >> 32),
+                          rc.v_mov_b32_e32(rc.v[2], 0)]
+          # Keep different data in VGPRs and ACCVGPRs; the LDS address always comes from VGPRs.
+          for i, value in enumerate(values):
+            instructions += [rc.v_mov_b32_e32(rc.v[4+i], value), rc.v_accvgpr_write(rc.v[4+i], rc.v[4+i]),
+                             rc.v_mov_b32_e32(rc.v[4+i], value ^ 0xFFFFFFFF)]
+          data0 = rc.v[4:3+width//32]
+          if count == 1:
+            instructions.append(getattr(rc, f'ds_write_b{width}')(addr=rc.v[2], data0=data0, acc=acc))
+          else:
+            instructions.append(getattr(rc, f'ds_write2_b{width}')(addr=rc.v[2], data0=data0, data1=rc.v[4+width//32:3+width//16],
+                                                                 offset1=1, acc=acc))
+          for i in range(width*count//32):
+            instructions += [rc.ds_read_b32(vdst=rc.v[8], addr=rc.v[2], offset0=i*4),
+                             rc.global_store_dword(addr=rc.v[0:1], data=rc.v[8], saddr=rc.NULL, offset=i*4)]
+          code = b''.join(inst.to_bytes() for inst in instructions + [rc.s_endpgm()])
+          kernel = ctypes.create_string_buffer(code)
+          self.assertEqual(run_asm(ctypes.addressof(kernel), len(code), 1, 1, 1, 1, 1, 1, 0, rsrc2=0x19c | (1 << 15), arch='cdna'), 0)
+          expected = [v if acc else v ^ 0xFFFFFFFF for v in values[:width*count//32]]
+          self.assertEqual(list(mem), expected + [0xDEADBEEF] * (4-len(expected)))
+
 if __name__ == '__main__': unittest.main()

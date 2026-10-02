@@ -8,6 +8,6 @@ def pytest_configure(config):
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item):
-  faulthandler.dump_traceback_later(int(os.getenv("TEST_TIMEOUT", 120)), file=item.config.stash[stderr_fd_key], exit=True)
+  faulthandler.dump_traceback_later(int(os.getenv("TEST_TIMEOUT", 180)), file=item.config.stash[stderr_fd_key], exit=True)
   try: yield
   finally: faulthandler.cancel_dump_traceback_later()

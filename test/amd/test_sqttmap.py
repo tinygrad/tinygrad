@@ -5,7 +5,7 @@ from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
-from tinygrad.viz.serve import sqtt_timeline, amd_decode
+from tinygrad.viz.serve import sqtt_timeline, amd_decode, get_arch, get_elf_section
 from test.amd.disasm import disasm
 from test.null.test_viz import run_cli
 
@@ -23,7 +23,8 @@ def needs_rocprof(fn):
         data = pickle.load(f)
       sqtt = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"][1]
       kern = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}[sqtt.kern]
-      rctx = roc_decode([sqtt], {kern.tag:{addr+kern.base:inst for addr,inst in amd_decode(kern.lib, "gfx1200").items()}})
+      decoded = amd_decode((text:=get_elf_section(kern.lib, ".text")).content, get_arch("gfx1200"), text.header.sh_addr)
+      rctx = roc_decode([sqtt], {kern.tag:{addr+kern.base:inst for addr,inst in decoded.items()}})
       insts = [e.time for e in list(rctx.inst_execs.values())[0][0].unpack_insts()]
       self.assertListEqual(insts, [28178, 28179, 28180, 28181, 28182, 29882, 29883, 29884, 29885, 30966, 30983, 30985, 30992, 30993])
     except Exception as e: self.skipTest(f"latest rocprof not available, install with extra/sqtt/install_rocprof_decoder.py: {e}")
@@ -32,7 +33,7 @@ def needs_rocprof(fn):
 
 def rocprof_inst_traces_match(sqtt, prg, target):
   from extra.sqtt.roc import decode as roc_decode, InstExec
-  addr_table = amd_decode(prg.lib, target)
+  addr_table = amd_decode((text:=get_elf_section(prg.lib, ".text")).content, get_arch(target), text.header.sh_addr)
   disasm_map = {addr+prg.base:inst for addr,inst in addr_table.items()}
   rctx = roc_decode([sqtt], {prg.tag:disasm_map})
   rwaves = rctx.inst_execs.get((sqtt.kern, sqtt.exec_tag), [])

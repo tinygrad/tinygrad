@@ -2,16 +2,14 @@ import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  # ranges in the cond should not be ended
-  backedge = tuple(x for x in rngs if x.dtype in (dtypes.void, dtypes.bool))
-  return r.replace(src=r.src[:off]+tuple(UOp.sink(*[x for x in rngs if x not in backedge]).ranges)+backedge)
+  return r.replace(src=r.src[:off]+tuple(dedup(x for s in rngs for x in ((s,) if s.op is Ops.RANGE else s.ranges))))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -25,14 +23,14 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
     # check same type
-    if r0.arg[-1] == r1.arg[-1]:
+    if r0.axis_type == r1.axis_type:
       # check if the ranges to merge are in the same reduces
       if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
         s0, s1 = r0.src[0], r1.src[0]
         # do the merge
         new_range = r0.replace(src=(s0*s1,))
         nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+                             name=f"check_merge_{r0.axis_id}_{r1.axis_id}")
 
         # check if it simplifies. return after one merge so the next rewrite uses the new ranges,
         # rather than continuing with stale pairs from the original ended_ranges.
@@ -50,6 +48,13 @@ def mark_gated(ctx, idx):
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
+  if x.arg is None: return None
+  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
+  ctx.clear()
+  return None if ret is x else ret.simplify()
+
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
   (UPat(Ops.INDEX, name="idx"), mark_gated),
@@ -60,18 +65,13 @@ pm_simplify_ranges = PatternMatcher([
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   # ranges that aren't looped over can't be split
-  if r not in ctx and r.arg[-1] not in {AxisType.WARP, AxisType.DEVICE} \
+  if r not in ctx and r.axis_type not in {AxisType.WARP, AxisType.DEVICE} \
     and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
-
-def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
-  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
-  ctx.clear()
-  return None if ret is x else ret.simplify()
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg+(0,))*v + k.replace(src=(v,), arg=k.arg+(1,)))),
 ])
 
 # **** reduce simplification ****
@@ -133,8 +133,8 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
-        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER}: continue
-        replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype, param=True)
+        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: continue
+        replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
     if not no_range(sink): return None
