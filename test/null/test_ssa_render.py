@@ -51,6 +51,7 @@ def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
                   pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, "volatile" in flags)
 
 def parse_ssa(text:str) -> UOp:
+  # the wire format carries storage declarations without runtime state: `buffer` reconstructs as an ALLOC
   nodes, root = {}, None
   def parse_tok(tok:str) -> UOp:
     if tok.startswith("%"): return nodes[int(tok[1:])]
@@ -84,25 +85,27 @@ def parse_ssa(text:str) -> UOp:
     elif argstr:
       try: arg = pyast.literal_eval(argstr)
       except (SyntaxError, ValueError): arg = argstr
+    if op is Ops.BUFFER: op = Ops.ALLOC
     nodes[n] = root = UOp(op, src=tuple(srcs), arg=arg)   # root is always the last node
   assert root is not None, "empty graph"
   return root
 
-def _strip_buffers(root:UOp) -> set:
+def _strip_buffers(root:UOp) -> UOp:
   # the wire format drops the bound runtime Buffer (it can't be a roundtrip; see pyrender's identical constraint).
   # substitute bufferless BUFFERs through the whole graph, then compare structure
-  subs = {b: b.replace(arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.size, b.arg.vmin_vmax, b.arg.multiple_of,
-                                    b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
-          for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.buffer is not None}
-  if subs: root = root.substitute(subs, walk=True, name="strip buffers for wire format test")
-  return {x.tuplize for x in root.toposort()}
+  # convert realized BUFFERs to ALLOCs: a BUFFER with no runtime binding is exactly an ALLOC (and SPEC-legal to construct)
+  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.size, b.arg.vmin_vmax, b.arg.multiple_of,
+                                                 b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
+          for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
+  return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root
 
 def assert_roundtrip(case, root:UOp):
   txt = render_ssa(root)
   parsed = parse_ssa(txt)
-  # structural equality via the interning cache: re-rendering must be identical text
-  case.assertEqual(txt, render_ssa(parsed))
-  case.assertEqual(_strip_buffers(root), _strip_buffers(parsed))
+  # text + structural equality, both sides stripped: realized BUFFER vs parsed ALLOC converge to the same thing
+  g1, g2 = _strip_buffers(root), _strip_buffers(parsed)
+  case.assertEqual(render_ssa(g1), render_ssa(g2))
+  case.assertEqual({x.tuplize for x in g1.toposort()}, {x.tuplize for x in g2.toposort()})
 
 class TestSSARender(unittest.TestCase):
   def test_gemm_pre_rangeify(self):
