@@ -258,7 +258,7 @@ pm_replace_buf = PatternMatcher([
 ])
 
 def transform_to_call(big_sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.
