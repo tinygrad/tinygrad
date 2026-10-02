@@ -27,7 +27,6 @@ def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.value, 1
 
 @uopfunc
 def cuda_run(cmdbuf:UOp, rt_vars:UOp, cmds:tuple, copy:bool) -> UOp: # rt_vars: [ctx, compute stream, copy stream, status]
-  # an arg of a call is a word of the cmdbuf, (word,) a pointer to it, None the stream
   words, h = cmdbuf.bitcast(dtypes.uint64), ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
   for fn, *args in cmds:
     s = rt_vars.after(h).index(2 if copy else 1).load() # the stream after the last call
