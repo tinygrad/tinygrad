@@ -298,7 +298,7 @@ multi_pm = PatternMatcher([
   # rewrite value-producing calls explicitly for UNSHARD
   # NOTE: lambda for late binding, rewrite_into_function references multi_pm
   (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call)),
-  (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
+  (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),

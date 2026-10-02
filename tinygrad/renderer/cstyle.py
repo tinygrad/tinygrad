@@ -37,8 +37,6 @@ base_rewrite = PatternMatcher([
   (UPat.cvar("c").cast(), lambda ctx,c: str(c.val)),
 
   # casting
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
-    if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(({ctx._render_dtype(x.dtype, addrspace=x.addrspace)})({ctx[x.src[0]]}))"
    if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
