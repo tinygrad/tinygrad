@@ -69,9 +69,8 @@ base_rewrite = PatternMatcher([
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{ctx.fn_names[body]}({', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}'
-                                     for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u:u.arg.slot))});"),
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{ctx.fn_names[body]}("
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src if u.op is Ops.PARAM))});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -264,8 +263,7 @@ class CStyleLanguage(Renderer):
 
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
-  def param_type(self, p:UOp) -> str: # the func decides its params' types, a call casts its args to them (e.g. drops volatile)
-    return ("volatile " if p.arg.volatile else "") + self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)
+  def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
     prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
     prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in UOp.sink(*uops).toposort() if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
