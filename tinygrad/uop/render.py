@@ -1,7 +1,8 @@
-from tinygrad.dtype import dtypes
+import re, sys
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort, sint
-from tinygrad.helpers import strip_parens
+from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, KernelInfo, range_str, consumer_map_from_toposort, sint
+from tinygrad.helpers import strip_parens, NO_COLOR
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
   def dfs(x:UOp, cache:dict):
@@ -13,13 +14,88 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
   cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
-# ***** uop helpers *****
+# ***** SSA wire format (uop v1) *****
+# human-readable, and parse(render(x)) roundtrips structurally. dtypes are rust-style: f32/i32/u8/bf16
 
-def print_uops(uops:list[UOp]):
-  uops_index = {u:i for i,u in enumerate(uops)}
-  for i,u in enumerate(uops):
-    formatted_srcs = [(uops_index[x] if x.op is not Ops.CONST else f"{x.val}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+def dtname(dt:DType) -> str:
+  if dtypes.is_bool(dt): return "bool"
+  if dt in dtypes.weaks or dt is dtypes.void: return dt.name
+  if dtypes.is_float(dt):
+    if dt is dtypes.bfloat16: return "bf16"
+    return dt.name.replace("float8_", "f8") if dt.bitsize == 8 else f"f{dt.bitsize}"   # float8_e4m3 -> f8e4m3
+  return ("u" if dtypes.is_unsigned(dt) else "i") + str(dt.bitsize)
+
+def _render_const(x:UOp) -> str:
+  if x.is_invalid: return "invalid"
+  dt, v = x.dtype, x.val
+  if dtypes.is_bool(dt): return str(bool(v)).lower()
+  if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
+  if dtypes.is_float(dt): return f"f{dt.bitsize}:{float(v).hex()}"  # float.hex() roundtrips exactly, inf/nan included
+  return f"i{dt.bitsize}:{v}"
+
+def _render_paramarg(x:UOp) -> str:
+  a, opts = x.arg, ""
+  if a.size is not None: opts += f" size={a.size}"
+  if a.vmin_vmax is not None: opts += f" bounds=[{a.vmin_vmax[0]},{a.vmin_vmax[1]}]"
+  if a.multiple_of is not None: opts += f" multiple_of={a.multiple_of}"
+  if a.addrspace not in (None, AddrSpace.GLOBAL): opts += f" addrspace={a.addrspace.name}"
+  if a.device is not None:
+    opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))
+  if a.volatile: opts += " volatile"
+  name = f'"{a.name}" ' if a.name is not None else ""
+  return f"{name}dtype={dtname(x.dtype)} slot={a.slot}{opts}"
+
+def _render_arg(x:UOp) -> str:
+  match x.op:
+    case Ops.CONST: return _render_const(x)
+    case Ops.PARAM | Ops.BUFFER | Ops.ALLOC: return _render_paramarg(x)
+    case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
+    case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
+    case Ops.REDUCE: return f"op={x.arg[0].name.lower()}" + (f" pop={x.arg[1]}" if x.arg[1] else "")
+    case Ops.CAST | Ops.BITCAST: return dtname(x.arg)   # one scalar -> bare (rule 1)
+    case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
+    case _: return repr(x.arg) if x.arg is not None else ""
+
+# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
+def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
+
+# the viz node color palette (single source of truth; viz/serve.py renders this in the browser, we're the terminal version)
+uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
+               Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
+               Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
+               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
+               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
+               Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
+               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
+               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
+               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
+               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
+
+def _truecolor(st:str, hex_color:str) -> str:
+  if NO_COLOR: return st
+  r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+  return f"\x1b[38;2;{r};{g};{b}m{st}\x1b[0m"
+
+def _op_name(u:UOp, color:bool) -> str:
+  s = u.op.name.lower()
+  return _truecolor(s, uops_colors[u.op]) if color and u.op in uops_colors else s
+
+def render_ssa(root:UOp|list[UOp], header:str="", color:bool=False) -> str:
+  toposort = list(root.toposort()) if isinstance(root, UOp) else list(root)
+  table = {u:i for i,u in enumerate(u for u in toposort if not _inline(u))}
+  def src_str(u:UOp) -> str:
+    if u.op is Ops.CONST: return _render_const(u)
+    if _inline(u): return "(" + ", ".join(src_str(s) for s in u.src) + ")"
+    return f"%{table[u]}"
+  lines = [l for l in [header] if l]  # optional caller-supplied header line
+  for u,(i) in ((u, table[u]) for u in toposort if not _inline(u)):
+    pieces = [f"%{i} =", _op_name(u, color)]
+    if len(u.src): pieces.append(", ".join(src_str(s) for s in u.src))
+    if (a:=_render_arg(u)): pieces.append(f": {a}")   # args always after ':'
+    lines.append(" ".join(pieces))
+  return "\n".join(lines)
+
+def print_uops(uops:list[UOp]): print(render_ssa(uops, color=sys.stdout.isatty()))
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.FLOORDIV: "//", Ops.FLOORMOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",

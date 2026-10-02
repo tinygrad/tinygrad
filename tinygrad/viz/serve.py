@@ -41,20 +41,10 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo, CallInfo
-from tinygrad.uop.render import print_uops, pyrender
+from tinygrad.uop.render import render_ssa, pyrender, uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
-uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
-               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
-               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
-               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
-               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
-               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
-               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
 addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
 
@@ -92,6 +82,7 @@ def load_rewrites(data:VizData) -> None:
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
         lin_idx = None
       if s.name == "View Program": ki = _reconstruct(data, s.sink, depth=1).src[0].arg
+      if s.name == "View Tensor Graph": steps.append(create_step("View Input UOps", ("/input-uops", i, len(steps)), j, depth=0))
     for key in k.keys: data.ref_map[canonicalize_ast(key) if isinstance(key, UOp) else key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
@@ -649,9 +640,12 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
+  if fmt == "input-uops":
+    sink = unwrap(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink))
+    return {"src":render_ssa(list(sink.toposort()), color=True)}   # ANSI; the web UI decodes it (parseColors in index.js)
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":render_ssa(list(unwrap(sink).src[1].src), color=True)}
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
