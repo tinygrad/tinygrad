@@ -259,6 +259,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def val(self):
     if self.op is Ops.CONST: return self.arg
+    if self.op is Ops.GETADDR: return cast("Buffer", self.src[0].buffer).get_buf(to_tuple(self.arg)[0])
     # a casted const CAST(dt, CONST(v)) is one const: .val reads the value through the CAST
     assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
     return self.src[0].val
@@ -546,8 +547,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     arg = replace(self.arg, buffer=cast("Buffer", object())) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
     # hcq2 calls have BUFFER UOps in the arg, tracing must store them as trace_nums
     if isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-      arg = replace(arg, aux=replace(aux, written_bufs=tuple(b.trace_num for b in aux.written_bufs),
-                                     inputs=tuple((u.trace_num, d, i) for u, d, i in aux.inputs)))
+      arg = replace(arg, aux=replace(aux, written_bufs=tuple(b.trace_num for b in aux.written_bufs)))
     uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg, tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
 
@@ -1168,7 +1168,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if (x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU) or x.is_variable))
+    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU))
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
@@ -1330,7 +1330,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
 def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(*args): uop args become params
   def param(i:int, n:str, a:UOp) -> UOp:
-    if a.addrspace in (None, AddrSpace.ALU): return UOp.param(i, a.dtype, name=n, addrspace=AddrSpace.ALU)
+    if a.addrspace in (None, AddrSpace.ALU): return UOp.param(i, a.commit_dtype(dtypes.int), name=n, addrspace=AddrSpace.ALU)
     return UOp.param(i, a.dtype, 1 if a.op is Ops.INDEX else a.max_numel(), a.device, name=n, addrspace=a.addrspace)
   def outlined(*args, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
