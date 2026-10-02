@@ -21,6 +21,7 @@ BASEDIR = pathlib.Path(__file__).parent
 if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
+def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def argfix(*x):
   if x and x[0].__class__ in (tuple, list):
     if len(x) != 1: raise ValueError(f"bad arg {x}")

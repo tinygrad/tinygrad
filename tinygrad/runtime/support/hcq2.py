@@ -3,9 +3,9 @@ from typing import cast, Any, Sequence
 import functools, itertools, weakref, ctypes, struct
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
-from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv
+from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
-from tinygrad.device import Device, Buffer, BufferSpec, TinyELF, HCQ_RUNTIME_DEV
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
@@ -56,7 +56,6 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
 
 def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTACK else u.mselect(lane) if len(to_tuple(u.device)) > 1 else u
 
-def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
@@ -545,6 +544,9 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
 # *****************
 # 5. link
 
+Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="timeline", name="b"), lambda b: Device[to_tuple(b.device)[0]].timeline),
+                                        (UPat(Ops.PARAM, tag="program", name="b"), lambda b: Device[to_tuple(b.device)[0]].program_buffer(b))])
+
 @dataclass
 class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
@@ -553,8 +555,8 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
 
   dev = Device[to_tuple(b.device)[0]]
 
-  # device owns the placeholders it names
-  if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
+  # a device owns the placeholders it names, the rest are allocated where they live
+  if (r:=cast(Buffer|None, Compiled.pm_bufferize.rewrite(b))) is not None: pass
   elif not ctx.use_rt:
     spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile or b.tag.startswith("cmdbuf"), cpu_access=True)
     r = Buffer(dev.device, max(b.max_numel(), 1), b.dtype, options=spec, preallocate=True)
