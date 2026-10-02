@@ -10,7 +10,6 @@ asm_call_counter = itertools.count(1)
 
 def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -> UOp:
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
-  assert backend in {"CPU", "PYTHON"}, f"unsupported ASM_CALL_BACKEND={backend}"
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
