@@ -682,7 +682,7 @@ class NVDevice(Compiled):
       UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
       UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
       UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue, fn="submit_nv_raw")
-    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
+    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)
 
