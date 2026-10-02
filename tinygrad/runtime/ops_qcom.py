@@ -12,7 +12,7 @@ from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -51,6 +51,12 @@ def pkt7_hdr(opcode: int, cnt: int): return mesa.CP_TYPE7_PKT | cnt & 0x3FFF | p
 def pkt4_hdr(reg: int, cnt: int): return mesa.CP_TYPE4_PKT | cnt & 0x7F | parity(cnt) << 7 | (reg & 0x3FFFF) << 8 | parity(reg) << 27
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
+
+@uopfunc
+def qcom_submit(req:UOp, ret:UOp, fd:UOp) -> UOp: # the kernel driver takes the command buffer
+  idir, base, nr, struct_t = kgsl.IOCTL_KGSL_GPU_COMMAND.args
+  ioctl_cmd = (idir << 30) | (ctypes.sizeof(struct_t) << 16) | (base << 8) | nr
+  return ret.index(0).store(ccall(libc.dll.ioctl, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.index(0))).sink()
 
 class QCOMComputeQueue(HWQueue):
   dev:QCOMDevice
@@ -197,11 +203,7 @@ class QCOMComputeQueue(HWQueue):
     obj = cstruct(kgsl.struct_kgsl_command_object, gpuaddr=ib.getaddr(self.devs) + ib_off, size=cmdbuf.max_numel(), flags=kgsl.KGSL_CMDLIST_IB)
     req = cstruct(kgsl.struct_kgsl_gpu_command, cmdlist=obj.getaddr(HCQ_RUNTIME_DEV.value), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
                   numcmds=1, context_id=ctxid)
-    ret = UOp.placeholder((1,), dtypes.int32, device=self.devs, volatile=True, tag="submit_ret")
-
-    idir, base, nr, struct_t = kgsl.IOCTL_KGSL_GPU_COMMAND.args
-    ioctl_cmd = (idir << 30) | (ctypes.sizeof(struct_t) << 16) | (base << 8) | nr
-    return ret.index(0).store(ccall(libc.dll.ioctl, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.after(cmdbuf).index(0)))
+    return qcom_submit(req.after(cmdbuf), UOp.placeholder((1,), dtypes.int32, device=self.devs, volatile=True, tag="submit_ret"), fd)
 
 class QCOMProgramData:
   def __init__(self, dev:QCOMDevice, obj:TinyELF):
