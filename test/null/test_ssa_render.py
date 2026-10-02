@@ -15,11 +15,9 @@ from tinygrad.helpers import Context
 _DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
 
 _line_re = re.compile(r"^\s*%(\d+) = (\w+)\s*(.*)$")
-_range_re = re.compile(r"^(\w+) r([\d_]+)$")
 
 def _split_top(s:str) -> list[str]:
   "split on ', ' at paren depth 0"
-  if not s.strip(): return []
   parts, d, last = [], 0, 0
   for i,c in enumerate(s):
     if c in "([": d += 1
@@ -27,55 +25,45 @@ def _split_top(s:str) -> list[str]:
     if c == ',' and d == 0 and s[i+1:i+2] == ' ': parts.append(s[last:i]); last = i+2  # noqa: E702
   return parts + [s[last:]]
 
+def _kv(zone:str) -> tuple[dict[str, str], set[str]]:
+  """the arg zone is k=v tokens plus bare flags"""
+  kv, flags = {}, set()
+  for t in zone.split(): (kv.__setitem__(t.split("=")[0], t.split("=", 1)[1])) if "=" in t else flags.add(t)
+  return kv, flags
+
 def _parse_const(tok:str) -> UOp:
   if tok == "invalid": return UOp(Ops.CONST, src=(), arg=Invalid)
   if tok in ("true", "false"): return UOp(Ops.CONST, src=(), arg=tok == "true")
-  m = re.match(r"^f(16|32|64):(.+)$", tok)
-  if m:
-    v = float("nan") if m[2] == "nan" else float.fromhex(m[2])
-    return UOp(Ops.CONST, src=(), arg={16:dtypes.float16, 32:dtypes.float32, 64:dtypes.float64}[int(m[1])].const(v))
-  m = re.match(r"^i(8|16|32|64):(.+)$", tok)
-  if m: return UOp(Ops.CONST, src=(), arg={8:dtypes.int8, 16:dtypes.int16, 32:dtypes.int32, 64:dtypes.int64}[int(m[1])].const(int(m[2])))
+  if ":" in tok:
+    dt = _DTYPES_BY_NAME[d:=tok.split(":", 1)[0]]
+    return UOp(Ops.CONST, src=(), arg=dt.const(float.fromhex(tok[len(d)+1:])) if dtypes.is_float(dt) else dt.const(int(tok[len(d)+1:])))
   if re.match(r"^-?\d+$", tok): return UOp(Ops.CONST, src=(), arg=int(tok))
-  if re.match(r"^-?\d+\.\d*(e[+-]\d+)?$", tok): return UOp(Ops.CONST, src=(), arg=dtypes.weakfloat.const(float(tok)))
-  raise RuntimeError(f"bad const {tok!r}")
+  return UOp(Ops.CONST, src=(), arg=dtypes.weakfloat.const(float(tok)))
 
 def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
-  kw: dict = {"slot": -1, "dtype": None, "name": name, "addrspace": AddrSpace.GLOBAL}
-  _kw = r"dtype=(\w+)|(slot|size|multiple_of)=(-?\d+)|bounds=\[(-?\d+),(-?\d+)\]|addrspace=(\w+)|device=(\'[^\']*\'|\([^)]*\)|[\w:]+)|volatile"
-  for m in re.finditer(_kw, rest):
-    if m.group(1) is not None: kw["dtype"] = _DTYPES_BY_NAME[m.group(1)]
-    elif m.group(2) is not None: kw[m.group(2)] = int(m.group(3))
-    elif m.group(4) is not None: kw["vmin_vmax"] = (int(m.group(4)), int(m.group(5)))
-    elif m.group(6) is not None: kw["addrspace"] = AddrSpace[m.group(6)]
-    elif m.group(7) is not None:
-      d = m.group(7)
-      kw["device"] = pyast.literal_eval(d) if d[0] in "'(" else d
-    else: kw["volatile"] = True
-  assert kw["dtype"] is not None
-  return ParamArg(kw["slot"], kw["dtype"], kw.get("size"), kw.get("vmin_vmax"), kw.get("multiple_of"), name, kw["addrspace"], kw.get("device"), kw.get("volatile", False))  # noqa: E501
+  kv, flags = _kv(rest)
+  def kw(k:str, default=None): return kv[k] if k in kv else default
+  dev = kw("device")
+  return ParamArg(int(kw("slot")), _DTYPES_BY_NAME[kw("dtype")], int(kv["size"]) if "size" in kv else None,
+                  tuple(map(int, kv["bounds"].strip("[]").split(","))) if "bounds" in kv else None,
+                  int(kv["multiple_of"]) if "multiple_of" in kv else None, name,
+                  AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
+                  pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, "volatile" in flags)
 
 def parse_ssa(text:str) -> UOp:
-  nodes: dict[int, UOp] = {}
-  root: UOp|None = None
+  nodes, root = {}, None
   def parse_tok(tok:str) -> UOp:
-    tok = tok.strip()
     if tok.startswith("%"): return nodes[int(tok[1:])]
-    if tok.startswith("("):
-      if not tok.endswith(")"): raise RuntimeError(f"bad inline {tok!r}")
-      return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in _split_top(tok[1:-1])))
+    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in _split_top(tok[1:-1])))
     return _parse_const(tok)
   for raw in text.splitlines():
     line = raw.strip()
     if not line or line.startswith(";"): continue
     m = _line_re.match(line)
     assert m, f"unparseable line {raw!r}"
-    n, opn, rest = int(m.group(1)), m.group(2), m.group(3).strip()
-    op = Ops[opn.upper()]
-    if " : " in rest:
-      idx = rest.index(" : ")
-      srcstr, argstr = rest[:idx], rest[idx+3:]
-    elif rest.startswith(": "): srcstr, argstr = "", rest[2:]
+    n, op, rest = int(m.group(1)), Ops[m.group(2).upper()], m.group(3).strip()
+    if rest.startswith(": "): srcstr, argstr = "", rest[2:]
+    elif " : " in rest: srcstr, argstr = rest.split(" : ", 1)
     else: srcstr, argstr = rest, ""
     name: str|None = None
     if argstr.startswith('"'):  # quoted param name comes first in the args
@@ -84,19 +72,19 @@ def parse_ssa(text:str) -> UOp:
     srcs = [parse_tok(t) for t in _split_top(srcstr) if t]
     arg: Any = None
     if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: arg = _parse_paramarg(argstr, name)
-    elif op is Ops.RANGE: arg = (AxisType[m.group(1)], *map(int, m.group(2).split("_"))) if (m:=_range_re.match(argstr)) else None
+    elif op is Ops.RANGE:
+      t, r = argstr.split()
+      arg = (AxisType[t], *map(int, r[1:].split("_")))
     elif op is Ops.REDUCE:
-      parts = argstr.split()
-      assert parts[0].startswith("op=")
-      arg = (Ops[parts[0].removeprefix("op=").upper()], int(parts[1].split("=")[1]) if len(parts) > 1 else 0)
-    elif op is Ops.CAST or op is Ops.BITCAST: arg = _DTYPES_BY_NAME[argstr]
+      kv, _ = _kv(argstr)
+      arg = (Ops[kv["op"].upper()], int(kv["pop"]) if "pop" in kv else 0)
+    elif op in (Ops.CAST, Ops.BITCAST): arg = _DTYPES_BY_NAME[argstr]
     elif op is Ops.SINK: arg = KernelInfo(name=argstr) if argstr else None
     elif op in (Ops.COPY, Ops.SPECIAL): arg = argstr
     elif argstr:
       try: arg = pyast.literal_eval(argstr)
       except (SyntaxError, ValueError): arg = argstr
-    nodes[n] = UOp(op, src=tuple(srcs), arg=arg)
-    root = nodes[n]   # root is always the last node
+    nodes[n] = root = UOp(op, src=tuple(srcs), arg=arg)   # root is always the last node
   assert root is not None, "empty graph"
   return root
 

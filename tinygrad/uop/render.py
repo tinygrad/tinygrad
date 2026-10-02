@@ -26,8 +26,8 @@ def _render_arg(x:UOp) -> str:
       dt, v = x.dtype, x.val
       if dtypes.is_bool(dt): return str(bool(v)).lower()
       if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
-      if dtypes.is_float(dt): return f"f{dt.bitsize}:{float(v).hex()}"   # float.hex() roundtrips exactly, inf/nan included
-      return f"i{dt.bitsize}:{v}"
+      if dtypes.is_float(dt): return f"{dt.name}:{float(v).hex()}"   # float.hex() roundtrips exactly, inf/nan included
+      return f"{dt.name}:{v}"
     case Ops.PARAM | Ops.BUFFER | Ops.ALLOC:
       a, opts = x.arg, ""
       if a.size is not None: opts += f" size={a.size}"
