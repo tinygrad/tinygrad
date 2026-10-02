@@ -157,10 +157,6 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
-def call_vals(ctx:ExecContext, call:UOp, ast:UOp, var_vals:dict[str, int]) -> tuple[int, ...]: # variables by name, the rest from the args
-  try: return tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
-  except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
-
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
@@ -168,9 +164,10 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
-    global_size, local_size = ast.arg.launch_dims(var_vals)
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=call_vals(ctx, call, ast, var_vals),
-                  wait=ctx.wait, timeout=ctx.timeout))
+    global_sz, local_sz = ast.arg.launch_dims(var_vals)
+    try: vals = tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
+    except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
+    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_sz, local_size=local_sz, vals=vals, wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -185,8 +182,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
-  info = call.arg.aux
-  ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
+  ctx = replace(ctx, wait=not (info:=call.arg.aux).skip_wait and ctx.wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   for host, dev in info.host_deps: Device[host].pending[Device[dev]] = Device[dev].timeline.host.view(fmt='Q')[1]
