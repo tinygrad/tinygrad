@@ -53,8 +53,35 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 # PM4
 
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {name}_{queue} like the device's bufferize rules
-  shapes = [("ring", (q.ring.size,), q.ring.dtype)] + [(n, (1,), dtypes.uint64) for n in ("write_ptr", "doorbell", "put_value")]
-  return [UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.queue)) for n, s, d in shapes]
+  shapes = [("ring", (q.ring.size,), q.ring.dtype)] + [(n, (1,), dtypes.uint64) for n in ("write_ptr", "doorbell")]
+  return [UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.queue)) for n, s, d in shapes] + [UOp.from_buffer(q.put_value)]
+
+@uopfunc
+def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
+  rs, n, p = ring.max_numel(), words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
+  first = (rs - (tail:=((p * (unit // 4)) % rs).cast(dtypes.int))).minimum(n)
+  for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
+    i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
+    cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
+  w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit)
+  return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
+
+@uopfunc
+def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UOp:
+  # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
+  rs, size_dw = ring.max_numel(), cmdbuf.max_numel() // 4
+  if size_dw > rs: raise RuntimeError(f"SDMA command buffer ({size_dw*4} bytes) exceeds ring size ({rs*4} bytes)")
+  put_b = put.index(0).load()
+  tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
+  fits = (size_dw <= rs - tail).cast(dtypes.int)
+  start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
+  zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(cmdbuf,))
+  zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
+  i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
+  copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
+  next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
+  w = wptr.after(copy).index(0).store(next_put)
+  return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put).sink()
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
@@ -415,18 +442,7 @@ class AMDComputeQueue(HWQueue):
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
     ib = UOp.placeholder((16,), dtypes.uint8, device=self.dev.host, tag=to_name("ib", self.queue))
-    return self.push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), self.dev.compute_queue)
-
-  @uopfunc
-  def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp:
-    ring, wptr, doorbell, put = _queue_args(self, q)
-    rs, n, p = q.ring.size, words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
-    first = (rs - (tail:=((p * (unit // 4)) % rs).cast(dtypes.int))).minimum(n)
-    for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
-      i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
-      cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
-    w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit)
-    return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
+    return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.dev.compute_queue))
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
   def __init__(self, submit):
@@ -463,7 +479,8 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     base, off = unwrap_view(cmdbuf)
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
-    return self.push(self.prof_bump(cmdbuf), encode_cmdbuf(self, name="aql", device=self.dev.host), self.dev.compute_queue, unit=64, doorbell_lag=1)
+    aql = encode_cmdbuf(self, name="aql", device=self.dev.host)
+    return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self, self.dev.compute_queue), unit=64, doorbell_lag=1)
 
 # *****************
 # SDMA
@@ -498,24 +515,7 @@ class AMDSDMAQueue(HWQueue):
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
     self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
 
-  @uopfunc
-  def submit(self, cmdbuf:UOp) -> UOp:
-    # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
-    q = unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))
-    ring, wptr, doorbell, put = _queue_args(self, q)
-    rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
-    if size_dw > rs: raise RuntimeError(f"SDMA command buffer ({size_dw*4} bytes) exceeds ring size ({rs*4} bytes)")
-    put_b = put.index(0).load()
-    tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
-    fits = (size_dw <= rs - tail).cast(dtypes.int)
-    start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
-    zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(cmdbuf,))
-    zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
-    i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
-    copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
-    next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
-    w = wptr.after(copy).index(0).store(next_put)
-    return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put).sink()
+  def submit(self, cmdbuf:UOp) -> UOp: return amd_sdma_submit(cmdbuf, *_queue_args(self, unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))))
 
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin, device=self.dev.host))
 
@@ -944,7 +944,7 @@ class AMDDevice(Compiled):
              ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx)
 
   def queue_buffer(self, tag):
-    if not isinstance(tag, str) or not tag.startswith(("ring_", "write_ptr_", "doorbell_", "put_value_")): return None
+    if not isinstance(tag, str) or not tag.startswith(("ring_", "write_ptr_", "doorbell_")): return None
     name, queue, idx = tag.rsplit('_', 2)
     return getattr(self.compute_queue if queue == 'compute' else self.sdma_queue(int(idx)), name)
 
