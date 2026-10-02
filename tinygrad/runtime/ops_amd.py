@@ -21,7 +21,7 @@ from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_bufferize
+from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_encode, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -53,8 +53,8 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 # PM4
 
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {name}_{queue} like the device's bufferize rules
-  shapes = [("ring", (q.ring.size,), q.ring.dtype)] + [(n, (1,), dtypes.uint64) for n in ("write_ptr", "doorbell")]
-  return [UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.queue)) for n, s, d in shapes] + [UOp.from_buffer(q.put_value)]
+  shapes = [("ring", (q.ring.size,), q.ring.dtype)] + [(n, (1,), dtypes.uint64) for n in ("write_ptr", "doorbell", "put_value")]
+  return [UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.queue)) for n, s, d in shapes]
 
 @uopfunc
 def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
@@ -895,7 +895,7 @@ class AMDDevice(Compiled):
     ]) + self.pm_bufferize
 
     if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
-      self.pm_batch, self.pm_lower = pm_usb_batch, pm_usb_lower
+      self.pm_batch, self.pm_lower, self.pm_encode = pm_usb_batch, pm_usb_lower, self.pm_encode + pm_usb_encode
       self.pm_bufferize = pm_usb_bufferize + self.pm_bufferize
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
@@ -944,7 +944,7 @@ class AMDDevice(Compiled):
              ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx)
 
   def queue_buffer(self, tag):
-    if not isinstance(tag, str) or not tag.startswith(("ring_", "write_ptr_", "doorbell_")): return None
+    if not isinstance(tag, str) or not tag.startswith(("ring_", "write_ptr_", "doorbell_", "put_value_")): return None
     name, queue, idx = tag.rsplit('_', 2)
     return getattr(self.compute_queue if queue == 'compute' else self.sdma_queue(int(idx)), name)
 

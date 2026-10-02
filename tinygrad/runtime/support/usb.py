@@ -1,5 +1,6 @@
 from typing import cast
 import ctypes, struct, time, functools, itertools
+from dataclasses import replace
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv, to_tuple, flatten
 from tinygrad.dtype import dtypes, DType, AddrSpace
@@ -384,7 +385,7 @@ def usb_copyout(h:UOp, table:UOp, n:int, run:int) -> UOp: # read back through bo
 
 # lower device memory accesses to USB transfers
 def is_remote(b:UOp) -> bool:
-  return (p:=unwrap_view(b)[0]).op is Ops.PARAM and not is_host(p) and not str(p.tag).startswith(("usb_host", "usb_xfer", "cmdbuf_copy"))
+  return (p:=unwrap_view(b)[0]).op is Ops.PARAM and not is_host(p) and not str(p.tag).startswith(("usb_host", "usb_xfer", "put_value", "cmdbuf_copy"))
 def usb_addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr("CPU") + (idx * dt.itemsize).cast(dtypes.uint64) # byte address of b[idx]
 def usb_deps(b:UOp) -> tuple[UOp, ...]: # dependencies through views
   return (b.src[1:] if b.op is Ops.AFTER else ()) + (usb_deps(b.src[0]) if b.op in (Ops.BITCAST, Ops.SHRINK, Ops.AFTER) else ())
@@ -437,6 +438,12 @@ def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   if v.op is Ops.LOAD: s0 += off // v.dtype.itemsize # fills reuse the zero buffer
   return usb_stream(h.after(*loops), addr + off.cast(dtypes.uint64), sb.index(s0.minimum(sb.max_numel() - 1)),
                     (size - off).minimum(USB_MAX_STREAM), True).end(*loops)
+
+def usb_host_params(c:UOp) -> UOp|None: # a function's param is host memory if its arg is, the arg knows
+  host = {p: p.replace(arg=replace(p.arg, device=HCQ_RUNTIME_DEV.value)) for p in c.body.toposort(enter_calls=False)
+          if p.op is Ops.PARAM and p.arg.name and is_remote(p) and not is_remote(c.src[1 + p.arg.slot])}
+  return c.replace(src=(c.body.substitute(host), *c.src[1:])) if host else None
+pm_usb_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, arg=None),), allow_any_len=True, name="c"), usb_host_params)])
 
 pm_usb_lower = PatternMatcher([
   (UPat.var("dst").index(UPat.var("di")).store(UPat.var("v")).end(UPat(Ops.RANGE, name="r")), usb_copy),
