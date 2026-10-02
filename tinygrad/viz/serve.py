@@ -584,9 +584,9 @@ def is_acc_operand(inst, name:str) -> bool:
   return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amdgpu_cfg(text:bytes, arch:str, off:int=0) -> dict:
+def amdgpu_cfg(code:bytes, arch:str, off:int=0) -> dict:
   # decode
-  pc_table = amd_decode(text, arch, off)
+  pc_table = amd_decode(code, arch, off)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
