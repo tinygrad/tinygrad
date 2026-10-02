@@ -584,9 +584,7 @@ def is_acc_operand(inst, name:str) -> bool:
   return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amd_cfg(code:bytes, arch:str, off:int=0) -> dict:
-  # decode
-  pc_table = amd_decode(code, arch, off)
+def get_cfg(pc_table:dict[int, Inst]) -> dict:
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
@@ -646,7 +644,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     lib:bytes = sink.src[3].arg
     if (target:=renderer.target.arch).startswith("gfx"):
       with soft_err(lambda err: ret.update(err)):
-        ret.update(amd_cfg((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr))
+        ret.update(get_cfg(amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
       with soft_err(lambda err: ret.update(err)):
         from tinygrad.runtime.autogen import amdgpu_kd
         kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
