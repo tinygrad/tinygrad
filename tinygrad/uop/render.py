@@ -69,7 +69,8 @@ def render_ssa(root:UOp|list[UOp], color:bool=False) -> str:
     return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
   lines = []
   for i,u in enumerate(nodes):
-    op = colored(u.op.name.lower(), uops_colors.get(u.op)) if color else u.op.name.lower()
+    op = u.op.name.lower()
+    if color: op = colored(op, uops_colors.get(u.op))
     line = f"%{i} = {op}"
     if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
     if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
