@@ -61,29 +61,22 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
                Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
-def _truecolor(st:str, hex_color:str) -> str:
-  if NO_COLOR: return st
-  r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
-  return f"\x1b[38;2;{r};{g};{b}m{st}\x1b[0m"
-
-def _op_name(u:UOp, color:bool) -> str:
-  s = u.op.name.lower()
-  return _truecolor(s, uops_colors[u.op]) if color and u.op in uops_colors else s
-
-def render_ssa(root:UOp|list[UOp], header:str="", color:bool=False) -> str:
-  toposort = list(root.toposort()) if isinstance(root, UOp) else list(root)
-  table = {u:i for i,u in enumerate(u for u in toposort if not _inline(u))}
+def render_ssa(root:UOp|list[UOp], color:bool=False) -> str:
+  nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
+  table = {u:i for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
-    if _inline(u):
-      if u.op is Ops.CONST: return _render_arg(u)
-      return "(" + ", ".join(src_str(s) for s in u.src) + ")"
-    return f"%{table[u]}"
-  lines = [l for l in [header] if l]  # optional caller-supplied header line
-  for u,(i) in ((u, table[u]) for u in toposort if not _inline(u)):
-    pieces = [f"%{i} =", _op_name(u, color)]
-    if len(u.src): pieces.append(", ".join(src_str(s) for s in u.src))
-    if (a:=_render_arg(u)): pieces.append(f": {a}")   # args always after ':'
-    lines.append(" ".join(pieces))
+    if not _inline(u): return f"%{table[u]}"
+    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
+  lines = []
+  for i,u in enumerate(nodes):
+    op = u.op.name.lower()
+    if color and not NO_COLOR and u.op in uops_colors:
+      r, g, b = int(uops_colors[u.op][1:3], 16), int(uops_colors[u.op][3:5], 16), int(uops_colors[u.op][5:7], 16)
+      op = f"\x1b[38;2;{r};{g};{b}m{op}\x1b[0m"   # viz palette as ANSI truecolor
+    line = f"%{i} = {op}"
+    if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
+    if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
+    lines.append(line)
   return "\n".join(lines)
 
 def print_uops(uops:list[UOp]): print(render_ssa(uops, color=sys.stdout.isatty()))
