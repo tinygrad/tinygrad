@@ -490,7 +490,7 @@ def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
   body = body.substitute({u: _param_for(u, slots.index(u)) for u in leaves}, walk=True)
 
   # new args in the caller
-  own = {p: args[p.arg.slot] for u in new for p in u.toposort() if p.op is Ops.PARAM and not _needs_arg(p, root)}
+  own = {p: args[p.arg.slot].without_after for u in new for p in u.toposort() if p.op is Ops.PARAM and not _needs_arg(p, root)}
   return call.replace(src=(body, *args, *UOp.sink(*new).substitute(own, walk=True).src))
 
 pm_lift = PatternMatcher([
