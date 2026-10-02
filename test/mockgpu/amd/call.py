@@ -1,5 +1,5 @@
 import ctypes, itertools
-from tinygrad.viz.serve import amd_decode
+from tinygrad.viz.serve import amd_decode, amd_cfg
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
@@ -23,7 +23,7 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
-  insts = amd_decode(lib_bytes, arch)
+  insts, cfg = amd_decode(lib_bytes, arch), amd_cfg(lib_bytes, arch)
   # construct CALL graph
   afters: dict[UOp, UOp] = {}
   for off, inst in insts.items():
