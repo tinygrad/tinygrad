@@ -3,12 +3,14 @@ from tinygrad.viz.serve import amd_decode
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, getenv
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info
 
 asm_call_counter = itertools.count(1)
 
-def lift(lib: int, lib_sz: int, arch: str = "rdna3") -> UOp:
+def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -> UOp:
+  backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
+  assert backend in {"CPU", "PYTHON"}, f"unsupported ASM_CALL_BACKEND={backend}"
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
@@ -26,4 +28,4 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3") -> UOp:
     afters.update((b, arg.after(call)) for b, arg in zip(bufs, args))
   sink = UOp.sink(*afters.values(), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    return to_program(sink, Device['CPU'].renderer)
+    return to_program(sink, Device[backend].renderer)
