@@ -15,21 +15,15 @@ from tinygrad.helpers import Context, ansistrip
 _DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
 
 _line_re = re.compile(r"^\s*%(\d+) = (\w+)\s*(.*)$")
+_src_tok = re.compile(r"\([^()]*\)|[^,\s]+")   # a src is %N, a literal, or a flat all-const tuple
 
-def _split_top(s:str) -> list[str]:
-  "split on ', ' at paren depth 0"
-  parts, d, last = [], 0, 0
-  for i,c in enumerate(s):
-    if c in "([": d += 1
-    if c in ")]": d -= 1
-    if c == ',' and d == 0 and s[i+1:i+2] == ' ': parts.append(s[last:i]); last = i+2  # noqa: E702
-  return parts + [s[last:]]
-
-def _kv(zone:str) -> tuple[dict[str, str], set[str]]:
-  """the arg zone is k=v tokens plus bare flags"""
-  kv, flags = {}, set()
-  for t in zone.split(): (kv.__setitem__(t.split("=")[0], t.split("=", 1)[1])) if "=" in t else flags.add(t)
-  return kv, flags
+def _kv(zone:str) -> dict[str, str]:
+  """the arg zone is k=v tokens"""
+  kv = {}
+  for t in zone.split():
+    k, _, v = t.partition("=")
+    kv[k] = v
+  return kv
 
 def _parse_const(tok:str) -> UOp:
   if tok == "invalid": return UOp(Ops.CONST, src=(), arg=Invalid)
@@ -41,21 +35,20 @@ def _parse_const(tok:str) -> UOp:
   return UOp(Ops.CONST, src=(), arg=dtypes.weakfloat.const(float(tok)))
 
 def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
-  kv, flags = _kv(rest)
-  def kw(k:str, default=None): return kv[k] if k in kv else default
-  dev = kw("device")
-  return ParamArg(int(kw("slot")), _DTYPES_BY_NAME[kw("dtype")], int(kv["size"]) if "size" in kv else None,
+  kv = _kv(rest)
+  def i(k:str) -> int|None: return int(kv[k]) if k in kv else None
+  dev = kv.get("device")
+  return ParamArg(int(kv["slot"]), _DTYPES_BY_NAME[kv["dtype"]], i("size"),
                   tuple(map(int, kv["bounds"].strip("[]").split(","))) if "bounds" in kv else None,
-                  int(kv["multiple_of"]) if "multiple_of" in kv else None, name,
-                  AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
-                  pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, "volatile" in flags)
+                  i("multiple_of"), name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
+                  pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, kv.get("volatile") == "true")
 
 def parse_ssa(text:str) -> UOp:
   # the wire format carries storage declarations without runtime state: `buffer` reconstructs as an ALLOC
   nodes, root = {}, None
   def parse_tok(tok:str) -> UOp:
     if tok.startswith("%"): return nodes[int(tok[1:])]
-    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in _split_top(tok[1:-1])))
+    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in tok[1:-1].split(", ")))
     return _parse_const(tok)
   for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_ssa
     line = raw.strip()
@@ -63,6 +56,7 @@ def parse_ssa(text:str) -> UOp:
     m = _line_re.match(line)
     assert m, f"unparseable line {raw!r}"
     n, op, rest = int(m.group(1)), Ops[m.group(2).upper()], m.group(3).strip()
+    if op is Ops.BUFFER: op = Ops.ALLOC   # the wire carries storage declarations without runtime state
     if rest.startswith(": "): srcstr, argstr = "", rest[2:]
     elif " : " in rest: srcstr, argstr = rest.split(" : ", 1)
     else: srcstr, argstr = rest, ""
@@ -70,14 +64,14 @@ def parse_ssa(text:str) -> UOp:
     if argstr.startswith('"'):  # quoted param name comes first in the args
       end = argstr.index('"', 1)
       name, argstr = argstr[1:end], argstr[end+1:].strip()
-    srcs = [parse_tok(t) for t in _split_top(srcstr) if t]
+    srcs = [parse_tok(t) for t in _src_tok.findall(srcstr)]
     arg: Any = None
     if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: arg = _parse_paramarg(argstr, name)
     elif op is Ops.RANGE:
       t, r = argstr.split()
       arg = (AxisType[t], *map(int, r[1:].split("_")))
     elif op is Ops.REDUCE:
-      kv, _ = _kv(argstr)
+      kv = _kv(argstr)
       arg = (Ops[kv["op"].upper()], int(kv["pop"]) if "pop" in kv else 0)
     elif op in (Ops.CAST, Ops.BITCAST): arg = _DTYPES_BY_NAME[argstr]
     elif op is Ops.SINK: arg = KernelInfo(name=argstr) if argstr else None
@@ -91,9 +85,7 @@ def parse_ssa(text:str) -> UOp:
   return root
 
 def _strip_buffers(root:UOp) -> UOp:
-  # the wire format drops the bound runtime Buffer (it can't be a roundtrip; see pyrender's identical constraint).
-  # substitute bufferless BUFFERs through the whole graph, then compare structure
-  # convert realized BUFFERs to ALLOCs: a BUFFER with no runtime binding is exactly an ALLOC (and SPEC-legal to construct)
+  # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
   subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.size, b.arg.vmin_vmax, b.arg.multiple_of,
                                                  b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
           for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
