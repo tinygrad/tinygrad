@@ -265,7 +265,11 @@ class GPTOSS:
       attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     proj = matmul_mx(attn, wo, wo_scale, padded_output=bool(getenv("GPTOSS_RESIDUAL_HIP", 0)))
-    out = (proj[:, :self.dim].reshape(x.shape) if getenv("GPTOSS_RESIDUAL_HIP", 0) else proj) + wo_bias
+    if getenv("GPTOSS_RESIDUAL_HIP", 0):
+      from extra.gptoss_kernels.residual import wo_bias_add
+      out = wo_bias_add(proj[:, :self.dim].reshape(x.shape), wo_bias)
+    else:
+      out = proj + wo_bias
     return out, [attn] + norm_saves + fa_saves, proj
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
