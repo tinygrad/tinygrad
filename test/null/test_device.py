@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest, os, subprocess
 from unittest.mock import patch
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.device import Device, Compiler, enumerate_devices_str
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, OSX, DEV
 from tinygrad.runtime.support.c import DLL
@@ -125,6 +125,12 @@ class TestDevice(unittest.TestCase):
     dev.cached_renderer.clear()
     with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
+
+  def test_null_cast_all_dtypes(self):
+    with Context(DEV="NULL"):
+      for dt in dtypes.all:
+        with self.subTest(dtype=dt):
+          Tensor.empty(32, dtype=dtypes.f32).cast(dt).realize().cast(dtypes.f32).realize()
 
   def test_dev_contextvar(self):
     orig_dev = Device.DEFAULT
