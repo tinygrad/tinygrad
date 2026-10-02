@@ -12,7 +12,7 @@ from tinygrad.helpers import Context
 
 # ***** prototype parse for the uop v1 wire format *****
 
-_DTYPES_BY_NAME: dict[str, DType] = {d.sname: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
+_DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
 
 _line_re = re.compile(r"^\s*%(\d+) = (\w+)\s*(.*)$")
 _range_re = re.compile(r"^(\w+) r([\d_]+)$")

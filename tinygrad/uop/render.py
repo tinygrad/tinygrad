@@ -38,11 +38,11 @@ def _render_arg(x:UOp) -> str:
         opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))
       if a.volatile: opts += " volatile"
       name = f'"{a.name}" ' if a.name is not None else ""
-      return f"{name}dtype={x.dtype.sname} slot={a.slot}{opts}"
+      return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
     case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
     case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
     case Ops.REDUCE: return f"op={x.arg[0].name.lower()}" + (f" pop={x.arg[1]}" if x.arg[1] else "")
-    case Ops.CAST | Ops.BITCAST: return x.arg.sname   # one scalar -> bare
+    case Ops.CAST | Ops.BITCAST: return x.arg.name   # one scalar -> bare
     case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
     case _: return repr(x.arg) if x.arg is not None else ""
 

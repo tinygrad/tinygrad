@@ -57,15 +57,14 @@ class AddrSpace(IntEnum):
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   bitsize: int
-  name: str  # C-style name (legacy alias)
-  sname: str  # modern rust/MLIR-style name: f32/i8/u64/bf16/f8e4m3
+  name: str
   fmt: FmtStr|None
   @property
   def itemsize(self) -> int: return (self.bitsize + 7) // 8
   @staticmethod
-  def new(priority:int, bitsize:int, name:str, sname:str, fmt:FmtStr|None): return DType(priority, bitsize, name, sname, fmt)
+  def new(priority:int, bitsize:int, name:str, fmt:FmtStr|None): return DType(priority, bitsize, name, fmt)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.name]}"
+  def __repr__(self): return f"dtypes.{self.name}"
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt) < (o.priority, o.bitsize, o.name, o.fmt)
   @functools.cached_property
   def min(self):
@@ -116,31 +115,31 @@ class DTypes:
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
             dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
-  void: Final[DType] = DType.new(-1, 0, "void", "void", None)
-  weakint: Final[DType] = DType.new(0, 800, "weakint", "weakint", None)  # the weak int position in the promo lattice
-  bool: Final[DType] = DType.new(0, 1, "bool", "bool", '?')
-  int8: Final[DType] = DType.new(1, 8, "signed char", "i8", 'b')
-  uint8: Final[DType] = DType.new(2, 8, "unsigned char", "u8", 'B')
-  int16: Final[DType] = DType.new(3, 16, "short", "i16", 'h')
-  uint16: Final[DType] = DType.new(4, 16, "unsigned short", "u16", 'H')
-  int32: Final[DType] = DType.new(5, 32, "int", "i32", 'i')
-  uint32: Final[DType] = DType.new(6, 32, "unsigned int", "u32", 'I')
-  int64: Final[DType] = DType.new(7, 64, "long", "i64", 'q')
-  uint64: Final[DType] = DType.new(8, 64, "unsigned long", "u64", 'Q')
-  weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", "weakfloat", None)
-  fp8e4m3: Final[DType] = DType.new(10, 8, "float8_e4m3", "f8e4m3", None)
-  fp8e5m2: Final[DType] = DType.new(11, 8, "float8_e5m2", "f8e5m2", None)
-  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "float8_e4m3fnuz", "f8e4m3fnuz", None)
-  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "float8_e5m2fnuz", "f8e5m2fnuz", None)
-  float16: Final[DType] = DType.new(12, 16, "half", "f16", 'e')
-  bfloat16: Final[DType] = DType.new(13, 16, "__bf16", "bf16", None)
-  float32: Final[DType] = DType.new(14, 32, "float", "f32", 'f')
-  float64: Final[DType] = DType.new(15, 64, "double", "f64", 'd')
+  void: Final[DType] = DType.new(-1, 0, "void", None)
+  weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # the weak int position in the promo lattice
+  bool: Final[DType] = DType.new(0, 1, "bool", '?')
+  i8: Final[DType] = DType.new(1, 8, "i8", 'b')
+  u8: Final[DType] = DType.new(2, 8, "u8", 'B')
+  i16: Final[DType] = DType.new(3, 16, "i16", 'h')
+  u16: Final[DType] = DType.new(4, 16, "u16", 'H')
+  i32: Final[DType] = DType.new(5, 32, "i32", 'i')
+  u32: Final[DType] = DType.new(6, 32, "u32", 'I')
+  i64: Final[DType] = DType.new(7, 64, "i64", 'q')
+  u64: Final[DType] = DType.new(8, 64, "u64", 'Q')
+  weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", None)
+  fp8e4m3: Final[DType] = DType.new(10, 8, "fp8e4m3", None)
+  fp8e5m2: Final[DType] = DType.new(11, 8, "fp8e5m2", None)
+  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "fp8e4m3fnuz", None)
+  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "fp8e5m2fnuz", None)
+  f16: Final[DType] = DType.new(12, 16, "f16", 'e')
+  bf16: Final[DType] = DType.new(13, 16, "bf16", None)
+  f32: Final[DType] = DType.new(14, 32, "f32", 'f')
+  f64: Final[DType] = DType.new(15, 64, "f64", 'd')
 
-  # dtype aliases
-  half = float16; float = float32; double = float64 # noqa: E702
-  uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
-  char = int8; short = int16; int = int32; long = int64 # noqa: E702
+  # legacy dtype aliases
+  float16 = half = f16; bfloat16 = bf16; float32 = float = f32; float64 = double = f64 # noqa: E702
+  uint8 = uchar = u8; uint16 = ushort = u16; uint32 = uint = u32; uint64 = ulong = u64 # noqa: E702
+  int8 = char = i8; int16 = short = i16; int32 = int = i32; int64 = long = i64 # noqa: E702
 
   @property
   def default_float(self) -> DType: return to_dtype(DEFAULT_FLOAT.value)
@@ -197,7 +196,6 @@ def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
