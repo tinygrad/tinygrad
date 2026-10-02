@@ -1170,8 +1170,8 @@ class TestSymbolic(unittest.TestCase):
   def test_do_math_in_int32(self):
     a = Variable("a", 1, 10, dtypes.int)
     b = Variable("b", 1, 10, dtypes.int)
-    self.assertIn((a.cast(dtypes.long)+b.cast(dtypes.long)).render(), "(long)((a+b))")
-    self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(long)((a*b))")
+    self.assertIn((a.cast(dtypes.long)+b.cast(dtypes.long)).render(), "(i64)((a+b))")
+    self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(i64)((a*b))")
 
   def test_nested_mod_negative_range(self):
     # (x%(k*c))%c = x%c for positive c

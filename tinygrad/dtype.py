@@ -64,7 +64,7 @@ class DType(metaclass=DTypeMetaClass):
   @staticmethod
   def new(priority:int, bitsize:int, name:str, fmt:FmtStr|None): return DType(priority, bitsize, name, fmt)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.name]}"
+  def __repr__(self): return f"dtypes.{self.name}"
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt) < (o.priority, o.bitsize, o.name, o.fmt)
   @functools.cached_property
   def min(self):
@@ -118,28 +118,29 @@ class DTypes:
   void: Final[DType] = DType.new(-1, 0, "void", None)
   weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # the weak int position in the promo lattice
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
-  int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
-  uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
-  int16: Final[DType] = DType.new(3, 16, "short", 'h')
-  uint16: Final[DType] = DType.new(4, 16, "unsigned short", 'H')
-  int32: Final[DType] = DType.new(5, 32, "int", 'i')
-  uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
-  int64: Final[DType] = DType.new(7, 64, "long", 'q')
-  uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
+  i8: Final[DType] = DType.new(1, 8, "i8", 'b')
+  u8: Final[DType] = DType.new(2, 8, "u8", 'B')
+  i16: Final[DType] = DType.new(3, 16, "i16", 'h')
+  u16: Final[DType] = DType.new(4, 16, "u16", 'H')
+  i32: Final[DType] = DType.new(5, 32, "i32", 'i')
+  u32: Final[DType] = DType.new(6, 32, "u32", 'I')
+  i64: Final[DType] = DType.new(7, 64, "i64", 'q')
+  u64: Final[DType] = DType.new(8, 64, "u64", 'Q')
   weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", None)
-  fp8e4m3: Final[DType] = DType.new(10, 8, "float8_e4m3", None)
-  fp8e5m2: Final[DType] = DType.new(11, 8, "float8_e5m2", None)
-  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "float8_e4m3fnuz", None)
-  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "float8_e5m2fnuz", None)
-  float16: Final[DType] = DType.new(12, 16, "half", 'e')
-  bfloat16: Final[DType] = DType.new(13, 16, "__bf16", None)
-  float32: Final[DType] = DType.new(14, 32, "float", 'f')
-  float64: Final[DType] = DType.new(15, 64, "double", 'd')
+  f8e4m3fn: Final[DType] = DType.new(10, 8, "f8e4m3fn", None)
+  f8e5m2: Final[DType] = DType.new(11, 8, "f8e5m2", None)
+  f8e4m3fnuz: Final[DType] = DType.new(10, 8, "f8e4m3fnuz", None)
+  f8e5m2fnuz: Final[DType] = DType.new(11, 8, "f8e5m2fnuz", None)
+  f16: Final[DType] = DType.new(12, 16, "f16", 'e')
+  bf16: Final[DType] = DType.new(13, 16, "bf16", None)
+  f32: Final[DType] = DType.new(14, 32, "f32", 'f')
+  f64: Final[DType] = DType.new(15, 64, "f64", 'd')
 
-  # dtype aliases
-  half = float16; float = float32; double = float64 # noqa: E702
-  uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
-  char = int8; short = int16; int = int32; long = int64 # noqa: E702
+  # legacy dtype aliases
+  fp8e4m3 = f8e4m3fn; fp8e5m2 = f8e5m2; fp8e4m3fnuz = f8e4m3fnuz; fp8e5m2fnuz = f8e5m2fnuz # noqa: E702
+  float16 = half = f16; bfloat16 = bf16; float32 = float = f32; float64 = double = f64 # noqa: E702
+  uint8 = uchar = u8; uint16 = ushort = u16; uint32 = uint = u32; uint64 = ulong = u64 # noqa: E702
+  int8 = char = i8; int16 = short = i16; int32 = int = i32; int64 = long = i64 # noqa: E702
 
   @property
   def default_float(self) -> DType: return to_dtype(DEFAULT_FLOAT.value)
@@ -162,8 +163,14 @@ class DTypes:
 
 dtypes = DTypes()
 
+# Public scalar names and aliases only: internal types and other DTypes attributes are not dtype strings.
+DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and v in dtypes.all}
+
 DTypeLike = str|DType
-def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
+def to_dtype(dtype:DTypeLike) -> DType:
+  if isinstance(dtype, DType): return dtype
+  try: return DTYPES_DICT[dtype.lower()]
+  except KeyError: raise AttributeError(f"unknown dtype {dtype!r}") from None
 assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a float dtype"
 assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
@@ -194,9 +201,6 @@ def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
 def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
-
-DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:

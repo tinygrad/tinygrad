@@ -4,7 +4,13 @@ from tinygrad.dtype import dtypes, DType, to_dtype, Invalid, InvalidType
 
 class TestEqStrDType(unittest.TestCase):
   def test_strs(self):
-    self.assertEqual(str(dtypes.float32), "dtypes.float")
+    self.assertEqual(str(dtypes.float32), "dtypes.f32")
+
+  def test_roundtrip(self):
+    for dt in (*dtypes.all, dtypes.void, *dtypes.weaks):
+      with self.subTest(dtype=dt):
+        self.assertIs(eval(repr(dt)), dt)
+        self.assertIs(pickle.loads(pickle.dumps(dt)), dt)
 
 class TestToDtype(unittest.TestCase):
   def test_dtype_to_dtype(self):
@@ -18,6 +24,10 @@ class TestToDtype(unittest.TestCase):
     res = to_dtype(dtype)
     self.assertIsInstance(res, DType)
     self.assertEqual(res, dtypes.int32)
+
+  def test_reject_non_dtype_names(self):
+    for name in ("typo", "all", "ints", "is_float", "__class__", "default_float", "default_int", "void", "weakint", "weakfloat"):
+      with self.subTest(name=name), self.assertRaises(AttributeError): to_dtype(name)
 
 class TestCastConvenienceMethod(unittest.TestCase):
   def test_method(self):

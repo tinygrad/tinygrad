@@ -99,6 +99,7 @@ if __name__ == "__main__":
       #print(srcs[si.ast][1])
   main.append("}")
 
-  mallocs = [f"  {b.dtype.name}* {n} = ({b.dtype.name}*)malloc({b.nbytes});" for n,b in dedup(all_bufs)]
+  mallocs = [f"  {dt}* {n} = ({dt}*)malloc({b.nbytes});"
+             for n,b in dedup(all_bufs) for dt in [Device["CPU"].renderer.render_dtype(b.dtype)]]
 
   with open("out.c", "w") as f: f.write('\n'.join(c_code+premain+mallocs+main))
