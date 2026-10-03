@@ -21,7 +21,7 @@ from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, usb_bufferize
+from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_encode, usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -893,7 +893,7 @@ class AMDDevice(Compiled):
                                              (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
 
     if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
-      self.pm_batch, self.pm_lower = pm_usb_batch, pm_usb_lower
+      self.pm_batch, self.pm_lower, self.pm_encode = pm_usb_batch, pm_usb_lower, AMDDevice.pm_encode + pm_usb_encode
       Compiled.pm_bufferize += usb_bufferize(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
