@@ -1,10 +1,12 @@
 # test to compare every packet with the rocprof decoder
 import unittest, pickle, functools, json
+from unittest.mock import patch
+from types import SimpleNamespace
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
-from tinygrad.renderer.amd.sqtt import print_packets, map_insts
-from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
+from tinygrad.renderer.amd.sqtt import print_packets, map_insts, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
+from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm, s_mov_b32, v_mov_b32_e32, s_nop
 from tinygrad.viz.serve import sqtt_timeline, amd_decode, get_arch, get_elf_section
 from test.amd.disasm import disasm
 from test.null.test_viz import run_cli
@@ -64,6 +66,46 @@ def rocprof_inst_traces_match(sqtt, prg, target):
     assert len(v) == 0, f"incomplete wave {k}"
 
   return passed_insts, len(rwaves), len(rwaves_iter)
+
+class TestSQTTMapSynthetic(unittest.TestCase):
+  def test_rdna3_selected_group(self):
+    from extra.sqtt.rgptool import RGP
+    from tinygrad.device import ProfileDeviceEvent, ProfileProgramEvent
+    from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+    from tinygrad.runtime.autogen import sqtt
+    from tinygrad.renderer.amd.dsl import s, v
+    from test.mockgpu.amd.sqtt_enc import _emit_nibbles
+    insts = [s_mov_b32(s[0], 1), v_mov_b32_e32(v[0], 0), s_nop(0)]
+    pc_map = {0x1000+i*4:inst for i,inst in enumerate(insts)}
+    text = SimpleNamespace(content=b"", header=SimpleNamespace(sh_addr=0x1000))
+    props = dict(gfx_target_version=110000, simd_count=192, simd_per_cu=2, array_count=12, simd_arrays_per_engine=2,
+                 max_waves_per_simd=16, lds_size_in_kb=64)
+    for group in (0, 4):
+      with self.subTest(group=group):
+        nibbles = []
+        _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, group=group, simd=2, sel_a=6)
+        # The other WGP uses the same SIMD/wave ID and finishes while the traced wave is still active.
+        _emit_nibbles(nibbles, WAVESTART, delta=1, simd=2, wgp=group ^ 4, wave=1)
+        _emit_nibbles(nibbles, WAVESTART, delta=1, simd=2, wgp=group, wave=1)
+        _emit_nibbles(nibbles, INST, delta=1, wave=1, op=InstOp.SALU)
+        _emit_nibbles(nibbles, WAVEEND, delta=1, simd=2, wgp=group ^ 4, wave=1)
+        _emit_nibbles(nibbles, VALUINST, delta=1, wave=1)
+        _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=1)
+        _emit_nibbles(nibbles, WAVEEND, delta=1, simd=2, wgp=group, wave=1)
+        nibbles += [0] * (32 + len(nibbles) % 2)
+        blob = bytes(nibbles[i] | (nibbles[i+1] << 4) for i in range(0, len(nibbles), 2))
+        with patch("tinygrad.viz.serve.get_elf_section", return_value=text), patch("tinygrad.viz.serve.amd_decode", return_value=pc_map):
+          mapped = list(map_insts(blob, b"", "gfx1101"))
+        self.assertEqual([(info.pc, info.wave, info.inst) for _, info in mapped if info is not None],
+                         [(pc, 1, inst) for pc, inst in pc_map.items()])
+        waves = [p for p, _ in mapped if isinstance(p, (WAVESTART, WAVEEND))]
+        self.assertEqual([(type(p), p.cu, p.simd, p.wave) for p in waves], [(WAVEEND, group, 2, 1)])
+        self.assertIsInstance(mapped[0][0], LAYOUT_HEADER)
+        profile = [ProfileDeviceEvent("AMD", props=props), ProfileProgramEvent("AMD", "kernel", b"\x7fELF", 0x1000, 1),
+                   ProfileSQTTEvent("AMD", 1, 0, blob, True, 0)]
+        exported = RGP.from_profile(pickle.dumps(profile))
+        self.assertEqual([c.header.v1.compute_unit_index for c in exported.chunks
+                          if isinstance(c.header, sqtt.struct_sqtt_file_chunk_sqtt_desc)], [group])
 
 @unittest.skip("TODO: fix to not require unpickling UOps.")
 class TestSQTTMapBase(unittest.TestCase):

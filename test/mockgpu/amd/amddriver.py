@@ -29,8 +29,9 @@ class DRMFileDesc(VirtFileDesc):
     if struct.query == amdgpu_drm.AMDGPU_INFO_DEV_INFO:
       dev_info = amdgpu_drm.struct_drm_amdgpu_info_device.from_address(struct.return_pointer)
       # mock of gfx1100
-      for se in range(4):
-        for sa in range(4): dev_info.cu_bitmap[se][sa] = 0xff if (se * 4 + sa) < 12 else 0
+      dev_info.num_shader_engines, dev_info.num_shader_arrays_per_engine = 6, 2
+      for se in range(dev_info.num_shader_engines):
+        for sa in range(dev_info.num_shader_arrays_per_engine): dev_info.cu_bitmap[se % 4][sa + 2 * (se // 4)] = 0xff
       return 0
     raise NotImplementedError(f"unknown DRM ioctl query {struct.query}")
 

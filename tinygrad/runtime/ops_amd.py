@@ -49,6 +49,16 @@ class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int
 @dataclass(frozen=True)
 class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]; blob:bytes; exec_tag:int # noqa: E702
 
+def get_sqtt_wgp(info:amdgpu_drm.struct_drm_amdgpu_info_device) -> int:
+  # Some Navi 3 GPUs are unable to capture instruction tokens for some WGP selections, including WGP 0.
+  # Use AMD's Linux gfx11 SQTT default of maximum active WGP count per shader array minus one.
+  # https://github.com/GPUOpen-Drivers/pal/blob/6353b182d28fe85f28b40d1809291b515fcddd3e/src/core/hw/gfxip/gfx9/gfx9PerfExperiment.cpp#L1411
+  cu_masks = (info.cu_bitmap[se % 4][sa + 2 * (se // 4)]
+              for se in range(info.num_shader_engines) for sa in range(info.num_shader_arrays_per_engine))
+  max_active_wgps = max(sum(bool(mask & (3 << (2 * wgp))) for wgp in range(16)) for mask in cu_masks)
+  assert max_active_wgps > 0, "SQTT requires an active WGP"
+  return max_active_wgps - 1
+
 # *****************
 # PM4
 
@@ -278,14 +288,16 @@ class AMDComputeQueue(HWQueue):
     if SQTT_LIMIT_SE:
       # Calculate number of CUs per SE to enable based on blocks count. 4 is maximum simd per CU, but on rdna we can trace only 1.
       cu_per_se = prod([x if isinstance(x, int) else 1 for x in info.global_size]) // ((self.dev.cu_cnt // self.dev.se_cnt) * 4)
+      traced_cu = 1 << (2 * self.dev.sqtt_wgp)
       for xcc in range(self.dev.xccs):
         with self.pred_exec(xcc_mask=1 << xcc):
           for i in range(8 if self.target[0] != 9 else 4):
-            if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
+            if SQTT_LIMIT_SE > 1: mask = traced_cu if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
             else:
               sa_mask = (1 << (self.dev.iface.props['cu_per_simd_array'] // 2)) - 1
               cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
               mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
+              if i == 0 and not (mask & traced_cu): mask = (mask & ~1) | traced_cu
             self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
 
   def sqtt_start(self, slot:UOp):
@@ -324,7 +336,7 @@ class AMDComputeQueue(HWQueue):
         else:
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, self.gc.regSQ_THREAD_TRACE_BUF0_SIZE.encode(size=win >> 12) | buf0_hi)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, buf0_lo)
-        # NOTE: SQTT can only trace instructions on one simd per se, this selects the simd in first wgp in first sa.
+        # NOTE: SQTT can only trace instructions on one simd per se, this selects the simd in the traced wgp in first sa.
         # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
         # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
         # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
@@ -332,7 +344,7 @@ class AMDComputeQueue(HWQueue):
         # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
         # Use SQTT_SIMD_SEL to select which SIMD to trace (0-3). Memory ops show different InstOp values (0x2x vs 0x5x) based on SIMD.
         cs_wtype = (1 << 6) if self.target >= (12,0,0) else self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT
-        self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=SQTT_SIMD_SEL.value, wgp_sel=0, sa_sel=0)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=SQTT_SIMD_SEL.value, wgp_sel=self.dev.sqtt_wgp, sa_sel=0)
         reg_include = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
                       self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
         token_exclude = SQTT_TOKEN_EXCLUDE.value | ((1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT) if self.target < (12,0,0) else 0)
@@ -897,6 +909,7 @@ class AMDDevice(Compiled):
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0
+    self.sqtt_wgp = get_sqtt_wgp(self.iface.drm_dev_info) if self.sqtt_enabled and self.target[0] == 11 and type(self.iface) is KFDIface else 0
     if self.pmc_enabled or self.sqtt_enabled:
       self.iface.require_profile_mode()
       self.prof_slots, self.prof_read, self.sqtt_next_cmd_id = getenv("PROF_SLOTS", 32), 0, itertools.count(0)

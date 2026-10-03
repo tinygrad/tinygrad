@@ -671,9 +671,10 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       yield (p, InstructionInfo(pc, key[1], inst))
   # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
   simd:int = 0
+  group:int = 0
   for p in decode(data):
-    if not getattr(p, "cu", 0) == 0: continue
-    if isinstance(p, LAYOUT_HEADER): simd = p.simd
+    if isinstance(p, LAYOUT_HEADER): simd, group = p.simd, p.group if p.layout == 3 else 0 # selected WGP on RDNA3
+    if getattr(p, "cu", group) != group: continue
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       if (key:=(p.simd, p.wave)) in wave_pc: raise AssertionError("only one inflight wave per unit")
       wave_pc[key] = next(iter(pc_map))
