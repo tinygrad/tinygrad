@@ -1,5 +1,5 @@
 from typing import cast
-import ctypes, struct, time, functools, itertools
+import ctypes, struct, sys, time, functools, itertools
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv, to_tuple, flatten
 from tinygrad.dtype import dtypes, DType, AddrSpace
@@ -470,4 +470,4 @@ def usb_bufferize(dev) -> PatternMatcher: # the placeholders a usb gpu owns
                          (UPat(Ops.PARAM, tag=dev.tag("usb_vram")), lambda d=dev: _words(d)),
                          (UPat(Ops.PARAM, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
 
-if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
+if DEV.interface.startswith("MOCK") and sys.platform != "win32": from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

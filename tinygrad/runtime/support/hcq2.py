@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Con
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
-from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
@@ -77,10 +77,20 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
     end = offset + arg.dtype.itemsize
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
+CDTYPES_MAP = {
+  None: dtypes.void,
+  ctypes.c_bool: dtypes.bool,
+  ctypes.c_int8: dtypes.int8,   ctypes.c_uint8: dtypes.uint8,
+  ctypes.c_int16: dtypes.int16, ctypes.c_uint16: dtypes.uint16,
+  ctypes.c_int32: dtypes.int32, ctypes.c_uint32: dtypes.uint32,
+  ctypes.c_int64: dtypes.int64, ctypes.c_uint64: dtypes.uint64,
+  ctypes.c_float: dtypes.float32,
+  ctypes.c_double: dtypes.float64,
+  ctypes.c_void_p: dtypes.uint64
+}
+
 def ccall(fn:Any, *args:UOp|int) -> UOp:
-  ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
-    next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
-  return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
+  return UOp.custom_function(fn.__name__, dtype=CDTYPES_MAP[fn.restype]).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
 
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 
