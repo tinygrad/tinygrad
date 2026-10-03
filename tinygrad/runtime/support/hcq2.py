@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Con
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
-from tinygrad.uop.ops import pm_renumber
+from tinygrad.uop.ops import pm_renumber_slots
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
@@ -481,7 +481,7 @@ def _param_for(u:UOp, slot:int) -> UOp:
   return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.value, name=f"{u.tag}_{slot}" if isinstance(u.tag, str) else None)
 
 def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
-  body, args = graph_rewrite(call.body, pm_lift_deps + pm_renumber, ctx=itertools.count(), walk=True, name="lift deps"), list(call.src[1:])
+  body, args = graph_rewrite(call.body, pm_lift_deps + pm_renumber_slots, ctx=itertools.count(), walk=True, name="lift deps"), list(call.src[1:])
   nodes = body.toposort(gate=lambda u: u.op is not Ops.GETADDR, enter_calls=False)
   leaves = dedup([u for u in nodes if _needs_arg(u, root)] + [g for u in nodes for g in u.src if g.op is Ops.GETADDR])
   slots = args + (new:=[u for u in leaves if u not in args])
