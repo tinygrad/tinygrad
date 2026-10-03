@@ -64,7 +64,7 @@ def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, u
   for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
     i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
     cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
-  w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit)
+  w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit).barrier()
   return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
 
 @uopfunc
@@ -81,7 +81,7 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UO
   i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
   copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
   next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
-  w = wptr.after(copy).index(0).store(next_put)
+  w = wptr.after(copy).index(0).store(next_put).barrier()
   return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put).sink()
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
