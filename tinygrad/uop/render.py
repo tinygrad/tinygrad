@@ -1,7 +1,7 @@
 import re
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, KernelInfo, range_str, consumer_map_from_toposort, sint
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, range_str, consumer_map_from_toposort, sint
 from tinygrad.helpers import strip_parens, colored
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
@@ -97,7 +97,7 @@ def render_marg(ctx,x:UOp):
 renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
-   x.arg.name if isinstance(x.arg, ParamArg) and x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
+   x.arg.name if x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
   (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.axis_id[0]}"),
@@ -157,7 +157,7 @@ pm_pyrender_extra = PatternMatcher([
   # `.where` re-promotes its operands, so render WHERE via .alu() too
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.WHERE, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
   # the binary operators re-promote their operands (a weak src meeting a strong one gets a cast), render those via .alu() too
-  (UPat(set(syms.keys())-{Ops.SUB, Ops.CDIV, Ops.CMOD}, name="x"), lambda ctx,x:
+  (UPat(set(syms.keys())-{Ops.SUB}, name="x"), lambda ctx,x:
     strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")
     if x.src[0]._broadcasted(x.src[1]) == x.src else f"{ctx[x.src[0]]}.alu({x.op}, {ctx[x.src[1]]})"),
   (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join(([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
@@ -206,7 +206,7 @@ def pyrender(ast:UOp) -> str:
     if u.op is Ops.CALL and (u.body.op is Ops.PROGRAM or u.arg.grad_fxn is not None or u.arg.aux is not None):
       raise NotImplementedError("call can't be pyrendered")
     # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
-    if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")
+    if u.op is Ops.BUFFER and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
