@@ -2,7 +2,7 @@ import math, functools
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
   CustomFunction
-from tinygrad.uop.render import print_uops, pyrender
+from tinygrad.uop.render import render_ssa, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
 from tinygrad.device import is_disk_device
@@ -41,7 +41,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
     for i,u in enumerate(lst):
       ret: bool|None = check_spec.rewrite(u)
       if ret is not True:
-        if DEBUG >= 3: print_uops(lst)
+        if DEBUG >= 3: print(render_ssa(lst))
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
 # ***** new specs *****
