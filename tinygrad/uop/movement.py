@@ -1,6 +1,6 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 
-# TODO: pm_mops from rangeify belongs here. this is all pattern matchers that strictly clean up movement ops
+# TODO: pm_mops from schedule/prepare.py belongs here. this is all pattern matchers that strictly clean up movement ops
 
 mop_cleanup = PatternMatcher([
   # merge adjacent SHRINKs

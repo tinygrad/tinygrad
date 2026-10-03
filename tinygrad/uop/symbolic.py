@@ -417,7 +417,7 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
   ret_idx = idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx
   return UOp.const(True).uprod(*keep).where(ret_idx, ret_idx.const_like(0))
 
-# where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
+# where after gated load becomes alt value, TODO: this is sort of duplicated with rules in codegen/late/gater.py
 pm_move_where_on_load = PatternMatcher([
   (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast"), 0), where_on_load),
   (UPat.var("cond").where(0, UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast")),

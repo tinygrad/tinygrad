@@ -581,7 +581,7 @@ class HIPRenderer(CStyleLanguage):
     prefix += [f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml]
     prefix += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if count > 1]
 
-    for name, (N, M, K), dtype_in, dtype_out, _ in wmma_args(uops): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
+    for name, (N, M, K), dtype_in, dtype_out, _ in wmma_args(uops): # TODO: handle RDNA3 TC bf16_bf16 w/ wrapper
       if self.is_cdna(self.target.arch):
         if (N, M, K) == (16, 16, 16): type_map[dtypes.bf16] = 'bf16_1k'
         elif (N, M, K) == (16, 16, 32): type_map = {**type_map, dtypes.bf16: "_bf16", dtypes.f16: "_f16"}
