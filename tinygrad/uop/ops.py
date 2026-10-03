@@ -1331,9 +1331,8 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
   def outlined(*args, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
-    body = fn(**(bound | {n: param(i, n, a) for i, (n, a) in enumerate(ins.items())}))
-    with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(body, pm_renumber_slots, ctx=itertools.count(), walk=True).call(*ins.values(), name=fn.__name__)
+    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots, ctx=itertools.count(), walk=True)
+    with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values(), name=fn.__name__)
   return functools.wraps(fn)(outlined)
 
 @dataclass(frozen=True)
