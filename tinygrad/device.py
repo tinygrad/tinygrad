@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, ContextVar, to_name
+from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes, DType, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
@@ -14,8 +14,6 @@ if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
-
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
