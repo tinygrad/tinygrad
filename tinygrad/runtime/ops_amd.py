@@ -55,7 +55,7 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {device}_{name}_{queue}. put is the host's copy of the write pointer
   shapes = [("ring", (q.ring.size,), q.ring.dtype, hq.devs[0])] + [(n, (1,), dtypes.uint64, hq.devs[0]) for n in ("write_ptr", "doorbell")]
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
-  return [UOp.alloc(s, dt, 0, device=d, tag=hq.dev.tag(n, hq.queue)) for n, s, dt, d in shapes]
+  return [UOp.alloc(s, dt, 0, device=d).rtag(hq.dev.tag(n, hq.queue)) for n, s, dt, d in shapes]
 
 @uopfunc
 def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
@@ -180,7 +180,7 @@ class AMDComputeQueue(HWQueue):
   ### profiling: a kernel's slot holds its counters and trace until a synchronize reads them back
 
   def prof_buf(self, name:str) -> UOp:
-    return UOp.alloc((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs[0], tag=self.dev.tag(name))
+    return UOp.alloc((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs[0]).rtag(self.dev.tag(name))
 
   def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None:
     if not (self.dev.pmc_enabled or self.dev.sqtt_enabled): return None
@@ -442,7 +442,7 @@ class AMDComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp: # the ring gets an indirect buffer packet: 4 dwords, put stays aligned so it never wraps mid packet
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
-    ib = UOp.alloc((16,), dtypes.uint8, device=self.dev.host, tag=to_name("ib", self.queue))
+    ib = UOp.alloc((16,), dtypes.uint8, device=self.dev.host).rtag(to_name("ib", self.queue))
     return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.dev.compute_queue))
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib

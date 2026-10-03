@@ -36,7 +36,7 @@ class NullQueue(HWQueue):
   def wait(self, signal:UOp, value:UOp, eq:bool=False): self.cmd(WAIT, signal, value, int(eq))
   def signal(self, signal:UOp, value:UOp): self.cmd(STORE, signal, value)
   def timestamp(self, signal:UOp): self.cmd(TIMESTAMP, signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
-  def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0], tag="doorbell"))
+  def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0]).rtag("doorbell"))
 
 class NullProgram(Program['NullDevice']):
   def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]

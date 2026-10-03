@@ -13,7 +13,7 @@ import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
 from test.null.test_hcq2 import chain, chain_input, compiled_chain, lower_hcq
 
-def cpu_buf(size:int=1, dtype=dtypes.uint8, **kwargs) -> UOp: return UOp.alloc((size,), dtype, device="CPU", **kwargs)
+def cpu_buf(size:int=1, dtype=dtypes.uint8, tag=None, **kwargs) -> UOp: return UOp.alloc((size,), dtype, device="CPU", **kwargs).rtag(tag)
 
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS) and not Device.DEFAULT.startswith("NULL"), "hcq2 device required")
 class TestHCQ2Schedule(unittest.TestCase):
@@ -98,10 +98,10 @@ class TestHCQ2Fence(unittest.TestCase):
     self.addCleanup(lambda: self.tl.__setitem__(0, self.tl[1]))
 
   def test_a_schedule_waits_for_its_previous_run(self):
-    slots = UOp.alloc((4,), dtypes.uint64, device="CPU", tag="slots")
+    slots = UOp.alloc((4,), dtypes.uint64, device="CPU").rtag("slots")
     program = lower_and_compile(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])))
     linked = hcq2.hcq_link(program, allow_cache=False)
-    (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.without_after.arg.name == "slots"]
+    (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.without_after.tag == "slots"]
     slots_mv = linked.src[0].without_after.src[1 + i].buffer.host.view(fmt='Q')
     slots_mv[2], base = 7, self.tl[1]
 

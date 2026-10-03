@@ -67,7 +67,7 @@ class QCOMComputeQueue(HWQueue):
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
     if write_back: # dirty cache write-back, into the device's dummy buffer
-      dummy = UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0], tag=self.dev.tag("dummy"))
+      dummy = UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0]).rtag(self.dev.tag("dummy"))
       self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, dummy.getaddr(self.devs), 0)
     if invalidate: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(mesa.CP_WAIT_MEM_WRITES)
@@ -173,7 +173,7 @@ class QCOMComputeQueue(HWQueue):
                                                                state_block=mesa.SB6_CS_TEX, num_unit=data.samp_cnt), args_addr + data.samp_off)
       self.reg(mesa.REG_A6XX_SP_CS_SAMPLER_BASE, args_addr + data.samp_off)
       self.reg(mesa.REG_A6XX_TPL1_CS_BORDER_COLOR_BASE,
-               UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0], tag=self.dev.tag("border_color")).getaddr(self.devs))
+               UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0]).rtag(self.dev.tag("border_color")).getaddr(self.devs))
 
     if data.tex_cnt > 0:
       self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
@@ -203,7 +203,7 @@ class QCOMComputeQueue(HWQueue):
     obj = cstruct(kgsl.struct_kgsl_command_object, gpuaddr=ib.getaddr(self.devs) + ib_off, size=cmdbuf.max_numel(), flags=kgsl.KGSL_CMDLIST_IB)
     req = cstruct(kgsl.struct_kgsl_gpu_command, cmdlist=obj.getaddr(HCQ_RUNTIME_DEV.value), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
                   numcmds=1, context_id=ctxid)
-    return qcom_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=self.devs[0], tag="submit_ret"), fd)
+    return qcom_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=self.devs[0]).rtag("submit_ret"), fd)
 
 class QCOMProgramData:
   def __init__(self, dev:QCOMDevice, obj:TinyELF):

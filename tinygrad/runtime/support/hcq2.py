@@ -57,7 +57,7 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
 def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTACK else u.mselect(lane) if len(to_tuple(u.device)) > 1 else u
 
 
-def timeline(devs:tuple[str, ...]) -> UOp: return UOp.alloc((2,), dtypes.uint64, 0, device=devs[0], tag="timeline")
+def timeline(devs:tuple[str, ...]) -> UOp: return UOp.alloc((2,), dtypes.uint64, 0, device=devs[0]).rtag("timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, deps:tuple[UOp, ...]=()) -> UOp: # the order is on the arg
@@ -87,7 +87,7 @@ CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # 
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
   flds = {n: (o, CDTYPE[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)} # skips zero length arrays
   rows = [(flds[n][0], v.cast(flds[n][1]) if isinstance(v, UOp) else UOp.const(v, flds[n][1])) for n, v in fields.items()]
-  buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value, tag=struct_t.__name__)
+  buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value).rtag(struct_t.__name__)
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
 def cfield(buf:UOp, struct_t, name:str) -> UOp: return buf[(f:=getattr(struct_t, name)).offset:f.offset + f.size].bitcast(CDTYPE[f.size]).index(0)
@@ -128,7 +128,7 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if None in (nics:=[rdma_nic_for(Device[d], Device[min(devs)]) for d in devs]): return None
 
   # wires: a placeholder per nic in place of the far gpu, tagged by it
-  wires = [UOp.alloc(src.max_shape, src.dtype, 0, device=unwrap(nic).device, tag=peer) for nic, peer in zip(nics, devs[::-1])]
+  wires = [UOp.alloc(src.max_shape, src.dtype, 0, device=unwrap(nic).device).rtag(peer) for nic, peer in zip(nics, devs[::-1])]
   send = call.replace(src=wires[1].store_call(src).src)
   return UOp(Ops.LINEAR, src=(send, call.replace(src=dst.store_call(wires[0]).src)))
 
@@ -217,7 +217,7 @@ class BatchCtx:
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev) or (dev, q) in self.peers}
     # a slot is [signal][timestamp], 16 bytes: the queue signals, the timeline, then two per call if profiling
     self.slots = {dev: UOp.alloc((2 * (len(qs) + 1 + (2 * len(self.batch) if self.profile else 0)),), dtypes.uint64, device=dev,
-                                 spec=BufferSpec(host=True, uncached=True, cpu_access=True), tag="slots") for dev, qs in self.queues.items()}
+                                 spec=BufferSpec(host=True, uncached=True, cpu_access=True)).rtag("slots") for dev, qs in self.queues.items()}
 
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) != 1 else self.queues[dev][0] # closes the device
 
@@ -448,7 +448,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
     bufs.append((offs, encode_cmdbuf(hq, name=lname)))
   views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
 
-  buf = UOp.alloc((len(stream),), dtypes.uint8, device=device or hq.devs[0], tag=to_name(name, hq.queue)).after(*hq.deps)
+  buf = UOp.alloc((len(stream),), dtypes.uint8, device=device or hq.devs[0]).rtag(to_name(name, hq.queue)).after(*hq.deps)
   words = UOp.sink(*[w for _, w in patches]).substitute(views).src
   return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*[b for _, b in bufs])
 
@@ -477,7 +477,7 @@ def _needs_arg(u:UOp, root:bool) -> bool:
 def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:
     return UOp.param(slot, u.commit_dtype(dtypes.int), name=u.arg.name if u.is_variable else None, addrspace=AddrSpace.ALU).cast(u.dtype)
-  return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.value, name=u.arg.name and f"{u.arg.name}_{slot}")
+  return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.value, name=f"{u.tag}_{slot}" if isinstance(u.tag, str) else None)
 
 def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
   body, args = graph_rewrite(call.body, pm_lift_deps, walk=True, name="lift deps"), list(call.src[1:])

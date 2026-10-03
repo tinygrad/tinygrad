@@ -1198,10 +1198,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
-            spec:BufferSpec|None=None, tag=None):
-    ret = UOp(Ops.ALLOC, src=UOp.device_range_src(device), tag=tag, # a string tag names it
+            spec:BufferSpec|None=None):
+    ret = UOp(Ops.ALLOC, src=UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(to_max_shape(shape)),
-                           name=tag if isinstance(tag, str) else None, addrspace=addrspace, device=device, spec=spec))
+                           addrspace=addrspace, device=device, spec=spec))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
