@@ -4,7 +4,7 @@ from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, uopfunc
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import getenv, dedup, prod, panic, cpu_events, perf_counter_us, NULL_ALLOW_COPYOUT, PROFILE, to_tuple
+from tinygrad.helpers import getenv, dedup, prod, panic, cpu_events, perf_counter_us, NULL_ALLOW_COPYOUT, PROFILE
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.runtime.support.hcq2 import HWQueue, layout_args, pack_args
 
@@ -36,7 +36,7 @@ class NullQueue(HWQueue):
   def wait(self, signal:UOp, value:UOp, eq:bool=False): self.cmd(WAIT, signal, value, int(eq))
   def signal(self, signal:UOp, value:UOp): self.cmd(STORE, signal, value)
   def timestamp(self, signal:UOp): self.cmd(TIMESTAMP, signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
-  def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.placeholder((1,), dtypes.uint8, device=self.devs, tag="doorbell"))
+  def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0], tag="doorbell"))
 
 class NullProgram(Program['NullDevice']):
   def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
@@ -68,6 +68,6 @@ class NullDevice(Compiled):
                                   if inspect.isclass(r) and issubclass(r, Renderer)]
     super().__init__(device, NullAllocator(self), dedup(renderers), NullProgram)
     Compiled.pm_bufferize += PatternMatcher([ # its memory is fake: every placeholder on it is a link buffer
-      (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.link_buffer(b.max_numel(), b.dtype) if to_tuple(b.device)[0] == d.device else None)])
+      (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.link_buffer(b.max_numel(), b.dtype) if b.device == d.device else None)])
 
   def link_buffer(self, n, dt): return Buffer(self.device, n, dt, opaque=memoryview(bytearray(n * dt.itemsize)), options=BufferSpec(external_ptr=1))

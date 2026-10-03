@@ -211,21 +211,21 @@ USB_MAX_STREAM = 1 << 20
 # host memory: link, staging, one stream's worth of zeros
 USB_HOST_SIZE = 32 + 2 * HALF + USB_MAX_STREAM
 def usb_host(dev) -> UOp:
-  return UOp.placeholder((USB_HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.value, tag=to_name(to_tuple(dev)[0], "usb_host"))
+  return UOp.alloc((USB_HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.value, tag=to_name(to_tuple(dev)[0], "usb_host"))
 def usb_link(dev) -> UOp: return usb_host(dev)[:24].bitcast(dtypes.uint64) # [handle, context, previous batch chunks]
 def usb_stage(dev) -> UOp: return usb_host(dev)[32:32 + 2 * HALF] # host buffers for the sram halves
 
 def usb_xfer(dev, half:int) -> UOp: # one bulk OUT transfer per half
   size = ctypes.sizeof(libusb.struct_libusb_transfer)
-  return UOp.placeholder((size,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.value, tag=to_name(to_tuple(dev)[0], f"usb_xfer{half}"))
+  return UOp.alloc((size,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.value, tag=to_name(to_tuple(dev)[0], f"usb_xfer{half}"))
 
 # vram words
-def usb_vram(dev) -> UOp: return UOp.placeholder((2,), dtypes.uint32, 0, device=to_tuple(dev)[0], tag=to_name(to_tuple(dev)[0], "usb_vram"))
+def usb_vram(dev) -> UOp: return UOp.alloc((2,), dtypes.uint32, 0, device=to_tuple(dev)[0], tag=to_name(to_tuple(dev)[0], "usb_vram"))
 def usb_go(dev) -> UOp: return usb_vram(dev)[:1] # chunk id + 1. the host has armed its read
 def usb_scratch(dev) -> UOp: return usb_vram(dev)[1:] # dummy target for empty copies
 
 # bridge memory: sys, cq, sram
-def usb_asm24(dev) -> UOp: return UOp.placeholder((0x85000,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag=to_name(to_tuple(dev)[0], "usb_asm24"))
+def usb_asm24(dev) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag=to_name(to_tuple(dev)[0], "usb_asm24"))
 def usb_fence(dev) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # completed gpu chunks
 def usb_cq(dev) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue (gpu reset to zero)
 def usb_sram(dev) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
@@ -314,7 +314,7 @@ pm_usb_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), usb_copy_rewriter)])
 # host functions
 
 def usb_table(hosts:list[tuple[UOp, int]], n:int, win:int, dev) -> UOp: # [host address, bytes] per chunk
-  table = UOp.placeholder((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.value, tag="usb_table")
+  table = UOp.alloc((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.value, tag="usb_table")
   rows:list[tuple[int|UOp, UOp]] = []
   for host, k in hosts:
     base, boff = unwrap_view(host)
@@ -386,7 +386,7 @@ def usb_copyout(dev, h:UOp, table:UOp, n:int, run:int) -> UOp: # read back throu
 
 # lower device memory accesses to USB transfers
 def is_remote(b:UOp) -> bool:
-  return (p:=unwrap_view(b)[0]).op is Ops.PARAM and not is_host(p)
+  return (p:=unwrap_view(b)[0]).op in (Ops.PARAM, Ops.ALLOC) and not is_host(p)
 def usb_addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr("CPU") + (idx * dt.itemsize).cast(dtypes.uint64) # byte address of b[idx]
 def usb_deps(b:UOp) -> tuple[UOp, ...]: # dependencies through views
   return (b.src[1:] if b.op is Ops.AFTER else ()) + (usb_deps(b.src[0]) if b.op in (Ops.BITCAST, Ops.SHRINK, Ops.AFTER) else ())
@@ -412,7 +412,7 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
   h, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
   loop, v = None, v.bitcast(dtypes.uint32 if v.dtype.itemsize == 4 else dtypes.uint64)
   if str(unwrap_view(b)[0].tag).startswith("kernargs"):
-    cache = UOp.placeholder((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.value, volatile=True, tag="usb_arg_cache")
+    cache = UOp.alloc((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.value, tag="usb_arg_cache")
     cache = cache.after(cache.store(UOp(Ops.BINARY, arg=bytes(v.dtype.itemsize * cache.max_numel())).bitcast(v.dtype)))
     loop = UOp.range(cache.index(idx - idx.vmin).load().ne(v).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int,
                      src=(h, v.cast(dtypes.uint32).cast(dtypes.uint64), (v >> 32).cast(dtypes.uint32).cast(dtypes.uint64)))
@@ -465,9 +465,9 @@ def _words(dev) -> Buffer: # zero the read signal and scratch
   b.host.view(fmt='B')[:8] = bytes(8)
   return b
 def usb_bufferize(dev) -> PatternMatcher: # the placeholders a usb gpu owns
-  return PatternMatcher([(UPat(Ops.PARAM, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)),
-                         (UPat(Ops.PARAM, tag={dev.tag(f"usb_xfer{h}") for h in (0, 1)}, name="b"), lambda b, d=dev: _xfer(d, b.tag)),
-                         (UPat(Ops.PARAM, tag=dev.tag("usb_vram")), lambda d=dev: _words(d)),
-                         (UPat(Ops.PARAM, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
+  return PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)),
+                         (UPat(Ops.ALLOC, tag={dev.tag(f"usb_xfer{h}") for h in (0, 1)}, name="b"), lambda b, d=dev: _xfer(d, b.tag)),
+                         (UPat(Ops.ALLOC, tag=dev.tag("usb_vram")), lambda d=dev: _words(d)),
+                         (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

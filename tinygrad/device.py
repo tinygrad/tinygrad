@@ -419,12 +419,11 @@ class Compiled:
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 
   @functools.cache
-  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
+  def rt_allocator(self, spec:BufferSpec) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
 
   @functools.cache
-  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
-    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
-    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
+  def rt_buffer(self, spec:BufferSpec) -> Buffer:
+    return Buffer(self.device, self.rt_allocator(spec).size, dtypes.uint8, options=spec, preallocate=True)
 
   def tag(self, *parts:str) -> str: return to_name(self.device, *parts) # of the placeholders it owns
   def program_buffer(self, b:UOp) -> Buffer:

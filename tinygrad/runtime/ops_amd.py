@@ -53,9 +53,9 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 # PM4
 
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {device}_{name}_{queue}. put is the host's copy of the write pointer
-  shapes = [("ring", (q.ring.size,), q.ring.dtype, hq.devs)] + [(n, (1,), dtypes.uint64, hq.devs) for n in ("write_ptr", "doorbell")]
+  shapes = [("ring", (q.ring.size,), q.ring.dtype, hq.devs[0])] + [(n, (1,), dtypes.uint64, hq.devs[0]) for n in ("write_ptr", "doorbell")]
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
-  return [UOp.placeholder(s, dt, 0, device=d, volatile=True, tag=hq.dev.tag(n, hq.queue)) for n, s, dt, d in shapes]
+  return [UOp.alloc(s, dt, 0, device=d, tag=hq.dev.tag(n, hq.queue)) for n, s, dt, d in shapes]
 
 @uopfunc
 def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
@@ -180,7 +180,7 @@ class AMDComputeQueue(HWQueue):
   ### profiling: a kernel's slot holds its counters and trace until a synchronize reads them back
 
   def prof_buf(self, name:str) -> UOp:
-    return UOp.placeholder((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs, tag=self.dev.tag(name))
+    return UOp.alloc((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs[0], tag=self.dev.tag(name))
 
   def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None:
     if not (self.dev.pmc_enabled or self.dev.sqtt_enabled): return None
@@ -399,7 +399,7 @@ class AMDComputeQueue(HWQueue):
     ka = UOp(Ops.LINEAR, src=tuple(self.kernargs(call, prg, data)), arg="kernargs")
 
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
-    scratch_addr = UOp.placeholder((data.private_segment_size,), dtypes.uint8, 0, device=self.devs).rtag(self.dev.tag("scratch")).getaddr(self.devs)
+    scratch_addr = UOp.alloc((data.private_segment_size,), dtypes.uint8, 0, device=self.devs[0]).rtag(self.dev.tag("scratch")).getaddr(self.devs)
     args_addr = ka.getaddr(self.devs)
 
     user_regs:list = []
@@ -442,7 +442,7 @@ class AMDComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp: # the ring gets an indirect buffer packet: 4 dwords, put stays aligned so it never wraps mid packet
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
-    ib = UOp.placeholder((16,), dtypes.uint8, device=self.dev.host, tag=to_name("ib", self.queue))
+    ib = UOp.alloc((16,), dtypes.uint8, device=self.dev.host, tag=to_name("ib", self.queue))
     return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.dev.compute_queue))
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
@@ -535,7 +535,7 @@ def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramDat
   # the image parses once per lib, each device set gets its own program buffer of it
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, devs))) is None:
     data, image = _amd_program_image(dev, lib)
-    buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
+    buf = UOp.alloc((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs[0]).rtag("program")
     cached = _amd_program_cache[key] = (data, buf.after(buf.store(UOp(Ops.BINARY, src=(), arg=image).bitcast(buf.dtype))))
     if PROFILE: _amd_program_prof[buf] = (prg.src[0].arg.function_name, lib, prg.key)
   return cached
@@ -889,8 +889,8 @@ class AMDDevice(Compiled):
 
     # Scratch setup
     self.max_private_segment_size = 0
-    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=self.tag("scratch"), name="b"), lambda b, d=self: d.scratch_buffer(b.max_numel())),
-                                             (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=self.tag("scratch"), name="b"), lambda b, d=self: d.scratch_buffer(b.max_numel())),
+                                             (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
 
     if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
       self.pm_batch, self.pm_lower = pm_usb_batch, pm_usb_lower
@@ -903,7 +903,7 @@ class AMDDevice(Compiled):
       self.prof_slots, self.prof_read, self.sqtt_next_cmd_id = getenv("PROF_SLOTS", 32), 0, itertools.count(0)
       self.pmc_sched:list[PMCSample] = []
       self.sqtt_ses, self.sqtt_win = self.se_cnt * self.xccs, (getenv("SQTT_BUFFER_SIZE", 256) << 20) // self.prof_slots # mb, per shader engine
-      Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=self.tag(n)), lambda n=n, d=self: getattr(d, n))
+      Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=self.tag(n)), lambda n=n, d=self: getattr(d, n))
                                                for n in ("prof_log", "pmc_buf", "sqtt_buf", "sqtt_wptrs")])
     if self.pmc_enabled:
       self.pmc_counters = import_pmc(self.target)
