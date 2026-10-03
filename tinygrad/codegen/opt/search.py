@@ -1,14 +1,13 @@
-import math, time, traceback, signal
+import math, time, traceback, threading, multiprocessing
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
-from tinygrad.helpers import IGNORE_BEAM_CACHE
+from tinygrad.helpers import prod, flatten, IGNORE_BEAM_CACHE, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str, unwrap
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.engine.realize import time_call
-from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
+from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool, _WorkerProcess
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -48,15 +47,8 @@ def _time_program(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer], early_
   return tms
 
 class TimeoutException(Exception): pass
-def timeout_handler(signum, frame):
-  if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
-  raise TimeoutException()
 
 def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
-  if hasattr(signal, "alarm"):
-    signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
-    # set timeout
-    signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
     st = time.perf_counter()
@@ -73,9 +65,30 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
     if DEBUG >= 4: traceback.print_exc()
   except Exception as e:
     if getenv("BEAM_STRICT_MODE"): raise e
-  finally:
-    if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
+
+def _try_compile_timeout(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
+  ret = err = None
+
+  def _compile():
+    nonlocal ret, err
+    try: ret = _try_compile(x)
+    except Exception as e: err = e
+
+  # need to use a thread here so we can timeout safely
+  thread = threading.Thread(target=_compile, daemon=True)
+  thread.start()
+  thread.join(getenv("BEAM_TIMEOUT_SEC", 10) or None)
+
+  # did we timeout?
+  if thread.is_alive():
+    # if we did, retire this worker, let the pool schedule a new one
+    if isinstance(p:=multiprocessing.current_process(), _WorkerProcess): p.cancelled = True
+    if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
+    if getenv("BEAM_STRICT_MODE"): raise TimeoutException()
+    return x[0], None
+  if err is not None: raise err
+  return unwrap(ret)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
 
@@ -129,7 +142,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
       candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
       timed: list[tuple[Scheduler, float]] = []
       least_compute_ops = math.inf
-      for i, proc in ((map if pool is None else pool.imap_unordered)(_try_compile, enumerate(candidates))):
+      for i, proc in ((map if pool is None else pool.imap_unordered)(_try_compile if pool is None else _try_compile_timeout, enumerate(candidates))):
         if proc is None: continue
         prg, compile_et = proc
         if (lib:=prg.src[3].arg) in seen_libs: continue
