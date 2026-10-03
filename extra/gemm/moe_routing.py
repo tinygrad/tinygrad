@@ -204,5 +204,9 @@ def dispatch_fp8(x:Tensor|tuple[Tensor, Tensor], r:Routing) -> tuple[Tensor, Ten
 
 def combine(y:Tensor, r:Routing, n_tokens:int, experts_per_tok:int) -> Tensor:
   G, D, k = r.n_groups, y.shape[-1], experts_per_tok
+  if getenv("FUSED_COMBINE", 0):
+    from extra.gptoss_kernels.combine import fused_combine
+    assert k == 4
+    return fused_combine(y.reshape(G, r.m_l, D), r.dest_row, r.weights.reshape(G, r.t_local, k)).reshape(n_tokens, D)
   sel = grouped_gather_rows(y.reshape(G, r.m_l, D), r.dest_row, G).reshape(G, r.t_local, k, D)
   return (sel * r.weights.reshape(G, r.t_local, k, 1).cast(sel.dtype)).sum(2).reshape(n_tokens, D).cast(y.dtype)
