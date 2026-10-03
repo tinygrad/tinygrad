@@ -39,7 +39,6 @@ packages = [
   'tinygrad.runtime.autogen.amd.rdna4',
   'tinygrad.runtime.autogen.amd.cdna',
   'tinygrad.runtime.autogen.nv_regs',
-  'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
   'tinygrad.runtime.support.rdma',
@@ -136,7 +135,7 @@ do_not_mutate = [
   "tinygrad/mixin/gradient.py",
   "tinygrad/tensor.py",
 ]
-tests_dir = ["test/test_tiny.py", "test/backend/test_ops.py"]
+tests_dir = ["test/test_tiny.py", "test/runtime/test_ops.py"]
 debug = true
 
 

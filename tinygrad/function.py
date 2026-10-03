@@ -13,13 +13,15 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 def is_implicit_storage(ctx, x:UOp) -> bool:
-  return x.op is Ops.BUFFER or (x.op is Ops.ALLOC and x.arg.bind_on_realize and x.arg.slot < ctx[2])
+  # Variables are caller-provided values (slot -1); positional scalar params (slot >= 0) are already captured
+  return (x.is_variable and x.arg.slot == -1) or x.op is Ops.BUFFER or (x.op is Ops.ALLOC and x.arg.bind_on_realize and x.arg.slot < ctx[2])
 
 pm_ctx = PatternMatcher([
   # Capture caller-owned storage, not allocations created while tracing this function.
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
+  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.PARAM), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
   (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
-   not x.op_in_backward_slice_with_self(Ops.PARAM) and any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
+   not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
+   any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:

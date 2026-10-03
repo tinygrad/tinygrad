@@ -10,8 +10,8 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmax, 42)
 
   def test_vmin_vmax_copy(self):
-    src = UOp.new_buffer("CPU", 4, dtypes.int32) & 3
-    for copy in (src.contiguous(), src.copy_to_device("CPU:1")):
+    src = UOp.placeholder((4,), dtypes.int32) & 3
+    for copy in (src.contiguous(), src.copy_to_device("NULL")):
       self.assertEqual((copy.vmin, copy.vmax), (0, 3))
 
   def test_vmin_vmax_cmpne(self):
@@ -49,10 +49,13 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 15)
 
-    # TODO: this can be improved
     uop = x & 32
     self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 20) # shoud be 0
+    self.assertEqual(uop.vmax, 0)
+
+    uop = x & 48
+    self.assertEqual(uop.vmin, 0)
+    self.assertEqual(uop.vmax, 16)
 
   def test_vmin_vmax_and_with_negative_variable(self):
     # when mask doesn't have sign bit set, result is always non-negative

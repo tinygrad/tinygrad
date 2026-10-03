@@ -154,7 +154,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
   # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
-  (UPat(Ops.END, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
    lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
 ])
 
@@ -250,7 +250,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, everything else (the stack pointer) by byte
-  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
+  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.AFTER} else 1
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
     return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale))
   if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale))
@@ -259,7 +259,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x))
 def is_address(x:UOp):
-  if x.op is Ops.BUFFER or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL) \
+  if x.op in {Ops.BUFFER, Ops.ALLOC} or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL) \
     or (x.op is Ops.INS and x.arg[0] in {X86Ops.LEA, X86Ops.DEFINE}): return True
   if x.op is Ops.INS and x.arg[0] is X86Ops.MOV: return (len(x.src) == 1 or x.src[0] is stack_pointer) and is_address(x.src[0])
   return x.op is Ops.INS and x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])
@@ -280,7 +280,7 @@ GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTS
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
 
 def _is_vec_xmm(y: UOp) -> bool:
-  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
+  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
 
 def _xmm_sz(x: UOp) -> X86Ops:
   bits = x.max_numel() * x.dtype.itemsize
@@ -309,19 +309,19 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
-  if x.op is Ops.BUFFER: return x.replace(src=tuple(s.rtag() for s in x.src), tag=tuple(defs))
+  if x.op in {Ops.BUFFER, Ops.ALLOC}: return x.replace(src=tuple(s.rtag() for s in x.src), tag=tuple(defs))
   return x.replace(tag=tuple(defs))
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
-  # really all a backedge END is is an IF with a tag referencing the RANGE start label
-  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
+  # BACKEDGE becomes a conditional jump referencing the RANGE start label
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally. they all share the stack pointer define's dtype so the the stack pointer define is first
+  # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + (stack_pointer,) + tuple(def_reg(r) for r in CALLEE_SAVED)),))
     if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
@@ -448,7 +448,7 @@ isel_matcher = PatternMatcher([
    x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****
@@ -456,7 +456,7 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
@@ -470,7 +470,7 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), alloc_buffer),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
@@ -498,11 +498,15 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
+def alloc_stack(ctx:X86LinearContext, x:UOp):
+  if not ctx.stack_size or ctx.stack_allocated or x.arg[0] is not X86Ops.DEFINE: return None
+  ctx.stack_allocated = True
+  return x, [stack_pointer.ins(X86Ops.SUBi, src=(imm(dtypes.int32, ctx.stack_size),)), x]
+
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # the frame is allocated after the stack pointer define at the top of the program and freed before RET
-  (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [x, x.ins(X86Ops.SUBi, src=(imm(dtypes.int32, ctx.stack_size),))])
-    if ctx.stack_size and x.arg[0] is X86Ops.DEFINE and rdef(x) == RSP else None),
+  # allocate the frame before any callee saves, regardless of the order of register definitions, and free it before RET
+  (UPat(Ops.INS, name="x"), alloc_stack),
   (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [stack_pointer.ins(X86Ops.ADDi, src=(imm(dtypes.int32, ctx.stack_size),)), x])
     if ctx.stack_size and x.arg[0] is X86Ops.RET else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
@@ -686,6 +690,7 @@ class X86LinearContext(LinearContext):
   def __init__(self, ren:X86Renderer):
     super().__init__(ren)
     self.lock: UOp|None = None
+    self.stack_allocated = False
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
     sz = r.cons[0].size
     offset = self.stack_size + (sz - self.stack_size % sz) %sz

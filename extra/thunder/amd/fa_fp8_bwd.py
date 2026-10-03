@@ -24,7 +24,7 @@ def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
   size, groups = do.numel(), partial.numel()
   assert size % groups == 0
   g = UOp.range(groups, 0)
-  r = UOp.range(size//groups, 1, AxisType.REDUCE)
+  r = UOp.range(size//groups, 1)
   idx = g*(size//groups)+r
   do = do.after(dq.flatten()[idx].store(0.))
   value = do.flatten()[idx].cast(dtypes.float).abs().reduce(r,arg=Ops.MAX)
@@ -34,7 +34,7 @@ def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
 def custom_fp8_backward_scales(scales:UOp, next_amax:UOp, partial:UOp, state:UOp, vs:UOp, *, D:int):
   assert scales.numel() == 5
   # Finalize once, rather than repeating the partial-amax reduction for every attention row in prep.
-  r = UOp.range(partial.numel(),0,AxisType.REDUCE)
+  r = UOp.range(partial.numel(),0)
   numerator = partial.flatten()[r].reduce(r,arg=Ops.MAX)+1e-8
   scale = numerator/57344.
   pd,sd = (state[0]+1e-8)/448.,state[1]/57344.
@@ -49,7 +49,7 @@ def custom_fp8_backward_scales(scales:UOp, next_amax:UOp, partial:UOp, state:UOp
 def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *reset_amax:UOp):
   B,N,H,D = do.shape
   row = UOp.range(B*N*H, 0)
-  d = UOp.range(D, 1, AxisType.REDUCE)
+  d = UOp.range(D, 1)
   b,n,h = row//(N*H), row//H%N, row%H
   scale = scales[4]/57344. if scales.numel() == 5 else scales[1]
   rounded = (do[b,n,h,d].cast(dtypes.float)/scale).maximum(-57344).minimum(57344).cast(dtypes.fp8e5m2)
@@ -65,8 +65,8 @@ def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *r
   dev = do.device[0] if isinstance(do.device,tuple) else do.device
   if (B,N,H,D) == (2,8192,32,128) and scales.numel() == 5 and Device[dev].renderer.target.arch == "gfx950":
     # Preserve the original eight-way strided sum, with four rows per workgroup and partial unrolling.
-    opts = (Opt(OptOps.SPLIT,2,(4,AxisType.LOCAL)),Opt(OptOps.SPLIT,4,(8,AxisType.GROUP_REDUCE)),
-            Opt(OptOps.SPLIT,5,(4,AxisType.UNROLL)))
+    opts = (Opt(OptOps.SPLIT,2,(4,AxisType.LOCAL)),Opt(OptOps.SPLIT,4,(8,AxisType.LOCAL)),
+            Opt(OptOps.SPLIT,5,(4,AxisType.UPCAST)))
   return UOp.group(*stores).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep",opts_to_apply=opts))
 
 def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, out:Tensor, lse:Tensor,

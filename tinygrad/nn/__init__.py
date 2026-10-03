@@ -312,12 +312,15 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     assert weight.axis is None or weight.axis == 0, "only vocab (axis=0) sharding supported on Embedding with USE_ATOMICS"
     def replicate(x:UOp) -> UOp:
       if x.device != weight.device or x.axis is None: return x.copy_to_device(weight.device)
-      rng = UOp.range(len(weight.device), -1, AxisType.DEVICE)
-      return x._shard(x.axis, rng)._unshard(x.axis).allreduce(Ops.ADD, weight.device)
+      rng = UOp.range(len(weight.device), 0, AxisType.DEVICE)
+      local = x._shard(x.axis, rng)
+      bsz = local.shape[x.axis]
+      return local.pad(tuple((0,0) if a != x.axis else (bsz*rng, bsz*int(rng.vmax)-bsz*rng)
+                             for a in range(len(local.shape)))).allreduce(Ops.ADD, weight.device)
     grad_emb = replicate(grad_emb)
     # This same-device-tuple COPY is a replication, not a contiguous materialization. Preserve that intent through
     # multi lowering now that COPY represents both operations.
-    idx = UOp(Ops.COPY, src=(idx,), arg=weight.device, tag=("replicate",))
+    idx = UOp(Ops.COPY, src=(idx, *UOp.device_range_src(weight.device)), arg=weight.device, tag=("replicate",))
   if is_vocab_sharded:
     ndev = len(weight.device)
     local_vocab_size = weight.shape[0] // ndev
@@ -352,7 +355,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
-      dnum = UOp.range(ndev, -1, AxisType.DEVICE)
+      dnum = UOp.range(ndev, 0, AxisType.DEVICE)
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)

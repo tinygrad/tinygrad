@@ -2,7 +2,7 @@
 import socket, struct, sys, signal
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
-from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.device import Device, TinyELF
 from tinygrad.helpers import DEBUG, Target, to_mv
 

@@ -95,7 +95,8 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # A precompiled allreduce's PARAM is already backed by the contiguous CALL argument below.
   stable_custom_output = _is_stable_custom_output(buf)
   if not input_staged and not stable_custom_output:
-    staged = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), buf.dtype, buf.max_numel(), device=buf.device)).reshape(buf.max_shape)
+    staged = UOp(Ops.ALLOC, src=UOp.device_range_src(buf.device),
+                 arg=ParamArg(next(UOp.unique_num), buf.dtype, buf.max_numel(), device=buf.device)).reshape(buf.max_shape)
     buf = staged.after(staged.store(buf))
 
   if concrete and (hdev:=ALLREDUCE_NODE_NDEVS.value) > 0 and ndev % hdev == 0:
@@ -136,7 +137,8 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # a padded MSTACK and then running a full-size reassembly kernel on every device.
   if direct_stack:
     if output is None:
-      output = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), reduced_chunks[0].dtype, red.max_numel(), device=device)).reshape(shape)
+      output = UOp(Ops.ALLOC, src=UOp.device_range_src(device),
+                   arg=ParamArg(next(UOp.unique_num), reduced_chunks[0].dtype, red.max_numel(), device=device)).reshape(shape)
     states = [[_allreduce_view(output.mselect(j).buf_uop, s, e) for s,e in chunks] for j in range(ndev)]
     for i,rc in enumerate(reduced_chunks):
       owner = i if use_all2all else (i-1) % ndev
@@ -166,7 +168,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if output is None:
-    output = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), red.dtype, red.max_numel(), device=red.device))
+    output = UOp(Ops.ALLOC, src=UOp.device_range_src(red.device), arg=ParamArg(next(UOp.unique_num), red.dtype, red.max_numel(), device=red.device))
     output = output.reshape(red.max_shape).shrink_to(red.shape)
   if isinstance(buf.device, tuple) and all_int(buf.shape) and allreduce_modes(len(buf.device), prod(buf.shape))[0]:
     ret = handle_allreduce(buf, red, output)

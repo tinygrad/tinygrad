@@ -1,6 +1,6 @@
 import functools
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 @functools.cache
 def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
@@ -9,13 +9,13 @@ def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp
   b = row // seq
   s = row % seq
 
-  v_max = UOp.range(vocab, 1, axis_type=AxisType.REDUCE)
+  v_max = UOp.range(vocab, 1)
   row_max = logits[b, s, v_max].cast(dtypes.float).reduce(v_max, arg=Ops.MAX)
 
-  v_lse = UOp.range(vocab, 2, axis_type=AxisType.REDUCE)
+  v_lse = UOp.range(vocab, 2)
   row_lse = (logits[b, s, v_lse].cast(dtypes.float) - row_max).exp().reduce(v_lse, arg=Ops.ADD).log() + row_max
 
-  v_smooth = UOp.range(vocab, 3, axis_type=AxisType.REDUCE)
+  v_smooth = UOp.range(vocab, 3)
   target = logits[b, s, targets[row].cast(dtypes.weakint)].cast(dtypes.float)
   mean_logits = logits[b, s, v_smooth].cast(dtypes.float).reduce(v_smooth, arg=Ops.ADD) / vocab
   loss = row_lse - (1.0 - label_smoothing) * target - label_smoothing * mean_logits

@@ -71,6 +71,7 @@ class Ops(FastEnum):
 
   # control flow ops
   BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto()
+  BACKEDGE = auto()  # (body, unbounded RANGE, condition): repeat while condition is true
 
   # const.
   CONST = auto()

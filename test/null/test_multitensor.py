@@ -1,7 +1,17 @@
 import gc, unittest
-from tinygrad import Tensor, UOp, GlobalCounters, dtypes
-from tinygrad.engine.jit import TinyJit
+from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, UOp
+from tinygrad.uop.ops import Ops
 from tinygrad.helpers import Context
+from tinygrad.nn.state import get_parameters, get_state_dict
+from test.helpers import not_support_multi_device, needs_second_gpu
+
+d1 = f"{Device.DEFAULT}:1"
+d2 = f"{Device.DEFAULT}:2"
+d3 = f"{Device.DEFAULT}:3"
+d4 = f"{Device.DEFAULT}:4"
+devices_2 = (d1, d2)
+devices_3 = (d1, d2, d3)
+devices_4 = (d1, d2, d3, d4)
 
 class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
@@ -223,6 +233,141 @@ class TestMultiAxis(unittest.TestCase):
     rows = UOp.variable("rows", 1, 4).bind(3)
     x = Tensor.empty(4, 2).shard(("NULL:1", "NULL:2"), axis=1)[:rows]
     self.assertEqual(x.reshape(rows, 1, 2).uop.axis, 2)
+
+@unittest.skipIf(not_support_multi_device(), "no multi")
+class TestMultiTensor(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def test_shard_like(self):
+    X = Tensor.ones(256).shard(devices_2, 0)
+    Y = Tensor.zeros(256).shard_like(X)
+    self.assertEqual(Y.device, X.device)
+    self.assertEqual(Y.uop.axis, 0)
+    # also test with axis=None
+    X2 = Tensor.ones(256).shard(devices_2, axis=None)
+    Y2 = Tensor.zeros(256).shard_like(X2)
+    self.assertEqual(Y2.device, X2.device)
+    self.assertEqual(Y2.uop.axis, None)
+    # test with single device
+    X3 = Tensor.ones(256)
+    Y3 = Tensor.zeros(256).shard_like(X3)
+    self.assertEqual(Y3.device, X3.device)
+    # cannot shard_like multi unless it's a no-op
+    X4 = Tensor.ones(256).shard(devices_2, 0)
+    Y4 = Tensor.ones(256).shard(devices_2, 0).shard_like(X4)
+    self.assertEqual(Y4.device, X4.device)
+    self.assertEqual(Y4.uop.axis, 0)
+    with self.assertRaises(RuntimeError):
+      Tensor.ones(256).shard(devices_2, None).shard_like(X4)
+
+  def test_shard_not_multiple(self):
+    X = Tensor.ones(256).contiguous().realize()
+    with self.assertRaises(RuntimeError):
+      X.shard_(devices_3, 0)
+
+  def test_shard_reshape_cross_boundary(self):
+    X = Tensor.ones(5, 4).contiguous().realize().shard(devices_2, 1)
+    with self.assertRaises(RuntimeError): X.reshape(10, 2).uop.axis
+
+  def test_bn_ast_on_devices(self):
+    t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
+    bn = nn.BatchNorm2d(64)
+    for p in get_parameters(bn): p.shard_(devices_4).realize()
+
+    out = bn(t)
+    scheds = [call for call in out.schedule_linear().src if call.src[0].op is not Ops.STORE and set(call.device) <= set(devices_4)]
+    self.assertEqual(set(scheds[0].device), set(devices_4), "should have ast on each shard device")
+    self.assertEqual(len(set(s.src[0] for s in scheds)), 1)
+
+  def test_init_rand_with_multiple_devices_fail(self):
+    # init rand with multi device is not allowed
+    with self.assertRaises(ValueError):
+      Tensor.rand(256, device=devices_2)
+
+  def test_rand_like_from_alu(self):
+    a = Tensor.ones(4, 4).shard(devices_4, axis=0)
+    aa = a + a
+    self.assertEqual(aa.device, devices_4)
+    self.assertEqual(aa.uop.axis, 0)
+    raa = aa.rand_like()
+    self.assertEqual(raa.device, devices_4)
+    self.assertEqual(raa.uop.axis, 0)
+
+    b = Tensor.empty(4, 4).shard(devices_4, axis=None)
+    ab = a + b
+    self.assertEqual(ab.device, devices_4)
+    self.assertEqual(ab.uop.axis, 0)
+    rab = ab.rand_like()
+    self.assertEqual(rab.device, devices_4)
+    self.assertEqual(rab.uop.axis, 0)
+
+  def test_rand_like_none_shard(self):
+    t = Tensor.empty((16, 16)).shard(devices_2)
+    t2 = Tensor.rand_like(t)
+    self.assertEqual(t.shape, t2.shape)
+    self.assertEqual(t.device, t2.device)
+    self.assertEqual(t.dtype, t2.dtype)
+    self.assertEqual(t.uop.axis, t2.uop.axis)
+
+  def test_rand_like_arg_dtype(self):
+    t = Tensor.empty((16, 16), dtype=dtypes.int32).shard(devices_2, axis=1)
+    t2 = Tensor.rand_like(t, dtype=dtypes.float32)
+    self.assertEqual(t.dtype, dtypes.int32)
+    self.assertEqual(t2.dtype, dtypes.float32)
+
+  def test_rand_like_arg_device(self):
+    # axis=None
+    t = Tensor.empty((16, 16)).shard((d1, d2), axis=None)
+    with self.assertRaises(RuntimeError):
+      Tensor.rand_like(t, device=(d3, d4))
+
+    # axis=1
+    t = Tensor.empty((16, 16)).shard((d1, d2), axis=1)
+    with self.assertRaises(RuntimeError):
+      Tensor.rand_like(t, device=(d3, d4))
+
+@unittest.skipIf(not_support_multi_device(), "no multi")
+class TestBatchNorm(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def test_synced_vs_unsynced_bn(self):
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.nn import BatchNorm2d
+    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
+
+    with Context(TRAINING=1):
+      synced_bn = BatchNorm2d(8)
+      unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
+
+      for p in get_parameters(synced_bn):
+        p.shard_(devices)
+      for k, p in get_state_dict(unsynced_bn).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(devices, axis=0)
+        else:
+          p.to_(devices)
+
+      synced_out = synced_bn(x)
+      synced_si = list(synced_out.schedule_linear().src)
+      unsynced_out = unsynced_bn(x)
+      unsynced_si = list(unsynced_out.schedule_linear().src)
+
+    # TODO: test synced / unsynced batchnorm cross device kernel and copies
+    assert synced_si
+    assert unsynced_si
+
+@unittest.skipIf(not_support_multi_device(), "no multi")
+class TestBackendMultiTensor(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def test_shard_invalids_contiguous(self):
+    # every store is Invalid, so none of them should become a (empty) kernel
+    t = Tensor.invalids(8).shard(devices_2, axis=0).contiguous()
+    self.assertEqual(len([c for c in t.schedule_linear().src if c.src[0].op is Ops.SINK]), 1)
 
 if __name__ == '__main__':
   unittest.main()

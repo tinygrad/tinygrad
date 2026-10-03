@@ -35,7 +35,8 @@ def clip_grads(grads:list[Tensor], grad_acc, clip_norm, clip_coeff_out:Tensor|No
     n, dnum = len(device), UOp.range(len(device), -1, AxisType.DEVICE)
     local_sq = [Tensor(g.uop._shard(0, dnum)).float().square().sum() if g.ndim and g.shape[0] % n == 0 else
                 g.float().square().sum() / n for g in avg_grads]
-    local_norm = Tensor.stack(*local_sq).sum()
+    # This norm must preserve its reduction topology across STACK lookup balancing changes.
+    local_norm = Tensor(Tensor.stack(*local_sq).uop.rtag(("linear_stack",))).sum()
     total_norm = Tensor(local_norm.uop.allreduce(Ops.ADD, device)).sqrt().contiguous()
   else:
     total_norm = Tensor.stack(*[g.float().square().sum() for g in avg_grads]).sum().sqrt().contiguous()

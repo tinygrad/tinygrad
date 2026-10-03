@@ -38,8 +38,9 @@ def lower_broadcast_copy(c:UOp, x:UOp):
   if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
   if (sx:=x.simplify()).device is None: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
   # Keep a computed value on its source device. Cross-device COPYs materialize their own SDMA source in prepare.
+  x = x.pad_to(x.max_shape)
   buffered = x.has_buffer_identity(after_ok=True)
-  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) if buffered or d != x.device else x for d in c.device))
+  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) if buffered or d != x.device else x for d in c.device)).shrink_to(c.shape)
 
 def lower_copy_to_one(c:UOp, x:UOp):
   if not (isinstance(c.device, str) and isinstance(x.device, tuple)): return None
@@ -48,9 +49,9 @@ def lower_copy_to_one(c:UOp, x:UOp):
 
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
-  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lower_broadcast_copy),
+  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),), allow_any_len=True), lower_broadcast_copy),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
-  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lower_copy_to_one),
+  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),), allow_any_len=True), lower_copy_to_one),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # move shrink before MSTACK
@@ -75,7 +76,7 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   assert all_same(devices), f"all buffers must have the same device {devices}"
   # without devices the sharding range comes from the UNSHARD itself (e.g. a LOCAL thread range);
   # device shards range over the devices instead
-  if len(devices): sharding_rng = UOp.range(len(devices[0]), -1, AxisType.DEVICE)
+  if len(devices): sharding_rng = UOp.range(len(devices[0]), 0, AxisType.DEVICE)
   else:
     sharding_rng = next((m.src[1] for m in msrcs if m.op is Ops.UNSHARD), None)
     assert sharding_rng is not None, "shard_srcs requires a device or a sharding range"
@@ -313,13 +314,14 @@ multi_pm = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
   # a COPY of a sharded value copies every shard to the target device
-  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
+  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), allow_any_len=True, name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 
   # rewrite value-producing calls explicitly for UNSHARD
-  (UPat(Ops.CALL, name="call"), rewrite_into_function),
-  (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
+  # NOTE: lambda for late binding, rewrite_into_function references multi_pm
+  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call)),
+  (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg) if not root.has_unbound_outputs else None),

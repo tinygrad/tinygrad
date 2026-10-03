@@ -87,7 +87,7 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
-  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  const labels = nodes.selectAll("g.label").data(d => d.source == null ? [d] : []).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
@@ -114,6 +114,9 @@ const drawGraph = (data) => {
   tokens.on("click", (e, { keys }) => {
     tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
   });
+  nodes.selectAll("foreignObject.source-node").data(d => d.source != null ? [d] : []).join("foreignObject").attr("class", "source-node")
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("width", d => d.width).attr("height", d => d.height)
+    .each((d, i, nodes) => nodes[i].replaceChildren(codeBlock(d.source, d.lang)));
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
@@ -454,8 +457,8 @@ async function renderProfiler(path, opts) {
     if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
-      const levels = [];
-      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor });
+      const levels = [], ends = [];
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor, ends });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), fmt:JSON.parse(strings[u32()])};
@@ -498,6 +501,7 @@ async function renderProfiler(path, opts) {
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
+        if (e.name.includes("WAVEEND")) ends.push(e.st+e.dur);
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
@@ -626,7 +630,7 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor, ends }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
@@ -664,6 +668,11 @@ async function renderProfiler(path, opts) {
             const key = e.arg.key; if (key === focusedShape || key === link0 || key === link1) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); continue; }
           }
           if (splitRects && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
+        }
+        for (let i=0; i<ends.length; i++) {
+          const end = ends[i]; if (end<st || end>et) continue;
+          const x = xscale(end)+0.5;
+          drawLine(ctx, [x, x], [offsetY-padding/2-0.5, offsetY+trackHeight-padding/2-0.5], { color:"#22232a" });
         }
       }
       // draw row line
@@ -928,7 +937,7 @@ const createToggle = (id, text) => {
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
-const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)"); showCallSrc.toggle.checked = false;
+const showCallSrc = createToggle("show-call-body", "Show CALL bodies (c)"); showCallSrc.toggle.checked = false;
 const showSink = createToggle("show-sink", "Show SINK (s)");
 showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");

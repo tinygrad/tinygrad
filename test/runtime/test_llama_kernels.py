@@ -1,0 +1,216 @@
+import unittest, functools
+from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
+from extra.llama_kernels.fused_ce import fused_ce_loss
+from extra.llama_kernels import local_abs_max
+from extra.llama_kernels.swiglu import swiglu
+from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
+from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
+from test.helpers import assert_kernel_count
+from test.device.amd.test_asm_gemm import has_hipcc, is_cdna4
+
+def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
+  Tensor.manual_seed(0)
+  logits_rand = Tensor.randn(bs, seqlen, vocab).cast(dtypes.bfloat16)
+  targets = Tensor.randint(bs, seqlen, high=vocab, dtype=dtypes.int32)
+  logits, logits_ref = logits_rand.clone(), logits_rand.detach().float().contiguous()
+  with Context(DEBUG=0):
+    Tensor.realize(logits, logits_ref, targets)
+
+  loss = fused_ce_loss(logits, targets, label_smoothing=label_smoothing)
+  loss.backward()
+  Tensor.realize(loss, logits.grad)
+
+  ref = logits_ref.sparse_categorical_crossentropy(targets, label_smoothing=label_smoothing)
+  ref.backward()
+  Tensor.realize(ref, logits_ref.grad)
+
+  assert logits.grad.shape == (bs, seqlen, vocab)
+  with Context(DEBUG=0):
+    assert loss.allclose(ref, atol=2e-3, rtol=2e-3).item(), "forward mismatch"
+    assert logits.grad.allclose(logits_ref.grad, atol=2e-3, rtol=2e-3).item(), "grad mismatch"
+
+class TestFusedCE(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
+  def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
+  def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
+
+  # note: this is the shape used in llama 8b
+  #def test_fused_ce_smoothing_16_1024_128256(self): run_fused_ce(16, 1024, 128256, label_smoothing=0.2)
+
+class TestLocalAmax(unittest.TestCase):
+  def test_multi_tensor_local_shard_amax(self):
+    devices = ("CPU:0", "CPU:1")
+    x = Tensor.arange(16).reshape(4, 4).cast(dtypes.float).clone(devices[0]).realize().shard(devices, axis=0).realize()
+    GlobalCounters.reset()
+    out = (x * local_abs_max(x)).clone().realize()
+    assert_kernel_count(2)
+    self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
+
+@unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+class TestRMSNormMul(unittest.TestCase):
+  def test_forward_backward(self):
+    from extra.llama_kernels.rmsnorm import rmsnorm, rmsnorm_mul
+    Tensor.manual_seed(1)
+    x = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    weight = Tensor.randn(4096, dtype=dtypes.bfloat16)
+    gradient = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    out, rrms = rmsnorm_mul(x, weight, 1e-5)
+    normalized, ref_rrms = rmsnorm(x, 1e-5)
+    ref = normalized * weight
+    dx, dw = out.gradient(x, weight, gradient=gradient)
+    ref_dx, ref_dw = ref.gradient(x, weight, gradient=gradient)
+    Tensor.realize(out, rrms, ref, ref_rrms, dx, dw, ref_dx, ref_dw)
+    with Context(DEBUG=0):
+      self.assertTrue(out.allclose(ref, atol=0.07, rtol=0.02).item(), "forward mismatch")
+      self.assertTrue(rrms.allclose(ref_rrms.squeeze(-1), atol=1e-6, rtol=1e-6).item(), "rrms mismatch")
+      self.assertTrue(dx.allclose(ref_dx, atol=0.07, rtol=0.02).item(), "input gradient mismatch")
+      self.assertTrue(dw.allclose(ref_dw, atol=0.3, rtol=0.03).item(), "weight gradient mismatch")
+
+  def test_add_forward_backward(self):
+    from extra.llama_kernels.rmsnorm import rmsnorm, rmsnorm_add_mul
+    Tensor.manual_seed(2)
+    x = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    residual = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    weight = Tensor.randn(4096, dtype=dtypes.bfloat16)
+    dout = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    dh_direct = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    out, h, rrms = rmsnorm_add_mul(x, residual, weight, 1e-5)
+    ref_h = x + residual
+    normalized, ref_rrms = rmsnorm(ref_h, 1e-5)
+    ref = normalized * weight
+    loss = (out*dout).sum() + (h*dh_direct).sum()
+    ref_loss = (ref*dout).sum() + (ref_h*dh_direct).sum()
+    dx, dr, dw = loss.gradient(x, residual, weight)
+    ref_dx, ref_dr, ref_dw = ref_loss.gradient(x, residual, weight)
+    Tensor.realize(out, h, rrms, ref, ref_h, ref_rrms, dx, dr, dw, ref_dx, ref_dr, ref_dw)
+    with Context(DEBUG=0):
+      self.assertTrue(out.allclose(ref, atol=0.07, rtol=0.02).item(), "forward mismatch")
+      self.assertTrue(h.allclose(ref_h, atol=0, rtol=0).item(), "residual state mismatch")
+      self.assertTrue(rrms.allclose(ref_rrms.squeeze(-1), atol=1e-6, rtol=1e-6).item(), "rrms mismatch")
+      self.assertTrue(dx.allclose(ref_dx, atol=0.1, rtol=0.03).item(), "input gradient mismatch")
+      self.assertTrue(dr.allclose(ref_dr, atol=0.1, rtol=0.03).item(), "residual gradient mismatch")
+      self.assertTrue(dw.allclose(ref_dw, atol=0.3, rtol=0.03).item(), "weight gradient mismatch")
+
+def run_fused_qkv_rope_forward(test:unittest.TestCase, shape:tuple[int, int, int, int, int]) -> None:
+  Tensor.manual_seed(0)
+  B, N, H, H_KV, D = shape
+  GROUP = H // H_KV
+  x = (Tensor.randn(B, N, H_KV * (GROUP + 2) * D) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+  freqs_cis = (Tensor.randn(1, N * 2, 1, D // 2, 2) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+
+  q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
+  packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)
+  q_ref = packed_ref[:, :, :, :GROUP].reshape(B, N, H, D)
+  k_ref, v_ref = packed_ref[:, :, :, GROUP], packed_ref[:, :, :, GROUP+1]
+  q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis[:, :N])
+  q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
+  Tensor.realize(q, k, v, q_ref, k_ref, v_ref)
+
+  with Context(DEBUG=0):
+    test.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
+    test.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
+    test.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
+
+class TestFusedQKVRoPE(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("test uses bf16 inputs")
+
+  def rand_bf16(self, *shape:int) -> Tensor:
+    return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+
+  def freqs_cis(self) -> Tensor:
+    _, N, _, _, D = self.SHAPE
+    return precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
+
+  def test_forward(self): run_fused_qkv_rope_forward(self, (1, 32, 8, 2, 16))
+
+  @unittest.skipUnless(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"),
+                       "only run production shape on gfx950 for speed")
+  def test_llama31_8b_forward(self): run_fused_qkv_rope_forward(self, self.SHAPE)
+
+  @unittest.skipUnless(has_hipcc() and is_cdna4(), "backward kernel requires hipcc and CDNA4")
+  def test_llama31_8b_backward(self):
+    Tensor.manual_seed(1)
+    B, N, H, H_KV, D = self.SHAPE
+    PARTIALS = 2
+    GROUP = H // H_KV
+    freqs_cis = precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
+    dq = self.rand_bf16(B, N, H, D)
+    dk_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
+    dv_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
+
+    # Invert Flash Attention's dQ layout transform to reproduce its native buffer.
+    dq_native = dq.transpose(1, 2).reshape(B, H, N//16, 4, 4, 4, 2, D//32, 2, 2) \
+      .permute(0, 1, 2, 5, 6, 8, 7, 3, 4, 9).reshape(B, H, N, D).contiguous().realize()
+    dx = Tensor.empty(B, N, H_KV * (GROUP + 2) * D, dtype=dtypes.bfloat16)
+    arch = Device[Device.DEFAULT].renderer.target.arch
+    fxn = functools.partial(custom_fused_qkv_rope_backward, device=Device.DEFAULT, arch=arch,
+                            B=B, N=N, H=H, H_KV=H_KV, D=D)
+    dx = Tensor.custom_kernel(dx, dq_native, dk_partial, dv_partial, freqs_cis, fxn=fxn)[0].realize()
+
+    def inverse_rope(x:Tensor) -> Tensor:
+      x = x.reshape(*x.shape[:-1], D//2, 2).float()
+      cs = freqs_cis[:, :N].float()
+      return Tensor.stack(x[..., 0] * cs[..., 0] + x[..., 1] * cs[..., 1],
+                          -x[..., 0] * cs[..., 1] + x[..., 1] * cs[..., 0], dim=-1).flatten(-2).cast(dtypes.bfloat16)
+
+    dq_ref = inverse_rope(dq).reshape(B, N, H_KV, GROUP, D)
+    dk_ref = inverse_rope(dk_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16)).unsqueeze(3)
+    dv_ref = dv_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
+    ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
+    with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
+
+  @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+  def test_llama31_8b_backward_expanded_gqa(self):
+    Tensor.manual_seed(2)
+    B, N, H, H_KV, D = self.SHAPE
+    GROUP = H // H_KV
+    freqs_cis = self.freqs_cis()
+    dq = self.rand_bf16(B, N, H, D)
+    dk_expanded = self.rand_bf16(B, N, H, D)
+    dv_expanded = self.rand_bf16(B, N, H, D)
+
+    dx = Tensor.empty(B, N, H_KV * (GROUP + 2) * D, dtype=dtypes.bfloat16)
+    arch = Device[Device.DEFAULT].renderer.target.arch
+    fxn = functools.partial(custom_fused_qkv_rope_backward, device=Device.DEFAULT, arch=arch,
+                            B=B, N=N, H=H, H_KV=H_KV, D=D, expanded_fa_grads=True)
+    dx = Tensor.custom_kernel(dx, dq, dk_expanded, dv_expanded, freqs_cis, fxn=fxn)[0].realize()
+
+    def inverse_rope(x:Tensor) -> Tensor:
+      x = x.reshape(*x.shape[:-1], D//2, 2).float()
+      cs = freqs_cis[:, :N].float()
+      return Tensor.stack(x[..., 0] * cs[..., 0] + x[..., 1] * cs[..., 1],
+                          -x[..., 0] * cs[..., 1] + x[..., 1] * cs[..., 0], dim=-1).flatten(-2).cast(dtypes.bfloat16)
+
+    dq_ref = inverse_rope(dq).reshape(B, N, H_KV, GROUP, D)
+    dk_ref = inverse_rope(dk_expanded.float().reshape(B, N, H_KV, GROUP, D).sum(3).cast(dtypes.bfloat16)).unsqueeze(3)
+    dv_ref = dv_expanded.float().reshape(B, N, H_KV, GROUP, D).sum(3).cast(dtypes.bfloat16).unsqueeze(3)
+    ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
+    with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "expanded GQA backward mismatch")
+
+def run_swiglu(test:unittest.TestCase, shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = (Tensor.randn(*shape) * 2).cast(dtypes.bfloat16).realize()
+  hidden = x.shape[-1] // 2
+  out, ref = swiglu(x), x[..., :hidden].silu() * x[..., hidden:]
+  Tensor.realize(out, ref)
+  with Context(DEBUG=0): test.assertTrue(out.allclose(ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU forward mismatch")
+
+  grad = (Tensor.randn(*out.shape) * 2).cast(dtypes.bfloat16).realize()
+  grad_x, grad_ref = out.gradient(x, gradient=grad)[0], ref.gradient(x, gradient=grad)[0]
+  Tensor.realize(grad_x, grad_ref)
+  test.assertEqual(grad_x.shape, shape)
+  test.assertEqual(grad_x.dtype, dtypes.bfloat16)
+  with Context(DEBUG=0): test.assertTrue(grad_x.allclose(grad_ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU backward mismatch")
+
+class TestSwiGLU(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_simple(self): run_swiglu(self, (2, 32, 64))
+
+if __name__ == '__main__':
+  unittest.main()

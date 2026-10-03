@@ -61,9 +61,11 @@ def unshard_gradient(ctx:UOp, ret:UOp) -> tuple[UOp, ...]:
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
   # NOTE: don't enter nested calls, their PARAMs are lexical params of the subprogram
-  used = sorted({p.arg.slot: p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM}.items())
-  body = body.substitute({p: p.replace(arg=dataclasses.replace(p.arg, slot=j)) for j,(_, p) in enumerate(used)}, walk=True)
-  return body, tuple(all_args[i] for i,_ in used)
+  used = sorted((p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
+  args = tuple(p if p.arg.slot < 0 else all_args[p.arg.slot] for p in used)
+  body = body.substitute({p:p.replace(arg=dataclasses.replace(p.arg, slot=i, name=None, val=None))
+                         for i,p in enumerate(used)}, walk=True)
+  return body, args
 
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.body, k.src[1:]
@@ -75,17 +77,17 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     # grads align with the call's src positions (None for the body and for RETURNED outputs, wherever they are)
     def arg_grads(g):
       git = iter(g)
-      return (None,) + tuple(None if (b:=a.unsharded_base).op is Ops.ALLOC and not b.arg.bind_on_realize else next(git) for a in k.src[1:])
+      return (None,) + tuple(None if i in outputs else next(git) for i in range(len(args)))
     if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
   assert fxn.op is Ops.SINK and k.has_unbound_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
-  ret_pos = [i for i, a in enumerate(args) if (b:=a.unsharded_base).op is Ops.ALLOC and not b.arg.bind_on_realize]
+  ret_pos = list(outputs)
   # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
-  params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+  params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op is Ops.PARAM and x.arg.slot >= 0}
   # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
   def shaped_grad(grad:UOp, i:int) -> UOp:
     a = args[i]
@@ -139,7 +141,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
 def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
   # A write through a non-overlapping view replaces only that region of the returned state.
   path, base = [], view
-  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP}:
+  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD}:
     path.append(base)
     base = base.src[0]
   if base is not dest: return None
@@ -176,7 +178,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
-  (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
+  (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),) + (None,) * (len(ret.src)-1)),
   (UPat(Ops.UNSHARD, name="ret"), unshard_gradient),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
@@ -186,7 +188,8 @@ pm_gradient = PatternMatcher([
    lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="dest"), UPat())))), lambda ctx,dest: (None, ctx)),
-  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))), partial_store_gradient),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))),
+   lambda ctx, dest, view: partial_store_gradient(ctx, dest, view)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
