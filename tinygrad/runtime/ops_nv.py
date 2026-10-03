@@ -122,10 +122,10 @@ class NVQueue(HWQueue):
     if not timestamp: self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    fifo = self.dev.fifos[self.queue]
-    bufs = (("ring", dtypes.uint64, fifo.entries, self.devs), ("gpput", dtypes.uint32, 1, self.devs), ("doorbell", dtypes.uint32, 1, self.devs),
+    fifo, dev = self.dev.fifos[self.queue], self.devs[0]
+    bufs = (("ring", dtypes.uint64, fifo.entries, dev), ("gpput", dtypes.uint32, 1, dev), ("doorbell", dtypes.uint32, 1, dev),
             ("put_value", dtypes.uint64, 1, self.dev.host))
-    ring, gpput, doorbell, put = [UOp.placeholder((sz,), dt, device=d, volatile=True, tag=self.dev.tag(nm, self.queue)) for nm, dt, sz, d in bufs]
+    ring, gpput, doorbell, put = [UOp.alloc((sz,), dt, device=d).rtag(self.dev.tag(nm, self.queue)) for nm, dt, sz, d in bufs]
     return nv_submit(cmdbuf, ring, gpput, doorbell, put, fifo.token)
 
 class NVComputeQueue(NVQueue):
@@ -135,7 +135,7 @@ class NVComputeQueue(NVQueue):
     progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
     self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
-    self.qmd_buf = UOp.placeholder((len(progs) * self.stride,), dtypes.uint8, device=self.devs, tag=to_name("qmd", self.queue))
+    self.qmd_buf = UOp.alloc((len(progs) * self.stride,), dtypes.uint8, device=self.devs[0]).rtag(to_name("qmd", self.queue))
     self.qmds:list[QMD] = []
     self.prev_qmd:QMD|None = None # the launch the next one chains onto
 
@@ -315,7 +315,7 @@ _nv_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[NVProgramData, UOp]]
 def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
   if (cached:=_nv_program_cache.get(key:=(prg.src[3].arg, devs))) is None:
     data = NVProgramData(dev, prg.to_elf())
-    buf = UOp.placeholder((len(data.image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
+    buf = UOp.alloc((len(data.image),), dtypes.uint8, next(UOp.unique_num), device=devs[0]).rtag("program")
     rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
     cached = _nv_program_cache[key] = (data, patch(buf, rows, data.image))
   return cached
@@ -658,7 +658,7 @@ class NVDevice(Compiled):
       gpput=self.gpfifo_buf.view(1, dtypes.uint32, gpput_off).ensure_allocated(),
       doorbell=Buffer("CPU", 1, dtypes.uint32, options=BufferSpec(external_ptr=self.gpu_mmio.addr + 0x90), preallocate=True),
       put_value=Buffer("CPU", 1, dtypes.uint64, initial_value=bytes(8)), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
-    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=self.tag(n, name)), lambda b=getattr(fifo, n): b)
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=self.tag(n, name)), lambda b=getattr(fifo, n): b)
                                              for n in ("ring", "gpput", "doorbell", "put_value")])
     return fifo
 

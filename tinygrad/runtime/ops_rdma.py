@@ -81,12 +81,12 @@ def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
   for nic, q in zip(nics, qps.values()):
     bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
     bufs |= {name: Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
-    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.PARAM, tag=to_name("rdma", *pair, n)), lambda b=b: b) for n, b in bufs.items()])
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=to_name("rdma", *pair, n)), lambda b=b: b) for n, b in bufs.items()])
   for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
   return qps
 
 def rdma_mem(nic:str, pair:tuple[str, str], name:str, size:int, dtype:DType=dtypes.uint8) -> UOp:
-  return UOp.placeholder((size,), dtype, 0, device=nic, volatile=True, tag=to_name("rdma", *pair, name))
+  return UOp.alloc((size,), dtype, 0, device=nic).rtag(to_name("rdma", *pair, name))
 def rdma_ring(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp:
   return rdma_mem(nic, pair, "rq" if is_recv else "sq", RING_ENTRIES * (WQE_SIZE if is_recv else WQE_SIZE + 8))
 def rdma_cq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rcq" if is_recv else "scq", CQ_ENTRIES * 32)

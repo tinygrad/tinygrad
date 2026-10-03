@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
 from tinygrad.dtype import PyConst, InvalidType, bitcast
-from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, is_disk_device, TinyELF
+from tinygrad.device import Buffer, BufferSpec, MultiBuffer, canonicalize_device, is_disk_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
@@ -40,9 +40,11 @@ class ParamArg:
   bind_on_realize: bool = False
   # the bound value of a Variable (an ALU PARAM with a value range); None means unbound
   val: PyConst|None = None
+  # the memory the linker gives an ALLOC
+  spec: BufferSpec|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
-              ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None))
+              ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
     args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
@@ -1190,25 +1192,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
-  def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None):
+  def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
+            spec:BufferSpec|None=None):
     ret = UOp(Ops.ALLOC, src=UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(to_max_shape(shape)),
-                           addrspace=addrspace, device=device))
+                           addrspace=addrspace, device=device, spec=spec))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod
-  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, volatile=False, tag=None):
+  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
-    name = tag if isinstance(tag, str) else None # a string tag names the param
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size=prod(shape), name=name, addrspace=addrspace, device=device, volatile=volatile))
+      ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size=prod(shape), addrspace=addrspace, device=device))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       assert device is None, "LOCAL and REG placeholders cannot have a device"
-      ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=prod(shape), name=name, addrspace=addrspace))
-    if tag is not None: ret = ret.rtag(tag)
+      ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=prod(shape), addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):

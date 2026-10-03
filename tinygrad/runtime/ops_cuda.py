@@ -38,7 +38,7 @@ class CUDAQueue(HWQueue):
   def call(self, fn, *args): # the values go in the cmdbuf as words
     vals = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]
     self.cmds.append((fn, *[a if a is None or isinstance(a, tuple) else self.q(a.cast(dtypes.uint64)) // 8 - 1 for a in vals]))
-  def extern(self, tag) -> UOp: return UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, tag=tag).getaddr(self.dev.host)
+  def extern(self, tag) -> UOp: return UOp.alloc((1,), dtypes.uint64, 0, device=self.devs[0]).rtag(tag).getaddr(self.dev.host)
 
   def exec(self, call:UOp, prg:UOp):
     obj, bufs, vals = prg.to_elf(), get_call_arg_uops(call), get_call_var_uops(call, prg)
@@ -56,7 +56,7 @@ class CUDAQueue(HWQueue):
 
   def encode(self) -> UOp:
     self.cmds:list[tuple] = []
-    rt_vars = UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag=self.dev.tag("cuda"))
+    rt_vars = UOp.alloc((4,), dtypes.uint64, 0, device=self.devs[0]).rtag(self.dev.tag("cuda"))
     return cuda_run(encode_cmdbuf(self, self.lin), rt_vars, tuple(self.cmds), self.queue.startswith("COPY"))
 
 # *****************
@@ -103,9 +103,9 @@ class CUDADevice(Compiled):
     self.streams = [init_c_var(cuda.CUstream, lambda x: check(cuda.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
     super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], None, arch=f"sm_{major.value}{minor.value}")
     Compiled.pm_bufferize += PatternMatcher([
-      (UPat(Ops.PARAM, tag=self.tag("cuda")), lambda d=self: d.handles),
-      (UPat(Ops.PARAM, tag=self.tag("stamp")), lambda d=self: d.stamp),
-      (UPat(Ops.PARAM, name="b"), lambda b, d=self: d.function(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("function") else None)])
+      (UPat(Ops.ALLOC, tag=self.tag("cuda")), lambda d=self: d.handles),
+      (UPat(Ops.ALLOC, tag=self.tag("stamp")), lambda d=self: d.stamp),
+      (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.function(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("function") else None)])
 
   @functools.cached_property
   def handles(self) -> Buffer:
