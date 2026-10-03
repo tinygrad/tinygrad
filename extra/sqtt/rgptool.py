@@ -4,6 +4,7 @@ import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+from tinygrad.renderer.amd.sqtt import LAYOUT_HEADER
 from tinygrad.helpers import round_up, flatten, all_same, temp
 from dataclasses import dataclass
 
@@ -70,7 +71,7 @@ class RGPChunk:
         for record_hdr,record_blob in data_codb:
           record_hdr.size = round_up(len(record_blob), 4)
           ret += record_hdr
-          ret += record_blob.ljust(4, b'\x00')
+          ret += record_blob.ljust(record_hdr.size, b'\x00')
         return ret
       case sqtt.SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_LOADER_EVENTS:
         assert isinstance(self.data, list)
@@ -210,7 +211,7 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550, 120000: 0x7550}[device_props['gfx_target_version']],
+        device_id={110000: 0x744c, 110001: 0x747e, 110003: 0x7480, 120001: 0x7550, 120000: 0x7550}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
@@ -279,7 +280,7 @@ class RGP:
           v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_v1(
             instrumentation_spec_version=1,
             instrumentation_api_version=0,
-            compute_unit_index=0,
+            compute_unit_index=LAYOUT_HEADER.from_raw(int.from_bytes(sqtt_event.blob[:8], 'little')).group if gfx_ver == 11 else 0,
           )
         )),
         RGPChunk(sqtt.struct_sqtt_file_chunk_sqtt_data(

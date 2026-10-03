@@ -8,7 +8,7 @@ from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
-from tinygrad.renderer.amd.sqtt import decode, print_packets
+from tinygrad.renderer.amd.sqtt import decode, print_packets, map_insts
 from tinygrad.renderer.amd.dsl import s, v
 from tinygrad.helpers import getenv
 
@@ -113,8 +113,12 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_asm(self):
     t = Tensor.empty(1)
-    with save_sqtt():
+    with Context(SQTT_LIMIT_SE=2, SQTT_ITRACE_SE_MASK=1, SQTT_SIMD_SEL=0), save_sqtt() as profile:
       t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
+    trace = next(e for e in profile if isinstance(e, ProfileSQTTEvent) and e.itrace)
+    program = next(e for e in profile if isinstance(e, ProfileProgramEvent) and e.tag == trace.kern)
+    instructions = [info for _, info in map_insts(trace.blob, program.lib, self.arch) if info is not None]
+    self.assertTrue(instructions, "no mapped instructions")
 
   def test_setprio(self):
     if self.arch == "gfx950":
