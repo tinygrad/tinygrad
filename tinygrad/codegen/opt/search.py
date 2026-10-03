@@ -1,4 +1,4 @@
-import math, time, traceback, signal
+import math, time, traceback, signal, threading, os
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
@@ -52,11 +52,23 @@ def timeout_handler(signum, frame):
   if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
   raise TimeoutException()
 
+def _compile_watchdog():
+  # hard self-kill for a worker wedged in a native compiler call, which SIGALRM can't interrupt.
+  # the worker thread still runs while the main thread is blocked in FFI; the pool repopulates the dead worker.
+  if DEBUG >= 2: print("*** BEAM COMPILE WATCHDOG KILL")
+  os._exit(1)
+
 def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
+  timeout = getenv("BEAM_TIMEOUT_SEC", 10)
+  watchdog = None
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
-    signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
+    signal.alarm(timeout)
+  if timeout > 0:
+    watchdog = threading.Timer(timeout + 5, _compile_watchdog)
+    watchdog.daemon = True
+    watchdog.start()
   ret = None
   try:
     st = time.perf_counter()
@@ -75,7 +87,22 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
     if getenv("BEAM_STRICT_MODE"): raise e
   finally:
     if hasattr(signal, "alarm"): signal.alarm(0)
+    if watchdog is not None: watchdog.cancel()
   return x[0], ret
+
+def _map_compile_with_deadline(candidates:list[Scheduler], timeout:int) -> list[tuple[int, tuple[UOp, float]|None]]:
+  """Map _try_compile over candidates in the worker pool, reaping each with a deadline.
+
+  A task that exceeds the deadline is rejected (same as the SIGALRM path); its wedged worker kills itself via the
+  watchdog in _try_compile, and the pool repopulates it, so no pool-level recovery is needed here.
+  """
+  pool = get_worker_pool()
+  results: dict[int, tuple[int, tuple[UOp, float]|None]] = {}
+  jobs = [(i, pool.apply_async(_try_compile, ((i, x),))) for i, x in enumerate(candidates)]
+  for i, job in jobs:
+    try: results[i] = job.get(timeout=timeout)
+    except Exception: results[i] = (i, None)
+  return [results[i] for i in range(len(candidates))]
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
 
@@ -129,7 +156,9 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
       candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
       timed: list[tuple[Scheduler, float]] = []
       least_compute_ops = math.inf
-      for i, proc in ((map if pool is None else pool.imap_unordered)(_try_compile, enumerate(candidates))):
+      compiled = map(_try_compile, enumerate(candidates)) if pool is None else \
+        _map_compile_with_deadline(candidates, getenv("BEAM_TIMEOUT_SEC", 10) + 15)
+      for i, proc in compiled:
         if proc is None: continue
         prg, compile_et = proc
         if (lib:=prg.src[3].arg) in seen_libs: continue
