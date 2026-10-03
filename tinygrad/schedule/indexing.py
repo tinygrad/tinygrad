@@ -276,9 +276,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
         out_rngs = tuple(rctx.new_range(x.shape[i]) for i in range(len(out_rngs)))
     ending_ranges[x] += broadcast_ending_ranges
 
-    # TODO: some ops don't have shape, enable this after the `.st` property is removed
-    #assert len(out_rngs) == len(x.shape), \
-    #  f"shape len mismatch {len(out_rngs)} != {len(x.shape)} on {x.op} with {len(consumer_map[x])} consumers and realize {x in realize_map}"
+    assert len(out_rngs) == len(x.shape), \
+      f"shape len mismatch {len(out_rngs)} != {len(x.shape)} on {x.op} with {len(consumer_map[x])} consumers and realize {x in rctx.realize_map}"
 
     # *** the ranges on the inputs are
     #  1. swizzled for MovementOps

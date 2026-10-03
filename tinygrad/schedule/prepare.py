@@ -203,7 +203,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # split_reduceop
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)), split_reduceop),
 
-  # remove DETACH/CONTIGUOUS_BACKWARD (TODO: this is copied in allocations)
+  # remove DETACH/CONTIGUOUS_BACKWARD
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
   # SINK only ever references the base
