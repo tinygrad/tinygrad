@@ -412,9 +412,7 @@ class Compiled:
   def renderer(self) -> Renderer: return self._select_renderer()
 
   @property
-  def compiler(self) -> Compiler:
-    if (ret:=self.renderer.compiler) is None: raise RuntimeError(f"no compiler for {self.device}")
-    return ret
+  def compiler(self) -> Compiler: return self.renderer.compiler
 
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 

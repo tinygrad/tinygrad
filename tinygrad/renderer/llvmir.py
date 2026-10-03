@@ -143,7 +143,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
 
   # call a function by the name of its body, the args in param order
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
    ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
 

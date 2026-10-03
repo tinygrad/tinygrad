@@ -297,7 +297,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
 
     # REDUCE creates ranges for the axes it is reducing
-    if x.op is Ops.REDUCE and x.arg[1]:
+    if x.op is Ops.REDUCE:
       rngs = tuple(rctx.new_range(s) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
 
     if debug:

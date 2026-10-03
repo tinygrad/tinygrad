@@ -398,7 +398,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return ps
 
     # movement ops change the shape
-    # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.UNSHARD, Ops.REDUCE}):
       ps = self.src[0]._shape
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape, {self.src[0].op} doesn't have one")
@@ -417,12 +416,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           # TODO: why do i need resolve here?
           if len(ps) != len(self.marg) or not all(resolve(sz>=0) and resolve(0<=o) and resolve(o+s<=sz) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid pad {self.marg} for {ps}")
-          return tuple(ssimplify(sz) for _,sz in self.marg)
+          return tuple(sz for _,sz in self.marg)
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
           if len(ps) != len(self.marg) or not all(resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=s) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
-          return tuple(ssimplify(sz) for _,sz in self.marg)
+          return tuple(sz for _,sz in self.marg)
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
@@ -1381,7 +1380,7 @@ class ProgramInfo:
       if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
-                       tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
+                       tuple(sorted(_vars, key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
