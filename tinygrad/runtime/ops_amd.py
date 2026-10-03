@@ -64,7 +64,7 @@ def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, u
   for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
     i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
     cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
-  w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit).barrier() # the ring and wptr land before the doorbell
+  w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit).barrier()
   return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
 
 @uopfunc
