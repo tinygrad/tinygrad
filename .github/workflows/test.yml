@@ -22,10 +22,11 @@ concurrency:
 jobs:
   docs:
     name: Docs
-    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'turin' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
+      DEV: CPU
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -75,9 +76,9 @@ jobs:
         llvm: 'true'
         ninja: 'true'
     - name: Test ResNet-18
-      run: DEBUG=2 python3 extra/torch_backend/example.py
+      run: DEV=CPU DEBUG=2 python3 extra/torch_backend/example.py
     - name: Test one op in torch tests
-      run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
+      run: DEV=CPU DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND
       run: DEV=CPU:LLVM LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/runtime/test_ops.py --durations=20
     - name: Custom tests
@@ -253,12 +254,14 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }}
+      run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
     runs-on: *linux
     timeout-minutes: 10
+    env:
+      DEV: CPU
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -393,6 +396,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECK_OOB: 0
+      DEV: CPU
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
