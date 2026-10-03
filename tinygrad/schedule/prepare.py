@@ -246,7 +246,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # remove two STOREs that store the same thing to the same place: TestSchedule.test_dedup_Assign
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),
 
-  # store a buffer's own current contents back into itself: TestAssign.test_nested_after_contiguous_store_no_init
+  # store a buffer's own current contents back into itself: TestAssign.test_assign_from_alias
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1"))), lambda buf,src,a1:a1),
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
