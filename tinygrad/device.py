@@ -431,18 +431,22 @@ class Compiled:
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
     return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
 
+  @functools.cached_property
+  def error_state(self) -> Buffer: return Buffer(self.host, 1, dtypes.int64, options=BufferSpec(nolru=True), preallocate=True)
+
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     timeout = timeout if timeout is not None and self.can_recover else None
-    st, done = time.perf_counter(), sig[0]
-    while done < value:
+    st, done, err = time.perf_counter(), sig[0], self.error_state.host.view(fmt='q')
+    while done < value and not err[0]:
       if done != (done:=sig[0]): st = time.perf_counter()
       elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
       elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
+    if err[0]: raise RuntimeError(f"{self.device} failed with {err[0]}")
 
   def synchronize(self, timeout:int|None=None):
-    try:
-      self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
-      for d, v in self.pending.items(): d._wait_signal(d.timeline.host.view(fmt='Q'), v, timeout)
+    for d in [*self.pending]: d._wait_signal(d.timeline.host.view(fmt='Q'), self.pending.pop(d), timeout) # a failed peer raises its own error, once
+    for dn in Device._opened_devices: Device[dn].pending.pop(self, None) # waited (or failed) here, the peers need not
+    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
       raise
@@ -501,7 +505,7 @@ class Compiled:
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
-    if self.pm_encode is None: return
+    if not self.pm_encode.patterns: return
     from tinygrad.tensor import Tensor
     tdiffs = []
     for _ in range(5):
