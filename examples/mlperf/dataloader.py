@@ -534,6 +534,7 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
 
 class BinIdxDataset:
   def __init__(self, base_path:Path):
+    self.base_path = base_path
     self.idx_t = Tensor(base_path.with_name(f"{base_path.name}.idx"))
     self.idx = TensorIO(self.idx_t)
 
@@ -559,8 +560,12 @@ class BinIdxDataset:
     end = start + doc_count * dtypes.int64.itemsize
     self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
 
-    # bin file
-    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin")).numpy()
+  @functools.cached_property
+  def bin_t(self):
+    # Prepare indices before RUN_START, but defer opening token data until the first sample read.
+    # Avoid copying the corpus; writes stay private. The backing file must remain unchanged while mapped.
+    bin_path = self.base_path.with_name(f"{self.base_path.name}.bin")
+    return np.memmap(bin_path, dtype=np.uint8, mode="c") if bin_path.stat().st_size else np.empty(0, dtype=np.uint8)
 
   def _index(self, idx) -> tuple[int, int]:
     return int(self.pointers[idx]), int(self.sizes[idx])
@@ -768,14 +773,22 @@ def get_llama3_dataset(samples:int, seqlen:int, base_dir:Path, seed:int=0, val:b
   return BlendedGPTDataset(
     [base_dir / "c4-train.en_6_text_document", base_dir / "c4-train.en_7_text_document"], [1.0, 1.0], samples, seqlen, seed, shuffle=True)
 
-def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
+def iterate_llama3_arrays(dataset:BlendedGPTDataset, bs:int):
   for b in range(math.ceil(dataset.samples / bs)):
     batch = [dataset.get(b * bs + i) for i in range(bs)]
     stacked = np.stack(batch, axis=0)
+    yield stacked
+
+def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
+  for stacked in iterate_llama3_arrays(dataset, bs):
     yield Tensor(stacked, device="NPY")
 
-def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
-  return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
+def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False, *, prefetch:int=0):
+  dataset = get_llama3_dataset(samples, seqlen, base_dir, seed, val, small)
+  if prefetch:
+    from examples.mlperf.prefetch import PrefetchTensors
+    return PrefetchTensors(iterate_llama3_arrays(dataset, bs), depth=prefetch)
+  return iterate_llama3_dataset(dataset, bs)
 
 if __name__ == "__main__":
   def load_unet3d(val):

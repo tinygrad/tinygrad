@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, pathlib
 from tinygrad import Tensor
-from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+from extra.hipcc import HIPCCCompiler
 
 FP8_MAX = 448.0
 NUM_WG, THREADS_PER_WG = 1024, 256
@@ -36,6 +36,17 @@ def alloc_local(shape, dtype, device, axis=None) -> Tensor:
   if isinstance(device, tuple) and axis is not None:
     return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.unshard(0), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
+
+def owned_empty(t:Tensor) -> Tensor:
+  """Fresh output storage, recognized as write-only scratch by upstream function tracing."""
+  return t.clone()
+
+@functools.cache
+def _cached_grad(fxn, kwargs:tuple) -> functools.partial: return functools.partial(fxn, **dict(kwargs))
+
+def kernel_grad(fxn, **kwargs) -> functools.partial:
+  # CallInfo's schedule key includes callback identity. Cache static configuration, never activations/buffers.
+  return _cached_grad(fxn, tuple(sorted(kwargs.items())))
 
 def compile_hip(src:str, defines:list[str]):
   return HIPCCCompiler("gfx950", ["-std=c++20", "-ffast-math", *defines]).compile_cached(src)

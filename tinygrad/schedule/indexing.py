@@ -31,9 +31,21 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx.realize_map[s] = None
 
+def reaches(src:UOp, target:UOp) -> bool:
+  # Equivalent to target in src.toposort(enter_calls=False), without ordering or a full traversal on a hit.
+  seen: set[UOp] = set()
+  stack = [src]
+  while stack:
+    node = stack.pop()
+    if node is target: return True
+    if node in seen: continue
+    seen.add(node)
+    stack.extend(reversed(node.src[1:] if node.op is Ops.CALL else node.src))
+  return False
+
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
+  if reaches(src, dest.base): ctx.realize_map[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:

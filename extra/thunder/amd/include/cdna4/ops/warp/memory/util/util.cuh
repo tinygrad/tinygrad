@@ -74,10 +74,10 @@ __device__ inline i32x4 make_srsrc(const void* ptr, uint32_t range_bytes, uint32
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);    // widen if host is 32-bit
     buffer_resource rsrc = make_buffer_resource(as_u64, range_bytes, 0x110000);
 
-    row_stride_bytes &= 0x3FFF;
-    if (row_stride_bytes) {
-        // - The swizzle stride lives in bits 13:0 of word2.
-        //   Max value = 0x3FFF (8 KiB – one cache line per bank).
+    // The cache-swizzle stride field is only 14 bits. Silently masking a larger stride aliases rows and can return
+    // stale data; leave the SRD linear when the requested byte stride is not representable.
+    if (row_stride_bytes && row_stride_bytes <= 0x3FFF) {
+        // The swizzle stride lives in bits 13:0 of word2, so its maximum encoded value is 0x3FFF.
         uint64_t stride_field = row_stride_bytes;
         stride_field = stride_field | 0x4000;         // Cache swizzle
         stride_field = stride_field | 0x8000;         // Swizzle enable

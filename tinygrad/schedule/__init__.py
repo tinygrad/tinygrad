@@ -154,26 +154,28 @@ def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
   return call.replace(src=(dst.store(src),) + call.src[1:])
 
-def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
+def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp, ctx:dict[UOp, UOp]|None=None):
   # NOTE: this is a codegen for SDMA devices
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
-  from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
-  from tinygrad.schedule.prepare import pm_mops
-  from tinygrad.uop.symbolic import sym
-  sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges in copy")
-  return call.replace(src=(sink,) + call.src[1:])
+  if ctx is None: ctx = {}
+  if ast not in ctx:
+    from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
+    from tinygrad.schedule.prepare import pm_mops
+    from tinygrad.uop.symbolic import sym
+    ctx[ast] = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges in copy")
+  return call.replace(src=(ctx[ast],) + call.src[1:])
 
 pm_copy_from_store = PatternMatcher([
-  # simplify copy kernels
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
-
-  # lower copy kernels to bulk STOREs
+  # Lower canonical copies directly, without re-simplifying their bodies.
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
+
+  # simplify noncanonical copy kernels
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
@@ -188,10 +190,11 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
-  linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
+  # Calls often share a body but not their buffers. Cache only bodies, for this pass alone.
+  linear = graph_rewrite(linear, pm_copy_from_store, ctx={}, name="lower copy kernels to STORE calls")
 
   # vars used in the schedule
-  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  used_vars = {v.expr for body in dict.fromkeys(si.src[0] for si in linear.src) for v in body.variables()}
   # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:

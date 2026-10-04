@@ -28,7 +28,10 @@ constexpr int ATTN_H_KV = 8; // number of key/value heads (for GQA)
 #endif
 
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV; // queries per KV head group
-constexpr int HEADS_PER_WG = (ATTN_D == 128 && GROUP_SIZE % 2 == 0) ? 2 : 1;
+#ifndef BWD_HEADS_PER_WG
+#define BWD_HEADS_PER_WG ((ATTN_D == 128 && GROUP_SIZE % 2 == 0) ? 2 : 1)
+#endif
+constexpr int HEADS_PER_WG = BWD_HEADS_PER_WG;
 
 #ifndef ATTN_N
 constexpr int ATTN_N = 1024; // sequence length
@@ -38,17 +41,25 @@ constexpr int ATTN_N = 1024; // sequence length
 constexpr int ATTN_D = 128; // dimension
 #endif
 constexpr int STEP_QO = 64; // block size for QO
-constexpr int BLOCK_SIZE_KV = 256; // block size for KV
+#ifndef BWD_BLOCK_SIZE_KV
+#define BWD_BLOCK_SIZE_KV 256
+#endif
+constexpr int BLOCK_SIZE_KV = BWD_BLOCK_SIZE_KV; // block size for KV
+constexpr int WARP_SIZE_KV = 64; // warp size for KV
 constexpr int SLICE_QO = 32;
 constexpr int DOT_SLICE_QO = 16;
-constexpr int WARP_SIZE_KV = 64; // warp size for KV
 constexpr bool causal = true;
 // WINDOW>0: sliding-window backward (query i sees keys in [i-WINDOW+1, i])
 #ifndef WINDOW
 #define WINDOW 0
 #endif
 
+#ifndef NUM_WARPS
 #define NUM_WARPS 4
+#endif
+#ifndef BWD_DQ_PIPE
+#define BWD_DQ_PIPE 0
+#endif
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
 
 using G = kittens::group<NUM_WARPS>;
@@ -60,6 +71,7 @@ using _gl_KV   = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_dQ   = gl<bf16, ATTN_B, ATTN_H, ATTN_N, ATTN_D>;
 using _gl_dKV  = gl<bf16, ATTN_B * (GROUP_SIZE / HEADS_PER_WG), ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_Lvec = gl<float, ATTN_B, ATTN_H, 1, ATTN_N>;
+
 
 template<int D> struct attn_bwd_combined_globals {
   _gl_QdO Q;
@@ -549,13 +561,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -564,8 +586,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -816,13 +840,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -831,8 +865,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -1083,13 +1119,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -1098,8 +1144,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -1349,13 +1397,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -1364,8 +1422,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -1637,13 +1697,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -1652,8 +1722,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -1906,13 +1978,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -1921,8 +2003,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -2173,13 +2257,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -2188,8 +2282,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -2439,13 +2535,23 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
-        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        // D=64: the MFMA accumulator needs 16 issue slots before the first VALU use.
+        // The gated pipeline fills four slots with independent K loads and waits only the remaining twelve.
+#if !BWD_DQ_PIPE
         if constexpr (D == 64) asm volatile("s_nop 15");
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
         load<0, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<0, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#if BWD_DQ_PIPE
+        if constexpr (D == 64) {
+          load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+          asm volatile("s_nop 11");
+        }
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 1>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) mma_AtB<1, 0, 2>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         if constexpr (D == 128) load<0, 2>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
@@ -2454,8 +2560,10 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         mul<0, 0, 0>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 1>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         if constexpr (D == 128) mma_AtB<1, 0, 4>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+#if !BWD_DQ_PIPE
         load<1, 0>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
         load<1, 1>(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}), K_j_addr);
+#endif
         if constexpr (D == 128) mma_AtB<1, 0, 5>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
         mul<0, 0, 2>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
         mul<0, 0, 3>(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);

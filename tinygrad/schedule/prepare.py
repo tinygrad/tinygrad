@@ -4,7 +4,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, P
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
-from tinygrad.schedule.indexing import apply_movement_op
+from tinygrad.schedule.indexing import apply_movement_op, reaches
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
@@ -25,7 +25,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
     key = base if base.op is Ops.ALLOC else src
     if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
-       target.storage_base not in st.src[1].toposort(enter_calls=False):
+       not reaches(st.src[1], target.storage_base):
       if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
         placed[key] = target.storage_base
       elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
@@ -92,7 +92,9 @@ def store_hazard_boundary(s:UOp):
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(enter_calls=False): return None
+  # A materialized root has an empty hazard slice.
+  if not store_hazard_boundary(src): return None
+  if not reaches(src, base:=target.base): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}

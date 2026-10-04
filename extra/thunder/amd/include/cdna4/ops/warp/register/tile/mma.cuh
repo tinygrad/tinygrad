@@ -94,21 +94,6 @@ __device__ static inline void mfma323232(      float2 (&D)[8],
     );
 }
 
-__device__ static inline void mfma323264(      float2 (&D)[8],
-                                         const fp8e4m3_4 (&A)[8],
-                                         const fp8e4m3_4 (&B)[8],
-                                         const float2 (&C)[8]) {
-    typedef __attribute__((__vector_size__(8 * sizeof(int)))) int intx8_t;
-    typedef __attribute__((__vector_size__(16 * sizeof(float)))) float floatx16_t;
-
-    *(floatx16_t*)D = {__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-        *(intx8_t*)A,
-        *(intx8_t*)B,
-        *(floatx16_t*)C,
-        0, 0, 0, 0, 0, 0
-    )};
-}
-
 __device__ static inline void mfma1616128(      float2 (&D)[2],
                                          const fp8e4m3_4 (&A)[8],
                                          const fp8e4m3_4 (&B)[8],
@@ -233,11 +218,6 @@ __device__ static inline void mma_ABt_base(rt_base<float, ducks::rt_layout::col,
                   B_rows == 16 && B_cols == 128 &&
                   std::is_same_v<C_shape, typename ducks::rt_shape::rt_16x16>) {
         mfma1616128(d.data, a.data, b.data, c.data);
-    } else if constexpr (std::is_same_v<D_shape, typename ducks::rt_shape::rt_32x32> &&
-                  A_rows == 32 && A_cols == 64 &&
-                  B_rows == 32 && B_cols == 64 &&
-                  std::is_same_v<C_shape, typename ducks::rt_shape::rt_32x32>) {
-        mfma323264(d.data, a.data, b.data, c.data);
     } else {
         static_assert(false, "Unsupported shape combination");
     }

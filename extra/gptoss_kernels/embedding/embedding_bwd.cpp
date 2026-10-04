@@ -34,13 +34,22 @@ extern "C" __global__ __launch_bounds__(THREADS) void embedding_bwd_build_links(
 // accumulates in FP32, and rounds once to BF16. Empty rows naturally write zero, replacing the old fill.
 extern "C" __global__ __launch_bounds__(THREADS) void embedding_bwd_owner_reduce(
     __hip_bfloat16 *__restrict__ out, const __hip_bfloat16 *__restrict__ grad_emb,
-    const int *__restrict__ head, const int *__restrict__ next_idx) {
+    const int *__restrict__ head, const int *__restrict__ next_idx
+#ifdef SHARDED_VOCAB
+    , const int *__restrict__ row_offset
+#endif
+    ) {
   constexpr int D_BLOCKS=(EMBED+THREADS-1)/THREADS;
-  const int token=blockIdx.x/D_BLOCKS, d=(blockIdx.x%D_BLOCKS)*THREADS+threadIdx.x;
+  const int row=blockIdx.x/D_BLOCKS, d=(blockIdx.x%D_BLOCKS)*THREADS+threadIdx.x;
+#ifdef SHARDED_VOCAB
+  const int token=row+row_offset[0];
+#else
+  const int token=row;
+#endif
   if(d<EMBED) {
     float sum=0.0f;
     for (int i=head[token]; i>=0; i=next_idx[i]) sum+=(float)grad_emb[(long long)i*EMBED+d];
-    out[(long long)token*EMBED+d]=(__hip_bfloat16)sum;
+    out[(long long)row*EMBED+d]=(__hip_bfloat16)sum;
   }
 }
 #endif

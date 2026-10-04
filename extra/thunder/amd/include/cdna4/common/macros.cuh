@@ -288,7 +288,9 @@ __device__ __forceinline__ T ds_read_b128(const uint32_t smem_ptr, const int i_o
   static_assert(sizeof(T) == sizeof(uint32_t) * 4);
   T result;
   asm volatile("ds_read_b128 %0, %1 offset:%2"
-    : "=v"(result)
+    // DS results are written asynchronously. The destination cannot overlap
+    // the address VGPR even though LLVM's normal output constraint permits it.
+    : "=&v"(result)
     : "v"(smem_ptr), "i"(i_offset)
     : "memory");
   return result;

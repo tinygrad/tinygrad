@@ -273,7 +273,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
       raise
 
   # swap the compiled PROGRAMs into the calls
-  return linear.substitute({c: c.replace(src=(c.body.substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
+  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
 pm_exec = PatternMatcher([

@@ -179,7 +179,7 @@ __device__ inline void prefill_swizzled_offsets(
 template<int axis, bool assume_aligned,
          ducks::st::all ST, ducks::gl::all GL,
          ducks::coord::tile COORD = coord<ST>,
-         int N_THREADS = WARP_THREADS>
+         int N_THREADS = WARP_THREADS, coherency CACHE = coherency::cache_all>
 __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint32_t* swizzled_offsets)
 {
     using T = typename ST::dtype;
@@ -214,7 +214,7 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
             swizzled_offsets[i],
             0, 
             0, // instruction offset
-            static_cast<int>(coherency::cache_all)); // cache coherency
+            static_cast<int>(CACHE)); // cache coherency
     }
 
     // there are leftover loads that need to be handled here
@@ -237,7 +237,7 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
                 swizzled_offsets[memcpy_per_tile],
                 0, 
                 0, // instruction offset
-                static_cast<int>(coherency::cache_all)); // cache coherency
+                static_cast<int>(CACHE)); // cache coherency
         }
     }
 }
@@ -255,7 +255,8 @@ inline __device__ __forceinline__ uint32_t to_sgpr_u32(uint32_t x) {
     return x;
 }
 
-template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD = coord<ST>, int N_THREADS = WARP_THREADS>
+template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD = coord<ST>,
+         int N_THREADS = WARP_THREADS, coherency CACHE = coherency::cache_all>
 __attribute__((always_inline)) 
 __device__ __forceinline__ void load(ST& dst, const GL& src, const COORD& idx,
                                 const uint32_t* __restrict__ swizzled_offsets,
@@ -297,20 +298,28 @@ __device__ __forceinline__ void load(ST& dst, const GL& src, const COORD& idx,
         int32_t lds_byte = lds_cur;                 // still SGPR
         asm volatile("" : "+s"(lds_byte));           // keep it SGPR at the use
 
+        // The LDS destination must be an explicit intrinsic operand in kernels that interleave several of these
+        // loads. Otherwise LLVM cannot see the m0 dependency and may overwrite m0 before the buffer load executes.
+#if WGRAD_SAFE_LDS_PTR
+        as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(uintptr_t)lds_byte;
+#else
         asm volatile("s_mov_b32 m0, %0" :: "s"(lds_byte));
+        as3_uint32_ptr lds_ptr = (as3_uint32_ptr)0;
+#endif
         llvm_amdgcn_raw_buffer_load_lds(
             SRD, 
-            (as3_uint32_ptr)0, 
+            lds_ptr,
             16, 
             swizzled_offsets[i], 
             SOFF, 
             0,
-            static_cast<int>(coherency::cache_all)
+            static_cast<int>(CACHE)
         );
 
         // SGPR bump (compiler emits s_add_u32)
         lds_cur += bytes_per_memcpy;
     }
+
 }
 template<ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>>
 __device__ static inline void load(ST &dst, const GL &src, const COORD &idx, const uint32_t* __restrict__ swizzled_offsets, i32x4 srd, const void* base_ptr, uint32_t lds_base) {
@@ -415,4 +424,5 @@ template<ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST
 __device__ static inline void store(const GL &dst, const ST &src, const COORD &idx) {
     store<2, false, ST, GL, COORD, WARP_THREADS>(dst, src, idx);
 }
+
 }

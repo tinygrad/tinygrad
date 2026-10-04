@@ -1,4 +1,5 @@
 import math, os, functools
+from dataclasses import replace
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -8,14 +9,77 @@ if __name__ == "__main__":
   os.environ["ALL2ALL"] = "1"
   os.environ["USE_ATOMICS"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
-from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
+from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker, TRAINING
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm, mx_pack
-from extra.gemm.moe_gemm import grouped_mx_gemm
-from extra.gemm.moe_routing import route, dispatch, combine, router_mfma, Routing, BLOCK_ROW
 from extra.gptoss_kernels.embedding import GPTOSSEmbedding
+from extra.llama_kernels import owned_empty
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
+from extra.gemm.moe_gemm import grouped_mx_gemm, grouped_mx_gemm_swiglu, mx_pack_3d, FUSED_FC1_COLW
+from extra.gemm.moe_routing import route, dispatch, dispatch_fp8, combine, router_mfma, router_quantize, Routing, BLOCK_ROW
+
+def gptoss_layer_backward(grad:UOp, call:UOp) -> tuple:
+  """Differentiate the layer's logical inputs, retaining DP-owned activation gradients.
+
+  Only the first output is differentiable; the remaining outputs are forward checkpoints.
+  Targeting a sharded input's flat PARAM instead would differentiate its UNSHARD,
+  gathering an already-owned gradient before selecting the same local shard again.
+  """
+  from tinygrad.mixin.gradient import compute_gradient
+  from tinygrad.function import renumber_invalid_outputs
+  args = call.src[1:]
+  stores = {st.src[0].unsharded_base.arg.slot:st for st in call.body.src}
+  params = {p.arg.slot:p for p in call.body.toposort(enter_calls=False) if p.op is Ops.PARAM}
+  # Replicated parameters can be read through several reshapes: retain their common flat target.
+  inputs = {i:p.view_as(args[i].shard_shape, args[i].axis) if args[i].axis is not None else p
+            for i,p in params.items() if i not in stores}
+  root = next(iter(stores.values())).src[1]
+  gradients = compute_gradient(root, grad.param_like(len(args)), set(inputs.values()))
+  slots = [i for i,t in inputs.items() if t in gradients]
+  body = UOp.sink(*(gradients[inputs[i]] if args[i].axis is not None else
+                   gradients[inputs[i]].view_as(args[i].shard_shape, None) for i in slots))
+  if call.arg.precompile:
+    body = body.substitute({st.src[1]:st.src[0] for st in stores.values()}, walk=True)
+    args = tuple(a.after(call) if i in stores else a for i,a in enumerate(args))
+  args += (grad,)
+  body = renumber_invalid_outputs(body)
+  used = sorted((p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
+  body = body.substitute({p:p.replace(arg=replace(p.arg, slot=i)) for i,p in enumerate(used)}, walk=True)
+  bound_args = tuple(args[p.arg.slot] for p in used)
+  values = (gptoss_backward_outputs(body.src, bound_args, name=(call.arg.name or "")+"_backward", precompile=call.arg.precompile_backward)
+            if getenv("GPTOSS_DEFER_FC1_REDUCE", 0) else
+            UOp.call_with_outputs(body.src, *bound_args, name=(call.arg.name or "")+"_backward", precompile=call.arg.precompile_backward))
+  outputs = dict(zip(slots, values))
+  return tuple(outputs.get(i) for i in range(len(call.src)-1) if i not in stores)
+
+def _return_storage(v:UOp) -> UOp:
+  # Present the exact owned output, with producer dependencies outside its view.
+  # An AFTER buried under UNSHARD otherwise prevents stock output forwarding.
+  if v.storage_base.op is not Ops.ALLOC or not v.has_buffer_identity(after_ok=True): return v
+  node, deps = v, []
+  while node.op in (Ops.AFTER, Ops.RESHAPE, Ops.UNSHARD):
+    if node.op is Ops.AFTER: deps.extend(node.src[1:])
+    node = node.src[0]
+  assert node is v.storage_base
+  return node.view_as(v.shard_shape, v.axis).after(*deps)
+
+def gptoss_backward_outputs(values:tuple[UOp, ...], args:tuple[UOp, ...], *, name:str, precompile:bool) -> tuple[UOp, ...]:
+  """Keep FC1's collective outside the precompiled activation-backward boundary."""
+  markers = [u for u in UOp.sink(*values).toposort(enter_calls=False)
+             if u.op is Ops.CALL and u.arg.aux == "gptoss_fc1_reduce"]
+  if not markers: return UOp.call_with_outputs(values, *args, name=name, precompile=precompile)
+  frontier = list(dict.fromkeys(x for c in markers for x in c.src[1:-1]))
+  deferred = [any(c in v.backward_slice_with_self for c in markers) for v in values]
+  direct = [v for v,d in zip(values,deferred) if not d]
+  outputs = UOp.call_with_outputs(tuple(direct+[_return_storage(v) for v in frontier]), *args, name=name, precompile=precompile)
+  replacements = dict(zip(frontier,outputs[len(direct):]))
+  normal = iter(outputs[:len(direct)])
+  result = tuple(v.substitute(replacements, walk=True) if d else next(normal) for v,d in zip(values,deferred))
+  # A deferred expression must be fully bound to caller buffers, never inner PARAMs.
+  for v,d in zip(result,deferred):
+    if d: assert not any(u.op is Ops.PARAM for u in v.toposort(enter_calls=False)), "unbound deferred gradient"
+  return result
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
@@ -105,6 +169,12 @@ def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Ten
   w_phys = dequant_weight(w_q, w_scale)
   return (x_phys @ w_phys.T).cast(dtypes.bfloat16)
 
+def dense_bias_add(x:Tensor, bias:Tensor) -> Tensor:
+  if getenv("FUSED_DENSE_BIAS_GRAD", 0):
+    from extra.llama_kernels.dense_bias import dense_bias_add as fused_dense_bias_add
+    return fused_dense_bias_add(x, bias)
+  return x + bias
+
 def _pad_to_mult(t:Tensor, axis:int, mult:int=256) -> Tensor:
   if (r := (-t.shape[axis]) % mult) == 0: return t
   pads = [(0, 0)] * t.ndim
@@ -155,6 +225,7 @@ class GPTOSS:
     self.gate = Tensor.normal(n_layers, n_experts, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.gate_bias = Tensor.zeros(n_layers, n_experts, dtype=dtypes.bfloat16).contiguous()
     self.w_gate_up, self.w_gate_up_scale = self._quant_weight(n_layers, n_experts, intermediate_size * 2, dim, moe=True)
+    self.w_gate_up_si = [mx_pack_3d(s).is_param_(False) for s in self.w_gate_up_scale] if getenv("PREPACK_FC1_WSI", 0) else None
     self.w_gate_up_bias = Tensor.zeros(n_layers, n_experts, intermediate_size * 2, dtype=dtypes.bfloat16).contiguous()
     self.w_down, self.w_down_scale = self._quant_weight(n_layers, n_experts, dim, intermediate_size, std=scaled_std, moe=True)
     self.w_down_bias = Tensor.zeros(n_layers, n_experts, dim, dtype=dtypes.bfloat16).contiguous()
@@ -164,10 +235,7 @@ class GPTOSS:
 
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
-    if getenv("GPTOSS_EMBEDDING", 0):
-      self.tok_embeddings = GPTOSSEmbedding(vocab_size, dim)
-    else:
-      self.tok_embeddings = nn.Embedding(vocab_size, dim)
+    self.tok_embeddings = (GPTOSSEmbedding if getenv("GPTOSS_EMBEDDING", 0) else nn.Embedding)(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(vocab_size, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(head_dim, max_context * 2, rope_theta).contiguous().is_param_(False)
@@ -179,8 +247,9 @@ class GPTOSS:
       return w_q, w_e8.is_param_(False)
     if moe:
       qs = [_one(*shape[1:]) for _ in range(shape[0])]
-      for q in qs: q[0]._zero2 = True  # grad arrives sharded on the expert axis under ZeRO-2 (moe_gemm)
-      return [q[0] for q in qs], [q[1] for q in qs]
+      ws = [q[0] for q in qs]
+      for w in ws: w._zero2_moe = True   # mark: grad is reduce-scattered on the expert axis under ZeRO-2
+      return ws, [q[1] for q in qs]
     return _one(*shape)
 
   def _make_wT(self, weights:list[Tensor], scales:list[Tensor]):
@@ -215,36 +284,45 @@ class GPTOSS:
     return attn.reshape(bsz, KV, R, seqlen, hd).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, H * hd)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, *, attention_norm:Tensor, wqkv:Tensor,
-                wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
+                wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor,
+                qkv_rope_out:tuple[Tensor, Tensor, Tensor]|None=None):
     bsz, seqlen, _ = x.shape
-
     if getenv("FUSED_RMSNORM_MX", 0):
       from extra.gptoss_kernels.rmsnorm import rmsnorm_mul_quantize_mxfp8
       x_q, x_e8, rrms = rmsnorm_mul_quantize_mxfp8(x, attention_norm, self.norm_eps)
-      qkv = matmul_mx((x_q, x_e8), wqkv, wqkv_scale) + wqkv_bias
+      qkv = matmul_mx((x_q, x_e8), wqkv, wqkv_scale)
       norm_saves = [x_q, x_e8, rrms]
-    if getenv("FUSED_RMSNORM_MUL", 0):
+    elif getenv("FUSED_RMSNORM_MUL", 0):
       from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
-      x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
-      qkv = matmul_mx(x_normed, wqkv, wqkv_scale) + wqkv_bias
+      x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)   # folds the *attention_norm into rmsnorm
+      qkv = matmul_mx(x_normed, wqkv, wqkv_scale)
       norm_saves = [x_normed, rrms]
     else:
       x_normed, rrms = rmsnorm(x, self.norm_eps)
-      qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
+      qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale)
       norm_saves = [x_normed, rrms]
+    if getenv("FUSED_QKV_ROPE", 0):
+      # one kernel fuses the qkv split + rope + bf16 cast + packed->per-head reindex (llama's fused_qkv_rope)
+      from extra.thunder.amd.fa import fused_qkv_rope
+      xq, xk, xv = fused_qkv_rope(qkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim, out=qkv_rope_out, bias=wqkv_bias)
+    else:
+      qkv = dense_bias_add(qkv, wqkv_bias)
+      qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
+      xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
+      xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+      xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
 
-    qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
-    xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
-    xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
-
-    fa_saves = []
-    if getenv("HK_FLASH_ATTENTION"):
+    fa_saves = []  # save flash fwd inputs + LSE so the precompiled backward substitutes them instead of re-running custom_fa_forward + qkv/rope
+    if getenv("HK_FLASH_ATTENTION") and (not sliding or getenv("HK_FLASH_SLIDING", 1)):
+      # CAUSAL and SLIDING both use flash (window=0 -> pure causal). Sliding's peaked bf16 backward is corrected in
+      # fa.py by recomputing the softmax LSE (_windowed_lse) and delta (_windowed_delta) in exact fp32; the window
+      # mask itself lives in the fwd/bwd kernels (-DWINDOW).
       from extra.thunder.amd.fa import flash_attention
-      attn, _, l_vec = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, sinks=sinks, window=self.sliding_window if sliding else 0)
+      attn, _, l_vec = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, sinks=sinks,
+                                       window=self.sliding_window if sliding else 0)
       attn = attn.reshape(bsz, seqlen, self.n_heads * self.head_dim)
-      fa_saves = [xq, xk, xv, l_vec]
+      fa_saves = [xq, xk, xv, l_vec]  # exact ker.src inputs + l_vec output (must be un-wrapped or the fwd_subs key misses)
     elif sliding:
       attn = self._sliding_attention(xq, xk, xv, sinks)
     else:
@@ -257,40 +335,137 @@ class GPTOSS:
       w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
       attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
-    out = matmul_mx(attn, wo, wo_scale) + wo_bias
-    return out, [attn] + norm_saves + fa_saves
+    out = dense_bias_add(matmul_mx(attn, wo, wo_scale), wo_bias)
+    return out, [*norm_saves, attn] + fa_saves
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
                    w_gate_up:Tensor, w_gate_up_scale:Tensor, w_gate_up_bias:Tensor,
-                   w_down:Tensor, w_down_scale:Tensor, w_down_bias:Tensor):
-    if getenv("FUSED_RMSNORM_MUL", 0):
+                   w_down:Tensor, w_down_scale:Tensor, w_down_bias:Tensor,
+                   w_gate_up_wT=None, w_gate_up_wT_scale=None, w_down_wT=None, w_down_wT_scale=None,
+                   w_gate_up_si=None,
+                   fc1_h_out:Tensor|None=None, dispatch_colw_out:tuple[Tensor, Tensor]|None=None,
+                   router_topk_out:tuple[Tensor, Tensor]|None=None, normed_input:tuple[Tensor, Tensor]|None=None):
+    # PRESTORE_WT: pass W^T alongside the fwd weight as a 4-tuple so the gemm wrapper registers it for the dgrad.
+    if w_gate_up_wT is not None:
+      w_gu = (w_gate_up, w_gate_up_scale, w_gate_up_wT, w_gate_up_wT_scale, w_gate_up_si) if w_gate_up_si is not None else \
+             (w_gate_up, w_gate_up_scale, w_gate_up_wT, w_gate_up_wT_scale)
+    else:
+      w_gu = (w_gate_up, w_gate_up_scale, w_gate_up_si) if w_gate_up_si is not None else (w_gate_up, w_gate_up_scale)
+    w_dn = (w_down, w_down_scale, w_down_wT, w_down_wT_scale) if w_down_wT is not None else (w_down, w_down_scale)
+    if normed_input is not None:
+      inp, rrms = normed_input
+      x_normed = inp
+    elif getenv("FUSED_RMSNORM_MUL", 0):
       from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
-      x_normed, rrms = rmsnorm_mul(x, ffn_norm, self.norm_eps)
-      inp = x_normed
+      inp, rrms = rmsnorm_mul(x, ffn_norm, self.norm_eps)   # folds the *ffn_norm into rmsnorm
+      x_normed = inp                                        # save the scaled value (backward via rmsnorm_mul grad_fxn)
     else:
       x_normed, rrms = rmsnorm(x, self.norm_eps)
       inp = x_normed * ffn_norm
 
     dim, inter = self.dim, self.intermediate_size
+    grouped_moe = getenv("GROUPED_MOE", 0)
+    # The grouped router consumes flat tokens. Make that the custom kernel's physical output shape too, so direct
+    # saved-output slots do not acquire a shape-fixing materialization at the function boundary.
+    if grouped_moe: inp = inp.reshape(-1, dim)
+    dispatch_quantized = None
+    if TRAINING and getenv("FUSED_ROUTER_DGRAD", 0):
+      assert grouped_moe and getenv("ROUTER_MFMA", 0) and getenv("FP8_DISPATCH", 0)
+      logits, q, e8 = router_quantize(inp, gate, gate_bias)
+      dispatch_quantized = (q, e8)
+    else:
+      logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else \
+        inp.float() @ gate.float().T + gate_bias.float()
 
-    if getenv("GROUPED_MOE", 0):
+    if grouped_moe:
       bsz, seqlen = x.shape[:2]
-      if getenv("FUSED_ROUTER_TOPK", 0):
-        from extra.gptoss_kernels.router_topk import fused_router
-        from extra.gemm.moe_routing import route_topk
-        weights, topi = fused_router(inp, gate, gate_bias)
-        r = route_topk(weights, topi, self.n_experts)
+      r = route(logits, self.experts_per_tok, self.n_experts, router_topk_out)
+      inp_pd = _pad_cols(inp.cast(dtypes.bfloat16))
+      # FP8_DISPATCH: quantize before the permute so the scatter moves fp8+e8 (not bf16) and the fc1 reads the
+      # already-quantized grouped rows (tuple path, no re-quantize). Byte-identical operands to the bf16 path.
+      xg = dispatch_fp8(inp_pd, r, dispatch_colw_out, quantized=dispatch_quantized) if getenv("FP8_DISPATCH", 0) else dispatch(inp_pd, r)
+      fused_fc1 = getenv("FUSED_FC1", 0)
+      fp8_y_path = fused_fc1 or getenv("FUSED_SWIGLU", 0)
+      # FUSED_DOWN_EPILOGUE folds the down-gemm bias + router-weighted combine scatter into the down-gemm epilogue
+      # (requires the fp8 y path). It consumes the per-expert w_down_bias directly, so dn_bias is not materialized.
+      fused_down = getenv("FUSED_DOWN_EPILOGUE", 0) and fp8_y_path
+      # FUSED_DOWN_BIAS folds ONLY the per-expert down-gemm bias into the down-gemm epilogue (no combine, no quantize) --
+      # a cheap per-column register add that deletes the separate `+dn_bias` bf16 kernel + its z round-trip. Combine stays
+      # separate. It consumes w_down_bias directly, so dn_bias is not materialized.
+      fused_down_bias = getenv("FUSED_DOWN_BIAS", 0) and not fused_down
+      skip_dn_bias = fused_down or fused_down_bias
+      if getenv("FUSED_MOE_BIAS", 0):
+        dn_bias = None if skip_dn_bias else _moe_bias_tile(w_down_bias, r)
+        gu_bias = None if fused_fc1 else _moe_bias_tile(w_gate_up_bias, r)
       else:
-        logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
-        r = route(logits.reshape(-1, self.n_experts), self.experts_per_tok, self.n_experts)
-      inp = inp.reshape(-1, dim)
-      xg = dispatch(_pad_cols(inp.cast(dtypes.bfloat16)), r)
-      h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
-      y = swiglu(h, self.swiglu_limit)
-      z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
-          + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
-      out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
-      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.topi, r.dest_row, r.off]
+        onehot = r.rows_e.one_hot(self.n_experts).float() if not (skip_dn_bias and fused_fc1) else None
+        dn_bias = None if skip_dn_bias else onehot @ w_down_bias.float()
+        gu_bias = None if fused_fc1 else onehot @ w_gate_up_bias.float()
+      if fused_fc1:
+        # fused FC1: gate_up gemm + per-expert bias fold + clamped SwiGLU + mxfp8-quantize in ONE kernel (fwd). The
+        # kernel ALSO emits h (pre-swiglu gate_up+bias). Save BOTH h AND y_e8: the precompiled backward reads the saved
+        # h (grad_fxn -> _custom_swiglu_bwd_fp8) AND the saved y_e8 (the DOWN-gemm's bwd needs y_e8 via its xe_in). If
+        # y_e8 is unsaved, that reference to the fused kernel's y_e8 OUTPUT keeps the fused CALL live and re-runs the
+        # whole fused fwd in the backward (x48). Saving y_e8 lets @function substitute it -> fused CALL dead in the
+        # backward -> fused fwd runs ONCE (x24).
+        if FUSED_FC1_COLW:
+          # ALSO emit + SAVE the pre-emitted COLUMNWISE mxfp8 of y (byte-exact with transpose_quantize(dequant(y_fp8)),
+          # the down/FC2 wgrad's operand). SAVING y_colw/y_colw_e8 (like y_e8) lets @function substitute them so the
+          # down-wgrad's reconstructed reference does NOT re-run the fused fwd (x24, not x48). See _fc1_colw_wgrad_operand.
+          fc1_ret = grouped_mx_gemm_swiglu(xg, w_gu, r.off, w_gate_up_bias, real_inter=inter, out_h=fc1_h_out,
+                                           padded_inter=w_down.shape[2], expert_counts=r.counts)
+          h, y_fp8, y_e8_full, y_colw, y_colw_e8 = fc1_ret[:5]
+          y_e8 = y_e8_full                                 # already padded to the down-gemm's physical K
+          y, h_save = y_fp8, [h, y_e8_full, y_colw, y_colw_e8]
+        else:
+          h, y_fp8, y_e8_full = grouped_mx_gemm_swiglu(
+            xg, w_gu, r.off, w_gate_up_bias, real_inter=inter, out_h=fc1_h_out, padded_inter=w_down.shape[2], expert_counts=r.counts)
+          y_e8 = y_e8_full                                 # already padded to the down-gemm's physical K
+          y, h_save = y_fp8, [h, y_e8_full]               # SAVE the FULL y_e8 -> grad_fxn reads the checkpoint (no recompute)
+      else:
+        h = grouped_mx_gemm(xg, w_gu, r.off)[:, :2*inter] + gu_bias.cast(dtypes.bfloat16)
+        h_save = [h]
+        if getenv("FUSED_SWIGLU", 0):
+          from extra.llama_kernels.fused_swiglu_quantize_gptoss import fused_swiglu_quantize
+          y_fp8, y_e8 = fused_swiglu_quantize(h)  # swiglu + mxfp8-quantize fused: h (M,2*inter) -> fp8 y (M,inter) + e8
+          y = y_fp8                               # save the down-gemm fp8 input (bwd substitutes it; grad chains via the pre-quant path)
+        else:
+          y = swiglu(h, self.swiglu_limit)
+      if fused_down:
+        # ONE kernel: down gemm + per-expert bias + router-weighted combine scatter. z (byte-exact) is emitted for
+        # the backward's d_weights=<d_out,z>; `out` is the fp32-atomic-scattered token output. Eliminates the separate
+        # `+dn_bias` elementwise and the `combine` gather (z re-read).
+        from extra.gemm.moe_gemm import grouped_mx_gemm_down_combine
+        out_flat, z = grouped_mx_gemm_down_combine((y_fp8, y_e8), w_dn, w_down_bias, r,
+                                                   inp.shape[0], self.experts_per_tok, real_out=dim)
+        out = out_flat.reshape(bsz, seqlen, dim)
+      else:
+        if fused_down_bias:
+          from extra.gemm.moe_gemm import grouped_mx_gemm_down_bias
+          gemm_in = (y_fp8, y_e8) if fp8_y_path else _pad_cols(y.cast(dtypes.bfloat16))
+          z = grouped_mx_gemm_down_bias(gemm_in, w_dn, r.off, w_down_bias, dim)
+        elif fp8_y_path:
+          z = grouped_mx_gemm((y_fp8, y_e8), w_dn, r.off)[:, :dim] + dn_bias.cast(dtypes.bfloat16)
+        else:
+          z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), w_dn, r.off)[:, :dim] \
+              + dn_bias.cast(dtypes.bfloat16)
+        if getenv("FUSED_COMBINE", 0):
+          from extra.llama_kernels.fused_combine_gptoss import fused_combine
+          out = fused_combine(z, r, inp.shape[0], self.experts_per_tok, real_dim=dim).reshape(bsz, seqlen, dim)
+        else:
+          if z.shape[-1] != dim: z = z[:, :dim]
+          out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
+      # save the MoE fwd chain + routing metadata so the precompiled backward substitutes them (no route/dispatch/gemm/swiglu recompute)
+      # Save every dispatch output, including the fresh column-layout buffers, for the precompiled backward.
+      xg_save = list(xg) if isinstance(xg, tuple) else [xg]
+      # FC1 wgrad consumes the exact per-expert counts from its forward custom call. Save them explicitly at the
+      # precompiled-function boundary just like the other routing metadata: rebuilding counts in run_layer_backward
+      # makes the one-hot reduction cross FUNCTION parameter substitution, where its int topi INDEX can acquire the
+      # float comparison dtype of the router-logit path. The saved int32 buffer also avoids that redundant reduction.
+      assert r.counts is not None
+      # Match the buffer-backed identity passed to the fused FC1 call. Its backward mailboxes recover this exact
+      # checkpoint instead of pulling the lazy routing reduction back across the precompiled-function boundary.
+      return out, [x_normed, rrms, *xg_save, *h_save, y, z, r.weights, r.topi, r.dest_row, r.off, r.counts]
     else:
       logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
       thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
@@ -306,13 +481,41 @@ class GPTOSS:
         out = contrib if out is None else out + contrib
     return out, [x_normed, rrms]
 
-  @function(precompile=True, precompile_backward=True)
+  @function(precompile=True, precompile_backward=True, grad_fxn=gptoss_layer_backward)
   def run_layer(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
+    # Own scratch inside this boundary so normal return binding saves it without caller-input aliases.
+    if getenv("GPTOSS_QKV_ROPE_DIRECT_SAVE", 0):
+      from extra.thunder.amd.fa import gptoss_qkv_rope_saved_outputs
+      if (qkv_rope_out := gptoss_qkv_rope_saved_outputs(x, self.n_heads, self.n_kv_heads, self.head_dim, sliding=sliding, save=save)) is not None:
+        attn_kwargs = {**attn_kwargs, "qkv_rope_out": qkv_rope_out}
     attn, attn_saves = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
     h = x + attn
+    bsz, seqlen = x.shape[:2]
+    ffn_kwargs = dict(ffn_kwargs)
+    if getenv("DIRECT_ROUTER_TOPK_OUT", 0) and getenv("FUSED_ROUTER_TOPK", 0) and getenv("GROUPED_MOE", 0):
+      from extra.gemm.moe_routing import _sharded_invalids
+      ffn_kwargs["router_topk_out"] = (
+        owned_empty(_sharded_invalids((bsz * seqlen, self.experts_per_tok), dtypes.float32, h.device)),
+        owned_empty(_sharded_invalids((bsz * seqlen, self.experts_per_tok), dtypes.int32, h.device)))
+    if getenv("DIRECT_FC1_H_OUT", 0) and getenv("GROUPED_MOE", 0) and getenv("FUSED_FC1", 0):
+      from extra.gemm.moe_routing import _sharded_invalids, m_max_for, n_groups_of
+      G = n_groups_of(h)
+      m_l = m_max_for((bsz * seqlen) // G, self.experts_per_tok, self.n_experts)
+      Npad = ffn_kwargs['w_gate_up'].shape[1]
+      ffn_kwargs["fc1_h_out"] = _sharded_invalids((G, m_l, Npad), dtypes.bfloat16, h.device).reshape(G * m_l, Npad).contiguous()
+    saved_h = h
+    if getenv("GPTOSS_RESIDUAL_RMSNORM_FWD", 0) and getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import gptoss_residual_rmsnorm_mul
+      if (normed := gptoss_residual_rmsnorm_mul(h, ffn_kwargs['ffn_norm'], self.norm_eps)) is not None:
+        ffn_kwargs['normed_input'], saved_h = normed[:2], normed[2]
     ffn, ffn_saves = self.feed_forward(h, **ffn_kwargs)
-    if save: ffn_saves.append(h)
-    h = h + ffn
+    # Preserve the exact norm input UOp so backward can reuse it without rematerializing WO.
+    if save and getenv("GPTOSS_SAVE_FFN_INPUT", 0): ffn_saves.append(saved_h)
+    if getenv("GPTOSS_RESIDUAL_HIP", 0) and x.shape[-1] == 2880 and x.dtype == dtypes.bfloat16:
+      from extra.llama_kernels.gptoss_residual import gptoss_residual_join
+      h = gptoss_residual_join(x, attn, ffn)
+    else:
+      h = h + ffn
     if save: return (h, *attn_saves, *ffn_saves)
     return (h,)
 
@@ -322,7 +525,7 @@ class GPTOSS:
     for v in get_parameters(self): v.shard_(device, axis=None)
     Tensor.realize(*get_parameters(self))
 
-  def __call__(self, tokens:Tensor, save:bool=True):
+  def __call__(self, tokens:Tensor, save:bool=True, targets:Tensor|None=None):
     h = self.tok_embeddings(tokens)
     bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :seqlen, :, :, :]
@@ -334,14 +537,26 @@ class GPTOSS:
       ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], gate=self.gate[i], gate_bias=self.gate_bias[i],
                         w_gate_up=self.w_gate_up[i], w_gate_up_scale=self.w_gate_up_scale[i], w_gate_up_bias=self.w_gate_up_bias[i],
                         w_down=self.w_down[i], w_down_scale=self.w_down_scale[i], w_down_bias=self.w_down_bias[i])
+      if self.w_gate_up_si is not None: ffn_kwargs["w_gate_up_si"] = self.w_gate_up_si[i]
+      if PRESTORE_WT:
+        ffn_kwargs.update(w_gate_up_wT=self.w_gate_up_wT[i], w_gate_up_wT_scale=self.w_gate_up_wT_scale[i],
+                          w_down_wT=self.w_down_wT[i], w_down_wT_scale=self.w_down_wT_scale[i])
       h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
+      if i == 0 and TRAINING and getattr(self, '_deferred_lmhead', None) is not None:
+        self._deferred_lmhead.prefetch_after(h)
 
     if getenv("FAST_FINAL_RMSNORM", 0):
       from extra.gptoss_kernels.rmsnorm import fast_final_rmsnorm
       h_normed = fast_final_rmsnorm(h, self.norm.weight, self.norm_eps)
     else: h_normed = self.norm(h)
 
+    if targets is not None and getenv("FUSED_LINEAR_CE", 0):
+      from extra.llama_kernels.fused_linear_ce import fused_linear_cross_entropy
+      return fused_linear_cross_entropy(h_normed, self.output, targets)
     if getenv("FP8_LMHEAD", 0) and ASM_GEMM:
+      # mxfp8 lm_head: quantize hidden + output on-the-fly, mxfp8 gemm (2x bf16 peak). w NOT stored fp8
+      # (output stays a bf16 master param) -> mx_w_stored=False so the wgrad is d/d the physical bf16 weight.
+      from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, quantize_mxfp8, mx_pack
       pad = (-self.dim) % 256
       h2 = h_normed.reshape(-1, self.dim).pad(((0, 0), (0, pad)))
       w2 = self.output.pad(((0, 0), (0, pad)))
@@ -353,30 +568,48 @@ class GPTOSS:
       else:
         logits = h_normed @ self.output.T
     elif ASM_GEMM:
+      from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
+      # pad hidden 2880 -> 3072 so fwd K%64, dgrad N%256 and wgrad M%256 all hold for the asm bf16 kernels;
+      # backward through the pads is a shrink, so output grads still land in the (vocab, dim) buffer
       pad = (-self.dim) % 256
       h_padded, w_padded = h_normed.pad((None, None, (0, pad))), self.output.pad(((0, 0), (0, pad)))
       logits = asm_gemm(h_padded, w_padded.T) if can_use_asm_gemm(h_padded, w_padded.T) and getenv("VOCAB_ASM", 1) else h_normed @ self.output.T
     else:
       logits = h_normed @ self.output.T
-
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
   if uop.op == Ops.ADD: return _get_pads(uop.src[0]) + _get_pads(uop.src[1])
   return [uop]
 
-def apply_grad(grad_buf:Tensor, new_grad:UOp):
+def apply_grad(grad_buf:Tensor, new_grad:UOp, accumulate:bool=True):
+  if not accumulate and getenv("GPTOSS_DEFER_FC1_REDUCE", 0) and new_grad.shape == (32,5888,3072) and \
+     new_grad.dtype == dtypes.bfloat16 and new_grad.axis == 0:
+    new_grad = _return_storage(new_grad)
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
+    if not accumulate and getenv("DIRECT_GRAD_ALIAS", 0):
+      grad_buf.uop = new_grad
+      return
+    stored = grad_buf.uop + new_grad if accumulate else new_grad
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(stored))
     return
+
+  if not accumulate:
+    assert all(pad.op == Ops.PAD for pad in pads), "direct gradient writes require disjoint padded slices"
+    regions = [tuple((p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)) for pad in pads]
+    assert sum(math.prod(pad.src[0].shape) for pad in pads) == math.prod(grad_buf.shape), "direct gradient writes must cover the buffer"
+    assert all(any(a[1] <= b[0] or b[1] <= a[0] for a,b in zip(regions[i], regions[j]))
+               for i in range(len(regions)) for j in range(i)), "direct gradient writes must not overlap"
+
   cur = grad_buf.uop
   for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
       grad_shrink = tuple((p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg))
       buf_slice = cur.shrink(grad_shrink)
-      cur = cur.after(buf_slice.store(pad.src[0].cast(cur.dtype)))
+      stored = buf_slice + pad.src[0].cast(cur.dtype) if accumulate else pad.src[0].cast(cur.dtype)
+      cur = cur.after(buf_slice.store(stored))
     else:
       cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
   grad_buf.uop = cur

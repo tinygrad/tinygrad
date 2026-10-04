@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any
-import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
+import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, bufferize_linear, to_name, patch, unwrap_view, layout_args
@@ -30,6 +30,7 @@ SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
   ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
 PMC = ContextVar("PMC", abs(VIZ.value)>=2)
+AMD_AQL_AGENT_FENCES = ContextVar("AMD_AQL_AGENT_FENCES", 0)
 
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
@@ -57,11 +58,12 @@ def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
 def dispatch_packet(data:AMDProgramData, info:ProgramInfo, kernel_object:UOp=UOp.const(0, dtypes.uint64),
-                    kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list: # as words: the grid may be symbolic
+                    kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list[UOp]: # as words: the grid may be symbolic
   pkt = bytes(hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
     setup=3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS, private_segment_size=data.private_segment_size,
     group_segment_size=data.group_segment_size, **{f"workgroup_size_{d}": l for d, l in zip("xyz", info.local_size)}))
-  grid = [(g * l).cast(dtypes.uint32) if isinstance(g, UOp) else g * l for g, l in zip(cast(tuple[Any, ...], info.global_size), info.local_size)]
+  grid = [(g * l).cast(dtypes.uint32) if isinstance(g, UOp) else UOp.const(g * l, dtypes.uint32)
+          for g, l in zip(cast(tuple[Any, ...], info.global_size), info.local_size)]
   return [UOp(Ops.BINARY, arg=pkt[:12]), *grid, UOp(Ops.BINARY, arg=pkt[24:32]), kernel_object, kernarg_address, UOp(Ops.BINARY, arg=pkt[48:])]
 
 class AMDComputeQueue(HWQueue):
@@ -450,8 +452,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     slot = self.prof_start(data, prg.arg, lib)
     self.close_run(len(self.blob))
     kernarg_address = UOp(Ops.LINEAR, src=tuple(self.kernargs(call, prg, data)), arg="kernargs").getaddr(self.devs)
-    self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w
-                  for w in dispatch_packet(data, prg.arg, lib.getaddr(self.devs) + data.desc_offset, kernarg_address)]
+    self.pkts += dispatch_packet(data, prg.arg, lib.getaddr(self.devs) + data.desc_offset, kernarg_address)
     self.run_start = len(self.blob)
     self.prof_stop(slot)
 
@@ -460,7 +461,19 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     base, off = unwrap_view(cmdbuf)
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
+    if AMD_AQL_AGENT_FENCES and self.local_fences_eligible():
+      from tinygrad.runtime.support.aql import narrow_aql_fences
+      self.blob = bytearray(narrow_aql_fences(self.blob, self.patches))
     return self.push(self.prof_bump(cmdbuf), bufferize_linear(self, "aql", self.dev.host), self.dev.compute_queue, unit=64, doorbell_lag=1)
+
+  def local_fences_eligible(self) -> bool:
+    # Opt-in is a caller promise that kernels have no hidden host/peer accesses. Validate all declared arguments as well.
+    if self.dev.target != (9,5,0) or not self.dev.is_am() or self.dev.is_vf or self.dev.is_usb or PROFILE: return False
+    if self.dev.pmc_enabled or self.dev.sqtt_enabled or len(self.devs) != 1 or self.queue != "COMPUTE:0": return False
+    calls = [u for u in self.lin.src if u.op is Ops.CALL]
+    if not calls or any(c.body.op is not Ops.PROGRAM for c in calls): return False
+    if any(b.device != self.devs[0] for c in calls for b in get_call_arg_uops(c)): return False
+    return all(u.op is Ops.CALL or (u.op is Ops.INS and u.arg[0] in ("barrier", "wait", "store", "timestamp")) for u in self.lin.src)
 
 # *****************
 # SDMA
@@ -790,6 +803,8 @@ class PCIIface(PCIIfaceBase):
       tl[0] = tl[1]
 
   def sleep(self, timeout):
+    # Without an IRQ poller, release the GIL so host workers can make progress during long GPU waits.
+    if getattr(self.pci_dev, 'irq_poller', None) is None: time.sleep(0)
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
     self._collect_interrupts()
@@ -1029,11 +1044,21 @@ class AMDDevice(Compiled):
 
   def program_buffer(self, b:UOp) -> Buffer:
     if b not in self.prog_bufs:
-      buf = self.prog_bufs[b] = Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+      buf = self.prog_bufs[b] = self._alloc_program(b)
       if PROFILE:
         name, lib, key = _amd_program_prof[b]
         Compiled.profile_events.append(ProfileProgramEvent(self.device, name, lib, buf._buf, b.arg.slot, key))
     return self.prog_bufs[b]
+
+  def _alloc_program(self, b:UOp) -> Buffer:
+    # Program images live as long as their device. Pool only the allocation: decode, upload, relocation and publication stay unchanged.
+    spec = BufferSpec(cpu_access=True, nolru=True)
+    if getenv("AMD_PROGRAM_ARENA", 0) and self.target == (9,5,0) and self.is_am() and not self.is_vf and not self.is_usb:
+      if not hasattr(self, "_program_pool"):
+        from tinygrad.runtime.support.amd import AMDProgramPool
+        self._program_pool = AMDProgramPool()
+      if (view:=self._program_pool.alloc(self, b)) is not None: return view
+    return Buffer(self.device, b.max_numel(), b.dtype, options=spec, allocator=self.allocator).ensure_allocated()
 
   def sqtt_trace(self, slot:int, se:int) -> bytes:
     off = (se * self.prof_slots + slot) * self.sqtt_win

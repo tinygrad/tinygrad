@@ -4,9 +4,10 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG, ceildiv
-from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+from extra.hipcc import HIPCCCompiler, rocm_toolchain, hip_program
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+from extra.llama_kernels import owned_empty, kernel_grad
 
 TILE_M, TILE_N, TILE_K = 256, 256, 64
 
@@ -16,7 +17,7 @@ TILE_M, TILE_N, TILE_K = 256, 256, 64
 def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3) -> UOp:
   # scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
   n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0) + (1 if scale_mode & 4 else 0)
-  scales, extra = args[:n_scales], args[n_scales:]
+  scales = args[:n_scales]
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
@@ -31,8 +32,7 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
                                  f"-DSCALE_MODE={scale_mode}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+  return hip_program(sink, src, lib)
 
 # ** FP8 AtB GEMM custom kernel
 
@@ -50,14 +50,14 @@ def custom_hk_fp8_atb_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode
   workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
   sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
   sink = UOp.sink(*sink_inputs,
-                  arg=KernelInfo(f"hk_fp8_atb_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+                  arg=KernelInfo(f"hk_fp8_atb_gemm_{M}_{N}_{K}",
+                                 estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
   src = (kittens_path/"gemm_fp8_atb.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
                                  f"-DSCALE_MODE={scale_mode}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+  return hip_program(sink, src, lib)
 
 def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_amax:Tensor|None=None) -> Tensor:
   assert a.dtype == b.dtype == FP8_DTYPE, f"expected fp8, got {a.dtype} {b.dtype}"
@@ -70,7 +70,8 @@ def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_amax:Tensor|
   reduce_out = False
   if is_multi:
     ndev = len(a.device)
-    if a.uop.axis in (0, 1) or b.uop.axis in (0, 1): inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
+    if a.uop.axis in (0, 1) or b.uop.axis in (0, 1):
+      inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
     elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=dtypes.bfloat16, device=a.device), 2
     elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=dtypes.bfloat16, device=a.device), 1
     else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
@@ -89,25 +90,117 @@ def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_amax:Tensor|
 # ** MXFP8 GEMM custom kernel
 
 @functools.cache
-def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:UOp, dname:str) -> UOp:
+def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:UOp, dname:str, post_scale:bool=False) -> UOp:
   # mxfp8 block-scaled gemm: A(M,K) @ B(N,K).T, e8m0 1x32 microscales packed (k_iters,dim) uint32
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
-  block_size = 256
+  tile_m128, single_buffer = getenv("MX_TILE_M128", 0), getenv("MX_SINGLE_BUFFER", 0)
+  reg_pipeline = getenv("MX_REG_PIPELINE", 0)
+  assert not reg_pipeline or (tile_m128 and single_buffer), "MX_REG_PIPELINE requires MX_TILE_M128=MX_SINGLE_BUFFER=1"
+  # Opt-in only from GPT-OSS: both 32-row operands consume two scale bytes. Keep the generic/Llama source unchanged.
+  pack32 = bool(getenv("GPTOSS_DENSE_PACK32", 0) and tile_m128 == 1 and single_buffer == 1 and reg_pipeline == 0 and
+                (M, N, K) in ((16384, 3072, 4096), (16384, 5120, 3072), (5120, 3072, 16384),
+                              (3072, 4096, 16384), (16384, 4096, 3072), (16384, 3072, 5120)))
+  true_grid = bool(getenv("GPTOSS_DENSE_TRUE_GRID", 0) and pack32 and
+                   ((M, N, K) == (16384, 5120, 3072) and not post_scale or (M, N, K) == (16384, 3072, 5120) and post_scale))
+  # Workgroup placement only; the GPT-OSS source keeps its contraction/epilogue unchanged. Generic/Llama ignores this knob.
+  gptoss_wgm = getenv("GPTOSS_DENSE_WGM", 8) if pack32 else 8
+  assert gptoss_wgm in (4, 8, 16)
+  block_m, block_n = (128 if tile_m128 else 256), 256
   threads = UOp.special(64 * 8, "lidx0")
-  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
   e_a = extra[0].base if len(extra) >= 1 else scale_A.base
   e_b = extra[1].base if len(extra) >= 2 else scale_B.base
-  sink_inputs = (C.base, A.base, B.base, scale_A.base, scale_B.base, e_a, e_b, threads, workgroups)
-  sink = UOp.sink(*sink_inputs,
-                  arg=KernelInfo(f"hk_mxfp8_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+  assert not post_scale or (M, N, K) == (16384, 3072, 5120) and len(extra) == 3 and C.dtype == dtypes.float32
+  post_e8 = (extra[2].base,) if post_scale else ()
+  sink_inputs = (C.base, A.base, B.base, scale_A.base, scale_B.base, e_a, e_b, *post_e8, threads, workgroups)
+  # The binary itself owns these accesses. Keep equivalent metadata in the AST so HCQ makes a following
+  # cross-device reduction wait for C and does not let this GEMM race its input producers.
+  zero = UOp.const(0, dtypes.int32)
+  accesses = (C.index(zero).store(UOp.const(0, C.dtype)), A.index(zero).load(), B.index(zero).load(),
+              scale_A.index(zero).load(), scale_B.index(zero).load()) + tuple(x.index(zero).load() for x in extra)
+  sink = UOp.sink(*sink_inputs, *accesses,
+                  arg=KernelInfo(f"hk_{'gptoss_qkv_dgrad_scale' if post_scale else 'mxfp8_gemm'}_{M}_{N}_{K}"
+                                 f"{'_p32' if pack32 else ''}{'_tg' if true_grid else ''}"+
+                                 (f"_wgm{gptoss_wgm}" if gptoss_wgm != 8 else ""),
+                                 estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
-  src = (kittens_path/"gemm_mxfp8.cpp").read_text()
+  src = (kittens_path/("gemm_mxfp8_gptoss.cpp" if pack32 else "gemm_mxfp8.cpp")).read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DMX_TILE_M128={tile_m128}", f"-DMX_SINGLE_BUFFER={single_buffer}",
+                                 f"-DMX_REG_PIPELINE={reg_pipeline}", f"-DMX_POST_SCALE={int(post_scale)}"] +
+                                 (["-DGPTOSS_DENSE_TRUE_GRID=1"] if true_grid else [])+
+                                 ([f"-DGPTOSS_DENSE_WGM={gptoss_wgm}"] if pack32 else [])).compile_cached(src)
+  return hip_program(sink, src, lib)
+
+@functools.cache
+def custom_hk_mxfp8_gptoss_lmhead_dh(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:UOp, dname:str) -> UOp:
+  # Exact GPT-OSS LM-head dHidden: dlogits(16384,128256) @ weight(3072,128256).T.
+  # It deliberately has a separate source/toolchain gate so generic and Llama dense MXFP8 GEMMs retain their binary.
+  M, K = A.shape[0]*A.shape[1], A.shape[2]
+  N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
+  assert (M, N, K) == (16384, 3072, 128256) and K == K2 and len(extra) == 2
+  rocm72_requested = bool(getenv("GPTOSS_LMHEAD_DH_ROCM72", 0))
+  rocm72_hipcc, rocm72_root = rocm_toolchain("/opt/rocm-7.2.1", rocm72_requested,
+    flag="GPTOSS_LMHEAD_DH_ROCM72", fallback="retaining the generic MXFP8 kernel")
+  rocm72 = rocm72_root is not None
+  pack32 = bool(getenv("GPTOSS_LMHEAD_PACK32", 0) and rocm72)
+  threads = UOp.special(64 * 8, "lidx0")
+  workgroups = UOp.special((M // 128) * (N // 256), "gidx0")
+  e_a, e_b = extra[0].base, extra[1].base
+  zero = UOp.const(0, dtypes.int32)
+  accesses = (C.index(zero).store(UOp.const(0, C.dtype)), A.index(zero).load(), B.index(zero).load(),
+              scale_A.index(zero).load(), scale_B.index(zero).load(), extra[0].index(zero).load(), extra[1].index(zero).load())
+  sink = UOp.sink(C.base, A.base, B.base, scale_A.base, scale_B.base, e_a, e_b, threads, workgroups, *accesses,
+                  arg=KernelInfo(f"hk_gptoss_lmhead_dh_wgm{4 if rocm72 else 8}_r72{int(rocm72)}_{M}_{N}_{K}{'_p32' if pack32 else ''}",
+                                 estimates=Estimates(ops=2*M*N*K,
+                                                     mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  # The measured win is the combination of WGM4 and ROCm 7.2.1. If that side toolchain is unavailable, compile the
+  # unchanged generic WGM8 source rather than accepting the marginal/noisy WGM4 result from the configured compiler.
+  src = (kittens_path/("gemm_mxfp8_gptoss_lmhead_dh.cpp" if rocm72 else "gemm_mxfp8.cpp")).read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 "-DMX_TILE_M128=1", "-DMX_SINGLE_BUFFER=1", "-DMX_REG_PIPELINE=0", "-DWGRAD_SAFE_LDS_PTR=0",
+                                 *(["-DGPTOSS_LMHEAD_PACK32=1"] if pack32 else [])],
+                      hipcc_path=rocm72_hipcc,
+                      rocm_path=rocm72_root).compile_cached(src)
+  return hip_program(sink, src, lib)
+
+@functools.cache
+def custom_hk_mxfp8_gptoss_lmhead_wgrad(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:UOp,
+                                        dname:str, part:int, wgm:int) -> UOp:
+  # GPT-OSS LM-head dWeight: dlcol(V,K) @ hcol(H,K).T. Part 1 owns the first 2816 hidden columns;
+  # part 2 owns the final 64 live columns and explicitly zeros the physical 2880:3072 padding.
+  M, K = A.shape[0]*A.shape[1], A.shape[2]
+  N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
+  assert (M, N, K) == (128256, 3072, 16384) and K == K2 and len(extra) == 2 and part in (0, 1, 2)
+  pack32 = bool(getenv("GPTOSS_LMHEAD_PACK32", 0) and part == 1 and wgm == 16)
+  threads = UOp.special(64 * 8, "lidx0")
+  workgroups = UOp.special((M // (256 if part == 2 else 128)) * (11 if part == 1 else 1 if part == 2 else N // 256), "gidx0")
+  zero = UOp.const(0, dtypes.int32)
+  # The tail's fake C read orders its disjoint partial write after the interior launch in async graphs.
+  accesses = ((C.index(zero).load(),) if part == 2 else ()) + \
+             (C.index(zero).store(UOp.const(0, C.dtype)), A.index(zero).load(), B.index(zero).load(),
+              scale_A.index(zero).load(), scale_B.index(zero).load()) + tuple(x.index(zero).load() for x in extra)
+  e_a = extra[0].base if len(extra) >= 1 else scale_A.base
+  e_b = extra[1].base if len(extra) >= 2 else scale_B.base
+  sink = UOp.sink(C.base, A.base, B.base, scale_A.base, scale_B.base, e_a, e_b, threads, workgroups, *accesses,
+                  arg=KernelInfo(f"hk_gptoss_lmhead_wgrad_p{part}_wgm{wgm}_{M}_{N}_{K}{'_p32' if pack32 else ''}",
+                                 estimates=Estimates(ops=2*M*(2816 if part == 1 else 64 if part == 2 else N)*K,
+                                                     mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"gemm_mxfp8_gptoss_lmhead_wgrad.cpp").read_text()
+  flags = [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+           "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_K={K}",
+           f"-DGPTOSS_LMHEAD_WGRAD_PART={part}", f"-DGPTOSS_LMHEAD_WGRAD_WGM={wgm}"]
+  # The iterative-ILP scheduler reduces p1's VGPR count and is consistently faster for this exact GPT-OSS contraction.
+  if part == 1: flags += ["-mllvm", "-amdgpu-sched-strategy=iterative-ilp"]
+  if pack32: flags += ["-DGPTOSS_LMHEAD_PACK32=1"]
+  lib = HIPCCCompiler("gfx950", flags).compile_cached(src)
+  return hip_program(sink, src, lib)
 
 # ** MXFP4 GEMM custom kernel
 
@@ -182,7 +275,9 @@ def _mx_block_scale_3d(e8:Tensor) -> Tensor:
   return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(E, rows, scale_K, 1).expand(E, rows, scale_K, 32).reshape(E, rows, scale_K*32)
 
 counters = {"used":0, "todos":[]}
-def todo(msg:str) -> bool: counters["todos"].append(msg); return False
+def todo(msg:str) -> bool:
+  counters["todos"].append(msg)
+  return False
 def _asm_gemm_report():
   print(f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used')
   if DEBUG >= 2 and counters["todos"]:
@@ -246,8 +341,7 @@ def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
   src = (kittens_path/"gemm_bf16.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                                UOp(Ops.BINARY, arg=lib)))
+  return hip_program(sink, src, lib)
 
 @functools.cache
 def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
@@ -264,8 +358,7 @@ def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   src = (kittens_path/"gemm_bf16_atb.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                                UOp(Ops.BINARY, arg=lib)))
+  return hip_program(sink, src, lib)
 
 def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
   assert a.dtype == b.dtype == dtypes.bfloat16, f"expected bf16, got {a.dtype} {b.dtype}"
@@ -299,12 +392,17 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
   if inputs[1].dtype == FP8_DTYPE:
     out, a, b = inputs[:3]
     i = 3
-    s_x = inputs[i]; i += 1
+    s_x = inputs[i]
+    i += 1
     has_w = n_scales >= 2
-    s_w = inputs[i] if has_w else None; i += has_w
-    s_g_amax = inputs[i] if n_scales == 3 else None; i += (n_scales == 3)
-    grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
-    next_grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
+    s_w = inputs[i] if has_w else None
+    i += has_w
+    s_g_amax = inputs[i] if n_scales == 3 else None
+    i += (n_scales == 3)
+    grad_amax_state = inputs[i] if has_grad_amax else None
+    i += has_grad_amax
+    next_grad_amax_state = inputs[i] if has_grad_amax else None
+    i += has_grad_amax
     w_post = inputs[i] if has_w_post else None
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t = Tensor(s_x, device=a.device)
@@ -373,17 +471,52 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
 def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=False):
   inputs = kernel.src[1:]  # (out, a_q, b_q, a_si, b_si, a_e8, b_e8, [w_post])
   aq, bq = Tensor(inputs[1], device=inputs[1].device), Tensor(inputs[2], device=inputs[2].device)
+  asi, bsi = Tensor(inputs[3], device=inputs[3].device), Tensor(inputs[4], device=inputs[4].device)
   ae8, be8 = Tensor(inputs[5], device=inputs[5].device), Tensor(inputs[6], device=inputs[6].device)
   wp = Tensor(inputs[7], device=inputs[7].device) if has_w_post else None
 
-  a_phys = (aq.reshape(-1, aq.shape[-1]).cast(dtypes.bfloat16) * _mx_block_scale(ae8)).cast(dtypes.bfloat16)
-  b_phys = (bq.cast(dtypes.bfloat16) * _mx_block_scale(be8)).cast(dtypes.bfloat16)
-
   g = Tensor(gradient, device=aq.device)[:aq.shape[0]].reshape(aq.shape[0]*aq.shape[1], bq.shape[0]).cast(dtypes.bfloat16)
-  grad_a = asm_gemm(g, b_phys, mx=True)
-  grad_b = asm_gemm(g.T, a_phys, mx=True, a_pretranspose=g)
+  fuse_dgrad_scale = False
+  if getenv("DENSE_DIRECT_REQUANT", 0):
+    from extra.llama_kernels.transpose_quantize_mxfp8 import transpose_quantize_mxfp8, transpose_requantize_mxfp8
+    def requant_col(q:Tensor, e8:Tensor, packed_si:Tensor):
+      M, N = q.shape
+      local_shape = q.uop.shard_shape if isinstance(q.device, tuple) else q.shape
+      use_packed = bool(getenv("GPTOSS_QKV_REQUANT_PACKED", 0) and local_shape == (16384, 3072))
+      packed_arg = packed_si.reshape(1, N // 128, M) if use_packed else None
+      qt, et, si = transpose_requantize_mxfp8(q.reshape(1, M, N), e8.reshape(1, M, N // 32), packed_arg)
+      return qt.squeeze(0), et.squeeze(0), si.squeeze(0)
+    af = aq.reshape(-1, aq.shape[-1])
+    a_col, a_col_e8, a_col_si = requant_col(af, ae8, asi)
+    b_col, b_col_e8, b_col_si = requant_col(bq, be8, bsi)
+    if getenv("FUSED_DENSE_BIAS_GRAD", 0):
+      from extra.llama_kernels.dense_bias import dense_bias_grad_lookup
+      bias_entry = dense_bias_grad_lookup(gradient)
+    else: bias_entry = None
+    if bias_entry is not None:
+      g_col, g_col_e8, g_col_si = (Tensor(u, device=aq.device) for u in bias_entry[:3])
+      if len(bias_entry) == 6: g_q, g_e8, g_si = (Tensor(u, device=aq.device) for u in bias_entry[3:])
+      else: g_q, g_e8, g_si = quantize_mxfp8(g)
+    else: g_col, g_col_e8, g_col_si = transpose_quantize_mxfp8(g)
+    if bias_entry is None: g_q, g_e8, g_si = quantize_mxfp8(g)
+    g_row, post_e8 = g_q.reshape(-1, g_q.shape[-1]), ae8.reshape(-1, ae8.shape[-1])
+    g_local_shape = g_row.uop.shard_shape if isinstance(g_row.device, tuple) else g_row.shape
+    post_local_shape = post_e8.uop.shard_shape if isinstance(post_e8.device, tuple) else post_e8.shape
+    fuse_dgrad_scale = bool(getenv("GPTOSS_QKV_DGRAD_SCALE_EPILOGUE", 0) and g_local_shape == (16384, 5120)
+                            and b_col.T.shape == (5120, 3072) and post_local_shape == (16384, 96))
+    lmhead_dh = bool(getenv("GPTOSS_LMHEAD_DH_WGM4", 0) and g_local_shape == (16384, 128256)
+                     and b_col.T.shape == (128256, 3072))
+    grad_a = asm_gemm(g_q, b_col.T, mx=True, mx_scales=(g_si, g_e8, b_col_si, b_col_e8),
+                      mx_post_e8=post_e8 if fuse_dgrad_scale else None, gptoss_lmhead_dh=lmhead_dh)
+    grad_b = asm_gemm(g_col, a_col.T, mx=True, mx_scales=(g_col_si, g_col_e8, a_col_si, a_col_e8))
+  else:
+    a_phys = (aq.reshape(-1, aq.shape[-1]).cast(dtypes.bfloat16) * _mx_block_scale(ae8)).cast(dtypes.bfloat16)
+    b_phys = (bq.cast(dtypes.bfloat16) * _mx_block_scale(be8)).cast(dtypes.bfloat16)
+    grad_a = asm_gemm(g, b_phys, mx=True)
+    grad_b = asm_gemm(g.T, a_phys, mx=True, a_pretranspose=g)
 
-  grad_a = (grad_a * _mx_block_scale(ae8)).reshape(aq.shape)
+  if not fuse_dgrad_scale: grad_a = grad_a * _mx_block_scale(ae8)
+  grad_a = grad_a.reshape(aq.shape)
   if not w_stored: grad_b = grad_b * _mx_block_scale(be8)
   if wp is not None: grad_b = grad_b / wp.reshape(-1, 1)
   return (None, grad_a.uop, grad_b.uop) + tuple(None for _ in inputs[3:])
@@ -422,7 +555,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
              a_pretranspose:Tensor|None=None, mxfp4:bool=False, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
-             mxfp4_x:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None) -> Tensor:
+             mxfp4_x:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None, mx_post_e8:Tensor|None=None, gptoss_lmhead_dh:bool=False,
+             gptoss_lmhead_reduce_scatter:bool=False) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   if mxfp4:
     assert not mx and mx_scales is None, "mxfp4 owns quantization; mx/mx_scales are for mxfp8"
@@ -434,7 +568,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
     a = a.reshape(a.shape[0]*a.shape[1], a.shape[2])
   squeeze = a.ndim == 2
   if squeeze: a = a.unsqueeze(0)
-  out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE or mxfp4 else a.dtype
+  out_dtype = dtypes.float32 if mx_post_e8 is not None else dtypes.bfloat16 if a.dtype == FP8_DTYPE or mxfp4 else a.dtype
 
   batch, M, K = a.shape
   N = b.shape[1]
@@ -474,6 +608,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
                                  a_col, scale_a_col, b_col, scale_b_col, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
     elif mx:
       # mxfp8 1x32 block scaling
+      assert mx_post_e8 is None or mx_scales is not None, "post-scaled mxfp8 GEMM requires prequantized operands"
       if mx_scales is not None:
         a_si, a_e8, b_si, b_e8 = mx_scales
         a_q, b_q = a.reshape(-1, a.shape[-1]), b.T
@@ -486,10 +621,37 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
         a_q, a_e8, a_si = quantize_mxfp8(a.reshape(-1, a.shape[-1]))
         b_q, b_e8, b_si = quantize_mxfp8(b.T)
       has_w_post = w_post_scale is not None
-      fxn = functools.partial(custom_hk_mxfp8_gemm, dname=dname)
-      grad_fxn = functools.partial(custom_mx_gemm_bw, has_w_post=has_w_post, w_stored=mx_w_stored)
+      assert mx_post_e8 is None or not has_w_post, "post-scaled mxfp8 GEMM cannot also apply a weight post-scale"
+      grad_fxn = kernel_grad(custom_mx_gemm_bw, has_w_post=has_w_post, w_stored=mx_w_stored)
       extra = [w_post_scale] if w_post_scale is not None else []
-      out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8, *extra, fxn=fxn, grad_fxn=grad_fxn)[0]
+      lmhead_dh = bool(gptoss_lmhead_dh and getenv("GPTOSS_LMHEAD_DH_WGM4", 0) and mx_scales is not None and not has_w_post and
+                       mx_post_e8 is None and batch*M == 16384 and N == 3072 and K == 128256)
+      lmhead_wgrad = bool(not lmhead_dh and getenv("GPTOSS_LMHEAD_WGRAD", 1) and mx_scales is not None and not has_w_post and
+                          batch*M == 128256 and N == 3072 and K == 16384)
+      if lmhead_dh:
+        fxn = functools.partial(custom_hk_mxfp8_gptoss_lmhead_dh, dname=dname)
+        out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8,
+                                   fxn=fxn, grad_fxn=grad_fxn)[0]
+      elif lmhead_wgrad:
+        # Both interior and tail write this same fresh allocation.
+        out = owned_empty(out)
+        wgm = getenv("GPTOSS_LMHEAD_WGRAD_WGM", 16)
+        if getenv("GPTOSS_LMHEAD_WGRAD_SPLIT", 1):
+          interior = functools.partial(custom_hk_mxfp8_gptoss_lmhead_wgrad, dname=dname, part=1, wgm=wgm)
+          out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8,
+                                     fxn=interior)[0]
+          tail = functools.partial(custom_hk_mxfp8_gptoss_lmhead_wgrad, dname=dname, part=2, wgm=wgm)
+          out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8,
+                                     fxn=tail, grad_fxn=grad_fxn)[0]
+        else:
+          fxn = functools.partial(custom_hk_mxfp8_gptoss_lmhead_wgrad, dname=dname, part=0, wgm=wgm)
+          out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8,
+                                     fxn=fxn, grad_fxn=grad_fxn)[0]
+      else:
+        post_inputs = [mx_post_e8] if mx_post_e8 is not None else []
+        fxn = functools.partial(custom_hk_mxfp8_gemm, dname=dname, post_scale=mx_post_e8 is not None)
+        out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8, *post_inputs, *extra,
+                                   fxn=fxn, grad_fxn=grad_fxn)[0]
     # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store
     elif a.dtype == FP8_DTYPE:
       scales = tuple(s for s in (x_scale, w_scale, g_amax) if s is not None)
@@ -503,7 +665,13 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
-  if k_sharded: out = out.sum(0)
+  if gptoss_lmhead_reduce_scatter:
+    # The terminal GPT-OSS loss backward needs only the optimizer-owned vocabulary rows. Keep the same
+    # local GEMM and BF16 all2all addition order, but omit the reduced-gradient all-gather.
+    assert k_sharded and squeeze and batch == 1 and out_dtype == dtypes.bfloat16
+    from extra.gemm.moe_gemm import reduce_scatter_devaxis
+    out = reduce_scatter_devaxis(out, 0).unsqueeze(0)
+  elif k_sharded: out = out.sum(0)
   out = out.squeeze(0) if squeeze else out
   if unfold_batch: out = out.reshape(orig_batch, -1, out.shape[-1])
   if w_post_scale is not None: out = (out * w_post_scale.reshape(*([1]*(out.ndim-1)), -1)).cast(out.dtype)

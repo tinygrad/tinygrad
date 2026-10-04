@@ -10,7 +10,24 @@ ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
 FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 IMMEDIATE_SCALE = getenv("IMMEDIATE_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
-PRESTORE_WT = getenv("PRESTORE_WT", 0)
+PRESTORE_WT = getenv("PRESTORE_WT", 0)  # pre-store transposed mxfp8 weight (W^T) so the dgrad skips dequant+transpose+requant
+FUSED_ADAM_MXFP8 = getenv("FUSED_ADAM_MXFP8", 0)
+
+def _gptoss_owned_shards(t:Tensor) -> tuple[Tensor, ...]:
+  """Broadcast native Adam's owned shards without a local staging copy."""
+  assert isinstance(t.device, tuple) and t.uop.axis == 0 and t.uop.has_buffer_identity(after_ok=True)
+  node, deps = t.uop, []
+  while node.op in (Ops.AFTER, Ops.RESHAPE, Ops.UNSHARD):
+    if node.op is Ops.AFTER: deps.extend(node.src[1:])
+    node = node.src[0]
+  assert node is t.uop.storage_base
+  # Preserve both FC1 writers (main and tail), exposing only their physical local
+  # output view. Logical shard slicing would introduce a copy before each send.
+  local = node.reshape(t.uop.shard_shape).after(*deps)
+  return tuple(Tensor(local.mselect(i).copy_to_device(t.device)) for i in range(len(t.device)))
+
+def _gptoss_gather_owned(t:Tensor) -> Tensor:
+  return Tensor.cat(*_gptoss_owned_shards(t), dim=0)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -38,6 +55,32 @@ def fclip_grads(grads:list[Tensor], clip_norm) -> tuple[list[Tensor], Tensor]:
   scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
   return [(g * scale).cast(g.dtype) for g in grads], total_norm
 
+def clip_grads_lazy(grads:list[Tensor], grad_acc, clip_norm) -> tuple[list[Tensor], Tensor]:
+  normalized = grads if grad_acc == 1 else [g / grad_acc for g in grads]
+  if getenv("FAST_GRAD_NORM", 0):
+    from extra.gptoss_kernels.grad_norm import sum_squares_bf16
+    # The expert-weight gradients dominate this pass and are contiguous BF16 buffers. Keep uncommon dtypes and
+    # small tensors on tinygrad's normal reduction path, where a custom launch would not repay its overhead.
+    squares, local_squares = [], {}
+    for g in normalized:
+      if g.dtype == dtypes.bfloat16 and g.numel() >= 1_000_000:
+        if getenv("GPTOSS_BATCHED_GRAD_NORM", 0) and isinstance(g.device, tuple) and g.uop.axis is not None:
+          local_squares.setdefault(g.device, []).append(sum_squares_bf16(g, local=True))
+        else: squares.append(sum_squares_bf16(g))
+      else: squares.append(g.float().square().sum())
+    # Sum each GPU's owned contributions before crossing devices. Replicated gradients above count only once.
+    squares.extend(Tensor.stack(*parts, dim=1).sum(1).sum() for parts in local_squares.values())
+  else:
+    squares = [g.float().square().sum() for g in normalized]
+  total_norm = Tensor.stack(*squares).sum().sqrt().contiguous()
+  scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+  clipped = [(g * scale).cast(g.dtype) for g in normalized]
+  # Same-shard fused optimizers can consume these directly and reproduce this BF16 rounding boundary in their kernel.
+  for out, raw in zip(clipped, normalized):
+    setattr(out, "_adam_raw_grad", raw)
+    setattr(out, "_adam_clip_scale", scale)
+  return clipped, total_norm
+
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
@@ -57,16 +100,119 @@ class GradAccClipAdamW(Optimizer):
     return Tensor(t.uop._shard(0, UOp.range(len(self.device), -1, AxisType.DEVICE)).unshard(0)).clone()
 
   def _zero_gather(self, t:Tensor) -> Tensor:
+    if (deferred := getattr(self, '_deferred_lmhead', None)) is not None and deferred.stage(t): return deferred.parameter
     if not isinstance(t.device, tuple) or t.uop.axis != 0: return t
+    # Finish local update math before selecting individual lanes. Otherwise gather can duplicate an update
+    # containing a DEVICE range into single-device calls, where that range no longer has a launch binding.
+    t = t.contiguous()
     n, sz = len(t.device), t.shape[0] // len(t.device)
     return Tensor.cat(*[t[p*sz:(p+1)*sz] for p in range(n)], dim=0)
 
   def fschedule_step(self, grads:list[Tensor]) -> list[Tensor]:
+    if FUSED_ADAM_MXFP8 and self.master_params is not None and MXFP8 and not PRESTORE_WT:
+      return self._fschedule_fused_adam_mxfp8(grads)
     updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
+    return self._scheduled_outputs(extra)
+
+  def _scheduled_outputs(self, extra:list[Tensor]) -> list[Tensor]:
     fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
     fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
-    return extra + self.params + self.buffers + (self.master_params or []) + fp8_inv_scales + fp8_next_inv_scales
+    fp8_wT = [tt._wT_q for tt in self.params if hasattr(tt, '_wT_q')] + [tt._wT_e8 for tt in self.params if hasattr(tt, '_wT_e8')]
+    fp8_fc1_si = [tt._fc1_packed_si for tt in self.params if hasattr(tt, '_fc1_packed_si')]
+    outputs = extra + self.params + self.buffers + (self.master_params or []) + fp8_inv_scales + fp8_next_inv_scales + fp8_wT + fp8_fc1_si
+    return deferred.scheduled_outputs(outputs) if (deferred := getattr(self, '_deferred_lmhead', None)) is not None else outputs
+
+  def _fschedule_fused_adam_mxfp8(self, grads:list[Tensor]) -> list[Tensor]:
+    from extra.llama_kernels.fused_adam_mxfp8 import fused_adam_mxfp8, fused_adam_bf16_vocab
+    self.b1_t *= self.b1
+    self.b2_t *= self.b2
+    for i, (tt, g) in enumerate(zip(self.params, grads)):
+      if g.device != self.m[i].device: g = g.to(self.m[i].device)
+      master = self.master_params[i]  # type: ignore[index]
+      raw_grad, raw_scale = getattr(g, "_adam_raw_grad", None), getattr(g, "_adam_clip_scale", None)
+      can_fuse = tt.dtype in dtypes.fp8s and g.dtype == dtypes.bfloat16 and master.shape[-1] % 32 == 0
+      # The two 128256x2880 BF16 vocabulary matrices otherwise run separate m, v, and master kernels, with the
+      # master kernel redundantly recomputing both moments. This is deliberately exact GPT-OSS-only dispatch.
+      can_fuse_vocab = bool(getenv("GPTOSS_ADAM_BF16_VOCAB", 0)) and tt.dtype == dtypes.bfloat16 and \
+        tt.shape == (128256, 2880)
+      if can_fuse_vocab:
+        raw_vocab_clip = bool(getenv("GPTOSS_ADAM_BF16_RAW_CLIP", 0)) and isinstance(raw_grad, Tensor) and \
+          isinstance(raw_scale, Tensor) and raw_grad.dtype == dtypes.bfloat16 and raw_grad.shape == master.shape and \
+          raw_grad.device == master.device and raw_scale.dtype == dtypes.float32 and raw_scale.shape in ((), (1,)) and \
+          raw_scale.device == master.device and (not isinstance(master.device, tuple) or raw_grad.uop.axis == master.uop.axis or \
+          (self.zero and raw_grad.uop.axis is None and master.uop.axis == 0))
+        if raw_vocab_clip:
+          # Vocab gradients are materialized after the DP backward reduction but remain replicated; select the same
+          # ZeRO shard as the already-clipped path before applying its BF16 clip boundary inside the custom kernel.
+          g = self._zero_shard(raw_grad) if isinstance(master.device, tuple) and raw_grad.uop.axis != master.uop.axis else raw_grad
+        elif isinstance(g.device, tuple) and g.uop.axis != master.uop.axis:
+          assert g.uop.axis is None and master.uop.axis == 0
+          g = self._zero_shard(g)
+        else:
+          g = g.shard_like(master)
+        self.m[i], self.v[i], self.master_params[i] = fused_adam_bf16_vocab(
+          self.m[i], self.v[i], master, g, self.lr, self.b1_t, self.b2_t,
+          b1=self.b1, b2=self.b2, eps=self.eps, clip_scale=raw_scale if raw_vocab_clip else None)
+        # Replicas consume BF16 weights, not the FP32 master. Round each local shard before transferring it.
+        new_w = self.master_params[i].cast(tt.dtype)  # type: ignore[index]
+        tt.assign(self._zero_gather(new_w) if self.zero else new_w)
+      elif can_fuse:
+        has_fc1_si = hasattr(tt, '_fc1_packed_si')
+        gptoss_down_shape = tt.ndim == 3 and tt.shape[-2:] == (3072, 3072) and not has_fc1_si
+        raw_clip_target = (has_fc1_si and bool(getenv("GPTOSS_ADAM_RAW_CLIP", 0))) or \
+          (gptoss_down_shape and bool(getenv("GPTOSS_ADAM_DOWN_RAW_CLIP", 0)))
+        raw_clip = raw_clip_target and \
+          isinstance(raw_grad, Tensor) and isinstance(raw_scale, Tensor) and \
+          raw_grad.dtype == dtypes.bfloat16 and raw_grad.shape == master.shape and raw_grad.device == master.device and \
+          raw_scale.dtype == dtypes.float32 and raw_scale.shape in ((), (1,)) and raw_scale.device == master.device and \
+          (not isinstance(master.device, tuple) or raw_grad.uop.axis == master.uop.axis)
+        if raw_clip:
+          g = raw_grad
+        elif isinstance(g.device, tuple) and g.uop.axis != master.uop.axis:
+          assert g.uop.axis is None and master.uop.axis == 0
+          g = self._zero_shard(g)
+        else:
+          g = g.shard_like(master)
+        # Local optimizer state can make the fused kernel write SI straight into its persistent model buffer. ZeRO
+        # needs the ordinary sharded temporary followed by the same gather used for q/e8.
+        direct_si = tt._fc1_packed_si if has_fc1_si and not self.zero and master.device == tt._fc1_packed_si.device else None
+        compact_q = self.zero and bool(getenv("GPTOSS_COMPACT_Q_GATHER", 0)) and (has_fc1_si or gptoss_down_shape)
+        fused_out = fused_adam_mxfp8(self.m[i], self.v[i], master, g, self.lr, self.b1_t, self.b2_t,
+                                     b1=self.b1, b2=self.b2, eps=self.eps,
+                                     weight_decay=self.wd if tt.ndim >= 3 else 0.0,
+                                     experts=tt.shape[0] if has_fc1_si else 1, out_si=direct_si,
+                                     clip_scale=raw_scale if raw_clip else None, compact_q=compact_q)
+        m, v, master, q, e8, *si_out = fused_out
+        self.m[i], self.v[i], self.master_params[i] = m, v, master  # type: ignore[index]
+        if self.zero:
+          gather = _gptoss_gather_owned if compact_q and getenv("GPTOSS_OWNED_EXPERT_GATHER", 0) else self._zero_gather
+          if compact_q:
+            # Word-typed raw storage retains vectorized copies; restore zero padding in the gather assembly.
+            assert q.dtype == dtypes.uint32
+            if getenv("GPTOSS_COMPACT_GATHER_VECTOR", 0):
+              from extra.llama_kernels.fused_adam_mxfp8 import gather_compact_q
+              q = gather_compact_q(_gptoss_owned_shards(q), tt)
+            else:
+              q = gather(q).pad(
+                ((0, 0), (0, tt.shape[1]-q.shape[1]), (0, tt.shape[2]//4-q.shape[2]))).bitcast(tt.dtype)
+          else: q = gather(q)
+          e8 = gather(e8)
+          if si_out: si_out[0] = gather(si_out[0])
+        if compact_q and getenv("GPTOSS_COMPACT_GATHER_VECTOR", 0): tt.replace(q)
+        else: tt.assign(q.reshape(tt.shape))
+        tt._inv_scale.assign(e8.reshape(tt._inv_scale.shape))
+        if si_out:
+          if direct_si is not None: tt._fc1_packed_si.replace(si_out[0])
+          else: tt._fc1_packed_si.assign(si_out[0])
+      else:
+        m_new = self.b1 * self.m[i].float() + (1.0 - self.b1) * g.float()
+        v_new = self.b2 * self.v[i].float() + (1.0 - self.b2) * (g.float() * g.float())
+        self.m[i].assign(m_new.cast(self.m[i].dtype))
+        self.v[i].assign(v_new.cast(self.v[i].dtype))
+        update = self.lr * (m_new / (1.0 - self.b1_t)) / ((v_new / (1.0 - self.b2_t)).sqrt() + self.eps)
+        tt.assign(self._apply_update(tt, update, master))
+    return self._scheduled_outputs([self.b1_t, self.b2_t] + self.m + self.v)
 
   def fstep(self, grads:list[Tensor], grad_norm:Tensor|None=None):
     Tensor.realize(*([grad_norm] if grad_norm is not None else []), *self.fschedule_step(grads))
@@ -110,7 +256,13 @@ class GradAccClipAdamW(Optimizer):
         new_e8 = w_e8.reshape(t._inv_scale.shape)
         t._inv_scale.assign(new_e8.shard_like(t._inv_scale) if offloaded else new_e8)
         ret = w_q.reshape(t.shape)
+        if hasattr(t, '_fc1_packed_si'):
+          from extra.gemm.moe_gemm import mx_pack_3d
+          packed_si = mx_pack_3d(new_e8)
+          t._fc1_packed_si.assign(packed_si.shard_like(t._fc1_packed_si) if offloaded else packed_si)
         if PRESTORE_WT and hasattr(t, '_wT_q'):
+          # pre-store W^T = quantize_mxfp8(dequant(stored w_q).transpose(1,2)) -- byte-exact with the dgrad's per-backward
+          # recompute (uses ret==the stored w_q the dgrad reads, NOT new_w). Same op chain, done once here.
           from extra.gemm.cdna_asm_gemm import _mx_block_scale_3d
           w_phys = ret.cast(dtypes.bfloat16) * _mx_block_scale_3d(new_e8).cast(dtypes.bfloat16)
           wT_q, wT_e8, _ = quantize_mxfp8(w_phys.transpose(1, 2))

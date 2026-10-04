@@ -23,8 +23,21 @@ using namespace kittens;
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV;
 constexpr int HALF_D = ATTN_D / 2;
 constexpr int PACKED_H = ATTN_H_KV * (GROUP_SIZE + 2);
-constexpr int HEADS_PER_WG = ATTN_D == 128 && GROUP_SIZE % 2 == 0 ? 2 : 1;
+#ifndef BWD_HEADS_PER_WG
+#define BWD_HEADS_PER_WG 1
+#endif
+#ifndef GPTOSS_BWD_DQ_CACHE
+#define GPTOSS_BWD_DQ_CACHE 0
+#endif
+#ifndef GPTOSS_BWD_Q_HEADS_PER_WG
+#define GPTOSS_BWD_Q_HEADS_PER_WG 1
+#endif
+constexpr int HEADS_PER_WG = BWD_HEADS_PER_WG;
+static_assert(GROUP_SIZE % HEADS_PER_WG == 0, "invalid Flash Attention partial layout");
 constexpr int KV_PARTIALS = GROUP_SIZE / HEADS_PER_WG;
+constexpr int Q_HEADS_PER_WG = GPTOSS_BWD_Q_HEADS_PER_WG;
+static_assert(ATTN_H % Q_HEADS_PER_WG == 0, "invalid Q-head grouping");
+constexpr int Q_FIELDS = ATTN_H / Q_HEADS_PER_WG;
 constexpr int NUM_WARPS = 4;
 constexpr int TILE_N = 16;
 
@@ -47,7 +60,7 @@ __device__ __forceinline__ void load_fa_shuffled(RT &dst, const GL &src, const C
     #pragma unroll
     for (int j = 0; j < dst.width; j++) {
       const float4 loaded = std::bit_cast<float4>(llvm_amdgcn_raw_buffer_load_b128(
-        std::bit_cast<i32x4>(br), (i * tile_row_stride + j * tile_stride + lane * 8) * sizeof(U), 0, 0));
+        std::bit_cast<i32x4>(br), (i * tile_row_stride + j * tile_stride + lane * 8) * sizeof(U), 0, GPTOSS_BWD_DQ_CACHE));
       const U2 *packed = reinterpret_cast<const U2*>(&loaded);
       #pragma unroll
       for (int k = 0; k < dst.packed_per_base_tile; k++) dst.tiles[i][j].data[k] = packed[k];
@@ -134,15 +147,20 @@ fused_qkv_rope_backward(
   const int b = blockIdx.x, n_tile = blockIdx.y * NUM_WARPS + kittens::warpid(), n_base = n_tile * TILE_N;
   const int field = blockIdx.z;
 
-  if (field < ATTN_H) {
-    grad_tile<bf16> tile;
-    load_fa_shuffled<2>(tile, dqg, {b, field, n_tile, 0});
-    inverse_rope_fa(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
-    const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
-    store_fa_shuffled<1>(out, tile, {b, n_tile, out_head, 0});
+  if (field < Q_FIELDS) {
+    #pragma unroll
+    for (int qj = 0; qj < Q_HEADS_PER_WG; qj++) {
+      const int qh = field * Q_HEADS_PER_WG + qj;
+      grad_tile<bf16> tile;
+      load_fa_shuffled<2>(tile, dqg, {b, qh, n_tile, 0});
+      inverse_rope_fa(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
+      const int out_head = (qh / GROUP_SIZE) * (GROUP_SIZE + 2) + qh % GROUP_SIZE;
+      store_fa_shuffled<1>(out, tile, {b, n_tile, out_head, 0});
+    }
   } else {
-    const bool is_k = field < ATTN_H + ATTN_H_KV;
-    const int kvh = field - ATTN_H - (is_k ? 0 : ATTN_H_KV);
+    const int kv_field = field - Q_FIELDS;
+    const bool is_k = kv_field < ATTN_H_KV;
+    const int kvh = kv_field - (is_k ? 0 : ATTN_H_KV);
     const auto &src = is_k ? dkg : dvg;
     grad_tile<bf16> partial, tile;
     grad_tile<float> partial_f, sum;

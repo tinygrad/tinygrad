@@ -13,9 +13,11 @@
 #ifndef THREADS
 #define THREADS 256
 #endif
+#ifndef GPTOSS_PAIR_ROWS
+#define GPTOSS_PAIR_ROWS 0
+#endif
 
 static_assert(THREADS % 64 == 0, "THREADS must contain whole AMD waves");
-static_assert(ROWS % (2 * NUM_WG) == 0, "ROWS must contain complete row pairs per partial");
 constexpr int COLS_PER_THREAD = (HIDDEN + THREADS - 1) / THREADS;
 
 extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_mul_bwd(
@@ -30,7 +32,9 @@ extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_mul_bwd(
 #pragma unroll
   for (int j = 0; j < COLS_PER_THREAD; j++) dw[j] = 0.0f;
 
-  // Reduce two rows through one pair of workgroup barriers, retaining each row's reduction tree.
+#if GPTOSS_PAIR_ROWS
+  // GPTOSS has exactly 16 rows per partial. Reduce two rows through one pair of
+  // workgroup barriers while retaining the original per-row reduction trees.
   __shared__ float pair_wave_sums[2][THREADS / 64];
   const int lane = tid & 63, wave = tid >> 6;
   for (int row = part; row < ROWS; row += 2 * NUM_WG) {
@@ -94,6 +98,49 @@ extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_mul_bwd(
       }
     }
   }
+#else
+  for (int row = part; row < ROWS; row += NUM_WG) {
+    const float r = rrms[row];
+    float xn[COLS_PER_THREAD], dy[COLS_PER_THREAD], dxn[COLS_PER_THREAD];
+    float dot = 0.0f;
+#pragma unroll
+    for (int j = 0; j < COLS_PER_THREAD; j++) {
+      const int col = tid + j * THREADS;
+      if (col < HIDDEN) {
+        const long long idx = (long long)row * HIDDEN + col;
+        xn[j] = (float)x[idx] * r;
+        dy[j] = (float)grad[idx];
+        dxn[j] = dy[j] * (float)weight[col];
+        dot = fmaf(dxn[j], xn[j], dot);
+      }
+    }
+
+#pragma unroll
+    for (int off = 32; off; off >>= 1) dot += __shfl_down(dot, off, 64);
+    __shared__ float wave_sums[THREADS / 64];
+    const int lane = tid & 63, wave = tid >> 6;
+    if (lane == 0) wave_sums[wave] = dot;
+    __syncthreads();
+    if (wave == 0) {
+      dot = lane < THREADS / 64 ? wave_sums[lane] : 0.0f;
+#pragma unroll
+      for (int off = 32; off; off >>= 1) dot += __shfl_down(dot, off, 64);
+      if (lane == 0) wave_sums[0] = dot;
+    }
+    __syncthreads();
+    const float mean_dot = wave_sums[0] * (1.0f / (float)HIDDEN);
+
+#pragma unroll
+    for (int j = 0; j < COLS_PER_THREAD; j++) {
+      const int col = tid + j * THREADS;
+      if (col < HIDDEN) {
+        const long long idx = (long long)row * HIDDEN + col;
+        grad_x[idx] = (__hip_bfloat16)(r * (dxn[j] - xn[j] * mean_dot));
+        dw[j] = fmaf(dy[j], xn[j], dw[j]);
+      }
+    }
+  }
+#endif
 
 #pragma unroll
   for (int j = 0; j < COLS_PER_THREAD; j++) {

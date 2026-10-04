@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import cast, Any, Sequence
 import functools, itertools, weakref, ctypes, importlib
 from dataclasses import replace, dataclass, field
+from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, round_up
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker, TinyELF, HCQ_RUNTIME_DEV
@@ -172,23 +173,179 @@ pm_insert_copy_staging = PatternMatcher([
 # *****************
 # 2. deps
 
+@dataclass(slots=True)
+class _HCQIntervalNode:
+  start:int
+  end:int
+  dep:Any
+  order:int
+  serial:int
+  max_end:int
+  height:int=1
+  left:Any=None
+  right:Any=None
+
+  @property
+  def key(self): return self.start,self.serial
+
+
+def _hcq_height(node): return node.height if node else 0
+
+
+def _hcq_refresh(node):
+  node.height=1+max(_hcq_height(node.left),_hcq_height(node.right))
+  node.max_end=max(node.end,node.left.max_end if node.left else node.end,node.right.max_end if node.right else node.end)
+  return node
+
+
+def _hcq_rotate_left(node):
+  child=node.right
+  node.right=child.left
+  child.left=_hcq_refresh(node)
+  return _hcq_refresh(child)
+
+
+def _hcq_rotate_right(node):
+  child=node.left
+  node.left=child.right
+  child.right=_hcq_refresh(node)
+  return _hcq_refresh(child)
+
+
+def _hcq_balance(node):
+  _hcq_refresh(node)
+  if _hcq_height(node.left)-_hcq_height(node.right)>1:
+    if _hcq_height(node.left.left)<_hcq_height(node.left.right): node.left=_hcq_rotate_left(node.left)
+    return _hcq_rotate_right(node)
+  if _hcq_height(node.right)-_hcq_height(node.left)>1:
+    if _hcq_height(node.right.right)<_hcq_height(node.right.left): node.right=_hcq_rotate_right(node.right)
+    return _hcq_rotate_left(node)
+  return node
+
+
+def _hcq_insert(root,node):
+  if root is None: return node
+  if node.key<root.key: root.left=_hcq_insert(root.left,node)
+  else: root.right=_hcq_insert(root.right,node)
+  return _hcq_balance(root)
+
+
+def _hcq_pop_min(root):
+  if root.left is None: return root.right,root
+  root.left,node=_hcq_pop_min(root.left)
+  return _hcq_balance(root),node
+
+
+def _hcq_remove(root,key):
+  assert root is not None
+  if key==root.key:
+    if root.left is None: return root.right
+    if root.right is None: return root.left
+    right,next_node=_hcq_pop_min(root.right)
+    next_node.left,next_node.right=root.left,right
+    return _hcq_balance(next_node)
+  if key<root.key: root.left=_hcq_remove(root.left,key)
+  else: root.right=_hcq_remove(root.right,key)
+  return _hcq_balance(root)
+
+
+class _HCQIntervalIndex:
+  def __init__(self):
+    self.root=None
+    self.serial=0
+    self.zero={}
+
+  def add(self,start,end,dep,order):
+    self.serial+=1
+    node=_HCQIntervalNode(start,end,dep,order,self.serial,end)
+    self.root=_hcq_insert(self.root,node)
+    if start==end: self.zero[node.key]=node
+
+  def overlapping(self,start,end):
+    out,stack=[],[self.root] if self.root else []
+    while stack:
+      node=stack.pop()
+      if node.max_end<=start: continue
+      if node.left: stack.append(node.left)
+      if node.start>=end: continue
+      if start<node.end: out.append(node)
+      if node.right: stack.append(node.right)
+    return sorted(out,key=lambda n:(n.order,n.start))
+
+  def overwrite(self,start,end):
+    # Stock drops ALL zero-width historical entries on any write, including
+    # disjoint ones. Preserve that odd edge behavior rather than reinterpret it.
+    for key in self.zero: self.root=_hcq_remove(self.root,key)
+    self.zero.clear()
+    for node in self.overlapping(start,end):
+      self.root=_hcq_remove(self.root,node.key)
+      if node.start<start: self.add(node.start,start,node.dep,node.order)
+      if end<node.end: self.add(end,node.end,node.dep,node.order)
+
+  def entries(self):
+    out,stack=[],[self.root] if self.root else []
+    while stack:
+      node=stack.pop()
+      out.append(node)
+      if node.left: stack.append(node.left)
+      if node.right: stack.append(node.right)
+    return [(n.start,n.end,n.dep) for n in sorted(out,key=lambda n:(n.order,n.start))]
+
+
 class HCQDepsTracker(DepsTracker):
+  def __new__(cls, *args:Any, **kwargs:Any) -> HCQDepsTracker:
+    # Keep the captured BatchCtx factory and direct scheduler construction consistent.
+    # Explicit subclasses retain their own constructor/state, regardless of this flag.
+    return super().__new__(_IndexedHCQDepsTracker if cls is HCQDepsTracker and getenv("HCQ_INDEXED_DEPS", 0) else cls)
+
   @staticmethod
   def _key(a:UOp) -> tuple[Any, int, int]: # (base, lane) and the byte range: overlapping views of one base depend
     base, lane, off = unwrap_lane(a)
     return (base, lane), off, off + a.max_numel() * a.dtype.itemsize
+
+class _IndexedHCQDepsTracker(HCQDepsTracker):
+  def __init__(self):
+    self._writes=defaultdict(_HCQIntervalIndex)
+    self._reads=defaultdict(_HCQIntervalIndex)
+    self._order=0
+
+  def _dependency_snapshot(self, writes:bool) -> dict[int, list[tuple[int, int, Any]]]:
+    return {key:index.entries() for key,index in (self._writes if writes else self._reads).items()}
+
+  def __getattr__(self, name:str) -> Any:
+    # Opt-in indexed HCQ exposes debug snapshots only, not the generic mutable-map API.
+    # The generic tracker and HCQ_INDEXED_DEPS=0 retain their original mutable maps.
+    if name in ("w_dependency_map", "r_dependency_map"): return self._dependency_snapshot(name == "w_dependency_map")
+    raise AttributeError(name)
+
+  def access_resources(self,bufs,write,new_dependency):
+    keyed=[self._key(buf) for buf in bufs]
+    waits:list[Any]=[]
+    for i,(key,start,end) in enumerate(keyed):
+      waits.extend(n.dep for n in self._writes[key].overlapping(start,end))
+      if i in write: waits.extend(n.dep for n in self._reads[key].overlapping(start,end))
+    for i,(key,start,end) in enumerate(keyed):
+      if i in write:
+        self._writes[key].overwrite(start,end)
+        self._reads[key].overwrite(start,end)
+        self._writes[key].add(start,end,new_dependency,self._order)
+      else: self._reads[key].add(start,end,new_dependency,self._order)
+      self._order+=1
+    return list({id(x):x for x in waits}.values())
 
 @dataclass
 class BatchCtx:
   batch:list[tuple[UOp, tuple[str, ...], str]] # (call, devices, queue) per enqueued call
   profile:bool
   tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker)
+  waited:dict[tuple[str, str], dict[tuple[str, str], int]] = field(default_factory=dict)
   queues:dict[str, list[str]] = field(init=False)
   last:dict[tuple[str, str], int] = field(init=False)
   prev:list[int|None] = field(init=False)
   signal_tags:set[int] = field(init=False)
   slots:dict[str, UOp] = field(init=False)
   peers:dict[tuple[str, str], set[str]] = field(init=False) # the other devices whose memory a queue touches
+  _signal_views:dict[tuple[tuple[str, ...], str], UOp] = field(default_factory=dict, init=False)
 
   def __post_init__(self):
     self.queues, self.last, self.prev, self.peers = {}, {}, [], {}
@@ -207,7 +364,10 @@ class BatchCtx:
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) != 1 else self.queues[dev][0] # closes the device
 
   def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((2 * i, 2 * i + 2),)) # not a slice: 10x the cost
-  def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slot(devs, self.queues[devs[0]].index(queue))
+  def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp:
+    key = devs, queue
+    if key not in self._signal_views: self._signal_views[key] = self.slot(devs, self.queues[devs[0]].index(queue))
+    return self._signal_views[key]
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
 
@@ -221,6 +381,11 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   if latest and device.split(":")[0] == "NV" and queue.startswith("COMPUTE") and (p:=ctx.prev[tag]) is not None: latest[(device, queue)] = p
 
   ctx.signal_tags |= set(latest.values())
+  # A queue already waited for these producer tags. Keep their signals (and cache flushes), only omit redundant AMD waits.
+  if device.split(":")[0] == "AMD":
+    seen = ctx.waited.setdefault((device, queue), {})
+    latest = {producer: t for producer, t in latest.items() if t > seen.get(producer, -1)}
+    seen.update(latest)
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
@@ -255,6 +420,12 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   return queues
 
 def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
+  # Optional post-allocation order: the policy must preserve physical hazards; HCQ2 still builds all synchronization.
+  if (module:=getenv("HCQ_SCHEDULE", "")) not in ("", "0"):
+    batch = importlib.import_module(module).reorder_batch(ctx.batch)
+    if batch is not ctx.batch:
+      assert sorted(map(id, batch)) == sorted(map(id, ctx.batch)), "HCQ schedule must retain every call and queue assignment"
+      ctx = BatchCtx(batch, ctx.profile)
   queues = _build_queues(ctx)
 
   # re-arm the batch signals before submitting queues in first-use order
@@ -428,7 +599,7 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
 
 def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   stream, patches = bytes(hq.blob), hq.patches
-  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
+  nested = dedup([g.src[0] for g in UOp.sink(*(w for _, w in patches)).toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
   bufs = []

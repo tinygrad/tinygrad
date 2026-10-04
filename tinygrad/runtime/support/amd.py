@@ -1,6 +1,33 @@
 import functools, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
-from tinygrad.helpers import getbits
+from tinygrad.helpers import getbits, round_up
+from tinygrad.device import Buffer, BufferSpec
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import UOp, Ops
+
+class AMDProgramPool:
+  """Device-owned immutable image slots. Views retain their slabs; no slot is moved or reused."""
+  slab_bytes, max_slabs = 8 << 20, 8
+
+  def __init__(self):
+    self.slabs:list[Buffer] = []
+    self.next_offset = 0
+
+  def alloc(self, dev, b:UOp) -> Buffer|None:
+    assert b.op is Ops.PARAM and b.tag == "program" and b.dtype == dtypes.uint8 and b.max_numel() > 0
+    size, spec = b.max_numel(), BufferSpec(cpu_access=True, nolru=True)
+    if size > self.slab_bytes: return None
+    off = round_up(self.next_offset, 4096)
+    if not self.slabs or off + size > self.slab_bytes:
+      if len(self.slabs) == self.max_slabs: return None
+      try: slab = Buffer(dev.device, self.slab_bytes, dtypes.uint8, options=spec, allocator=dev.allocator).ensure_allocated()
+      except MemoryError: return None
+      assert slab._buf % 4096 == 0, "program slab must be page aligned"
+      self.slabs.append(slab)
+      off = 0
+    result = Buffer(dev.device, size, b.dtype, base=self.slabs[-1], offset=off, options=spec).ensure_allocated()
+    self.next_offset = off + size
+    return result
 
 @dataclass
 class AMDReg:
