@@ -1168,40 +1168,17 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     idx = indices.reshape(M, K)
     base = Tensor.zeros((M,), dtype=indices.dtype, device=indices.device)
     for d in range(K): base = base + (idx[:, d] + (idx[:, d] < 0).where(x.shape[d], 0)) * prod(int(s) for s in x.shape[d+1:K])
-    combine = {"none": lambda a, b: b, "add": lambda a, b: a + b, "mul": lambda a, b: a * b,
-               "max": lambda a, b: a.maximum(b), "min": lambda a, b: a.minimum(b)}[reduction]
-    # joint bitonic sort of slots with their update rows (Tensor.sort can't be used, it materializes an O(n^2) index map)
-    P = 1 << (M - 1).bit_length()
-    sidx = base.cat(Tensor.full((P - M,), base.dtype.max, dtype=base.dtype, device=base.device)) if P > M else base
-    rows = updates.reshape(M, T)
-    sval = rows.cat(Tensor.zeros((P - M, T), dtype=rows.dtype, device=rows.device)) if P > M else rows
-    order = Tensor.arange(P).to(base.device)
-    for k in (1 << s for s in range(1, (M - 1).bit_length() + 1)):
-      for j in (1 << s for s in range(k.bit_length() - 2, -1, -1)):
-        peer = order ^ j
-        k_peer, v_peer = sidx[peer], sval[peer]
-        # lower member of an ascending pair takes the min, upper takes the max (reversed for descending)
-        take_peer = (((order & k) == 0) == (order < peer)).where(sidx > k_peer, sidx < k_peer)
-        sidx, sval = take_peer.where(k_peer, sidx), take_peer.unsqueeze(1).where(v_peer, sval)
-    sidx, sval = sidx[:M], sval[:M]
-    if reduction != "none":
-      # Hillis-Steele segmented scan: after log2(M) strides each row holds its slot group's reduction
-      seg, pos, d = sval, Tensor.arange(M).to(base.device), 1
-      while d < M:
-        src = (pos - d).clip(0)
-        seg = ((pos >= d) & (sidx == sidx[src])).unsqueeze(1).where(combine(seg, seg[src]), seg)
-        d *= 2
-    else: seg = sval
-    # right boundary of each slot group via binary search, then gather the reduced row (last in group)
-    tgt = Tensor.arange(B, dtype=sidx.dtype).to(sidx.device)
-    lo, hi = Tensor.zeros((B,), dtype=sidx.dtype, device=sidx.device), Tensor.full((B,), M, dtype=sidx.dtype, device=sidx.device)
-    for _ in range(M.bit_length()):
-      mid = (lo + hi) // 2
-      le = (mid < M) & (sidx[mid.clip(0, M - 1)] <= tgt)
-      lo, hi = le.where(mid + 1, lo), le.where(hi, mid)
-    at = (lo - 1).clip(0, M - 1)
-    has = ((lo > 0) & (sidx[at] == tgt)).unsqueeze(1)
-    return has.where(combine(x.reshape(B, T), seg[at]), x.reshape(B, T)).reshape(x.shape)
+    # one masked reduction over all M update rows at once; the old per-index loop built an O(M) graph (issue #13409)
+    rows, flat = updates.reshape(M, T), x.reshape(B, T)
+    if reduction == "none":
+      # last index wins per slot; -1 marks untouched slots
+      mask = base.reshape(M, 1) == Tensor.arange(B, dtype=base.dtype).to(base.device).reshape(1, B)
+      last = mask.where(Tensor.arange(M, dtype=dtypes.int32).to(base.device).reshape(M, 1), -1).max(0)
+      return (last >= 0).unsqueeze(1).where(rows[last.clip(0)], flat).reshape(x.shape)
+    index = base.reshape(M, 1).expand(M, T)
+    reduction_map: dict[Literal["add", "mul", "min", "max"], Literal["sum", "prod", "amin", "amax"]] = \
+      {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}
+    return flat.scatter_reduce(0, index, rows, reduction_map[reduction]).reshape(x.shape)
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
     # scatter updates along axis -2 at positions given by indices, for each batch
