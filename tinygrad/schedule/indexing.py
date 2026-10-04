@@ -5,13 +5,15 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, all_int, prod, cpu_profile, colored, Context, SPEC, getenv
 
 @dataclass
 class IndexingContext:
   realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   non_removable: dict[UOp, None] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
+  # reduce axes of already-processed (consumer side) REDUCEs, used to detect serialization below
+  reduced: set[UOp] = field(default_factory=set)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -63,6 +65,21 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if x.op not in GroupOp.Broadcastable: return rngs
   baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
   return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
+
+def _fully_reduced_out(ctx:IndexingContext, out_rngs:tuple[UOp, ...]) -> bool:
+  # True if every output range is iterated sequentially by a downstream REDUCE. CONSTs (size 1 dims) don't iterate.
+  if not out_rngs or all(r.op is Ops.CONST for r in out_rngs): return False
+  for r in out_rngs:
+    if r.op is Ops.CONST: continue
+    if r in ctx.reduced: continue
+    if r.op is not Ops.RANGE and r.ranges and all(d in ctx.reduced for d in r.ranges): continue
+    return False
+  return True
+
+def _big_serialized_nest(x:UOp) -> bool:
+  # a REDUCE iterates every element of its input once per full nest. below this many elements the fused sequential
+  # tail is cheaper than a kernel launch plus a memory roundtrip, so only split above it.
+  return all_int(x.src[0].shape) and prod(x.src[0].shape) > getenv("SERIALIZE_SPLIT_THRESHOLD", 65536)
 
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -242,6 +259,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
     elif len(consumer_rngs) == 1:
       # if this has one consumer, it inherits the ranges from it
       out_rngs = consumer_rngs[0]
+      # if a REDUCE inherits output ranges that a downstream REDUCE iterates over, fusing it would serialize its whole
+      # output: every element recomputed sequentially inside another reduce loop instead of in parallel (issue #16228:
+      # conv-backward grad norms fused into one single-threaded kernel the GPU can't execute). End these ranges to
+      # force a buffer here. Range identity finds the serialization, the nest size guards the split economics.
+      if (x.op is Ops.REDUCE and x.arg[1] and _fully_reduced_out(rctx, out_rngs)
+          and _big_serialized_nest(x)): ending_ranges[x] += list(out_rngs)
     elif len(consumer_rngs) > 1:
       # if this has two consumers, we have to merge the ranges and might create new ones
       all_rngs: list[tuple[UOp, ...]] = list(zip(*consumer_rngs))
@@ -263,6 +286,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
           _out_rngs.append(rctx.new_range(x.shape[i]))
           _realize_axis.append(i)
       out_rngs = tuple(_out_rngs)
+      if (x.op is Ops.REDUCE and x.arg[1] and _fully_reduced_out(rctx, out_rngs)
+          and _big_serialized_nest(x)): ending_ranges[x] += list(out_rngs)
 
       # we have to (partially) realize here if there's new ranges
       if len(_realize_axis): rctx.realize_map[x] = _realize_axis
@@ -311,6 +336,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
+    # a REDUCE iterates its first arg[1] input ranges sequentially, producers inheriting them would serialize
+    if x.op is Ops.REDUCE and x.arg[1]: rctx.reduced.update(rngs[:x.arg[1]])
 
   # NOTE: SPEC=3 is broken here with shape
   with Context(SPEC=min(SPEC.value, 2)):
