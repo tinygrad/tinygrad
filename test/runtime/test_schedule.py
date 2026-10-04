@@ -2,7 +2,7 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import unittest
+import unittest, math
 import numpy as np
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
@@ -438,13 +438,17 @@ class TestFusionOp(unittest.TestCase):
   def test_conv_backward_gradient_norm_no_serialize(self):
     # the weight grads must materialize: fusing them into the norm would serialize every element
     # sequentially inside another reduce loop (issue #16228: GPU can't execute that kernel)
-    weights = [Tensor.empty(c, ic, 4, 4) for ic, c in ((1, 16), (16, 32), (32, 64))]
+    weights = [Tensor.uniform(c, ic, 4, 4) for ic, c in ((1, 16), (16, 32), (32, 64))]
     for weight in weights: weight.requires_grad = True
-    hidden = Tensor.empty(256, 1, 13, 13)
+    hidden = Tensor.uniform(256, 1, 13, 13)
+    Tensor.realize(*weights, hidden)
     for weight in weights: hidden = hidden.conv2d(weight, stride=2, padding=1).relu()
     hidden.sum().backward()
     gradient_norm = sum((weight.grad * weight.grad).sum() for weight in weights).sqrt()
-    check_schedule(gradient_norm, 9)
+    linear, var_vals = check_schedule(gradient_norm, 9)
+    run_linear(linear, var_vals)
+    gn = gradient_norm.item()
+    assert math.isfinite(gn) and gn > 0, gn
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
