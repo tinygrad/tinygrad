@@ -60,6 +60,7 @@ class NullDevice(Compiled):
                                lambda submit: NullQueue(submit).encode()) for q in ("compute", "copy")])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))
+  error_state = functools.cached_property(lambda self: self.link_buffer(1, dtypes.int64))
 
   def __init__(self, device:str):
     assert (emu:=getenv("EMULATE", "")) == "", \
