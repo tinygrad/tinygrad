@@ -67,14 +67,12 @@ jobs:
     - name: Run pytest (amd)
       env:
         DEV: MOCKKFD+AMD
-        HCQ_RUNTIME_DEV: PYTHON
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/null/test_hcq2.py test/runtime/test_hcq2.py test/test_tiny.py test/device/amd --durations=20
     - name: Run pytest (ptx)
       env:
         DEV: "MOCK+NV:PTX"
-        HCQ_RUNTIME_DEV: PYTHON
         FORWARD_ONLY: 1
         # TODO: failing due to library loading error
         CAPTURE_PROCESS_REPLAY: 0

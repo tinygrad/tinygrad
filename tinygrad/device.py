@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 # **************** Device ****************
 
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
+HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
