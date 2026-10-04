@@ -1160,16 +1160,48 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
-    assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
-    for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
-      i = tuple(idx.squeeze(-1) for idx in index.squeeze(0).split(1, -1))
-      u = u.squeeze(0)
-      if reduction == "none": x[i] = u
-      elif reduction == "add": x[i] += u
-      elif reduction == "mul": x[i] *= u
-      elif reduction == "max": x[i] = x[i].maximum(u)
-      elif reduction == "min": x[i] = x[i].minimum(u)
-    return x
+    K = cast(int, indices.shape[-1])
+    assert updates.shape == indices.shape[:-1] + x.shape[K:]
+    # each of the M index tuples selects one contiguous trailing slice; group tuples by their linear slot in x.shape[:K]
+    M, B, T = (prod(int(s) for s in sh) for sh in (indices.shape[:-1], x.shape[:K], x.shape[K:]))
+    if M == 0 or B * T == 0: return x
+    idx = indices.reshape(M, K)
+    base = Tensor.zeros((M,), dtype=indices.dtype, device=indices.device)
+    for d in range(K): base = base + (idx[:, d] + (idx[:, d] < 0).where(x.shape[d], 0)) * prod(int(s) for s in x.shape[d+1:K])
+    combine = {"none": lambda a, b: b, "add": lambda a, b: a + b, "mul": lambda a, b: a * b,
+               "max": lambda a, b: a.maximum(b), "min": lambda a, b: a.minimum(b)}[reduction]
+    # joint bitonic sort of slots with their update rows (Tensor.sort can't be used, it materializes an O(n^2) index map)
+    P = 1 << (M - 1).bit_length()
+    sidx = base.cat(Tensor.full((P - M,), base.dtype.max, dtype=base.dtype, device=base.device)) if P > M else base
+    rows = updates.reshape(M, T)
+    sval = rows.cat(Tensor.zeros((P - M, T), dtype=rows.dtype, device=rows.device)) if P > M else rows
+    order = Tensor.arange(P).to(base.device)
+    for k in (1 << s for s in range(1, (M - 1).bit_length() + 1)):
+      for j in (1 << s for s in range(k.bit_length() - 2, -1, -1)):
+        peer = order ^ j
+        k_peer, v_peer = sidx[peer], sval[peer]
+        # lower member of an ascending pair takes the min, upper takes the max (reversed for descending)
+        take_peer = (((order & k) == 0) == (order < peer)).where(sidx > k_peer, sidx < k_peer)
+        sidx, sval = take_peer.where(k_peer, sidx), take_peer.unsqueeze(1).where(v_peer, sval)
+    sidx, sval = sidx[:M], sval[:M]
+    if reduction != "none":
+      # Hillis-Steele segmented scan: after log2(M) strides each row holds its slot group's reduction
+      seg, pos, d = sval, Tensor.arange(M).to(base.device), 1
+      while d < M:
+        src = (pos - d).clip(0)
+        seg = ((pos >= d) & (sidx == sidx[src])).unsqueeze(1).where(combine(seg, seg[src]), seg)
+        d *= 2
+    else: seg = sval
+    # right boundary of each slot group via binary search, then gather the reduced row (last in group)
+    tgt = Tensor.arange(B, dtype=sidx.dtype).to(sidx.device)
+    lo, hi = Tensor.zeros((B,), dtype=sidx.dtype, device=sidx.device), Tensor.full((B,), M, dtype=sidx.dtype, device=sidx.device)
+    for _ in range(M.bit_length()):
+      mid = (lo + hi) // 2
+      le = (mid < M) & (sidx[mid.clip(0, M - 1)] <= tgt)
+      lo, hi = le.where(mid + 1, lo), le.where(hi, mid)
+    at = (lo - 1).clip(0, M - 1)
+    has = ((lo > 0) & (sidx[at] == tgt)).unsqueeze(1)
+    return has.where(combine(x.reshape(B, T), seg[at]), x.reshape(B, T)).reshape(x.shape)
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
     # scatter updates along axis -2 at positions given by indices, for each batch

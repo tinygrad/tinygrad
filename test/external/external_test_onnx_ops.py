@@ -96,6 +96,42 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_scatternd(self):
+    rng = np.random.default_rng(0)
+    inputs = {
+      "data": rng.standard_normal((3, 4)).astype(np.float32),
+      "indices": np.array([[[0, 0], [1, 1]], [[2, 3], [0, 0]]]),  # duplicate (0, 0)
+      "updates": rng.standard_normal((2, 2)).astype(np.float32),
+    }
+    for reduction in ["add", "mul", "max", "min"]:
+      with self.subTest(reduction=reduction):
+        self.helper_test_single_op("ScatterND", inputs, {"reduction": reduction}, ["y"])
+
+  def test_scatternd_none(self):
+    # K < ndim copies trailing slices, negative indices wrap (duplicates stay unique: winner is unspecified)
+    rng = np.random.default_rng(1)
+    inputs = {
+      "data": rng.standard_normal((2, 3, 4)).astype(np.float32),
+      "indices": np.array([[[0, 0], [1, -1]], [[-1, 1], [0, 2]]]),
+      "updates": rng.standard_normal((2, 2, 4)).astype(np.float32),
+    }
+    self.helper_test_single_op("ScatterND", inputs, {"reduction": "none"}, ["y"])
+
+  def test_scatternd_empty(self):
+    from tinygrad.nn.onnx import onnx_ops
+    out = onnx_ops["ScatterND"](Tensor.ones(2, 2), Tensor.zeros((0, 2), dtype=dtypes.int64), Tensor.zeros((0,)))
+    np.testing.assert_array_equal(out.numpy(), np.ones((2, 2), np.float32))
+
+  def test_scatternd_many_indices(self):
+    # https://github.com/tinygrad/tinygrad/issues/13409: must not build a per-index graph
+    rng = np.random.default_rng(2)
+    inputs = {
+      "data": np.zeros((8, 128), np.float32),
+      "indices": np.stack([rng.integers(0, 8, size=4096), rng.integers(0, 128, size=4096)], axis=-1).astype(np.int64),
+      "updates": rng.standard_normal(4096).astype(np.float32),
+    }
+    self.helper_test_single_op("ScatterND", inputs, {"reduction": "add"}, ["y"])
+
   def test_gather_jit_different_indices(self):
     # Gather should not assume indices is const when it can change at runtime
     from tinygrad import TinyJit
