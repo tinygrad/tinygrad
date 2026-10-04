@@ -186,6 +186,7 @@ class PTXRenderer(Renderer):
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST}: continue
       if u.op is Ops.AFTER:
+        if u.src[0].op is Ops.NOOP: continue
         self.r[u] = self.r[u.src[0]]
         continue
       if u.op is Ops.SINK:

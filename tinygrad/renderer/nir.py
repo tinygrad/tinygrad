@@ -195,7 +195,7 @@ class NIRRenderer(Renderer):
         # INDEX on a register value picks the element, memory INDEX is handled in the LOAD/STORE patterns
         if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].src[0].val)
       elif u.op is Ops.AFTER:
-        self.r[u] = self.r[u.src[0]]
+        if u.src[0].op is not Ops.NOOP: self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
         if u.arg is not None:
           self.b.shader.contents.info.name = ctypes.cast(ctypes.create_string_buffer(u.arg.function_name.encode()), POINTER[ctypes.c_char])

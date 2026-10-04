@@ -144,10 +144,8 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(name="x"),), allow_any_len=True, name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {tuple(range(r.arg[1]))})" if r.arg[1] else None),
-  # NOTE: range has srcs sometimes after control flow
-  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
-    f"UOp.range({c.val}, {x.axis_id[0]}, {x.axis_type}"+
-      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+")" if len(x.axis_id) == 1 else None),
+  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), name="x"), lambda ctx,x,c:
+    f"UOp.range({c.val}, {x.axis_id[0]}, {x.axis_type})" if len(x.axis_id) == 1 else None),
   # TODO: movement ops simplify stuff, this can break SPEC=2
   #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__

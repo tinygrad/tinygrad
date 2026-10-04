@@ -637,8 +637,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
-  def range(end:sint, axis_id, axis_type=AxisType.WEAK, *, dtype=dtypes.weakint, src=(), **kwargs):
-    return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_type, axis_id), **kwargs)
+  def range(end:sint, axis_id, axis_type=AxisType.WEAK, *, dtype=dtypes.weakint, **kwargs):
+    return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),), arg=(axis_type, axis_id), **kwargs)
   @staticmethod
   def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(AxisType.WEAK, axis_id))
   @staticmethod

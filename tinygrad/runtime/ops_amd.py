@@ -62,7 +62,7 @@ def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, u
   rs, n, p = ring.max_numel(), words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
   first = (rs - (tail:=((p * (unit // 4)) % rs).cast(dtypes.int))).minimum(n)
   for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
-    i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
+    i = UOp.range(count.after(cmdbuf), rid, dtype=dtypes.int)
     cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
   w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit).barrier()
   return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
@@ -76,9 +76,9 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UO
   tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
   fits = (size_dw <= rs - tail).cast(dtypes.int)
   start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
-  zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(cmdbuf,))
+  zi = UOp.range(zero_amt.after(cmdbuf), 10, dtype=dtypes.int)
   zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
-  i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
+  i = UOp.range(UOp.const(size_dw, dtypes.int).after(cmdbuf), 11, dtype=dtypes.int)
   copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
   next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
   w = wptr.after(copy).index(0).store(next_put).barrier()

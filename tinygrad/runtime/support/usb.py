@@ -236,7 +236,7 @@ def usb_poke(link:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: a dword
 
 @uopfunc
 def usb_stream(link:UOp, addr:UOp, data:UOp, n:UOp, write:bool, fill:bool=False) -> UOp: # 0xF0 mode 1/2: header, then bulk per STREAM
-  i = UOp.range((n + (STREAM - 1)) // STREAM, next(UOp.unique_num), dtype=dtypes.int, src=(link,))
+  i = UOp.range(((n + (STREAM - 1)) // STREAM).after(link), next(UOp.unique_num), dtype=dtypes.int)
   off, cnt = i * STREAM, (n - i * STREAM).minimum(STREAM)
   payload = usb_stack(dtypes.uint64, addr + off.cast(dtypes.uint64), cnt // 4)
   header = usb_ctrl(link.after(i), 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2, payload.index(0), 12, 5000)
@@ -248,7 +248,7 @@ def usb_poke_word(link:UOp, addr:UOp, val:UOp) -> UOp:
 
 @uopfunc
 def usb_patch(link:UOp, addr:UOp, val:UOp, slot:UOp) -> UOp: # poke only on change
-  changed = UOp.range(slot.index(0).load().ne(val).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int, src=(link,))
+  changed = UOp.range(slot.index(0).load().ne(val).cast(dtypes.int).after(link), next(UOp.unique_num), dtype=dtypes.int)
   return slot.after(usb_poke_word(link.after(changed), addr, val).end(changed)).index(0).store(val).sink()
 
 # *****************
@@ -305,14 +305,14 @@ def usb_put(link:UOp, ptr:UOp, dt:DType, *vals:UOp|int) -> UOp: # store through 
 
 @uopfunc
 def usb_reap(link:UOp, xfer:UOp) -> UOp: # poll while pending (0xff)
-  loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(link,)), usb_stack(dtypes.uint32)
+  loop, slot = UOp.range(UOp(Ops.NOOP).after(link), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.uint32)
   events = ccall(libusb.libusb_handle_events_timeout, link.after(loop).index(1).load(), usb_stack(dtypes.uint64, 0, 0).index(0)) # zero timeout
   peeked = ccall(libc.memcpy, slot.after(events).index(0), xfer + 16, 4)
   return events.backedge(loop, slot.after(peeked).index(0).load().eq(0xff) & ((events >= 0) | events.eq(libusb.LIBUSB_ERROR_INTERRUPTED))).sink()
 
 @uopfunc
 def usb_drain(link:UOp, fence:UOp, need:UOp) -> UOp: # fence == need - 1 or need, mod 256
-  loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(link,)), usb_stack(dtypes.uint32, 0)
+  loop, slot = UOp.range(UOp(Ops.NOOP).after(link), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.uint32, 0)
   read = usb_ctrl(link.after(loop), 0xC0, 0xE4, fence, 0, slot.index(0), 1).src[0]
   return read.backedge(loop, (read >= 0) & (((need - slot.after(read).index(0).load().cast(dtypes.uint64)) & 0xff) > 1)).sink()
 
@@ -339,7 +339,7 @@ def usb_send(link:UOp, table:UOp, i:UOp, run:UOp, fence:UOp, stage:UOp) -> UOp: 
   ret = ccall(libusb.libusb_submit_transfer, link.after(status, buffer).index(3 + half).load()) # read after the fields
 
   # failed submit: not pending
-  failed = UOp.range((ret < 0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int, src=(link.after(ret),))
+  failed = UOp.range((ret < 0).cast(dtypes.int).after(link.after(ret)), next(UOp.unique_num), dtype=dtypes.int)
   return usb_put(link.after(failed), xfer + 16, dtypes.uint32, ret.cast(dtypes.uint32)).end(failed).sink()
 
 @uopfunc
