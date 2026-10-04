@@ -314,6 +314,10 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
+  # the const in an AFTER-wrapped range bound (an ordering dep on a sibling loop) stays an imm,
+  # the const materializer has already run on the cast under the AFTER
+  (UPat(Ops.AFTER, src=(UPat(Ops.INS, name="i"),), allow_any_len=True, name="a"),
+   lambda a,i: a.replace(src=i.src[:1]+a.src[1:]) if i.arg[0] is X86Ops.MOVi and len(i.src) == 1 and to_imm(i.src[0]) is not None else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
