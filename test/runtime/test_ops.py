@@ -1362,7 +1362,6 @@ class TestOps(TensorTestCase):
     helper_test_op([(3, 4, 3, 4)], lambda a: torch.einsum('ijij->ji', a), lambda a: Tensor.einsum('ijij->ji', a))
     helper_test_op([(3, 3, 4, 3)], lambda a: torch.einsum('iiji->ij', a), lambda a: Tensor.einsum('iiji->ij', a))
 
-  @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):
     helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot)
     helper_test_op([(65), (65,45)], lambda x,y: x.matmul(y), Tensor.dot)
