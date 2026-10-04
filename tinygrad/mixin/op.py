@@ -383,7 +383,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(a.dot(b).numpy())
     ```
     """
-    if IMAGE and self.ndim > 1 and w.ndim > 1: return self.image_dot(w, dtype)
+    if IMAGE: return self.image_dot(w, dtype)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
     if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
@@ -1465,6 +1465,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
     if not (self.ndim > 0 and w.ndim > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {self.ndim=}, {w.ndim=}")
     if self.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {self.shape} and {w.shape}")
+    if w.ndim == 1: return self.image_dot(w.unsqueeze(-1), dtype).squeeze(-1)
+    if self.ndim == 1:
+      return self.reshape(*([1]*(w.ndim-1)), self.shape[-1]).expand(*w.shape[0:-2], 1, self.shape[-1]).image_dot(w, dtype).squeeze(-2)
 
     bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
     out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout,)
