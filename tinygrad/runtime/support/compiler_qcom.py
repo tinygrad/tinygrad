@@ -10,6 +10,7 @@ def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 class QCOMCompiler(Compiler):
   def __init__(self, arch:str):
     assert arch.split(',')[0] == "a630", "only a630 supported"
+    self.gpu_id = int(arch.split(',')[0][1:])
     if platform.machine() == "aarch64": self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
     else:
       # extract once into the download cache, all processes share the rootfs (extract=True)
@@ -43,5 +44,5 @@ class QCOMCompiler(Compiler):
     llvm_qcom.cl_compiler_free_assembly(ptr)
     return ret
 
-  def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.chip_id)
+  def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.gpu_id)
 
