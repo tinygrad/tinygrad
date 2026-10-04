@@ -3256,6 +3256,9 @@ class TestOps(TensorTestCase):
     np.testing.assert_equal(t.masked_select(mask, size=6, fill_value=-1).numpy(), [0, 2, 4, 8, -1, -1])
     np.testing.assert_equal(t.masked_select(mask, size=2).numpy(), [0, 2])
     np.testing.assert_equal(Tensor([], dtype=dtypes.int32).masked_select(Tensor([], dtype=dtypes.bool), size=2, fill_value=-1).numpy(), [-1, -1])
+    np.testing.assert_equal(t.masked_select(mask, size=0).numpy(), [])
+    np.testing.assert_equal(Tensor([1, 2, 3]).masked_select(Tensor([False, False, False])).numpy(), [])
+    np.testing.assert_equal(Tensor([1, 2, 3]).masked_select(Tensor([False, False, False]), size=2, fill_value=-1).numpy(), [-1, -1])
     # fill_value must not alter output dtype
     self.assertEqual(Tensor([1.0, 2.0]).masked_select(Tensor([True, False]), size=3, fill_value=-1).dtype, dtypes.default_float)
 

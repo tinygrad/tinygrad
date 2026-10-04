@@ -1198,12 +1198,14 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
-    mask_cumsum = mask.cumsum()
+    n = x.numel()
+    # True positions carry their flat index as the sort key, False positions sink to n. sorting ascending puts the K masked positions first, in order.
+    keys = mask.where(type(self).arange(n), n).cast(dtypes.int32)
     if size is None:
-      counts = type(self).zeros(mask_cumsum[-1].item() if mask.numel() else 0, dtype=dtypes.int32, buffer=False)
-      return x[counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()]
-    counts = type(self).zeros(size, dtype=dtypes.int32, buffer=False).scatter(0, mask_cumsum, 1, reduce='add')
-    return (type(self).arange(size) < mask.sum()).where(x[counts.cumsum()], fill_value).cast(self.dtype)
+      if (k := mask.sum(dtype=dtypes.int32).item()) == 0: return x[:0]
+      return x[keys.topk(k, largest=False)[0]]
+    idx = keys.topk(min(size, n), largest=False)[0].pad_to((size,)).clip(0, max(n - 1, 0))
+    return (type(self).arange(size) < mask.sum()).where(x[idx], fill_value).cast(self.dtype)
 
   def nonzero(self, size:int|None=None, fill_value:ConstType=0) -> Self:
     """
