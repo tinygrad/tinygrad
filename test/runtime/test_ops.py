@@ -726,10 +726,11 @@ class TestOps(TensorTestCase):
     # overflow wraps
     _test([11, 3, 2, -3, 7], [7, 40, 31, 21, 2**30])
 
-    np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
-    np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
-    np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
-    np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
+    if not COMPILE_ONLY:
+      np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
+      np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
+      np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
+      np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
 
     # pow to a const int
     helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
