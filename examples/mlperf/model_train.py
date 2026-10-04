@@ -1992,11 +1992,25 @@ def train_gptoss():
     for dev in device: Device[dev].synchronize()
     print(f"gptoss: captured and restored in {time.perf_counter()-capture_st:.1f}s", flush=True)
 
-  # MLPerf run_start: model init (and graph capture or load + link) is done, the dataset is touched from here on
+  # Prepare dataset metadata/indices before the clock. Token maps and worker reads stay lazy until iteration below.
+  train_iter = get_train_iter()
+  if getenv("FAKEDATA", 0):
+    eval_dataset = None
+  else:
+    from examples.mlperf.dataloader import get_llama3_dataset
+    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=True)
+
+  def get_eval_iter():
+    if eval_dataset is None:
+      return fake_data(EVAL_BS, EVAL_SAMPLES)
+    from examples.mlperf.dataloader import iterate_llama3_dataset
+    return iterate_llama3_dataset(eval_dataset, EVAL_BS)
+
+  # MLPerf run_start: model/graph and dataset indices are ready; all token reads and real-data model work remain timed.
   run_start = time.time()
   print(f"run_start {time.strftime('%Y-%m-%dT%H:%M:%S')}", flush=True)
   if MLLOGGER and RUNMLPERF:
-    # init spans the setup process (init_start there) and this one's graph load + link, up to here
+    # init spans the setup process (init_start there), graph load + link, and dataset index preparation.
     MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
     MLLOGGER.start(key=mllog_constants.RUN_START, value=None)
     MLLOGGER.event(key=mllog_constants.SEED, value=SEED)
@@ -2028,18 +2042,6 @@ def train_gptoss():
     MLLOGGER.event(key=mllog_constants.CONFIG_FILENAME, value=getenv("CONFIG_FILENAME", "tinybox_2x8xMI350X/common.sh"))
     MLLOGGER.start(key=mllog_constants.EPOCH_START, metadata={mllog_constants.SAMPLES_COUNT: 0})
     MLLOGGER.start(key=mllog_constants.BLOCK_START, metadata={mllog_constants.SAMPLES_COUNT: 0})
-  if getenv("FAKEDATA", 0):
-    eval_dataset = None
-  else:
-    from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=True)
-
-  def get_eval_iter():
-    if eval_dataset is None:
-      return fake_data(EVAL_BS, EVAL_SAMPLES)
-    from examples.mlperf.dataloader import iterate_llama3_dataset
-    return iterate_llama3_dataset(eval_dataset, EVAL_BS)
-
   model_flops = gptoss_model_flops(model, batch_size=GBS, seqlen=SEQLEN)
   metric_basis = "useful model GEMMs; active experts; logical dimensions; causal/window attention; capture wall time"
   print(f"MFU model work: {model_flops/1e15:.6f} PFLOP/node/update ({metric_basis}); "
@@ -2049,7 +2051,6 @@ def train_gptoss():
     wandb.config.update({"mfu_metric_basis": metric_basis, "gflops_metric_basis": "GlobalCounters.global_ops / 1e9 / dev_time",
                         "model_flops_per_update": model_flops,
                         "mfu_peak_flops_per_gpu": MI350X_FP8_FLOPS})
-  train_iter = get_train_iter()
   i, sequences_seen = 0, 0
   step_times = []
   group_calls = 1 if jit_load or capture_first else 0

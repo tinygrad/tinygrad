@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # timed run: model init loads the graphs dev_beam.sh saved (still before run_start), then trains on the real dataset to
 # log perplexity 3.34
+set -e
 source "$(dirname "$0")/common.sh"
 export RUNMLPERF=1 BENCHMARK=0 BEAM_CACHE_ONLY=1
 export GPTOSS_JIT_LOAD=${GPTOSS_JIT_LOAD:-$GPTOSS_JIT_PKL}

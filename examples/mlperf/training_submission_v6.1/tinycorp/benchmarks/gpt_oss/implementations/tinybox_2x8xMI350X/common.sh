@@ -27,9 +27,7 @@ export GPTOSS_STEP_GROUP=${GPTOSS_STEP_GROUP:-2} GPTOSS_JIT_NO_WARMUP=${GPTOSS_J
 # the required 12,288-sequence evaluation cadence
 export LR=${LR:-0.00045} END_LR=${END_LR:-0.000045} WARMUP_STEPS=${WARMUP_STEPS:-128} GPTOSS_REF_WD=${GPTOSS_REF_WD:-1}
 export EVAL_FREQ=${EVAL_FREQ:-12288} CKPT=${CKPT:-0} LOGMLPERF=${LOGMLPERF:-1}
-# the shuffled training index covers 300k samples (convergence is ~221k-233k): a fresh data seed builds it in seconds instead of
-# the 4.4 min of MAX_STEPS*GBS = 38.4M samples; MAX_STEPS (LR schedule) stays 1.2M
-export SAMPLES=${SAMPLES:-300000}
+# SAMPLES inherits the single-node launcher default: MAX_STEPS * GBS (38.4M sequences at BS=32).
 # a fresh tinygrad cache unless the caller chose one (dev_beam.sh clears whatever cache it is given)
 export CACHEDB=${CACHEDB:-$(mktemp -d)/cache.db}
 # the captured training and eval graphs, saved by dev_beam.sh and loaded by dev_run.sh

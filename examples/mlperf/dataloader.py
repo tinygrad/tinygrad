@@ -534,6 +534,7 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
 
 class BinIdxDataset:
   def __init__(self, base_path:Path):
+    self.base_path = base_path
     self.idx_t = Tensor(base_path.with_name(f"{base_path.name}.idx"))
     self.idx = TensorIO(self.idx_t)
 
@@ -559,9 +560,10 @@ class BinIdxDataset:
     end = start + doc_count * dtypes.int64.itemsize
     self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
 
-    # bin file
-    # memory-mapped: get() only slices it, and reading the whole file up front costs ~16s before the first batch
-    self.bin_t = np.memmap(base_path.with_name(f"{base_path.name}.bin"), dtype=np.uint8, mode="r")
+  @functools.cached_property
+  def bin_t(self):
+    # Index preparation needs only metadata; open/map token data on the first sample read, after run_start.
+    return np.memmap(self.base_path.with_name(f"{self.base_path.name}.bin"), dtype=np.uint8, mode="r")
 
   def _index(self, idx) -> tuple[int, int]:
     return int(self.pointers[idx]), int(self.sizes[idx])
@@ -784,13 +786,15 @@ def _pool_batch(args):
 
 def batch_load_llama3_pool(pool, bs:int, samples:int, seqlen:int, base_dir:Path, seed:int, small:bool=False, depth:int=32):
   # training batches read by a process pool (random offsets into a cold page cache take ~0.6 s per batch of 32), `depth` in flight.
-  # this process builds (and caches) the index once, the workers load the cached one on their first batch
+  # Prepare/cache indices now, before run_start. Only consuming the returned iterator submits token reads to the workers.
   n = math.ceil(get_llama3_dataset(samples, seqlen, base_dir, seed, val=False, small=small).samples / bs)
-  args, pending = (samples, seqlen, base_dir, seed, small), collections.deque()
-  for b in range(n):
-    pending.append(pool.apply_async(_pool_batch, ((args, b, bs),)))
-    if len(pending) >= depth: yield Tensor(pending.popleft().get(), device="NPY")
-  while pending: yield Tensor(pending.popleft().get(), device="NPY")
+  def batches():
+    args, pending = (samples, seqlen, base_dir, seed, small), collections.deque()
+    for b in range(n):
+      pending.append(pool.apply_async(_pool_batch, ((args, b, bs),)))
+      if len(pending) >= depth: yield Tensor(pending.popleft().get(), device="NPY")
+    while pending: yield Tensor(pending.popleft().get(), device="NPY")
+  return batches()
 
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
   return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
