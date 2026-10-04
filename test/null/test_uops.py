@@ -192,6 +192,17 @@ class TestExecALU(unittest.TestCase):
     np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, ((34**2),)), 1/(34**2))
     np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (10,)), 1/10)
 
+  def test_int_pow(self):
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (11, 7)), 11**7)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (3, 40)), 689956897)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.uint8, (3, 5)), 243)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int64, (3, 2**40)), -7860764868738023423)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (2, -2)), 0)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (0, -1)), 0)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (1, -5)), 1)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (-1, -3)), -1)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (-1, -4)), 1)
+
   def test_bool_cmplt(self):
     self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (False, False)), False)
     self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (False, True)), True)

@@ -1412,6 +1412,9 @@ def safe_exp2(x):
   except OverflowError: return math.inf
 
 def safe_pow(x, y):
+  if isinstance(x, int) and isinstance(y, int):
+    if y < 0: return x**(y%2) if abs(x) == 1 else 0
+    return x**y if y < 64 or abs(x) <= 1 else pow(x, y, 1<<64)
   try: return math.nan if isinstance(p:=pow(x, y), complex) else p
   except ZeroDivisionError: return math.inf
   except ValueError: return math.inf if x > 0 else -math.inf
