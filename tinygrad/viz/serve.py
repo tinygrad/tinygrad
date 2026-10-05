@@ -161,7 +161,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 
-def _reconstruct(data:VizData, a:int, depth:int|None=None):
+def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
   if depth is None and a in data.all_uops: return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
   # mirror of the trace_num encoding, viz must not save buffers
