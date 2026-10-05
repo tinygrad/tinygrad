@@ -90,7 +90,7 @@ def main(args) -> None:
             print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
             if v["src"]:
               print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
-        elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
+        elif "uop" in m: print(emit(m["graph"] if print_graph else ''.join(t["st"] for t in m["uop"])))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
