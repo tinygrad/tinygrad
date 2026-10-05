@@ -196,7 +196,7 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (11, 7)), 11**7)
     self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (3, 40)), 689956897)
     self.assertEqual(exec_alu(Ops.POW, dtypes.uint8, (3, 5)), 243)
-    self.assertEqual(exec_alu(Ops.POW, dtypes.int64, (3, 2**40)), -7860764868738023423)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.weakint, (2, 64)), 2**64)
     self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (2, -2)), 0)
     self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (0, -1)), 0)
     self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (1, -5)), 1)

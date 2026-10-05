@@ -725,6 +725,8 @@ class TestOps(TensorTestCase):
     _test([0, 1, -1, 1, -1], [-1, -5, -5, -6, -6])
     # overflow wraps
     _test([11, 3, 2, -3, 7], [7, 40, 31, 21, 2**30])
+    # exponent bounds past its dtype
+    helper_test_op(None, lambda x,y: x**(y*4), vals=[[2, 3, 2], [1, 2, -1]], forward_only=True, atol=0)
 
     if not COMPILE_ONLY:
       np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)

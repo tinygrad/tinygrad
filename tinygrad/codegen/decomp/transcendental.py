@@ -269,11 +269,13 @@ def xpow_int(base:UOp, exponent:UOp, dt:DType) -> UOp|None:
   # square and multiply over the exponent bits in unsigned, masking so products wrap instead of growing
   udt = dt if dtypes.is_unsigned(dt) else dtypes.uints[dtypes.sints.index(dt)]
   ret, sq = (b:=base.cast(dt).bitcast(udt)).const_like(1), b
-  for i in range(nbits:=int(max(exponent.vmax, 0)).bit_length()):
+  edt = exponent.dtype
+  lo, hi = (edt.min, edt.max) if edt in dtypes.ints and exponent.overflows(edt) else (exponent.vmin, exponent.vmax)
+  for i in range(nbits:=int(max(hi, 0)).bit_length()):
     ret = ((exponent >> i) & 1).ne(0).where((ret*sq) & udt.max, ret)
     if i < nbits-1: sq = (sq*sq) & udt.max
   ret = ret.bitcast(dt)
-  if exponent.vmin >= 0: return ret
+  if lo >= 0: return ret
   # negative exponent truncates to 0, except for 1 and -1
   one = ret.const_like(1)
   neg = base.eq(-1).where((exponent & 1).ne(0).where(-one, one), base.eq(1).where(one, 0))
