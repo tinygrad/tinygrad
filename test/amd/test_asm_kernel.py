@@ -19,8 +19,6 @@ from extra.gemm.amd_asm_matmul import Kernel
 # small pattern matcher converting CALL to INS
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
 
-from test.mockgpu.amd.emu import ASM_CALL as _ASM_CALL
-
 @dataclass(frozen=True)
 class InstInfo:
   op: Callable[..., Inst]
@@ -205,6 +203,10 @@ def custom_data_deps(A:UOp) -> UOp:
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+
+
+# import contextvar to use it
+from test.mockgpu.amd.emu import ASM_CALL # noqa: F401
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
