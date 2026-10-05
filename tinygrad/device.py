@@ -443,7 +443,6 @@ class Compiled:
 
   def synchronize(self, timeout:int|None=None):
     for d in [*self.pending]: d._wait_signal(d.timeline.host.view(fmt='Q'), self.pending.pop(d), timeout) # a failed peer raises its own error, once
-    for dn in Device._opened_devices: Device[dn].pending.pop(self, None) # waited (or failed) here, the peers need not
     try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
