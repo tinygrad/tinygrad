@@ -41,7 +41,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo
-from tinygrad.uop.render import render_uir, uops_colors
+from tinygrad.uop.render import uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -164,7 +164,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
-  yield {"graph":uop_to_json(data, next_sink), "uop":render_uir(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
+  yield {"graph":uop_to_json(data, next_sink), "uop":next_sink.render_uir(), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
@@ -172,9 +172,9 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":render_uir(new_sink),
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":new_sink.render_uir(),
            "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":[ansistrip(x) for x in difflib.unified_diff(render_uir(u0).splitlines(), render_uir(u1).splitlines())],
+           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
            "upat":(upat_loc, match_repr), "_sink":new_sink}
     if not ctx.bottom_up: next_sink = new_sink
 

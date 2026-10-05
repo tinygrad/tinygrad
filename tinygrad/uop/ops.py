@@ -1171,6 +1171,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ctx[u] = cast(str, pm.rewrite(u, ctx=ctx))
     return ctx[s]
 
+  def render_uir(self) -> str:
+    from tinygrad.uop.render import render_uir
+    return render_uir(self)
+
   # *** uop high level syntactic sugar ***
 
   @staticmethod
@@ -1241,10 +1245,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
     creates ALLOCs: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
-    from tinygrad.uop.render import render_uir
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
-      f"ranges {self.ranges} are leaking out of the call in {render_uir(self)}"
+      f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
     # an external C call is a CALL on a CUSTOM_FUNCTION body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
