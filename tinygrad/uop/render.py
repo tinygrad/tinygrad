@@ -58,7 +58,7 @@ def _render_arg(x:UOp) -> str:
 # CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
-def render_ssa(root:UOp|list[UOp]) -> str:
+def render_uir(root:UOp|list[UOp]) -> str:
   nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
