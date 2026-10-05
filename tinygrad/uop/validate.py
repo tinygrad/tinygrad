@@ -65,6 +65,8 @@ z3_renderer = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.RANGE), name="x"), lambda x,ctx:
    create_bounded(x.arg if x.op is Ops.SPECIAL else f"r{range_str(x)}", 0, ctx[1][x.src[0]]-1, ctx[0])),
   # unknown values are variables bounded by their vmin/vmax: params, loads (non-pointer INDEX is a LOAD) and anything from floats
+  # an AFTER passes its value through, its extra srcs are ordering deps and are ignored
+  (UPat(Ops.AFTER, name="x"), lambda x,ctx: ctx[1][x.src[0]] if x.src[0] in ctx[1] else create_var(x, ctx)),
   (UPat((Ops.PARAM, Ops.LOAD, Ops.INDEX), name="x"), create_var),
   (UPat((Ops.CAST, Ops.BITCAST)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
   # a bitcast between ints wraps into the target range, z3 ints are unbounded
@@ -80,7 +82,7 @@ z3_renderer = PatternMatcher([
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
   # gate on upstream memory addressing, but keep INDEX as an unknown LOAD
-  lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.AFTER, Ops.SHRINK, Ops.ALLOC, Ops.BUFFER}
+  lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.SHRINK, Ops.ALLOC, Ops.BUFFER}
                                       and (x.dtype in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
   z3map: dict[UOp, z3.ExprRef] = {}
   for u in lst:

@@ -24,10 +24,10 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
-  cfg = get_cfg(insts)
+  cfg = get_cfg(insts)["data"]
   # construct CALL graph
   afters: dict[UOp, UOp] = {}
-  for block_pc, block in cfg.values():
+  for block_pc, block in cfg["blocks"].items():
     for off in block:
       inst = insts[off]
       inst_st = str(inst)

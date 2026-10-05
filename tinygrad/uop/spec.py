@@ -1,10 +1,8 @@
-import math, functools
-from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
   CustomFunction
-from tinygrad.uop.render import render_ssa, pyrender
-from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
-from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
+from tinygrad.uop.render import render_uir
+from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid
+from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
 from tinygrad.device import is_disk_device
 
 # ***** uop helpers *****
@@ -35,13 +33,12 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
-  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
   with Context(TRACK_MATCH_STATS=0):
     for i,u in enumerate(lst):
       ret: bool|None = check_spec.rewrite(u)
       if ret is not True:
-        if DEBUG >= 3: print(render_ssa(lst))
+        if DEBUG >= 3: print(render_uir(lst))
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
 # ***** new specs *****
@@ -79,7 +76,8 @@ spec_shared = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
 
   # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
-  (UPat(Ops.RANGE, src=(UPat(),), allow_any_len=True, name="rng"), lambda rng: isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+  # a RANGE has exactly one src, the bound. ordering deps wrap the bound in AFTER: RANGE(AFTER(CONST, other_range))
+  (UPat(Ops.RANGE, src=(UPat(),), name="rng"), lambda rng: isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       isinstance(rng.arg[0], AxisType) and all(isinstance(ra, int) for ra in rng.arg[1:])),
   (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.is_invalid for y in x.src[1:]) or None),
   # END closes bounded RANGEs around a void effect; it does not discard a value. Conditional loops use BACKEDGE.
@@ -99,9 +97,13 @@ spec_shared = PatternMatcher([
   (UPat(Ops.GROUP, dtypes.void, src=UPat(dtype=dtypes.void)), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
+  # CONST/CAST/NOOP are range bounds: RANGE(AFTER(CONST, other_range)) orders a loop after a sibling
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
-                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS,
+                                                     Ops.CONST, Ops.CAST, Ops.NOOP})),),
         allow_any_len=True), lambda: True),
+  # an AFTER can wrap a scalar ALU (e.g. a computed RANGE bound) to order it after effect ops
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.ALU),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == ()),
 
   # CUSTOM (inline and non inline): the arg is the source string and the dtype it produces, void for a bare statement
   (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),
@@ -275,30 +277,3 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
                                                   Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),), allow_any_len=True), lambda: True),
 ])
-
-# **** pyrender (move this) ****
-
-# circular-import-safe eval globals for pyrender round-tripping (lazy: codegen/schedule/renderer are heavy)
-@functools.cache
-def pyrender_globals() -> dict[str, Any]:
-  from tinygrad.codegen.opt import Opt, OptOps
-  from tinygrad.schedule.rangeify import BufferizeOpts
-  from tinygrad.renderer import Estimates
-  return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
-          "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates, "CallInfo": CallInfo, "CustomFunction": CustomFunction}
-def eval_pyrender(code:str) -> UOp:
-  lcls:dict[str, Any] = {}
-  exec(code, pyrender_globals(), lcls)
-  return lcls['ast']
-
-def test_pyrender(test_ast:UOp, assert_parents=True):
-  try: code = pyrender(test_ast)
-  except NotImplementedError: return None  # this is okay, not all ops can be pyrendered
-  ast:UOp = eval_pyrender(code)
-  if ast is not test_ast:
-    if assert_parents:
-      for u in test_ast.toposort(): test_pyrender(u, assert_parents=False)
-    raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
-  return code
