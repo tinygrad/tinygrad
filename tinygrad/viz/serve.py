@@ -128,7 +128,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
-    label = f"{u.op.name}{'\n'+argst if argst else ''}"
+    label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
       if x in excluded:
