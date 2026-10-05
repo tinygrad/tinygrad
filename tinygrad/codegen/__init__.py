@@ -140,10 +140,10 @@ devectorizer2 = pm_mops+PatternMatcher([
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
-  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="b"), UPat(Ops.STACK, name="s")), name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="b"), UPat(Ops.STACK, name="s")), name="x"),
    lambda b,s,x: UOp.stack(*[x.replace(src=(b,u)) for u in s.src])),
   # INDEX into RESHAPE moves the RESHAPE
-  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="b"), UPat(Ops.RESHAPE, name="s"))),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="b"), UPat(Ops.RESHAPE, name="s"))),
    lambda b,s: b.index(s.src[0]).reshape(s.shape)),
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),

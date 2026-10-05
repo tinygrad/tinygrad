@@ -300,7 +300,7 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
 def check_buf_states(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, UOp] = {}
-  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM} and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
+  if any((buf:=idx.buf_uop).op in GroupOp.Defines and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
 
 to_define_global = PatternMatcher([
