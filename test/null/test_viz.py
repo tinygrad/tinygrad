@@ -213,7 +213,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
     # fallback to REWRITE_ERROR with the error message
-    self.assertIn("REWRITE_ERROR\nTraceback", graphs[2]["label"])
+    self.assertIn("REWRITE_ERROR\n'Traceback", graphs[2]["label"])
     # cut after the first error, instead of going through all REWRITE_STACK_LIMIT matches
     self.assertEqual(len(graphs), 3)
 
