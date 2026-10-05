@@ -292,7 +292,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
-  # NOTE: grad_fxn doesn't work with pyrender
   def test_gemm_backward(self, custom_backward_gemm=False):
     N = 4
     a_rand = Tensor.randn(N, 8)
