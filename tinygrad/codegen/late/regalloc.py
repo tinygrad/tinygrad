@@ -109,7 +109,11 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     # v here is the virtual defined by the original s as s is the rewritten version
     if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
       reg = replace(ctx.reals[i][v], size=v.size)
-      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg) if v in ctx.spills else retag(s, reg))
+      if v in ctx.spills:
+        fill = ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg)
+        # an AFTER-wrapped value (e.g. a RANGE bound) keeps its ordering deps around the fill
+        nsrc.append(s.replace(src=(fill,)+s.src[1:]) if s.op is Ops.AFTER else fill)
+      else: nsrc.append(retag(s, reg))
     else: nsrc.append(s)
   ndefs = tuple(replace(ctx.reals[i][v], size=v.size) for v in x.tag) if isinstance(x.tag, tuple) else x.tag
   nx = x.replace(src=tuple(nsrc), tag=ndefs)
