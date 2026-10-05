@@ -621,7 +621,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
   if fmt in {"input-uops", "uops"}:
-    if fmt.startswith("input"): uops = list(unwrap(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink)).toposort())
+    if fmt.startswith("input"): uops = list(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink).toposort())
     else:
       if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
       if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
