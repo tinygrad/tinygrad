@@ -27,7 +27,7 @@ def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -
   cfg = get_cfg(insts)
   # construct CALL graph
   afters: dict[UOp, UOp] = {}
-  for block_pc, block in cfg.values():
+  for block_pc, block in cfg.items():
     for off in block:
       inst = insts[off]
       inst_st = str(inst)

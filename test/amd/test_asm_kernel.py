@@ -251,5 +251,29 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
+  def test_cfg(self):
+    def cfg_kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      for i in range(4): k.emit(v_mov_b32_e32(v[i], float(i)))
+      for i in range(2):
+        k.emit(s_cmp_eq_i32(0, 1-i))
+        k.emit(s_cbranch_scc0(), target=f"branch_{i}")
+        k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1], offset=i*4))
+        k.emit(s_branch(), target=f"after_branch_{i}")
+        k.label(f"branch_{i}")
+        k.emit(global_store_b32(addr=v[0], data=v[2], saddr=s[0:1], offset=i*4))
+        k.label(f"after_branch_{i}")
+      k.emit(s_branch(), target="final")
+      k.label("final")
+      k.emit(global_store_b32(addr=v[0], data=v[3], saddr=s[0:1], offset=8))
+      k.emit(s_endpgm())
+      insts = k.finalize()
+      sink = UOp.sink(out.base, arg=KernelInfo("cfg_kernel"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+    out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
+    self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
+
 if __name__ == "__main__":
   unittest.main()
