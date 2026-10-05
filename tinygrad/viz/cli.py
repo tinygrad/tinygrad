@@ -85,7 +85,7 @@ def main(args) -> None:
     data = viz.get_render(viz_data, step["query"], update_sink=False)
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if "uop" in m: print(emit(m["uop"]))
+        if "uop" in m: print(emit(''.join(t["st"] for t in m["uop"])))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
