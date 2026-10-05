@@ -2,7 +2,7 @@ import functools, time
 from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, GroupOp, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
@@ -18,7 +18,7 @@ def is_implicit_storage(ctx, x:UOp) -> bool:
 
 pm_ctx = PatternMatcher([
   # Capture caller-owned storage, not allocations created while tracing this function.
-  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.PARAM), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
+  (UPat(GroupOp.Defines, name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
   (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
    not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
    any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
