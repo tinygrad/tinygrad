@@ -55,6 +55,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertEqual(bytes(host.host[:]), bytes(new.host[:]))
 
   @unittest.skipIf(Device.DEFAULT == "METAL", "unified memory: METAL copies on the host and maps nothing")
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOMAllocator has no _map")
   def test_map_cpu_buffer_preserves_contents(self):
     src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
     data = bytes(range(16))

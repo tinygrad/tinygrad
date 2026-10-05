@@ -51,6 +51,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM compiles without mergedregs, too many registers for this local size")
   def test_grouped_reduce_with_local_upcast_padto(self):
     Tensor.manual_seed(7)
     a = Tensor.rand(7, 11, 13)

@@ -1,16 +1,17 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple
 from tinygrad.device import Compiled
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, CustomFunction
 from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
+from test.mockgpu.qcom.qcomdriver import QCOMDriver
 start = time.perf_counter()
 
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
-                                              "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
+                                              "MOCK+NV": NVDriver, "MOCK+QCOM": QCOMDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds: dict[int, typing.Any] = {}
 
 @ctypes.CFUNCTYPE(None, ctypes.c_uint64)
@@ -19,12 +20,19 @@ def mockgpu_doorbell(addr:int): # compiled stores aren't tracked, so the submits
     if st <= addr <= en: wcb(None, addr - st)
 setattr(libc.dll, "mockgpu_doorbell", mockgpu_doorbell)
 
+@ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_uint32, ctypes.c_uint64)
+def mockgpu_ioctl(fd:int, req:int, argp:int) -> int: # compiled submits call ioctl directly, bypassing MockFileIOInterface
+  return tracked_fds[fd].ioctl(fd, req, argp)
+setattr(libc.dll, "mockgpu_ioctl", mockgpu_ioctl)
+
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
 def hook_doorbells(s:UOp) -> UOp|None:
   hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr("CPU")) for c in s.toposort() if c.op is Ops.CALL
                 for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.tag) and to_tuple(b.device)[0].split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
-Compiled.pm_lower = PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
+def hook_ioctl(f:UOp) -> UOp|None:
+  return f.replace(arg=CustomFunction("mockgpu_ioctl", f.arg.dtype)) if f.arg.name == "ioctl" and "QCOM" in mocked else None
+Compiled.pm_lower = PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells), (UPat(Ops.CUSTOM_FUNCTION, name="f"), hook_ioctl)])
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:
