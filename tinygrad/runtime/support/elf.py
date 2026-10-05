@@ -9,7 +9,7 @@ class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:byte
 def link_sym(sym:str, libs:list[ctypes.CDLL]) -> int:
   for lib in libs:
     try: return unwrap(ctypes.cast(getattr(lib, sym), ctypes.c_void_p).value)
-    except (OSError, AttributeError): pass
+    except (OSError, AttributeError, TypeError): pass
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 
 def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
