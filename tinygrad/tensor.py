@@ -36,10 +36,10 @@ def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop i
 # **** Tensor helper functions ****
 
 def _fromnp(x: 'numpy.ndarray') -> UOp:
-  ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
+  buf = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
-  ret.buffer.allocate(x)
-  return ret.reshape(x.shape)
+  buf.buffer.allocate(x)
+  return buf if buf.shape == x.shape else UOp.flat_view(buf, x.shape)
 
 class Tensor(RandMixin):
   """
@@ -85,7 +85,8 @@ class Tensor(RandMixin):
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
       elif isinstance(data, pathlib.Path):
         _dtype = _dtype or dtypes.uint8
-        data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // _dtype.itemsize, _dtype)
+        dbuf = UOp.new_buffer(f"DISK:{data.resolve()}", (n:=data.stat().st_size // _dtype.itemsize), _dtype)
+        data = dbuf if n else UOp.flat_view(dbuf, (n,))
 
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
@@ -182,7 +183,7 @@ class Tensor(RandMixin):
     tensor_map:dict[UOp, UOp] = {}
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, int(x.src[0].val), x.dtype)
+      if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, x.src[0].val, x.dtype)
       elif x in bases and u.needs_storage():
         # unwrap the rebuilt output to the compute; a STAGE means a contiguous view was requested
         src, contiguous = u, False

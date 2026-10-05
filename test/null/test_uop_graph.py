@@ -6,7 +6,8 @@ from tinygrad.uop.symbolic import sym
 from test.helpers import full_rewrite, to_uops_list
 
 simple_pm = PatternMatcher([
-  (UPat.cvar('x', dtypes.weakint), lambda x: UOp.const(1.0) + UOp.const(2.0)),
+  # NOTE: 0 is the size CONST on PARAM/BUFFER/ALLOC, it is not a value here
+  (UPat.cvar('x', dtypes.weakint), lambda x: None if x.val == 0 else UOp.const(1.0) + UOp.const(2.0)),
   (UPat.cvar('x') + UPat.cvar('y'), lambda x,y: UOp.const(x.val+y.val)),
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(x.val*y.val*z.val)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
@@ -194,8 +195,9 @@ class TestGraphRewrite(unittest.TestCase):
       print(sink.render())
       self.assertEqual(sink.op, Ops.ADD)
       self.assertEqual(sink.src[1].op, Ops.CONST)
-      # one value CONST (folded to the end) plus the shared size CONST 0 of the Variable PARAMs
-      self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST]), 2)
+      # the size CONSTs on the Variables don't count
+      size_consts = {s for u in sink.toposort() if u.op is Ops.PARAM for s in u.src if s.op is Ops.CONST}
+      self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST and x not in size_consts]), 1)
 
 class TestUOpGraph(unittest.TestCase):
   def test_where_same_fold(self):

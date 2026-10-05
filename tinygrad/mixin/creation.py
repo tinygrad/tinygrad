@@ -38,9 +38,9 @@ class CreationMixin(DTypeMixin, MovementMixin):
     new_shape = argfix(*shape)
     max_shape = to_max_shape(new_shape)
     dev = canonicalize_device(device)
-    u = UOp(Ops.ALLOC, src=(UOp.const(prod(max_shape)), *UOp.device_range_src(dev)),
+    u = UOp(Ops.ALLOC, src=(UOp.const(prod(max_shape)),)+UOp.device_range_src(dev),
             arg=ParamArg(next(UOp.unique_num), dt, device=dev, bind_on_realize=True))
-    u = u.reshape(max_shape).shrink_to(new_shape)
+    u = (u if u.shape == max_shape else UOp.flat_view(u, max_shape)).shrink_to(new_shape)
     return cls._wrap_uop(u)
 
   def empty_like(self, dtype: DTypeLike|None=None, device: str|tuple[str, ...]|None=None) -> Self:

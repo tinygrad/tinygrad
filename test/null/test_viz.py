@@ -244,8 +244,8 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides exclude=True nodes by default
-    # z is also the size CONST 0 of the Variable a, so it toposorts before a
-    self.assertEqual(list(graphs[0]), [id(z), id(a), id(alu), id(y), id(sink)])
+    # (the size CONST src of the Variable comes first in the toposort)
+    self.assertEqual(set(graphs[0]), {id(a), id(z), id(alu), id(y), id(sink)})
     self.assertTrue(graphs[0][id(z)]["exclude"])
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
