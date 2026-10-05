@@ -265,7 +265,8 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x))
 def is_address(x:UOp):
   if x.op is Ops.INS and x.arg[0] is X86Ops.MOV: return (len(x.src) == 1 or x.src[0] is stack_pointer) and is_address(x.src[0])
-  if (x is stack_pointer) or (x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG) or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL): return True
+  if (x is stack_pointer) or (x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG): return True
+  if x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL: return True
   return x.op is Ops.INS and (x.arg[0] is X86Ops.LEA or (x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])))
 
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
