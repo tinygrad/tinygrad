@@ -1081,7 +1081,7 @@ async function main() {
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) metadata.appendChild(traceBlock(step.trace));
-  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "txt", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
   // ** multi graph in one page
   if (!step.match_count) return;
   const rewriteList = metadata.appendChild(document.createElement("div"));
