@@ -1956,7 +1956,7 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   st._write_sgpr(SGPR_COUNT - 16 + 4, hw_id)  # HW_REGISTERS[4] = HW_ID
   return st
 
-# lift the assembly to a CALL graph and execute
+# lift assembly to a CALL graph and execute
 ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND", "CPU")
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
