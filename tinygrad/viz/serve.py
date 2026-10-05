@@ -41,7 +41,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo
-from tinygrad.uop.render import uops_colors
+from tinygrad.uop.render import render_uir, uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -77,6 +77,7 @@ def load_rewrites(data:VizData) -> None:
       # get source and binary from Ops.PROGRAM
       if s.name == "linearize/render": lin_idx = j
       if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= rewrites[lin_idx].depth):
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=0))
         steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=0))
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
         lin_idx = None
@@ -612,6 +613,12 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
+  if fmt == "uops":
+    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ret:dict = {}
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort())[:-1])
+    return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
