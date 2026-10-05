@@ -57,7 +57,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if we return None, the bufferize is kept
 
   accessed_buffers: list[UOp] = []
-  indexes: list[UOp] = []
   reduces: list[UOp] = []
   def red_gate(x:UOp):
     if x.op is Ops.AFTER:
@@ -71,8 +70,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       return False
     if x.op is Ops.PARAM:
       accessed_buffers.append(x)
-    if x.op is Ops.INDEX:
-      indexes.append(x)
     if x.op is Ops.REDUCE: reduces.append(x)
     return True
   src.toposort(gate=red_gate)
@@ -188,7 +185,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
       if s.op in GroupOp.Elementwise and s.device is not None:
         # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
         orig_ranges = s.ranges
-        end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
+        end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x
                       for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
@@ -250,7 +247,7 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   return None
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
-  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx)),
+  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
 
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
   # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE

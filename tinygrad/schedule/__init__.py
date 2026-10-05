@@ -140,7 +140,6 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
-      if frm.filename.startswith(str(BASEDIR / "apps")): break
       if not frm.filename.startswith(str(BASEDIR)) and not frm.filename.endswith("/contextlib.py"): break
     else:
       frm = None
@@ -258,7 +257,7 @@ pm_replace_buf = PatternMatcher([
 ])
 
 def transform_to_call(big_sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.

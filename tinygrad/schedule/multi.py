@@ -86,7 +86,6 @@ def shard_subview(full:UOp, multi:UOp) -> UOp:
 
 def alu_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
-  if not multis: return None
   sharding = multis[0].sharding
   target = multis[0]
   def can_handle(m:UOp) -> bool:
@@ -188,7 +187,6 @@ def flip_multi(root:UOp, multi:UOp):
 def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
-  if not multis: return None
   sharding = multis[0].sharding
   if all(m.sharding == sharding for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
