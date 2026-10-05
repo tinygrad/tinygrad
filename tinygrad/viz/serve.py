@@ -101,10 +101,14 @@ def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
 
-def tokenize_uir(root:UOp) -> list[dict]:
+def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
   nodes = [u for u in root.toposort() if not _inline(u)]
   refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
-  return [{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", render_uir(root)) if s]
+  lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", line) if s] for line in render_uir(root).split("\n")]
+  for u,line in zip(nodes, lines):
+    if u.op is Ops.CALL and (ref:=data.ref_map.get(canonicalize_ast(u.body))) is not None:
+      line.append({"st":f" # {fmt_colored(data.ctxs[ref]['name'])}"})
+  return [t for i,line in enumerate(lines) for t in ([{"st":"\n"}] if i else [])+line]
 
 def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
@@ -170,7 +174,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
-  yield {"graph":uop_to_json(data, next_sink), "uop":tokenize_uir(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
+  yield {"graph":uop_to_json(data, next_sink), "uop":tokenize_uir(data, next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
@@ -178,7 +182,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(new_sink),
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink),
            "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
            "upat":(upat_loc, match_repr), "_sink":new_sink}

@@ -372,7 +372,13 @@ class TestVizIntegration(unittest.TestCase):
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     # steps is the presentation list; use the trace index from the step's query (extra presentation steps break 1:1 alignment)
     viz_kernel = next(int(s["query"].rsplit("=", 1)[1]) for s in lst[sched_idx]["steps"] if s["name"] == "View Kernel Graph")
-    graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
+    details = next(viz.get_details(sched_idx, viz_kernel))
+    graph = details["graph"]
+    refs = [t for t in details["uop"] if "ref" in t]
+    self.assertTrue(refs)
+    for t in refs:
+      self.assertEqual(t["st"], f" # {lst[t['ref']]['name']}")
+      self.assertEqual(lst[t["ref"]]["name"], kernel_name)
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
@@ -1161,10 +1167,11 @@ class TestCLI(unittest.TestCase):
       with Context(DEBUG=5):
         out = run_cli(*files, "-s", "TINY")
     i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
-    # next print is the CALL graph, CLI outputs exactly as web in TestVizIntegration.test_link_sched_codegen
-    call_nodes = [n for n in out[i+1].values() if n["label"].startswith("CALL")]
-    for i,n in enumerate(call_nodes):
-      assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
+    print(out[i+1]["value"])
+    # next print is the CALL graph, with codegen names annotated on the UIR calls
+    calls = [line for line in out[i+1]["value"].splitlines() if " = call " in line]
+    self.assertTrue(calls)
+    self.assertEqual([line.rsplit(" # ", 1)[-1] for line in calls], prgs[:len(calls)])
 
   def test_interval(self):
     def emit_kernel(name:str): Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(name=name)))[0].realize()
