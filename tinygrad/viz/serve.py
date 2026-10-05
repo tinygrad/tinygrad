@@ -625,7 +625,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     else:
       if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
       if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
-      uops = list(unwrap(sink).src[1].toposort())[:-1]
+      uops = list(sink.src[1].toposort())[:-1]
     ret:dict = {}
     with soft_err(lambda err: ret.update(err)): ret["src"] = render_ssa(uops)
     return ret
