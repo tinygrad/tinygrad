@@ -81,6 +81,9 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(x.uop.base.buffer.size, 12)
     x.assign(Tensor.arange(24).float().reshape(4, 6).shard(devices_2, axis=1)).realize()
     np.testing.assert_equal(x.numpy(), np.arange(24).reshape(4, 6))
+    scalar = Tensor.empty((), device=devices_2, axis=0).realize()
+    self.assertEqual(scalar.shape, ())
+    self.assertEqual(scalar.uop.base.buffer.size, 1)
 
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):

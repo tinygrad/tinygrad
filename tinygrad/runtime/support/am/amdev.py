@@ -285,6 +285,8 @@ class AMDev:
     if DEBUG >= 3: print(f"am {self.devfmt}: Start recovery")
     self.ih.interrupt_handler()
     self.gfx.reset_mec()
+    self.sdma.fini_hw()
+    self.sdma.init_hw()
     self.is_err_state = False
     if DEBUG >= 3: print(f"am {self.devfmt}: Recovery complete")
     return True
