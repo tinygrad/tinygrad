@@ -2,7 +2,7 @@
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
@@ -40,7 +40,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, CallInfo
+from tinygrad.uop.ops import KernelInfo
 from tinygrad.uop.render import render_uir, pyrender, uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
@@ -164,9 +164,6 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
 def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
   if depth is None and a in data.all_uops: return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
-  # mirror of the trace_num encoding, viz must not save buffers
-  if op is Ops.CALL and isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-    arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs)))
   if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
   ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
