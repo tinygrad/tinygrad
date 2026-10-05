@@ -540,7 +540,6 @@ jobs:
     timeout-minutes: 15
     env:
       DEV: MOCKPCI+AMD
-      HCQ2: 1
       PYTHONPATH: .
     steps:
       - name: Checkout Code
@@ -573,7 +572,6 @@ jobs:
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
-      HCQ2: 1
       PYTHONPATH: .
     steps:
       - name: Checkout Code
