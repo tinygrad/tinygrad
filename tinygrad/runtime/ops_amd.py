@@ -786,9 +786,9 @@ class PCIIface(PCIIfaceBase):
     else: d.iface.dev_impl.ih.interrupt_handler()
 
     if reset and d.iface.dev_impl.recover(force=True):
-      cq = d.compute_queue
-      for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b.host.view(fmt='Q')[0] = 0
-      d.iface.dev_impl.gfx.setup_ring(*cq.params)
+      for q, ip in [(d.compute_queue, d.iface.dev_impl.gfx), *[(q, d.iface.dev_impl.sdma) for q in d.sdma_queues.values()]]:
+        for b in (q.put_value, q.read_ptr, q.write_ptr): b.host.view(fmt='Q')[0] = 0
+        ip.setup_ring(*q.params)
       tl = d.timeline.host.view(fmt='Q')
       tl[0] = tl[1]
       d.error_state.host.view(fmt='q')[0] = 0

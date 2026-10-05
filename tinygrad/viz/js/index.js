@@ -20,8 +20,14 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
   ([_, r, g, b, rgb_st, code, colored_st, st]) => ({ st: rgb_st ?? colored_st ?? st, color: r != null ? `rgb(${r},${g},${b})`
     : code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
-const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof n === "string" ? parseColors(n) : n).join("span")
-                       .style("color", d => d.color).text(d => d.st)).node();
+const highlightUir = id => d3.selectAll(".uir-ref").classed("highlight", d => d.id === id);
+const colored = n => d3.create("span").call(s => s.selectAll("span")
+  .data((typeof n === "string" ? [{st:n}] : n).flatMap(t => parseColors(t.st, t.color).map(p => ({...t, ...p})))).join("span")
+  .style("color", d => d.id == null ? d.color : null).text(d => d.st).classed("uir-ref", d => d.id != null).on("click", (e,d) => {
+    if (d.id == null) return;
+    highlightUir(d.id);
+    d3.select("#nodes").selectAll("g.node").filter(n => n.id === d.id).dispatch("click");
+  })).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
@@ -83,6 +89,7 @@ const drawGraph = (data) => {
       const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
       d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
       d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
+      highlightUir(d.id);
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
