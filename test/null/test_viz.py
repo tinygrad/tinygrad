@@ -1199,8 +1199,12 @@ class TestCLI(unittest.TestCase):
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
     with write_files(viz) as files:
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+      with Context(NO_COLOR=1):
+        uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
     self.assertEqual(len(codegen_count), 4)
+    self.assertIn(" = linear ", uops)
+    self.assertIn(" = call ", uops)
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):
