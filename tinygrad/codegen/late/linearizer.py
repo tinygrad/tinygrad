@@ -81,7 +81,8 @@ class CFGContext:
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  # the ordering dep goes on the bound wrapped in AFTER, so a RANGE always has exactly one src
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].after(y),)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
 def do_split_ends(e:UOp):
