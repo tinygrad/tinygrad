@@ -2,7 +2,7 @@ import unittest
 from dataclasses import replace
 from tinygrad.helpers import Target
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes
 from tinygrad.renderer.isa import Register
 from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, alloc_reg
 
