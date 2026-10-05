@@ -182,7 +182,7 @@ class Tensor(RandMixin):
     tensor_map:dict[UOp, UOp] = {}
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, x.max_numel(), x.dtype)
+      if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, int(x.src[0].val), x.dtype)
       elif x in bases and u.needs_storage():
         # unwrap the rebuilt output to the compute; a STAGE means a contiguous view was requested
         src, contiguous = u, False

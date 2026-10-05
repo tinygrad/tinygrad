@@ -52,6 +52,7 @@ def absorb_weak_src(s:UOp) -> UOp:
 
 def lower_weak_node(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const, not a consumer
+  if u.op in GroupOp.Defines: return None  # the size of a PARAM/BUFFER/ALLOC stays a bare weakint CONST
   src = tuple(absorb_weak_src(s) for s in u.src)
   if derived_dtypes(u, src) is None:
     src = tuple(s.ccast(s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src)
@@ -91,6 +92,7 @@ pm_uncast_const = PatternMatcher([(UPat(GroupOp.Broadcastable, name="u"), uncast
 # commit every remaining bare const, keyed on the consumer: "bare" is a property of the edge
 def cast_consts(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const's CONST is its value, not an edge
+  if u.op in GroupOp.Defines: return None  # the size of a PARAM/BUFFER/ALLOC stays a bare weakint CONST
   if (dts:=derived_dtypes(u, u.src)) is not None: u = commit_weak_consts(u, dts[0])
   # .cast folds at the dtypes a bare CONST derives, so the width is forced. Invalid never commits.
   return u.replace(src=tuple(UOp.cconst(s.val, s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and not s.is_invalid else s for s in u.src))

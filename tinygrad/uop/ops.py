@@ -25,8 +25,6 @@ class AxisType(Enum):
 class ParamArg:
   slot: int
   dtype: DType
-  # number of elements in the buffer. always a concrete int (never symbolic), None for scalars (shape ())
-  size: int|None = None
   vmin_vmax: tuple[PyConst, PyConst]|None = None
   multiple_of: int|None = None
   name: str|None = None
@@ -45,10 +43,10 @@ class ParamArg:
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
-    args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
+    args = [repr(self.slot), repr(self.dtype)] + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
-      args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.size}, {self.dtype!r}, {self.slot}).buffer")
+      args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.size}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u"}
@@ -366,9 +364,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
-        # these don't have a shape input, they have a size in the arg: int gives shape (size,), None gives ()
+        # the flat size is a weakint CONST in src (0 for scalars); an image buffer states its shape in the arg
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
-        return () if self.arg.size is None else (self.arg.size,)
+        return () if self.src[0].val == 0 else (int(self.src[0].val),)
       case Ops.CUSTOM | Ops.CUSTOMI:
         if self.dtype is dtypes.void: return None
         input_shapes = [x._shape for x in self.src if x._shape is not None]
@@ -404,8 +402,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          # with symbolic views prod equality can be true at runtime but unprovable, only reject provably unequal products
-          if resolve(prod(ps) != prod(self.marg), False): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          # with symbolic views prod equality can be true at runtime but unprovable, only reject provably unequal products;
+          # scalar storage (size 0) reshapes into any 0-element shape
+          if resolve(prod(ps) != prod(self.marg), False) and not (ps == () and resolve(prod(self.marg) == 0)):
+            raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
           return tuple(self.marg) + ps
@@ -849,12 +849,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     slot = next(UOp.unique_num) if num is None else num
     buf = MultiBuffer(device, size, dtype) if isinstance(device, tuple) else Buffer(device, size, dtype)
-    return UOp(Ops.BUFFER, src=UOp.device_range_src(device), arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
+    return UOp(Ops.BUFFER, src=(UOp.const(size), *UOp.device_range_src(device)), arg=ParamArg(slot, dtype, device=device, buffer=buf))
   @staticmethod
   def from_buffer(opaque:Buffer|MultiBuffer, device:str|tuple[str, ...]|None=None):
     # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
-    return UOp(Ops.BUFFER, src=UOp.device_range_src(device or opaque.device),
-               arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
+    return UOp(Ops.BUFFER, src=(UOp.const(opaque.size), *UOp.device_range_src(device or opaque.device)),
+               arg=ParamArg(-id(opaque), opaque.dtype, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -1011,8 +1011,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
     # a Variable is a scalar ALU PARAM with a name and a value range; binding it sets the val payload on the arg
-    return UOp(Ops.PARAM, arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of,
-                                       addrspace=AddrSpace.ALU))
+    return UOp(Ops.PARAM, src=(UOp.const(0),), arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val),
+                                                               multiple_of=multiple_of, addrspace=AddrSpace.ALU))
   @property
   def is_variable(self) -> bool:
     # a Variable is a scalar ALU PARAM that carries a value range
@@ -1193,8 +1193,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None):
-    ret = UOp(Ops.ALLOC, src=UOp.device_range_src(device),
-              arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype), prod(to_max_shape(shape)),
+    ret = UOp(Ops.ALLOC, src=(UOp.const(prod(to_max_shape(shape))), *UOp.device_range_src(device)),
+              arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
                            addrspace=addrspace, device=device, spec=spec))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
@@ -1204,11 +1204,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size=prod(shape), addrspace=addrspace, device=device))
+      ret = UOp(Ops.PARAM, src=(UOp.const(prod(shape)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       assert device is None, "LOCAL and REG placeholders cannot have a device"
-      ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=prod(shape), addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, src=(UOp.const(prod(shape)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
@@ -1224,23 +1224,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
             multiple_of:int|None=None, name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
-    the arg only stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
+    the size src only stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
     a symbolic shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     if isinstance(shape, (int, UOp)): shape = (shape,)
     if shape is None or len(shape) == 0:
-      return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, None, vmin_vmax, multiple_of, name, addrspace, device, volatile))
+      return UOp(Ops.PARAM, src=(UOp.const(0),), arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, device, volatile))
     max_shape = to_max_shape(shape)
-    ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name, addrspace, device, volatile))
+    ret = UOp(Ops.PARAM, src=(UOp.const(prod(max_shape)),),
+              arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
     if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU:
-      return UOp(Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
+      return UOp(Ops.PARAM, src=self.src, arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
-      return UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
-                                         name=name, device=self.device)).view_as(self.shard_shape, self.axis)
+      return UOp(Ops.PARAM, src=(UOp.const(prod(to_max_shape(self.shard_shape))),),
+                 arg=ParamArg(slot, self.dtype, name=name, device=self.device)).view_as(self.shard_shape, self.axis)
     return UOp.param(slot, self.dtype, self._shape, self.device, name=name)
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""

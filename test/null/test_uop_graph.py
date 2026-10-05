@@ -194,7 +194,8 @@ class TestGraphRewrite(unittest.TestCase):
       print(sink.render())
       self.assertEqual(sink.op, Ops.ADD)
       self.assertEqual(sink.src[1].op, Ops.CONST)
-      self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST]), 1)
+      # one value CONST (folded to the end) plus the shared size CONST 0 of the Variable PARAMs
+      self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST]), 2)
 
 class TestUOpGraph(unittest.TestCase):
   def test_where_same_fold(self):
