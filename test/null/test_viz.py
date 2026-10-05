@@ -489,7 +489,7 @@ class TestVizIntegration(unittest.TestCase):
     assert all(i is not None for i in [src_idx, bin_idx]), f"source and disasm must be visible in {steps}"
     # Ops.LINEAR renders in the graph rewrite stream
     lin_step = next(s for s in steps if s["name"] == "linearize/render")
-    lin_render = ansistrip([m for m in get_render(viz.data, lin_step["query"])["value"]][-1]["uop"])
+    for m in get_render(viz.data, lin_step["query"])["value"]: lin_render = ansistrip(m["uop"])
     self.assertIn("linear", lin_render)
     self.assertIn("customi", lin_render)
     # Ops.SOURCE renders
@@ -1203,7 +1203,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len(codegen_count), 4)
     # the linearized program contains a call to inner (not inlined) and a linear op
     lin_step = next(s for c in viz.list_items() for s in c["steps"] if s["name"] == "linearize/render")
-    uops = ansistrip([m for m in get_render(viz.data, lin_step["query"])["value"]][-1]["uop"])
+    for m in get_render(viz.data, lin_step["query"])["value"]: uops = ansistrip(m["uop"])
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
 
