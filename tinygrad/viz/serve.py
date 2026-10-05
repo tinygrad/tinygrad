@@ -41,7 +41,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo
-from tinygrad.uop.render import render_ssa, pyrender, uops_colors
+from tinygrad.uop.render import render_uir, pyrender, uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -624,7 +624,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
       if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
       uops = list(sink.src[1].toposort())[:-1]
     ret:dict = {}
-    with soft_err(lambda err: ret.update(err)): ret["src"] = render_ssa(uops)
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(uops)
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}

@@ -2,7 +2,7 @@ import math, functools
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
   CustomFunction
-from tinygrad.uop.render import render_ssa, pyrender
+from tinygrad.uop.render import render_uir, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
 from tinygrad.device import is_disk_device
@@ -41,7 +41,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
     for i,u in enumerate(lst):
       ret: bool|None = check_spec.rewrite(u)
       if ret is not True:
-        if DEBUG >= 3: print(render_ssa(lst))
+        if DEBUG >= 3: print(render_uir(lst))
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
 # ***** new specs *****
@@ -79,7 +79,8 @@ spec_shared = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
 
   # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
-  (UPat(Ops.RANGE, src=(UPat(),), allow_any_len=True, name="rng"), lambda rng: isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+  # a RANGE has exactly one src, the bound. ordering deps wrap the bound in AFTER: RANGE(AFTER(CONST, other_range))
+  (UPat(Ops.RANGE, src=(UPat(),), name="rng"), lambda rng: isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       isinstance(rng.arg[0], AxisType) and all(isinstance(ra, int) for ra in rng.arg[1:])),
   (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.is_invalid for y in x.src[1:]) or None),
   # END closes bounded RANGEs around a void effect; it does not discard a value. Conditional loops use BACKEDGE.
@@ -99,9 +100,13 @@ spec_shared = PatternMatcher([
   (UPat(Ops.GROUP, dtypes.void, src=UPat(dtype=dtypes.void)), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
+  # CONST/CAST/NOOP are range bounds: RANGE(AFTER(CONST, other_range)) orders a loop after a sibling
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
-                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS,
+                                                     Ops.CONST, Ops.CAST, Ops.NOOP})),),
         allow_any_len=True), lambda: True),
+  # an AFTER can wrap a scalar ALU (e.g. a computed RANGE bound) to order it after effect ops
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.ALU),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == ()),
 
   # CUSTOM (inline and non inline): the arg is the source string and the dtype it produces, void for a bare statement
   (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),

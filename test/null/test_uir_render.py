@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.uop.render import render_ssa
+from tinygrad.uop.render import render_uir
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.helpers import Context, ansistrip
@@ -50,7 +50,7 @@ def parse_ssa(text:str) -> UOp:
     if tok.startswith("%"): return nodes[int(tok[1:])]
     if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in tok[1:-1].split(", ")))
     return _parse_const(tok)
-  for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_ssa
+  for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_uir
     line = raw.strip()
     if not line or line.startswith(";"): continue
     m = _line_re.match(line)
@@ -92,11 +92,11 @@ def _strip_buffers(root:UOp) -> UOp:
   return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root
 
 def assert_roundtrip(case, root:UOp):
-  txt = render_ssa(root)
+  txt = render_uir(root)
   parsed = parse_ssa(txt)
   # text + structural equality, both sides stripped: realized BUFFER vs parsed ALLOC converge to the same thing
   g1, g2 = _strip_buffers(root), _strip_buffers(parsed)
-  case.assertEqual(render_ssa(g1), render_ssa(g2))
+  case.assertEqual(render_uir(g1), render_uir(g2))
   case.assertEqual({x.tuplize for x in g1.toposort()}, {x.tuplize for x in g2.toposort()})
 
 class TestSSARender(unittest.TestCase):
@@ -156,7 +156,7 @@ class TestSSARender(unittest.TestCase):
   def test_continue_parsing(self):
     # lines out of order / comments tolerated, ids sparse
     g = UOp.sink(UOp.const(1) + UOp.const(2))
-    txt = "; hand written\n" + render_ssa(g) + "\n;; trailing comment\n"
+    txt = "; hand written\n" + render_uir(g) + "\n;; trailing comment\n"
     assert_roundtrip(self, parse_ssa(txt))
 
 if __name__ == '__main__': unittest.main()

@@ -507,7 +507,7 @@ class TestUOpRender(unittest.TestCase):
     shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, 32), offset, UOp.const(2, dtypes.int)))
     self.assertIsNot(shrink.src[1], shrink.marg[0][0])
     self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
-    self.assertEqual(UOp.range(1, 0, src=(shrink,), dtype=dtypes.int).render(simplify=False), "r0")
+    self.assertEqual(UOp.range(UOp.const(1, dtypes.int).after(shrink), 0, dtype=dtypes.int).render(simplify=False), "r0")
 
   def test_render_vectorize_empty(self):
     u = UOp(Ops.STACK, src=())
