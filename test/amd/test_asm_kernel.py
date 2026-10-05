@@ -204,7 +204,6 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
-
 # import contextvar to use it
 from test.mockgpu.amd.emu import ASM_CALL # noqa: F401
 
