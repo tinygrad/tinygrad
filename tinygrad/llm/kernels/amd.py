@@ -51,10 +51,6 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
   ret = UOp.alloc(shape, dtypes.float, addrspace=AddrSpace.REG)
   return ret.after((ret if dep is None else ret.after(dep)).store(ret.const_like(value)))
 
-def _empty(*shape, dtype, device:str|tuple[str, ...]|None, axis:int|None) -> Tensor:
-  if isinstance(device, tuple) and axis is not None: return Tensor.empty(*shape, dtype=dtype).shard(device, axis).empty_like()
-  return Tensor.empty(*shape, dtype=dtype, device=device)
-
 # ******** quant linear: q8-activation kernels over packed ggml weights ********
 
 class Linear(nn.Linear):
@@ -463,8 +459,8 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features), *extra)
     out_shape += ((in_features+1023)//1024,)
-  out = _empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
-  result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=out.uop.shard_shape[1], in_features=in_features))[0]
+  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
+  result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if len(result.shape) == 3: result = result.sum(-1)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1: result = result.reshape(splits, tokens, out_features).sum(0)
@@ -628,8 +624,8 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
   chunks, axis = min(48, max_kv_len // 64), q.uop.axis
-  partial = _empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
-  stats = _empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
+  partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
+  stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
   waves, group = 16, H // cache_kv.shape[2]
   while waves * group * ((D+LDS_PAD)*2 + 8) > 65536: waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
@@ -637,7 +633,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, fxn=fxn)[:2]
   live = (valid_kv_len+63)//64
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
-  out = _empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
+  out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
 
@@ -751,7 +747,7 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     assert T_pad % BLOCK_M == 0, "chunk_size must be a multiple of 32"
     q, q_start = q.pad_to((*q.shape[:2], T_pad, q.shape[3])), valid_end - T_real
   B, H, T, D = q.shape
-  out = q.empty_like(dtype="float32").reshape(B*H, T, D)
+  out = Tensor.empty(B, H, T, D, dtype="float32", device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
   fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_wmma_rdna4(q.device))
   if isinstance(valid_end, UOp): assigned_kv = Tensor(assigned_kv.uop.after(valid_end))
   out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)

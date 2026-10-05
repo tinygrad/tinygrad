@@ -431,13 +431,15 @@ class Transformer:
     arch = kv['general.architecture']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
+    shard_map:dict[str, int] = {}
     if shard > 1:
       assert not kv.get(f"{arch}.attention.kv_lora_rank"), "tensor parallel doesn't support MLA attention"
       assert n_kv_heads % shard == 0, f"tensor parallel needs the kv heads to split over {shard} devices"
-    rules = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'ffn_gate.weight',
-      'ffn_up.weight')}, **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight')}}
+      rules = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'ffn_gate.weight',
+        'ffn_up.weight')}, **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight')}}
+      shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    state_dict = gguf_shard(entries, devices, {name: rules[k] for name in entries if shard > 1 and (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules})
+    state_dict = gguf_shard(entries, devices, shard_map)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}

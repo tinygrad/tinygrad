@@ -246,15 +246,14 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   Packed weights are copied to the default device before constructing the lazy decoding expressions.
   """
   kv, entries = gguf_parse(fn)
-  packed = {name: data.to(None) for name, (data, _, _) in entries.items()}
-  if packed: Tensor.realize(*packed.values())
-  return kv, {name: ggml_data_to_tensor(packed[name], prod(shape), typ).reshape(shape) for name, (_, shape, typ) in entries.items()}
+  return kv, gguf_shard(entries, (Device.DEFAULT,))
 
-def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int]) -> dict[str, Tensor]:
+def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
+               shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   """
-  n, packed = len(devices), {}
+  n, packed, shard_map = len(devices), {}, shard_map or {}
   for name, (data, shape, typ) in entries.items():
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
     else:
