@@ -96,7 +96,7 @@ def main(args) -> None:
           loc = pathlib.Path(m["upat"][0][0])
           print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
-    if data.get("src") is not None: print(emit(''.join(t["st"] for t in data["src"]) if isinstance(data["src"], list) else data["src"]))
+    if data.get("src") is not None: print(emit(data["src"]))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
