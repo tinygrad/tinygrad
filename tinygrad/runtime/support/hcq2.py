@@ -4,7 +4,7 @@ import functools, itertools, weakref, ctypes, struct
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
-from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
+from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
@@ -17,7 +17,7 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # 0. helpers
 
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM", "CUDA", "NULL", "METAL")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "NULL", "METAL"))
 
 @dataclass(frozen=True)
 class HCQInfo:
