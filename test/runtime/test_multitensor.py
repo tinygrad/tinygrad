@@ -73,6 +73,18 @@ class TestMultiTensor(unittest.TestCase):
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
+  def test_empty_axis(self):
+    GlobalCounters.reset()
+    x = Tensor.empty(4, 6, device=devices_2, axis=1).realize()
+    assert_kernel_count(0)
+    self.assertEqual((x.shape, x.uop.axis), ((4, 6), 1))
+    self.assertEqual(x.uop.base.buffer.size, 12)
+    x.assign(Tensor.arange(24).float().reshape(4, 6).shard(devices_2, axis=1)).realize()
+    np.testing.assert_equal(x.numpy(), np.arange(24).reshape(4, 6))
+    scalar = Tensor.empty((), device=devices_2, axis=0).realize()
+    self.assertEqual(scalar.shape, ())
+    self.assertEqual(scalar.uop.base.buffer.size, 1)
+
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()

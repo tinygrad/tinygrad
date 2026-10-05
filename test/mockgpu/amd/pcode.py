@@ -18,6 +18,7 @@ def _const_int(expr: str) -> int:
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen.decomp.dtype import f2f
+from tinygrad.codegen.decomp.transcendental import exponent_bias
 
 # Type alias for vars dict: stores UOps and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
@@ -98,8 +99,7 @@ def _floor(x):
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
 # ═════ FP8 (E4M3) and BF8 (E5M2) conversion helpers ═════
-# f32→fp8/bf8 uses f2f decomposition directly. fp8/bf8→f32 wraps f2f with subnormal handling
-# (f2f flushes denormals to zero, but AMD V_CVT_F32_FP8/BF8 preserves subnormals).
+# f2f flushes denormals to zero, but AMD FP8 conversions preserve subnormals in both directions.
 def _fp8_to_f32(v: UOp) -> UOp:
   b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
   # E4M3 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-7) * (mant/8) = (-1)^sign * mant * 2^(-9)
@@ -120,10 +120,17 @@ def _bf8_to_f32(v: UOp) -> UOp:
   normal = f2f(b, dtypes.fp8e5m2, dtypes.float32)
   return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
 
-def _f32_to_fp8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3, sat=False)
+def _f32_to_fp8(v: UOp, dt=dtypes.fp8e4m3) -> UOp:
+  bits = v.bitcast(dtypes.uint32)
+  magnitude = bits & _u32(0x7FFFFFFF)
+  # Adding this power of two rounds to the subnormal spacing with round-to-nearest-even.
+  magic = _const(dtypes.float32, 2.0**(24 - exponent_bias(dt) - dtypes.finfo(dt)[1]))
+  sub = (magnitude.bitcast(dtypes.float32) + magic).bitcast(dtypes.uint32) - magic.bitcast(dtypes.uint32)
+  sub = (sub | ((bits >> _u32(24)) & _u32(0x80))).cast(dtypes.uint8)
+  is_sub = magnitude < _const(dtypes.float32, 2.0**(1 - exponent_bias(dt))).bitcast(dtypes.uint32)
+  return is_sub.where(sub, f2f(bits, dtypes.float32, dt, sat=False))
 def _f32_to_bf8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2, sat=False)
+  return _f32_to_fp8(v, dtypes.fp8e5m2)
 def _f32_to_bf16(v: UOp) -> UOp:
   """Convert f32 to bf16 with round-to-nearest-even. BF16 is the upper 16 bits of F32 with rounding."""
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
