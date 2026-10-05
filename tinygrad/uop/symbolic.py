@@ -251,7 +251,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
    lambda cond, t, f: cond.where(f,t) if not f.is_invalid else None),
   # in cond.where(t, f), uses of cond fold to True within t and False within f
-  (UPat.var("cond", dtype=dtypes.bool).where(UPat.var("t"), UPat.var("f")), fold_where_closure),
+  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   (UPat.var("gate").where(UPat.var("x"), 0) != 0, lambda gate,x: gate & (x != 0)),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),

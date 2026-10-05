@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, get_call_written_bufs
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -33,6 +33,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
+  linear = linear.substitute({u: u.rtag("scratch") for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}, walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear
@@ -60,26 +61,24 @@ class CapturedJit(Generic[ReturnType]):
   def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 
   @functools.cached_property
-  def _written_uops(self) -> set[UOp]:
-    return {b for call in self.linear.toposort() if call.op is Ops.CALL for b in get_call_written_bufs(call)}
+  def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort(enter_calls=False) if u.op is Ops.BUFFER}
 
   @functools.cached_property
   def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
     return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
+    concrete = tuple(_copy_input(u) if u in self._jit_bufs else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
     run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
   def free_intermediates(self):
-    for u in self._written_uops:
-      if u.op is not Ops.BUFFER or (buf:=u.arg.buffer) is None: continue
-      for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
-        if b.is_allocated(): b.deallocate()
-        if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated(): base.deallocate()
+    bufs = [u.arg.buffer for u in self._jit_bufs if u.tag == "scratch"]
+    if not (freed:=[b for b in flatten(b.bufs if isinstance(b, MultiBuffer) else [b] for b in bufs) if b.is_allocated()]): return
+    for b in freed: b.deallocate()
+    self.__dict__.pop("linear", None) # should be relinked
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]

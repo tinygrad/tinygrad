@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, ContextVar
+from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes, DType, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
@@ -14,8 +14,6 @@ if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
-
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
@@ -387,23 +385,16 @@ class Compiled:
   pm_batch:Any = None
   pm_encode:Any = None
   pm_lower:Any = None
+  pm_bufferize:Any = None # one for all devices: each adds the rules of the placeholders it owns, its tags start with its name
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
-    from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
     self.device, self.allocator, self.runtime_t, self.renderers = device, allocator, runtime, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
     self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
-
-    # hcq2
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
-      (UPat(Ops.PARAM, tag="program", name="b"),
-       lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
-    ])
 
     # profiling
     self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs
@@ -419,36 +410,41 @@ class Compiled:
   def renderer(self) -> Renderer: return self._select_renderer()
 
   @property
-  def compiler(self) -> Compiler:
-    if (ret:=self.renderer.compiler) is None: raise RuntimeError(f"no compiler for {self.device}")
-    return ret
+  def compiler(self) -> Compiler: return self.renderer.compiler
 
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 
   @functools.cache
-  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
+  def rt_allocator(self, spec:BufferSpec) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
 
   @functools.cache
-  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
-    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
-    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
+  def rt_buffer(self, spec:BufferSpec) -> Buffer:
+    return Buffer(self.device, self.rt_allocator(spec).size, dtypes.uint8, options=spec, preallocate=True)
+
+  def tag(self, *parts:str) -> str: return to_name(self.device, *parts) # of the placeholders it owns
+  def program_buffer(self, b:UOp) -> Buffer:
+    return self.prog_bufs.setdefault(b, Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
     return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
 
+  @functools.cached_property
+  def error_state(self) -> Buffer: return Buffer(self.host, 1, dtypes.int64, options=BufferSpec(nolru=True), preallocate=True)
+
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     timeout = timeout if timeout is not None and self.can_recover else None
-    st, done = time.perf_counter(), sig[0]
-    while done < value:
+    st, done, err = time.perf_counter(), sig[0], self.error_state.host.view(fmt='q')
+    while done < value and not err[0]:
       if done != (done:=sig[0]): st = time.perf_counter()
       elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
       elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
+    if err[0]: raise RuntimeError(f"{self.device} failed with {err[0]}")
 
   def synchronize(self, timeout:int|None=None):
-    try:
-      self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
-      for d, v in self.pending.items(): d._wait_signal(d.timeline.host.view(fmt='Q'), v, timeout)
+    for d in [*self.pending]: d._wait_signal(d.timeline.host.view(fmt='Q'), self.pending.pop(d), timeout) # a failed peer raises its own error, once
+    for dn in Device._opened_devices: Device[dn].pending.pop(self, None) # waited (or failed) here, the peers need not
+    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
       raise
@@ -507,7 +503,7 @@ class Compiled:
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
-    if self.pm_encode is None: return
+    if not self.pm_encode.patterns: return
     from tinygrad.tensor import Tensor
     tdiffs = []
     for _ in range(5):

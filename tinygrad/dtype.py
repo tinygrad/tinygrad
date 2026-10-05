@@ -195,7 +195,7 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
+DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("void", "weak", "_"))}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
@@ -263,7 +263,7 @@ def float_to_fp8(x: float, dtype: DType) -> int:
     res, half = mantissa >> shift, half_ulp << shift
     round_bits = (xbits | (1 << 52)) & ((half << 1) - 1)
     if round_bits > half or (round_bits == half and res & 1): res += 1
-  return 0 if dtype in dtypes.fp8_fnuz and res == 0 else int(res | sign)  # fnuz has no negative zero
+  return 0 if dtype in dtypes.fp8_fnuz and res == 0 else res | sign  # fnuz has no negative zero
 
 def fp8_to_float(x: int, dtype: DType) -> float:
   assert dtype in dtypes.fp8s, "Only for fp8s"

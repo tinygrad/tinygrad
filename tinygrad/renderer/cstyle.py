@@ -14,7 +14,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BINARY, name="x"), lambda ctx,x: f'const unsigned char {ctx[x]}[] = "' + ''.join(f'\\x{b:02x}' for b in x.arg) + '";'),
 
   # range/loop/if/endif
-  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda ctx,x: "for (;;) {"),
+  (UPat(Ops.RANGE, dtypes.void), lambda ctx: "for (;;) {"),
   (UPat(Ops.RANGE, name="x"),
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE), UPat(name="c", dtype=dtypes.bool))), lambda ctx,c: f"  if (!({ctx[c]})) {{ break; }}\n}}"),
@@ -37,8 +37,6 @@ base_rewrite = PatternMatcher([
   (UPat.cvar("c").cast(), lambda ctx,c: str(c.val)),
 
   # casting
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
-    if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(({ctx._render_dtype(x.dtype, addrspace=x.addrspace)})({ctx[x.src[0]]}))"
    if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
@@ -71,8 +69,8 @@ base_rewrite = PatternMatcher([
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{ctx.fn_names[body]}({', '.join(ctx[x.src[s+1]] for s in sorted(u.arg.slot for u in body.src if u.op is Ops.PARAM))});"),
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{ctx.fn_names[body]}("
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src if u.op is Ops.PARAM))});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -224,6 +222,8 @@ class CStyleLanguage(Renderer):
       if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST, Ops.CUSTOM_FUNCTION}: continue
       if u.op == Ops.STACK and len(u.src) == 0: continue
       if u.op is Ops.AFTER:
+        # the AFTER-wrapped NOOP bound of a void RANGE is never rendered
+        if u.src[0].op is Ops.NOOP: continue
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.SINK:
@@ -265,14 +265,14 @@ class CStyleLanguage(Renderer):
 
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
+  def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
     prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
     prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in UOp.sink(*uops).toposort() if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
     for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
       self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)
-      params = ', '.join(("volatile " if p.arg.volatile else "") +
-                         f"{self._render_dtype(p.dtype, addrspace=p.addrspace, override_ptr=p.addrspace != AddrSpace.ALU)} {n}" for n,(p,_) in bufs)
+      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
       prefix.append(f"static inline void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
       call_bodies.extend(body.src)
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
@@ -290,7 +290,7 @@ class ClangRenderer(CStyleLanguage):
   barrier = "__atomic_thread_fence(__ATOMIC_SEQ_CST);"
   buffer_suffix = " restrict"
   type_map = {**CStyleLanguage.type_map, dtypes.bool:"_Bool", dtypes.f16:"__fp16"}
-  code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.TRUNC, Ops.RECIPROCAL]}),
+  code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.RECIPROCAL]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
@@ -368,8 +368,6 @@ class MetalRenderer(CStyleLanguage):
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
-  var_prefix = "constant "
-  var_suffix = "&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}

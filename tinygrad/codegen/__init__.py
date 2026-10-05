@@ -4,7 +4,7 @@ from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
-from tinygrad.uop.render import pyrender
+from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext
@@ -30,10 +30,8 @@ from tinygrad.helpers import all_same, all_int, argsort, partition, to_function_
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
-def do_number_param(ctx:list[int], x:UOp):
-  if x.arg.slot != -1: return None
-  ctx[0] += 1
-  return x.replace(arg=replace(x.arg, slot=ctx[0]-1))
+def do_number_param(ctx:tuple[int, dict[str, int]], x:UOp): # after the params, one slot per name
+  if x.is_variable: return x.replace(arg=replace(x.arg, slot=ctx[0] + ctx[1].setdefault(x.arg.name, len(ctx[1]))))
 
 pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
@@ -142,10 +140,10 @@ devectorizer2 = pm_mops+PatternMatcher([
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
-  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="b"), UPat(Ops.STACK, name="s")), name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="b"), UPat(Ops.STACK, name="s")), name="x"),
    lambda b,s,x: UOp.stack(*[x.replace(src=(b,u)) for u in s.src])),
   # INDEX into RESHAPE moves the RESHAPE
-  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="b"), UPat(Ops.RESHAPE, name="s"))),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="b"), UPat(Ops.RESHAPE, name="s"))),
    lambda b,s: b.index(s.src[0]).reshape(s.shape)),
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
@@ -273,7 +271,7 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
-  if DEBUG >= 5: print(pyrender(ast))
+  if DEBUG >= 5: print(render_uir(list(ast.toposort())))
   if SPEC: type_verify(ast, spec_tensor)
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
@@ -322,7 +320,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, name="devectorize2")
 
   # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
@@ -378,9 +376,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
-  # put unnumbered variable PARAMs in slots
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
-  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
+  # put the variables in slots
+  num_params = max([x.arg.slot + 1 for x in sink.toposort() if x.op is Ops.PARAM and not x.is_variable], default=0)
+  sink = graph_rewrite(sink, pm_number_params, ctx=(num_params, {}), name="number variables", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC:
@@ -388,8 +386,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     if os.environ.get("DBGTV"):
       try: type_verify(sink, spec_program)
       except RuntimeError:
-        from tinygrad.uop.render import print_uops
-        print_uops(list(sink.toposort()))
+        print(render_uir(list(sink.toposort())))
         raise
     else: type_verify(sink, spec_program)
 

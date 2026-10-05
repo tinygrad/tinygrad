@@ -1,7 +1,7 @@
 from typing import Iterator
 import functools, itertools
 from dataclasses import dataclass, field, replace
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
@@ -95,7 +95,6 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   return new_srcs
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.STAGE, Ops.INDEX}: return None
   return x.replace(src=tuple(create_bufferize_and_index_srcs(ctx, x)))
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
@@ -122,8 +121,8 @@ def _stack_select(r0:UOp, srcs:list[UOp], lo:int, hi:int) -> UOp:
   return (r0 < mid).where(_stack_select(r0, srcs, lo, mid), _stack_select(r0, srcs, mid, hi))
 
 def convert_stack_to_where(ctx:IndexingContext, x:UOp):
-  # only data STACKs: shape tuple STACKs aren't in range_map, the empty shape tuple is void
-  if x not in ctx.range_map or x.dtype == dtypes.void: return None
+  # only data STACKs: shape tuple STACKs aren't in range_map
+  if x not in ctx.range_map: return None
   # use the src list directly, a transient STACK of mid-rangeify srcs violates the spec shape rule
   srcs = create_bufferize_and_index_srcs(ctx, x)
   r0 = ctx.range_map[x][1][0]
@@ -141,7 +140,7 @@ pm_apply_rangeify = PatternMatcher([
   # STACK -> WHERE select on the leading range
   (UPat(Ops.STACK, name="x"), convert_stack_to_where),
   # finally, apply_rangeify
-  (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
+  (UPat(GroupOp.All-{Ops.STAGE, Ops.INDEX}, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
 ])
@@ -206,7 +205,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
-    if x.op in {Ops.CALL, Ops.LINEAR}: continue
+    if x.op is Ops.CALL: continue
 
     # AFTER doesn't have range
     if x.op is Ops.AFTER: continue
@@ -297,7 +296,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
 
     # REDUCE creates ranges for the axes it is reducing
-    if x.op is Ops.REDUCE and x.arg[1]:
+    if x.op is Ops.REDUCE:
       rngs = tuple(rctx.new_range(s) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
 
     if debug:

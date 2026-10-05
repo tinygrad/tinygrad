@@ -86,7 +86,6 @@ def shard_subview(full:UOp, multi:UOp) -> UOp:
 
 def alu_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
-  if not multis: return None
   sharding = multis[0].sharding
   target = multis[0]
   def can_handle(m:UOp) -> bool:
@@ -188,7 +187,6 @@ def flip_multi(root:UOp, multi:UOp):
 def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
-  if not multis: return None
   sharding = multis[0].sharding
   if all(m.sharding == sharding for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
@@ -298,7 +296,7 @@ multi_pm = PatternMatcher([
   # rewrite value-producing calls explicitly for UNSHARD
   # NOTE: lambda for late binding, rewrite_into_function references multi_pm
   (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call)),
-  (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
+  (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),

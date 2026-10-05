@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv
+from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv, ContextVar
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -1956,15 +1956,17 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   st._write_sgpr(SGPR_COUNT - 16 + 4, hw_id)  # HW_REGISTERS[4] = HW_ID
   return st
 
+# lift assembly to a CALL graph and execute
+ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND", "CPU")
+
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   lifted = None
-  if getenv("ASM_CALL"):
+  if ASM_CALL:
     from test.mockgpu.amd.call import lift
-    backend = getenv("ASM_CALL_BACKEND", "CPU")
-    prg = lift(lib, lib_sz, arch, backend)
-    lifted = (prg, get_runtime(backend, prg))
+    prg = lift(lib, lib_sz, arch, ASM_CALL_BACKEND)
+    lifted = (prg, get_runtime(ASM_CALL_BACKEND, prg))
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512

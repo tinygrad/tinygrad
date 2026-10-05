@@ -370,7 +370,8 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     # schedule graph CALL nodes have a link to jump to codegen
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
-    viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
+    # steps is the presentation list; use the trace index from the step's query (extra presentation steps break 1:1 alignment)
+    viz_kernel = next(int(s["query"].rsplit("=", 1)[1]) for s in lst[sched_idx]["steps"] if s["name"] == "View Kernel Graph")
     graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
@@ -488,9 +489,9 @@ class TestVizIntegration(unittest.TestCase):
     bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
     assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
     # Ops.LINEAR renders
-    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
-    self.assertIn("Ops.SINK", lin_render)
-    self.assertIn("Ops.CUSTOMI", lin_render)
+    lin_render = ansistrip(get_render(viz.data, steps[lin_idx]["query"])["src"])
+    self.assertIn("sink", lin_render)
+    self.assertIn("customi", lin_render)
     # Ops.SOURCE renders
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertIn("undeclared_name", src_render)
@@ -1198,8 +1199,12 @@ class TestCLI(unittest.TestCase):
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
     with write_files(viz) as files:
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+      with Context(NO_COLOR=1):
+        uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
     self.assertEqual(len(codegen_count), 4)
+    self.assertIn(" = linear ", uops)
+    self.assertIn(" = call ", uops)
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):

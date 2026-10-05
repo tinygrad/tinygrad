@@ -16,8 +16,9 @@ const darkenHex = (h, p = 0) =>
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
-const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
-  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
+const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[38;2;(\d+);(\d+);(\d+)m([\s\S]*?)\u001b\[0m)|(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
+  ([_, r, g, b, rgb_st, code, colored_st, st]) => ({ st: rgb_st ?? colored_st ?? st, color: r != null ? `rgb(${r},${g},${b})`
+    : code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
 const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof n === "string" ? parseColors(n) : n).join("span")
                        .style("color", d => d.color).text(d => d.st)).node();
@@ -1107,13 +1108,9 @@ async function main() {
 
 // **** collapse/expand
 
-let isCollapsed = false;
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
-  isCollapsed = !isCollapsed;
-  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed");
   e.currentTarget.blur();
-  e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -1206,6 +1203,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
+  // cmd shift \ toggles sidebars
+  if (event.code === "Backslash" && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    return document.querySelector(".collapse-btn").click();
+  }
 });
 
 main()

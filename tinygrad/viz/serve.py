@@ -2,7 +2,7 @@
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
@@ -40,21 +40,11 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, CallInfo
-from tinygrad.uop.render import print_uops, pyrender
+from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.render import render_uir, pyrender, uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
-uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
-               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
-               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
-               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
-               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
-               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
-               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
 addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
 
@@ -92,6 +82,7 @@ def load_rewrites(data:VizData) -> None:
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
         lin_idx = None
       if s.name == "View Program": ki = _reconstruct(data, s.sink, depth=1).src[0].arg
+      if s.name == "View Tensor Graph": steps.append(create_step("View Input UOps", ("/input-uops", i, len(steps)), j, depth=0))
     for key in k.keys: data.ref_map[canonicalize_ast(key) if isinstance(key, UOp) else key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
@@ -170,13 +161,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 
-def _reconstruct(data:VizData, a:int, depth:int|None=None):
+def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
   if depth is None and a in data.all_uops: return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
-  # mirror of the trace_num encoding, viz must not save buffers
-  if op is Ops.CALL and isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-    arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs),
-                                   inputs=tuple((_reconstruct(data, u, depth), d, i) for u, d, i in aux.inputs)))
   if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
   ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
@@ -584,9 +571,7 @@ def is_acc_operand(inst, name:str) -> bool:
   return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amdgpu_cfg(code:bytes, arch:str, off:int=0) -> dict:
-  # decode
-  pc_table = amd_decode(code, arch, off)
+def get_cfg(pc_table:dict[int, Inst]) -> dict:
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
@@ -632,21 +617,27 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
-  if fmt == "uops":
-    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
+  if fmt in {"input-uops", "uops"}:
+    if fmt.startswith("input"): uops = list(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink).toposort())
+    else:
+      if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
+      if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+      uops = list(sink.src[1].toposort())[:-1]
+    ret:dict = {}
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(uops)
+    return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
-    ret:dict = {}
+    ret = {}
     renderer, idx = data
     if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     lib:bytes = sink.src[3].arg
     if (target:=renderer.target.arch).startswith("gfx"):
       with soft_err(lambda err: ret.update(err)):
-        ret.update(amdgpu_cfg((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr))
+        ret.update(get_cfg(amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
       with soft_err(lambda err: ret.update(err)):
         from tinygrad.runtime.autogen import amdgpu_kd
         kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))

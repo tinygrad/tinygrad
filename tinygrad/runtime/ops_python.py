@@ -81,7 +81,8 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env:
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
+          or (u.op is Ops.AFTER and u.src[0].op is Ops.NOOP): # the AFTER-wrapped NOOP bound of a void RANGE
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -120,7 +121,7 @@ class PythonProgram(Program['PythonDevice']):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
-            scale = u.src[0].dtype.itemsize // u.src[0].src[0].dtype.itemsize if u.src[0].op is Ops.BITCAST else 1
+            scale = v.dtype.itemsize // v.src[0].dtype.itemsize if (v:=u.src[0].without_after).op is Ops.BITCAST else 1
             for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
         elif u.op is Ops.RANGE:
