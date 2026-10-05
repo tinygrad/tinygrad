@@ -90,13 +90,13 @@ def main(args) -> None:
             print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
             if v["src"]:
               print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
-        elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
+        elif "uop" in m: print(emit(m["graph"] if print_graph else ''.join(t["st"] for t in m["uop"])))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
-    if data.get("src") is not None: print(emit(data["src"]))
+    if data.get("src") is not None: print(emit(''.join(t["st"] for t in data["src"]) if isinstance(data["src"], list) else data["src"]))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
