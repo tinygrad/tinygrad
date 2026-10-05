@@ -29,7 +29,6 @@ class LinearScanRegallocContext:
       if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
     # allocate registers
-    self.locals: dict[UOp, UOp] = {}
     self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point

@@ -21,7 +21,7 @@ from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_encode, usb_bufferize
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -794,6 +794,8 @@ class PCIIface(PCIIfaceBase):
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
       tl = d.timeline.host.view(fmt='Q')
       tl[0] = tl[1]
+      d.error_state.host.view(fmt='q')[0] = 0
+      if d.is_usb: usb_reset(d)
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -891,10 +893,7 @@ class AMDDevice(Compiled):
     self.max_private_segment_size = 0
     Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=self.tag("scratch"), name="b"), lambda b, d=self: d.scratch_buffer(b.max_numel())),
                                              (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
-
-    if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
-      self.pm_batch, self.pm_lower, self.pm_encode = pm_usb_batch, pm_usb_lower, AMDDevice.pm_encode + pm_usb_encode
-      Compiled.pm_bufferize += usb_bufferize(self)
+    if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0
