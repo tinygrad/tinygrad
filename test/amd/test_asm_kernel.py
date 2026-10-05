@@ -8,7 +8,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -18,6 +18,8 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
+
+from test.mockgpu.amd.emu import ASM_CALL as _ASM_CALL
 
 @dataclass(frozen=True)
 class InstInfo:
@@ -208,6 +210,7 @@ def custom_data_deps(A:UOp) -> UOp:
 class TestAsmKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
 
+  @Context(ASM_CALL=1)
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
