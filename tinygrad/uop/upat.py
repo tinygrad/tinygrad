@@ -130,8 +130,8 @@ pm_renderer = PatternMatcher([
   (UPat(Ops.OR, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=("(" + ' or '.join(y.arg[0] for y in x.src) + ")", dtypes.void))),
 
   (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=(x.arg[0].format(*[y.arg[0] for y in x.src]), dtypes.void))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"),
-   lambda x,c,g: x.replace(arg=(x.arg[0]+f".src[{c.val}]", dtypes.void)))
+  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c"))),
+   lambda x,c: x.replace(arg=(x.arg[0]+f".src[{c.val}]", dtypes.void)))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:

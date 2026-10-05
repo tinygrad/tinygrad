@@ -224,8 +224,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** stage rules **
 
   # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
-  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"),
-   lambda x,stg: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+  (UPat(Ops.STAGE, src=(UPat.var("x"),)),
+   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
 
   # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
   (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
@@ -247,7 +247,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),
 
   # store a buffer's own current contents back into itself: TestAssign.test_assign_from_alias
-  (UPat.var("buf").after(UPat.var("buf").store(UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1"))), lambda buf,src,a1:a1),
+  (UPat.var("buf").after(UPat.var("buf").store(UPat.var("buf").after(UPat.var("buf").store(UPat()), name="a1"))), lambda buf,a1:a1),
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
