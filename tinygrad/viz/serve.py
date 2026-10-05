@@ -620,17 +620,20 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
-  if fmt == "input-uops":
-    sink = unwrap(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink))
-    return {"src":render_ssa(list(sink.toposort()))}
-  if fmt == "uops":
-    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":render_ssa(list(unwrap(sink).src[1].src))}
+  if fmt in {"input-uops", "uops"}:
+    if fmt.startswith("input"): uops = list(unwrap(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink)).toposort())
+    else:
+      if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
+      if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+      uops = list(unwrap(sink).src[1].src)
+    ret:dict = {}
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_ssa(uops)
+    return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
-    ret:dict = {}
+    ret = {}
     renderer, idx = data
     if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
