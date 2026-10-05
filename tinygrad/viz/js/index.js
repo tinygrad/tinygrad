@@ -1077,11 +1077,16 @@ async function main() {
   showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
   showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
-  metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
-  if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
-  if (step.trace) metadata.appendChild(traceBlock(step.trace));
-  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  let uop = data.uop != null ? metadata.querySelector("#uop") : null;
+  for (const child of [...metadata.children]) if (child !== uop) child.remove();
+  if (ckey.includes("rewrites")) for (const label of [showIndexing.label, showCallSrc.label, showSink.label]) metadata.insertBefore(label, uop);
+  if (step.code_line != null) metadata.insertBefore(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), uop);
+  if (step.trace) metadata.insertBefore(traceBlock(step.trace), uop);
+  if (data.uop != null) {
+    if (uop == null) { uop = metadata.appendChild(codeBlock(data.uop, "txt", { wrap:false })); uop.id = "uop"; }
+    else { uop.querySelector("code").replaceChildren(colored(data.uop)); }
+    uop.classList.toggle("full-height", step.match_count === 0);
+  }
   // ** multi graph in one page
   if (!step.match_count) return;
   const rewriteList = metadata.appendChild(document.createElement("div"));
