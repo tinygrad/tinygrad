@@ -197,7 +197,7 @@ class TestViz(unittest.TestCase):
       a = UOp(Ops.PYLITERAL, src=tuple(src), arg=arg)
       exec_rewrite(a, [PatternMatcher([])])
     a2 = next(viz.get_details(0, 0))["graph"][id(a)]
-    self.assertEqual(ansistrip(a2["label"]), "PYLITERAL\n'x\nyzww\nw'")
+    self.assertEqual(ansistrip(a2["label"]), "PYLITERAL\nx\nyzww\nw")
 
   def test_inf_loop(self):
     a = UOp.const(3)
@@ -213,7 +213,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
     # fallback to REWRITE_ERROR with the error message
-    self.assertIn("REWRITE_ERROR\n'Traceback", graphs[2]["label"])
+    self.assertIn("REWRITE_ERROR\nTraceback", graphs[2]["label"])
     # cut after the first error, instead of going through all REWRITE_STACK_LIMIT matches
     self.assertEqual(len(graphs), 3)
 
