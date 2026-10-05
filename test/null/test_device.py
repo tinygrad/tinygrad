@@ -24,6 +24,11 @@ class TestDevice(unittest.TestCase):
     with self.assertRaises(ModuleNotFoundError):
       Device["TYPO"]
 
+  def test_synchronize_disallowed_device_usage(self):
+    # a gc during codegen (ALLOW_DEVICE_USAGE=0) can free a buffer, which synchronizes the devices it is mapped on
+    (dev:=Device[Device.DEFAULT]).synchronize()
+    with Context(ALLOW_DEVICE_USAGE=0): dev.synchronize()
+
   @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
   def test_nonexistent_renderer(self):
     with self.assertRaisesRegex(RuntimeError, "has no renderer"):

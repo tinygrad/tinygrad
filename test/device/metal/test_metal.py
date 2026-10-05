@@ -1,5 +1,7 @@
 import unittest
-from tinygrad.device import CompileError, Device, BufferSpec
+from tinygrad import dtypes
+from tinygrad.device import CompileError, Device, Buffer, BufferSpec
+from tinygrad.helpers import Context
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -60,3 +62,14 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
     self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before+size, msg=f"{curr=} - {before=}")
     device.allocator.free(buf, size, BufferSpec(nolru=True))
     self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before, msg=f"{curr=} - {before=}")
+
+  def test_free_disallowed_device_usage(self):
+    # a gc during codegen (ALLOW_DEVICE_USAGE=0) can free a buffer. a free that stops early leaves the released MTLBuffer in useResources
+    device = Device['METAL']
+    for d in (Device[device.host], device): d.synchronize()
+    buf = Buffer("METAL", 64, dtypes.uint8, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf.get_buf(device.host) # the host programs map it, so the free synchronizes the host
+    mtl = buf.get_storage().meta
+    with Context(ALLOW_DEVICE_USAGE=0): buf.deallocate()
+    self.assertFalse(mtl.retain) # released by _free
+    self.assertNotIn(mtl.value, device.resources)

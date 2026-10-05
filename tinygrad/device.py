@@ -19,7 +19,7 @@ ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-    self._opened_devices:set[str] = set()
+    self._opened_devices:dict[str, Compiled] = {}
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
@@ -37,7 +37,7 @@ class _Device:
   def __get_canonicalized_item(self, ix:str) -> Compiled:
     ret = self.get_class(ix)(ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
-    self._opened_devices.add(ix)
+    self._opened_devices[ix] = ret
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
@@ -443,7 +443,7 @@ class Compiled:
 
   def synchronize(self, timeout:int|None=None):
     for d in [*self.pending]: d._wait_signal(d.timeline.host.view(fmt='Q'), self.pending.pop(d), timeout) # a failed peer raises its own error, once
-    for dn in Device._opened_devices: Device[dn].pending.pop(self, None) # waited (or failed) here, the peers need not
+    for d in Device._opened_devices.values(): d.pending.pop(self, None) # waited (or failed) here, the peers need not
     try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
