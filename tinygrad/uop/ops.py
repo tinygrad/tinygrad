@@ -107,14 +107,6 @@ def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
     if not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
   return src[0] if len(src) == 1 else UOp(Ops.STACK, src=src)
 
-def consumer_map_from_toposort(lst:Iterable[UOp]):
-  ret: dict[UOp, dict[UOp, None]] = {}
-  for u in lst:
-    ret[u] = {}
-    for s in u.src:
-      if s in ret: ret[s][u] = None
-  return ret
-
 def promo_dtype(src:tuple[UOp,...]) -> DType:
   dts = [x.dtype for x in src]
   return dts[0] if all_same(dts) else least_upper_dtype(*dts)
@@ -202,12 +194,10 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(op, src, arg, tag))
     if metadata is not None: all_metadata[created] = metadata
     if SPEC > 1:
-      from tinygrad.uop.spec import spec_full, test_pyrender
+      from tinygrad.uop.spec import spec_full
       if SPEC > 2:
         # SPEC=3 checks the shape
         _ = created._shape
-        if SPEC > 3:
-          test_pyrender(created)
       with Context(CHECK_OOB=0): fret = cast(bool|None, spec_full.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
@@ -543,9 +533,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     tag = tuple(t.trace_num if isinstance(t, UOp) else t for t in self.tag) if isinstance(self.tag, tuple) else self.tag
     # the trace must not retain the device Buffer: store a placeholder instead (the real one would pin memory and fail pickling)
     arg = replace(self.arg, buffer=cast("Buffer", object())) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
-    # hcq2 calls have BUFFER UOps in the arg, tracing must store them as trace_nums
-    if isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-      arg = replace(arg, aux=replace(aux, written_bufs=tuple(b.trace_num for b in aux.written_bufs)))
     uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg, tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
 
@@ -1184,9 +1171,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ctx[u] = cast(str, pm.rewrite(u, ctx=ctx))
     return ctx[s]
 
-  def pyrender(self):
-    from tinygrad.uop.render import pyrender
-    return pyrender(self)
+  def render_uir(self) -> str:
+    from tinygrad.uop.render import render_uir
+    return render_uir(self)
 
   # *** uop high level syntactic sugar ***
 
@@ -1261,7 +1248,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
-      f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
+      f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
     # an external C call is a CALL on a CUSTOM_FUNCTION body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))

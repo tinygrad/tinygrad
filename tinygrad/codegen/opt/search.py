@@ -1,7 +1,6 @@
 import math, time, traceback, signal
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
-from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
@@ -118,7 +117,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG:
     print("BEAM_SEARCH:")
-    print(pyrender(s.ast.replace(arg=None)))
+    print(s.ast.replace(arg=None).render_uir())
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {s.colored_shape()}")
 
   try:

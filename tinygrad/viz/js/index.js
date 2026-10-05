@@ -1081,7 +1081,7 @@ async function main() {
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) metadata.appendChild(traceBlock(step.trace));
-  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "txt", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
   // ** multi graph in one page
   if (!step.match_count) return;
   const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -1108,13 +1108,9 @@ async function main() {
 
 // **** collapse/expand
 
-let isCollapsed = false;
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
-  isCollapsed = !isCollapsed;
-  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed");
   e.currentTarget.blur();
-  e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -1207,6 +1203,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
+  // cmd shift \ toggles sidebars
+  if (event.code === "Backslash" && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    return document.querySelector(".collapse-btn").click();
+  }
 });
 
 main()

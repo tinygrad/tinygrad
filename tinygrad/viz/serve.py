@@ -2,7 +2,7 @@
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
@@ -40,8 +40,8 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, CallInfo
-from tinygrad.uop.render import render_uir, pyrender, uops_colors
+from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.render import render_uir, uops_colors
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -82,7 +82,6 @@ def load_rewrites(data:VizData) -> None:
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
         lin_idx = None
       if s.name == "View Program": ki = _reconstruct(data, s.sink, depth=1).src[0].arg
-      if s.name == "View Tensor Graph": steps.append(create_step("View Input UOps", ("/input-uops", i, len(steps)), j, depth=0))
     for key in k.keys: data.ref_map[canonicalize_ast(key) if isinstance(key, UOp) else key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
@@ -98,11 +97,6 @@ class GraphRewriteDetails(TypedDict):
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
-def pystr(u:UOp) -> str:
-   # pyrender may check for shape mismatch
-  try: return pyrender(u)
-  except Exception: return str(u)
-
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
@@ -164,9 +158,6 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
 def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
   if depth is None and a in data.all_uops: return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
-  # mirror of the trace_num encoding, viz must not save buffers
-  if op is Ops.CALL and isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-    arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs)))
   if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
   ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
@@ -174,7 +165,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
-  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
+  yield {"graph":uop_to_json(data, next_sink), "uop":next_sink.render_uir(), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
@@ -182,8 +173,10 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr), "_sink":new_sink}
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":new_sink.render_uir(),
+           "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
+           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
+           "upat":(upat_loc, match_repr), "_sink":new_sink}
     if not ctx.bottom_up: next_sink = new_sink
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
@@ -620,14 +613,11 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
-  if fmt in {"input-uops", "uops"}:
-    if fmt.startswith("input"): uops = list(_reconstruct(viz_data, viz_data.trace.rewrites[i][data].sink).toposort())
-    else:
-      if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
-      if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
-      uops = list(sink.src[1].toposort())[:-1]
+  if fmt == "uops":
+    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     ret:dict = {}
-    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(uops)
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort())[:-1])
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}

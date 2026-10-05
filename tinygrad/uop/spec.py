@@ -1,10 +1,8 @@
-import math, functools
-from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
   CustomFunction
-from tinygrad.uop.render import render_uir, pyrender
-from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
-from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
+from tinygrad.uop.render import render_uir
+from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid
+from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
 from tinygrad.device import is_disk_device
 
 # ***** uop helpers *****
@@ -36,7 +34,6 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
-  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
   with Context(TRACK_MATCH_STATS=0):
     for i,u in enumerate(lst):
@@ -290,30 +287,3 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
                                                   Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),), allow_any_len=True), lambda: True),
 ])
-
-# **** pyrender (move this) ****
-
-# circular-import-safe eval globals for pyrender round-tripping (lazy: codegen/schedule/renderer are heavy)
-@functools.cache
-def pyrender_globals() -> dict[str, Any]:
-  from tinygrad.codegen.opt import Opt, OptOps
-  from tinygrad.schedule.rangeify import BufferizeOpts
-  from tinygrad.renderer import Estimates
-  return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
-          "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates, "CallInfo": CallInfo, "CustomFunction": CustomFunction}
-def eval_pyrender(code:str) -> UOp:
-  lcls:dict[str, Any] = {}
-  exec(code, pyrender_globals(), lcls)
-  return lcls['ast']
-
-def test_pyrender(test_ast:UOp, assert_parents=True):
-  try: code = pyrender(test_ast)
-  except NotImplementedError: return None  # this is okay, not all ops can be pyrendered
-  ast:UOp = eval_pyrender(code)
-  if ast is not test_ast:
-    if assert_parents:
-      for u in test_ast.toposort(): test_pyrender(u, assert_parents=False)
-    raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
-  return code
