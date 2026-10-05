@@ -625,7 +625,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     return {"src":render_ssa(list(sink.toposort()))}
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":render_ssa(list(unwrap(sink).src[1].src))}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":render_ssa(list(unwrap(sink).src[1].toposort())[:-1])}
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
