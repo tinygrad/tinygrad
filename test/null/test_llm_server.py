@@ -104,7 +104,8 @@ class TestLLMServer(unittest.TestCase):
       for token in (300, 301, 999):
         ids.append(token)
         yield token
-    with patch.object(self.mock_model, "generate", side_effect=generate):
+    with patch.object(self.mock_model, "generate", side_effect=generate), \
+         patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
       chunks = list(self.client.chat.completions.create(
         model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, stream_options={"include_usage": True}))
     last_chunk = chunks[-1]
@@ -112,6 +113,19 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(last_chunk.usage.prompt_tokens, 3)
     self.assertEqual(last_chunk.usage.completion_tokens, 2)
     self.assertEqual(last_chunk.usage.total_tokens, 5)
+
+  def test_thinking_template_options(self):
+    cases = [({}, True, None), ({"reasoning_effort": "low"}, True, "low"), ({"reasoning_effort": "none"}, False, "none"),
+             ({"chat_template_kwargs": {"enable_thinking": False}}, False, None),
+             ({"reasoning_effort": "high", "chat_template_kwargs": {"reasoning_effort": "low"}}, True, "low")]
+    with patch.object(self.server, 'template', wraps=self.server.template) as template:
+      for options, enabled, effort in cases:
+        with self.subTest(options=options):
+          self.client.chat.completions.create(model="test", messages=[{"role": "user", "content": "Hello"}], extra_body=options)
+          kwargs = template.render.call_args.kwargs
+          self.assertEqual(kwargs['enable_thinking'], enabled)
+          self.assertEqual(kwargs.get('reasoning_effort'), effort)
+          if effort is None: self.assertNotIn('reasoning_effort', kwargs)  # preserve the template's own default
 
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
@@ -219,6 +233,40 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(len(content_chunks), 2)
     self.assertEqual(chunks[-1].choices[0].finish_reason, "length")
 
+  def test_context_exhaustion_reports_length(self):
+    # generate() exhausts its iterator at max_context; it does not yield an EOS.
+    def generate(ids, **kwargs):
+      ids.append(300)
+      yield 300
+    for stream in (True, False):
+      with self.subTest(stream=stream), patch.object(self.mock_model, "generate", side_effect=generate), \
+           patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
+        response = self.client.chat.completions.create(model="test", messages=[{"role":"user", "content":"Hello"}],
+                                                       stream=stream, max_completion_tokens=2048)
+        if stream:
+          self.assertEqual(list(response)[-1].choices[0].finish_reason, "length")
+        else:
+          self.assertEqual(response.choices[0].finish_reason, "length")
+          self.assertEqual(response.usage.completion_tokens, 1)
+
+  def test_one_token_budget_hit_and_miss(self):
+    # A one-token client budget, not an EOS or a broken cache, can truncate a thinking-only reply.
+    for cached in (0, 2):
+      for field in ("max_tokens", "max_completion_tokens"):
+        with self.subTest(cached=cached, field=field), \
+             patch.object(self.mock_model, "get_start_pos", return_value=cached), \
+             patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
+             patch.object(self.server.template, "render", return_value="<think>\n"), \
+             patch("tinygrad.llm.serve.stderr_log") as log:
+          chunks = list(self.client.chat.completions.create(model="test", messages=[{"role":"user", "content":"Hello"}],
+            stream=True, stream_options={"include_usage": True}, extra_body={field:1}))
+          choices = [c.choices[0] for c in chunks if c.choices]
+          self.assertEqual(choices[-1].finish_reason, "length")
+          self.assertEqual("".join(getattr(c.delta, "reasoning_content", "") or "" for c in choices), "Hello")
+          self.assertEqual(chunks[-1].usage.completion_tokens, 1)
+          self.assertEqual(chunks[-1].usage.prompt_tokens_details.cached_tokens, cached)
+          self.assertIn("finish:length (max_tokens=1)", "".join(c.args[0] for c in log.call_args_list))
+
   def test_max_tokens_non_streaming(self):
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
     resp = self.client.chat.completions.create(
@@ -247,7 +295,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok.decode = Mock(return_value="")
     cls.mock_tok.preset = "qwen2"
     cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
-    cls.mock_tok.is_end = Mock(return_value=False)
+    cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid == 999)
 
     cls.mock_model = Mock()
     cls.mock_model.max_context = 4
@@ -275,7 +323,7 @@ class TestLLMToolCalls(unittest.TestCase):
   def set_output(self, text:str):
     pieces = dict(enumerate(text, 1))
     self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([*pieces, 999]))
 
   @staticmethod
   def tools():
@@ -354,7 +402,7 @@ class TestTransformerGenerate(unittest.TestCase):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0], [0]])
+    self.assertEqual(calls, [[0] * (TEST_CONFIG.max_context - 8)] * 2)
 
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)
