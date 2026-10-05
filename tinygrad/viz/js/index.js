@@ -1108,13 +1108,9 @@ async function main() {
 
 // **** collapse/expand
 
-let isCollapsed = false;
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
-  isCollapsed = !isCollapsed;
-  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed");
   e.currentTarget.blur();
-  e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -1207,6 +1203,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
+  // cmd shift \ toggles sidebars
+  if (event.code === "Backslash" && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    return document.querySelector(".collapse-btn").click();
+  }
 });
 
 main()
