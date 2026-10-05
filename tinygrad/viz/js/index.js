@@ -23,7 +23,7 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 const highlightUir = id => d3.selectAll(".uir-ref").classed("highlight", d => d.id === id);
 const colored = n => d3.create("span").call(s => s.selectAll("span")
   .data((typeof n === "string" ? [{st:n}] : n).flatMap(t => parseColors(t.st, t.color).map(p => ({...t, ...p})))).join("span")
-  .style("color", d => d.color).text(d => d.st).classed("uir-ref", d => d.id != null).on("click", (e,d) => {
+  .style("color", d => d.id == null ? d.color : null).text(d => d.st).classed("uir-ref", d => d.id != null).on("click", (e,d) => {
     if (d.id == null) return;
     highlightUir(d.id);
     d3.select("#nodes").selectAll("g.node").filter(n => n.id === d.id).dispatch("click");

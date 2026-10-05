@@ -101,17 +101,10 @@ def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
 
-def tokenize_uir(root:UOp|list[UOp]) -> list[dict]:
-  nodes = [u for u in (root.toposort() if isinstance(root, UOp) else root) if not _inline(u)]
-  tokens:list[dict] = []
-  for i,line in enumerate(render_uir(root).split("\n")):
-    if i: tokens.append({"st":"\n"})
-    src, sep, arg = line.partition(" : ")
-    for part in re.split(r"(%\d+\b)", src):
-      if not part: continue
-      tokens.append({"st":part, **({"id":str(id(nodes[int(part[1:])]))} if re.fullmatch(r"%\d+", part) else {})})
-    if sep: tokens.append({"st":sep+arg})
-  return tokens
+def tokenize_uir(root:UOp) -> list[dict]:
+  nodes = [u for u in root.toposort() if not _inline(u)]
+  refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
+  return [{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", render_uir(root)) if s]
 
 def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
