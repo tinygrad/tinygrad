@@ -318,6 +318,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
                         else y.src for y in x.src[1:]]))))),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
+  # loop with const false backedge only runs once
+  (UPat.var("b").backedge(UPat(Ops.RANGE, src=(UPat(Ops.NOOP),), name="r"), UPat.const(False)), lambda b,r: b.substitute({r:UOp(Ops.NOOP)})),
   # ranges can be subbed for CONSTs, remove them from ENDs. BACKEDGE conditions are never range selectors.
   (UPat(Ops.END, name="x"), lambda x: x.replace(src=(x.src[0],)+tuple(r for r in x.src[1:] if r.op is not Ops.CONST))),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
