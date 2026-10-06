@@ -302,5 +302,16 @@ class TestAsmKernel(unittest.TestCase):
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
 
+  def test_plus_tensor(self):
+    out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
+    self.assertListEqual(out.tolist(), [5, 7, 9])
+
+  def test_gemm_tensor(self):
+    N = 64
+    a = Tensor.ones(N,N, dtype=dtypes.float).contiguous()
+    b = Tensor.eye(N, dtype=dtypes.float).clone()
+    out = a@b
+    self.assertEqual(out.tolist(), (a.numpy()@b.numpy()).tolist())
+
 if __name__ == "__main__":
   unittest.main()
