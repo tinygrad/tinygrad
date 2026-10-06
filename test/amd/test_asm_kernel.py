@@ -279,5 +279,25 @@ class TestAsmKernel(unittest.TestCase):
     out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
 
+  def test_cfg_loop(self):
+    def cfg_kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_mov_b32(s[2], 0))
+      k.label("loop")
+      k.emit(s_add_u32(s[2], s[2], 1))
+      k.emit(s_cmp_lt_i32(s[2], 4))
+      k.emit(s_cbranch_scc1(), target="loop")
+      k.emit(v_mov_b32_e32(v[0], 0))
+      k.emit(v_mov_b32_e32(v[1], s[2]))
+      k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      insts = k.finalize()
+      sink = UOp.sink(out.base, arg=KernelInfo("cfg_loop_kernel"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+    out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
+    self.assertListEqual(out.tolist(), [4])
+
 if __name__ == "__main__":
   unittest.main()
