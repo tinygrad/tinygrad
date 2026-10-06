@@ -60,7 +60,7 @@ def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTAC
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.alloc((2,), dtypes.uint64, 0, device=devs[0]).rtag("timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def make_program(prg:UOp, size:int, device:str) -> UOp: # one placeholder per program and device: the calls of a linear share it, its link owns it
+def make_program(prg:UOp, size:int, device:str) -> UOp:
   slot = int.from_bytes(prg.key[:8], "little")
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
   return UOp.alloc((size,), dtypes.uint8, slot, device=device).rtag("program")

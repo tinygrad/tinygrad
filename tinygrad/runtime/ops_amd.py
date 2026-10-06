@@ -182,18 +182,15 @@ class AMDComputeQueue(HWQueue):
   def prof_buf(self, name:str) -> UOp:
     return UOp.alloc((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs[0]).rtag(self.dev.tag(name))
 
-  def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None:
-    if not (self.dev.pmc_enabled or self.dev.sqtt_enabled): return None
+  def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp:
     slot = (self.prof_buf("prof_log").index(0).load() + len(self.profiled)) % self.dev.prof_slots
-    tag = UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64)
-    self.profiled.append(self.prof_buf("prof_log").index(1 + slot.cast(dtypes.int)).store(tag))
+    self.profiled.append(self.prof_buf("prof_log").index(1 + slot.cast(dtypes.int)).store(UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64)))
     if self.dev.sqtt_enabled:
       self.sqtt_start(slot)
       self.sqtt_setup_exec(data, info)
     return slot
 
-  def prof_stop(self, slot:UOp|None):
-    if slot is None: return
+  def prof_stop(self, slot:UOp):
     if self.dev.pmc_enabled: self.pmc_read(slot)
     if self.dev.sqtt_enabled: self.sqtt_stop(slot)
 
@@ -408,7 +405,7 @@ class AMDComputeQueue(HWQueue):
     dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
       **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
     self.acquire_mem(gli=0, gl2=0)
-    slot = self.prof_start(data, prg.arg, lib)
+    if (prof:=self.dev.pmc_enabled or self.dev.sqtt_enabled): slot = self.prof_start(data, prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
@@ -423,7 +420,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
-    self.prof_stop(slot)
+    if prof: self.prof_stop(slot)
 
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
@@ -465,12 +462,12 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
-    slot = self.prof_start(data, prg.arg, lib)
+    if (prof:=self.dev.pmc_enabled or self.dev.sqtt_enabled): slot = self.prof_start(data, prg.arg, lib)
     self.close_run(len(self.blob))
     self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w
                   for w in dispatch_packet(data, prg.arg, lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))]
     self.run_start = len(self.blob)
-    self.prof_stop(slot)
+    if prof: self.prof_stop(slot)
 
   def submit(self, cmdbuf:UOp) -> UOp: # the doorbell is the last packet's index
     self.close_run(cmdbuf.max_numel())
