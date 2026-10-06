@@ -318,7 +318,7 @@ def copy_op(dt:DType) -> X86Ops:
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # Stack pointer definition has to be placed at top of program
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=x.src + (stack_pointer,)) if rdef(x.src[-1]) is not RSP else None),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=x.src + (stack_pointer,)) if not len(x.src) or rdef(x.src[-1]) is not RSP else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
