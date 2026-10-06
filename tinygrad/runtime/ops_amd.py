@@ -4,7 +4,7 @@ import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, i
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args
-from tinygrad.runtime.support.hcq2 import pack_args, make_program
+from tinygrad.runtime.support.hcq2 import pack_args, make_program, kernel_args
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
 from tinygrad.dtype import dtypes
@@ -25,7 +25,6 @@ from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher, uopfunc
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
@@ -376,9 +375,8 @@ class AMDComputeQueue(HWQueue):
 
   def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> UOp:
     if not data.kernargs_segment_size and not data.enable_dispatch_ptr: return UOp.const(0, dtypes.uint64) # no kernargs, nothing to point at
-    args = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in prg.arg.globals] + \
-            [b.ccast(v.dtype) for v, b in zip(prg.arg.vars, get_call_var_uops(call, prg))] # a bound value is a bare const, the var has the width
-    words = pack_args(layout_args(args), data.kernargs_segment_size) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
+    words = pack_args(layout_args(kernel_args(call, prg, self.devs)), data.kernargs_segment_size) + \
+            (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
