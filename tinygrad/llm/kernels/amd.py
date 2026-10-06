@@ -56,6 +56,7 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 class Linear(nn.Linear):
   ggml_type:int|None = None
   use_custom_quant = True
+  shard_axis:int|None = None
   def __init__(self, in_features:int, out_features:int, bias=True):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
@@ -63,18 +64,21 @@ class Linear(nn.Linear):
     if self.in_features % GGML_BLOCK_SIZE: return
     packed_sizes = {typ: decoded.numel() // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
-    raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER) and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
+    raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
+                prod(u.shape) in packed_sizes.values()), None)
     if raw is None: return
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
+    # a permute keeps the order if the axes not of size 1 on a device stay sorted (gguf_shard moves the devices)
     def unwrapped(u:UOp) -> UOp:
-      while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
+      while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)) or \
+        (u.op is Ops.PERMUTE and (kept:=[a for a in u.marg if u.src[0].shard_shape[a] != 1]) == sorted(kept)):
         u = u.src[0]
       return u
     # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
     for ggml_type, size in packed_sizes.items():
       if size != prod(raw.shape): continue
-      expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
+      expected = ggml_data_to_tensor(Tensor(raw).flatten(), self.in_features * self.out_features, ggml_type)
       if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
     else: return
     # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
@@ -82,7 +86,8 @@ class Linear(nn.Linear):
     raw_offset = raw.contiguous_view_offset()
     if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return
     self.ggml_type = ggml_type
-    self.weight = Tensor(raw).bitcast(word_dtype).contiguous()
+    self.shard_axis = decoded.uop.axis
+    self.weight = Tensor(raw).flatten().bitcast(word_dtype).contiguous()
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
@@ -91,7 +96,7 @@ class Linear(nn.Linear):
         # tiny dense fp16 matmul (e.g. the ssm beta/alpha head rows): single fp16 gemv kernel instead of a
         # generic matmul schedule, and realize the densely packed weight once if it is still a lazy ggml view
         if self.weight.dtype in (dtypes.half, dtypes.float, dtypes.bfloat16) and self.out_features <= 2048 \
-          and self.in_features % (WARP_SIZE*4) == 0:
+          and self.in_features % (WARP_SIZE*4) == 0 and self.weight.uop.axis is None:
           numel, max_shape = x.numel(), x.max_shape
           if isinstance(numel, int) or prod(max_shape) // self.in_features <= 32:
             out = f16_gemv(self, x if isinstance(numel, int) else x.pad_to(max_shape))
@@ -336,7 +341,8 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   x = x.reshape(out.shape[0], in_features)
   output_waves, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens = layout
   token_tile, output_tiles = len(tokens)*16, len(outputs)
-  output_words = in_features // GGML_BLOCK_SIZE * type_words
+  # IQ4_NL blocks are 32 wide: a device can hold part of a 256 weight row group
+  output_words = in_features * type_words // GGML_BLOCK_SIZE
   accs = tuple(tuple(UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG)
                      for tile in range(token_tile // 16)) for ot in range(output_tiles))
   accs = tuple(tuple(acc.after(acc.store(acc.const_like(0))) for acc in output_accs) for output_accs in accs)
@@ -433,11 +439,15 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
-  out_features, in_features = layer.out_features, layer.in_features
-  out_shape:tuple[int, ...] = (tokens, out_features)
+  out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
+  splits = layer.in_features // in_features
+  assert (layer.shard_axis == 1) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.shard_axis}"
+  out_shape:tuple[int, ...] = (splits*tokens, out_features)
   fxn:Callable[..., UOp]
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
-  if tokens % 16 == 0 and out_features % 16 == 0:
+  # the kernels write the output features of their own device
+  local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
+  if tokens % 16 == 0 and local_out % 16 == 0:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else:
@@ -449,9 +459,11 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features), *extra)
     out_shape += ((in_features+1023)//1024,)
-  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device)
-  result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=out_features, in_features=in_features))[0]
+  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
+  result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if len(result.shape) == 3: result = result.sum(-1)
+  # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
+  if splits > 1: result = result.reshape(splits, tokens, out_features).sum(0)
   result = result.reshape(*x.shape[:-1], out_features)
   return result if layer.bias is None else result + layer.bias
 
@@ -611,9 +623,9 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   # Carry length bindings even when the cache was populated independently of this call.
   if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
-  chunks = min(48, max_kv_len // 64)
-  partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
-  stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
+  chunks, axis = min(48, max_kv_len // 64), q.uop.axis
+  partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
+  stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
   waves, group = 16, H // cache_kv.shape[2]
   while waves * group * ((D+LDS_PAD)*2 + 8) > 65536: waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
@@ -621,7 +633,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, fxn=fxn)[:2]
   live = (valid_kv_len+63)//64
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
-  out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device)
+  out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
 
@@ -735,7 +747,7 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     assert T_pad % BLOCK_M == 0, "chunk_size must be a multiple of 32"
     q, q_start = q.pad_to((*q.shape[:2], T_pad, q.shape[3])), valid_end - T_real
   B, H, T, D = q.shape
-  out = Tensor.empty(B*H, T, D, dtype="float32", device=q.device)
+  out = Tensor.empty(B, H, T, D, dtype="float32", device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
   fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_wmma_rdna4(q.device))
   if isinstance(valid_end, UOp): assigned_kv = Tensor(assigned_kv.uop.after(valid_end))
   out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)
