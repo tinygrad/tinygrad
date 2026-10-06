@@ -632,10 +632,9 @@ class KFDIface:
     if owned: kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=handle)
 
   def map(self, buf:Buffer) -> BufferStorage:
-    if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
+    if buf.device == self.dev.host:
       if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta.handle, True))
-    if buf.device.split(":")[0] != "AMD": raise RuntimeError(f"Cannot map {buf.device} on {self.dev.device}")
     self._map_handle(buf.meta.handle)
     return BufferStorage(buf._buf, (buf.meta.handle, False))
 

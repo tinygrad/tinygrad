@@ -334,8 +334,7 @@ class PCIIfaceBase:
     return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
 
   def map(self, b:Buffer) -> BufferStorage:
-    if b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
-      if self.dev.host != Device[b.device].host: raise RuntimeError(f"host memory is not on the node of {self.dev.device}")
+    if b.device == self.dev.host:
       if b._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       lo, size = b._buf, round_up(b.nbytes, 0x1000)
       if not self.dev_impl.mm.va_base <= lo < lo + size <= self.dev_impl.mm.va_base + (1 << self.dev_impl.mm.va_bits):
@@ -343,9 +342,8 @@ class PCIIfaceBase:
       if self.remote is None: System.lock_memory(lo, size)
       paddrs = [(x, 0x1000) for x in (b.meta if self.remote is not None else System.system_paddrs(lo, size))]
       aspace, snooped, uncached = AddrSpace.SYS, True, True
-    elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase):
+    elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase) and ifa.peer_group == self.peer_group:
       if ifa.is_bar_small(): raise RuntimeError(f"P2P mapping not supported for small bar devices: {b.device} -> {self.dev.device}")
-      if ifa.peer_group != self.peer_group: raise RuntimeError(f"P2P mapping across peer groups: {b.device} -> {self.dev.device}")
       lo, size, snooped, uncached = b._buf, b.meta.mapping.size, True, b.meta.mapping.uncached
       if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
       else: paddrs, aspace = ifa.p2p_paddrs(b.meta.mapping.paddrs)
