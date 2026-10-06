@@ -52,7 +52,6 @@ def absorb_weak_src(s:UOp) -> UOp:
 
 def lower_weak_node(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const, not a consumer
-  if u.op in GroupOp.Defines: return None  # the size of a PARAM/BUFFER/ALLOC stays a bare weakint CONST
   src = tuple(absorb_weak_src(s) for s in u.src)
   if derived_dtypes(u, src) is None:
     src = tuple(s.ccast(s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src)
@@ -75,7 +74,7 @@ pm_lower_weak = PatternMatcher([
    lambda u,x: x.cast(u.src[0].commit_dtype(dtypes.int)).cast(u.commit_dtype(dtypes.int)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(arg=replace(u.arg, dtype=u.commit_dtype(dtypes.int))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
-  (UPat(GroupOp.All, name="u"), lower_weak_node),
+  (UPat(GroupOp.All-GroupOp.Defines, name="u"), lower_weak_node),
 ])
 
 # drop the CAST off a committed const where the consumer re-derives it anyway, so bare-CONST rules keep matching.
@@ -92,9 +91,8 @@ pm_uncast_const = PatternMatcher([(UPat(GroupOp.Broadcastable, name="u"), uncast
 # commit every remaining bare const, keyed on the consumer: "bare" is a property of the edge
 def cast_consts(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const's CONST is its value, not an edge
-  if u.op in GroupOp.Defines: return None  # the size of a PARAM/BUFFER/ALLOC stays a bare weakint CONST
   if (dts:=derived_dtypes(u, u.src)) is not None: u = commit_weak_consts(u, dts[0])
   # .cast folds at the dtypes a bare CONST derives, so the width is forced. Invalid never commits.
   return u.replace(src=tuple(UOp.cconst(s.val, s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and not s.is_invalid else s for s in u.src))
 
-pm_cast_const = PatternMatcher([(UPat(GroupOp.All, name="u", custom_early_reject={Ops.CONST}), cast_consts)])
+pm_cast_const = PatternMatcher([(UPat(GroupOp.All-GroupOp.Defines, name="u", custom_early_reject={Ops.CONST}), cast_consts)])

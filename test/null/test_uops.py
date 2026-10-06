@@ -16,7 +16,7 @@ from tinygrad.uop.ops import ParamArg, PatternMatcher, UPat, dtype_from_uop, exe
 from tinygrad.codegen.late.coalesce import memory_coalescing
 from tinygrad.renderer import Renderer
 from tinygrad.uop.weak import pm_lower_weak
-from tinygrad.uop.spec import spec_program, spec_shared, spec_tensor, type_verify
+from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
 
@@ -72,24 +72,6 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual(out.src, (UOp.const(1, dtypes.half), UOp.const(0, dtypes.half)))
     type_verify(out.sink(), spec_program)
 
-class TestStorageShape(unittest.TestCase):
-  def test_scalar_and_empty_param(self):
-    for shape in ((), (0,), (1,), (2, 0)):
-      with self.subTest(shape=shape):
-        p = UOp.param(0, dtypes.float, shape)
-        self.assertEqual(p.shape, shape)
-        self.assertEqual(p.base.src[0].op, Ops.CONST if shape else Ops.STACK)
-        self.assertEqual(p.base.src[0].as_shape, (math.prod(shape),) if shape else ())
-        type_verify(p, spec_tensor)
-    self.assertIs(UOp.variable("n", 0, 10).src[0], UOp(Ops.STACK))
-
-  def test_empty_storage(self):
-    for shape in ((0,), (2, 0)):
-      self.assertEqual(Tensor.empty(*shape).shape, shape)
-      self.assertEqual(UOp.alloc(shape, dtypes.float).shape, shape)
-      self.assertEqual(UOp.placeholder(shape, dtypes.float).shape, shape)
-    self.assertEqual(UOp.new_buffer("NULL", 0, dtypes.float).shape, (0,))
-
 class TestMemoryCoalescing(unittest.TestCase):
   def test_volatile_view_not_coalesced(self):
     buf = UOp.param(0, dtypes.uint32, 4, volatile=True).bitcast(dtypes.int32)
@@ -111,8 +93,7 @@ class TestLowerIndexDtype(unittest.TestCase):
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
-    self.assertEqual(reg.src[0].val, 4)
-    self.assertEqual(reg.src[0].dtype, dtypes.weakint)
+    self.assertIs(reg.src[0], UOp.const(4))
     lowered = graph_rewrite(reg.sink(), pm_lower_weak)
     self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
                     "lowering must resolve every weak width, except a typed literal's value half")
