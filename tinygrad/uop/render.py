@@ -65,13 +65,14 @@ def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and a
 def render_uir(root:UOp|list[UOp]) -> str:
   nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
+  def srcs(u:UOp) -> tuple[UOp, ...]: return u.src_without_body if u.op is Ops.CALL and (not u.src or u.src[0] not in table) else u.src
   def src_str(u:UOp) -> str:
     if not _inline(u): return f"%{table[u]}"
-    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
+    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in srcs(u)) + ")"
   lines = []
   for i,u in enumerate(nodes):
     line = f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}"
-    if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
+    if len(ss:=srcs(u)): line += " " + ", ".join(src_str(s) for s in ss)
     if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
     lines.append(line)
   return "\n".join(lines)

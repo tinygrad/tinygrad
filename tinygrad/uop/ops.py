@@ -283,7 +283,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
 
-  def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
+  def toposort(self, gate:Callable|None=None, enter_calls=False) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
