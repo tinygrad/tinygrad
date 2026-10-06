@@ -278,7 +278,7 @@ def xpow_int(base:UOp, exponent:UOp, dt:DType) -> UOp|None:
   if lo >= 0: return ret
   # negative exponent truncates to 0, except for 1 and -1
   one = ret.const_like(1)
-  neg = base.eq(-1).where((exponent & 1).ne(0).where(-one, one), base.eq(1).where(one, 0))
+  neg = (sb:=b.bitcast(dt)).eq(-1).where((exponent & 1).ne(0).where(-one, one), sb.eq(1).where(one, 0))
   return (exponent < 0).where(neg, ret)
 
 @functools.cache

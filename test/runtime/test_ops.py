@@ -740,6 +740,10 @@ class TestOps(TensorTestCase):
     # const int base
     helper_test_op(None, lambda x: 3**x, vals=[[0, 1, 5, 19, 20]], forward_only=True, atol=0)
     helper_test_op(None, lambda x: (-2)**x, vals=[[0, 1, 2, 3, 31]], forward_only=True, atol=0)
+    # const base wraps to the dtype
+    for c in (255, 257):
+      helper_test_op([], lambda: c ** torch.tensor([-1, -2, 1, 2], dtype=torch.int8), lambda: c ** Tensor([-1, -2, 1, 2], dtype=dtypes.int8),
+                     forward_only=True, atol=0)
 
   def test_pow_int_dtypes(self):
     for dt, tdt in ((dtypes.uint8, torch.uint8), (dtypes.int8, torch.int8), (dtypes.int16, torch.int16), (dtypes.int64, torch.int64)):
