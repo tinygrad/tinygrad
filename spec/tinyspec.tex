@@ -167,8 +167,10 @@ Unary & $(T,)$
   & Convert to target dtype (specified in arg). \\
   \\[4pt]
 Binary & $(A, B)$
-  & \op{Add}, \op{Mul}, \op{Max}, \op{Mod}, \op{Idiv}
-  & $a+b$, $a \cdot b$, $\max(a,b)$, $a \bmod b$, $\lfloor a/b \rfloor$ \\
+  & \op{Add}, \op{Mul}, \op{Max}
+  & $a+b$, $a \cdot b$, $\max(a,b)$ \\
+& & \op{Floordiv}, \op{Floormod}
+  & $\lfloor a/b \rfloor$, $a-b\lfloor a/b \rfloor$ \\
 & & \op{CmpLt}, \op{CmpNe}
   & $[a < b]$, $[a \ne b]$ \\
 & & \op{Xor}, \op{Or}, \op{And}, \op{Shr}, \op{Shl}
@@ -191,6 +193,8 @@ Ternary & $(P, A, B)$
 \op{Neg} & \op{Mul}($A$, $-1$) & $-x$ \\
 \op{Sub} & \op{Add}($A$, \op{Neg}($B$)) & $a - b$ \\
 \op{Div} & \op{Mul}($A$, \op{Recip}($B$)) & $a / b$ \\
+\op{Cdiv} & $q+c$ & Integer division toward zero. \\
+\op{Cmod} & $r-bc$ & Remainder with dividend's sign (or zero). \\
 \op{CmpGt} & \op{CmpLt}($B$, $A$) & $[a > b]$ \\
 \op{CmpGe} & \op{CmpNe}(\op{CmpLt}($A$, $B$),\, $1$) & $[a \ge b]$ \\
 \op{CmpLe} & \op{CmpNe}(\op{CmpLt}($B$, $A$),\, $1$) & $[a \le b]$ \\
