@@ -305,6 +305,7 @@ class TestAsmKernel(unittest.TestCase):
       acc = acc.after(acc[0].store(0))
       loop = UOp.loop(0)
       body = acc[0].store(acc.after(loop)[0] + 1)
+      acc = acc.after(body)
       acc = acc.after(body.backedge(loop, acc[0] < 4))
       return x[0].store(acc[0]).sink(arg=KernelInfo("handmade"))
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel_handmade)[0]
