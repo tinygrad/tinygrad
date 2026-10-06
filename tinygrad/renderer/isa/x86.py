@@ -14,8 +14,8 @@ from dataclasses import replace
 
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
-  # these aren't real instructions, DEFINE is a register placeholder that defines a register without emitting an instruction
-  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto(); LOOP_CMP = auto()
+  # these aren't real instructions
+  FRAME_INDEX = auto(); LABEL = auto(); LOOP_CMP = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -170,7 +170,8 @@ pre_isel_matcher = PatternMatcher([
 ])
 
 # ***** X86 registers *****
-def def_reg(reg:Register) -> UOp: return UOp(Ops.INS, arg=(X86Ops.DEFINE, dtypes.void), tag=(reg,))
+def alloc_reg(dt:DType, pin:Register|tuple[Register, ...]|None=None):
+  return UOp.alloc((1,), dt, addrspace=AddrSpace.REG).replace(tag=(pin,) if isinstance(pin, Register) else pin)
 
 RAX = Register("rax", 0)
 RCX = Register("rcx", 1)
@@ -191,11 +192,9 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
-stack_pointer = def_reg(RSP)
+stack_pointer = alloc_reg(dtypes.void, RSP)
 
 # ***** X86 instruction selection *****
-def alloc_reg(dt:DType, pin:Register|tuple[Register, ...]|None=None):
-  return UOp.alloc((1,), dt, addrspace=AddrSpace.REG).replace(tag=(pin,) if isinstance(pin, Register) else pin)
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -255,7 +254,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, everything else (the stack pointer) by byte
-  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.AFTER} else 1
+  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.AFTER} and base.addrspace is not AddrSpace.REG else 1
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
     return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale))
   if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale))
@@ -264,10 +263,10 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x))
 def is_address(x:UOp):
-  if (x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG) or (x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL) \
-    or (x.op is Ops.INS and x.arg[0] in {X86Ops.LEA, X86Ops.DEFINE}): return True
   if x.op is Ops.INS and x.arg[0] is X86Ops.MOV: return (len(x.src) == 1 or x.src[0] is stack_pointer) and is_address(x.src[0])
-  return x.op is Ops.INS and x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])
+  if x.op in {Ops.BUFFER, Ops.ALLOC} and (isinstance(x.tag, tuple) and x.tag[0] == RSP or x.addrspace is not AddrSpace.REG): return True
+  if x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL: return True
+  return x.op is Ops.INS and (x.arg[0] is X86Ops.LEA or (x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])))
 
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
@@ -299,7 +298,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.op is Ops.INS and x.arg[0] in {X86Ops.DEFINE, X86Ops.LOOP_CMP, X86Ops.FRAME_INDEX}: return None
+  if x.op is Ops.INS and x.arg[0] in {X86Ops.LOOP_CMP, X86Ops.FRAME_INDEX}: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -318,17 +317,14 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
+  # Stack pointer definition has to be placed at top of program
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=x.src + (stack_pointer,)) if not len(x.src) or rdef(x.src[-1]) is not RSP else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
-  # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally
-  (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, src=x.src + (stack_pointer,) + tuple(def_reg(r) for r in CALLEE_SAVED)),))
-    if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   # conditional moves between addresses, lea both srcs
@@ -479,7 +475,7 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
   # register allocations dont live on stack
   if x.addrspace is AddrSpace.REG: return None
-  nx = UOp(Ops.INS, src=fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), arg=(X86Ops.LEA, x.dtype), tag=x.tag)
+  nx = UOp(Ops.INS, fold_address(stack_pointer.index(imm(dtypes.uint32, ctx.stack_size))), (X86Ops.LEA, x.dtype), x.tag)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [nx]
 
@@ -515,17 +511,9 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
-def alloc_stack(ctx:X86LinearContext, x:UOp):
-  if not ctx.stack_size or ctx.stack_allocated or x.arg[0] is not X86Ops.DEFINE: return None
-  ctx.stack_allocated = True
-  return x, [stack_pointer.ins(X86Ops.SUBi, src=(imm(dtypes.int32, ctx.stack_size),)), x]
-
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # allocate the frame before any callee saves, regardless of the order of register definitions, and free it before RET
-  (UPat(Ops.INS, name="x"), alloc_stack),
-  (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [stack_pointer.ins(X86Ops.ADDi, src=(imm(dtypes.int32, ctx.stack_size),)), x])
-    if ctx.stack_size and x.arg[0] is X86Ops.RET else None),
+  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(X86Ops.RET)])),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
@@ -708,6 +696,21 @@ class X86LinearContext(LinearContext):
     super().__init__(ren)
     self.lock: UOp|None = None
     self.stack_allocated = False
+
+  # stack alloc/dealloc and callee saved handling
+  def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
+    before, after = [], []
+    used = {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
+    for r in CALLEE_SAVED:
+      if r.name in used:
+        a = alloc_reg(dtypes.uint64, r)
+        slot = self.assign_spill_slot(r,a)
+        before.append(self.ren.spill(slot,a))
+        after.append(self.ren.fill(slot,a,r))
+    before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+    after.append(stack_pointer.ins(X86Ops.ADDi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+    return before + uops[:-1] + after + [uops[-1]]
+
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
     sz = r.cons[0].size
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
@@ -759,7 +762,7 @@ class X86Renderer(ISARenderer):
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if u.op is not Ops.INS or u.arg[0] is X86Ops.DEFINE: continue
+      if u.op is not Ops.INS: continue
       if u.arg[0] is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
       elif u.arg[0] is X86Ops.RET: asm.append(_format_op(u))
       else: asm.append(_format_op(u) + " " + _format_operands(u))
@@ -770,7 +773,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op is not Ops.INS or u.arg[0] is X86Ops.DEFINE: continue
+      if u.op is not Ops.INS: continue
       if u.arg[0] is X86Ops.LOOP_CMP: continue
       if u.arg[0] is X86Ops.LABEL:
         targets[u.tag] = len(binary)
