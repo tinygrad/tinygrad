@@ -1,8 +1,8 @@
 import math, time, traceback, signal
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
-from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -11,12 +11,11 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
-actions = [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, at)) for at in (AxisType.UPCAST, AxisType.UNROLL) for amt in [0,2,3,4,5,7] for axis in range(10)]
-actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, at)) for at in (AxisType.LOCAL, AxisType.GROUP_REDUCE)
-            for amt in [0,2,3,4,8,13,16,29] for axis in range(8)]
-actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.GROUP_REDUCE, True)) for amt in [13,16,28,29,32,49,64,256] for axis in range(8)]
+actions = [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.UPCAST)) for amt in [0,2,3,4,5,7] for axis in range(10)]
+actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.LOCAL)) for amt in [0,2,3,4,8,13,16,29] for axis in range(8)]
+actions += [Opt(op=OptOps.SPLIT, axis=axis, arg=(amt, AxisType.LOCAL, True)) for amt in [13,16,28,29,32,49,64,256] for axis in range(8)]
 if getenv("BEAM_PADTO", 0): actions += [Opt(op=OptOps.PADTO, axis=axis, arg=amt) for amt in [32] for axis in range(7)]
-actions += [Opt(op=OptOps.SPLIT, axis=0, arg=(32, at)) for at in (AxisType.LOCAL, AxisType.GROUP_REDUCE)]
+actions += [Opt(op=OptOps.SPLIT, axis=0, arg=(32, AxisType.LOCAL))]
 actions += [Opt(op=OptOps.TC, axis=0, arg=(-1, 0, getenv("TC", 1)))]
 # covers resnet kernels (3 global * 3 reduce)
 actions += [Opt(op=OptOps.TC, axis=axis, arg=(-1, getenv("TC_OPT", 2), getenv("TC", 1))) for axis in range(9)]
@@ -61,7 +60,8 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   try:
     st = time.perf_counter()
     ast, dev = x[1].copy().get_optimized_ast(name_override="test"), x[1].ren.target.device
-    prg = to_program(ast.substitute({p: p.replace(arg=replace(p.arg, device=dev)) for p in ast.toposort() if p.op is Ops.PARAM}), x[1].ren)
+    prg = to_program(ast.substitute({p: p.replace(arg=replace(p.arg, device=dev)) for p in ast.toposort()
+                                     if p.op is Ops.PARAM and p.addrspace is not AddrSpace.ALU}), x[1].ren)
     et = time.perf_counter() - st
     uops = prg.src[1].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
@@ -83,21 +83,17 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 # get dictionary of all possible actions
 def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dict[int, Scheduler]:
   acted, max_up, max_lcl = {0:s} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256) if max_up is None else max_up, getenv("BEAM_LOCAL_MAX", 1024)
-  kernel_actions = actions.copy()
-
-  for i,a in enumerate(kernel_actions):
+  for i,a in enumerate(actions):
     if a.axis is not None and a.op is not OptOps.TC:
-      try: ax = s.real_axis(a.op, a.axis)
-      except KernelOptError: continue
-      if (ax >= s.shape_len) or (a.op is OptOps.SPLIT and isinstance(arg:=a.arg, tuple) and s.full_shape[ax] == arg[0]
-                                 and replace(a, arg=(0,)+arg[1:]) in kernel_actions): continue
+      if (a.axis >= s.shape_len) or (a.op is OptOps.SPLIT and isinstance(arg:=a.arg, tuple) and s.full_shape[a.axis] == arg[0]
+                                     and replace(a, arg=(0,)+arg[1:]) in actions): continue
     s2 = s.copy()
     try:
       s2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if hasattr(s2, 'tensor_core') and (tc:=s2.tensor_core) else 1
+      up, lcl, tc_up = 1, 1, next((prod(u.arg[0])//u.arg[2] for u in s2.ast.backward_slice if u.op is Ops.WMMA), 1)
       for x,t in zip(s2.full_shape, s2.axis_types):
-        if t in (AxisType.UPCAST, AxisType.UNROLL): up *= x
-        elif t in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= x
+        if t is AxisType.UPCAST: up *= x
+        elif t in (AxisType.WARP, AxisType.LOCAL): lcl *= x
       if up//tc_up > max_up or lcl > max_lcl:
         if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")
         continue
@@ -121,7 +117,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG:
     print("BEAM_SEARCH:")
-    print(pyrender(s.ast.replace(arg=None)))
+    print(s.ast.replace(arg=None).render_uir())
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {s.colored_shape()}")
 
   try:

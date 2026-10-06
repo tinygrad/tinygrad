@@ -2,19 +2,19 @@ import heapq
 from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
-from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import prod, getenv, TUPLE_ORDER
+from tinygrad.dtype import AddrSpace
+from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort())
+  lst = list(sink.toposort(enter_calls=False))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    for s in u.src: out_degree[s] += 1
+    for s in u.src_without_body: out_degree[s] += 1
 
     # we place UOps with higher run_counts later
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
@@ -24,11 +24,11 @@ def linearize(sink:UOp) -> list[UOp]:
     match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
-      case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
+      case Ops.BUFFER | Ops.ALLOC: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good
-      case Ops.END: priority = -5     # placing END is bad
+      case Ops.END | Ops.BACKEDGE: priority = -5     # placing loop exits is bad
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)
 
@@ -40,7 +40,7 @@ def linearize(sink:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in u.src:
+    for v in u.src_without_body:
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]
@@ -64,9 +64,9 @@ class CFGContext:
       deps[u] = {}
       for s in u.src: deps[u] |= deps[s]
 
-      if u.op in (Ops.END, Ops.SINK):
-        nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END): deps[u][u] = None
+      if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
+        nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
+      if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
@@ -81,13 +81,15 @@ class CFGContext:
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  # the ordering dep goes on the bound wrapped in AFTER, so a RANGE always has exactly one src
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].after(y),)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
 def do_split_ends(e:UOp):
-  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.dtype in (dtypes.void, dtypes.bool))
-  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
-  return ret.end(*backedge) if len(backedge) else ret
+  ret = e.src[0]
+  rngs = dedup(r for s in e.src[1:] for r in ((s,) if s.op is Ops.RANGE else s.ranges))
+  for r in sorted(rngs, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  return ret
 
 pm_split_ends = PatternMatcher([
   # split the ends

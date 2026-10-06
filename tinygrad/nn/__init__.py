@@ -305,7 +305,7 @@ class RMSNorm:
 
 from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType
 def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
-  weight, idx = (a for a in call.src[1:] if not a.unsharded_base.is_unbound)
+  weight, idx = (a for a in call.src[1:] if (b:=a.unsharded_base).op is not Ops.ALLOC or b.arg.bind_on_realize)
   is_vocab_sharded = isinstance(weight.device, tuple) and weight.axis == 0
   # for multi-device: replicate grad_emb and idx on all devices
   if isinstance(weight.device, tuple):
@@ -346,7 +346,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
-      dnum = UOp.range(ndev, -1, AxisType.DEVICE)
+      dnum = UOp.range(ndev, 0, AxisType.DEVICE)
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)

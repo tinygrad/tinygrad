@@ -1,8 +1,9 @@
 import unittest
 
 from tinygrad import Tensor, Device, Variable, dtypes
-from tinygrad.helpers import DEV, fetch, round_up
+from tinygrad.helpers import fetch, round_up
 from tinygrad.engine.realize import compile_linear
+from tinygrad.runtime.support.hcq2 import HCQInfo
 from tinygrad.uop.ops import Ops
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 from extra.hevc.decode import hevc_decode
@@ -65,7 +66,7 @@ class TestHevc(unittest.TestCase):
     self.assertEqual(list(frame3.initreflistidxl1), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     self.assertEqual(list(frame3.RefDiffPicOrderCnts), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
-  @unittest.skipUnless(Device.DEFAULT == "NV" and not DEV.interface.startswith("MOCK"), "real NV only")
+  @unittest.skipUnless(Device.DEFAULT == "NV", "NV only")
   def test_hevc_decode(self):
     url = "https://github.com/haraschax/filedump/raw/09a497959f7fa6fd8dba501a25f2cdb3a41ecb12/comma_video.hevc"
     dat = fetch(url, headers={"Range": f"bytes=0-{512<<10}"}).read_bytes()
@@ -98,9 +99,10 @@ class TestHevc(unittest.TestCase):
       Variable("pos", 0, max_hist + 1).bind(frame_pos), out_image_size, opaque[1], history)
 
     compiled = compile_linear(decoded.linear_with_vars()[0])
-    self.assertTrue(any(call.without_after.src[0].op is Ops.PROGRAM for call in compiled.src))
-    encdec_calls = [call for call in compiled.src if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "encdec"]
-    self.assertEqual(len(encdec_calls), 1)
+    self.assertTrue(all(call.without_after.body.op is Ops.PROGRAM for call in compiled.src))
+    self.assertEqual(sum("enc/dec" in k[1] for c in compiled.src if isinstance(c.without_after.arg.aux, HCQInfo)
+                         for k in c.without_after.arg.aux.kernels), 1)
+    self.assertIn("ENCDEC:0", Device["NV"].fifos)
 
 if __name__ == "__main__":
   unittest.main()

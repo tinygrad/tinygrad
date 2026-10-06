@@ -2,7 +2,7 @@ import functools, time
 from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, GroupOp, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
@@ -12,11 +12,16 @@ def add_to_ctx(ctx, x:UOp):
   ctx[0].append(x)
   return ret
 
+def is_implicit_storage(ctx, x:UOp) -> bool:
+  # Variables are caller-provided values (slot -1); positional scalar params (slot >= 0) are already captured
+  return (x.is_variable and x.arg.slot == -1) or x.op is Ops.BUFFER or (x.op is Ops.ALLOC and x.arg.bind_on_realize and x.arg.slot < ctx[2])
+
 pm_ctx = PatternMatcher([
-  # unbound BUFFERs and their AFTER outputs are scoped inside their CALL: they are never implicit inputs
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
-  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if not x.buf_uop.is_unbound and
-   not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+  # Capture caller-owned storage, not allocations created while tracing this function.
+  (UPat(GroupOp.Defines, name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
+  (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
+   not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
+   any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:
@@ -27,7 +32,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
 
 def renumber_invalid_outputs(uret:UOp) -> UOp:
   invalid = invalid_outputs(uret)
-  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i))
+  return uret.substitute({b:b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=i, buffer=None, bind_on_realize=False))
                           for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')
@@ -52,6 +57,7 @@ class _function(Generic[ReturnType]):
 
     # disable realize/schedule while this is running
     # run it and do surgery later
+    alloc_start = next(UOp.unique_num)
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
       _function.depth += 1
       try:
@@ -69,13 +75,13 @@ class _function(Generic[ReturnType]):
     subs = {x:x.param_like(i) for i,x in enumerate(call_uops)}
     uret = uret.substitute(subs)
 
-    # the BUFFERs that are left are the implicit inputs
+    # caller-owned storage left in the graph becomes implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret), alloc_start), bottom_up=True, name="get_implicit_inputs")
     uret = renumber_invalid_outputs(uret)
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
-      implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
+      implicit_buffers = [x for x in call_uops[num_explicit:] if x.op in {Ops.BUFFER, Ops.ALLOC}]
       if implicit_buffers:
         buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.max_numel()}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")

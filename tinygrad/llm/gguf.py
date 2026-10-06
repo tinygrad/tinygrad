@@ -2,15 +2,19 @@ import functools, io, pathlib, re, struct
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
-@functools.lru_cache(None)
-def _ggml_iq_grid(device: str, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
-  values = [float((w >> (8*i)) & 0xFF) for w in grid for i in range(grid_shape[1])]
-  return Tensor(values, dtype=dtypes.float32, device=device).reshape(grid_shape)
+def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
+  # Use 32-bit words for devices without uint64; keep word columns separate to avoid doubling the constant lookup depth.
+  words = [Tensor.const(tuple((v >> shift) & 0xffffffff for v in grid), dtypes.uint32) for shift in range(0, 8*grid_shape[1], 32)]
+  return Tensor.stack(*words, dim=1).to(device, force=True).bitcast(dtypes.uint8).float().reshape(grid_shape)
+
+def _ggml_iq_signs(device: str|tuple[str, ...]|None) -> Tensor:
+  return Tensor.const(tuple(i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)), dtypes.uint8).to(device, force=True)
 
 # native types {ggml_type: dtype}
 _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtypes.int16,
@@ -91,8 +95,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       scale_words = blocks[:, 66:98].bitcast(dtypes.uint32)
       db = d * (scale_words.rshift(28).cast(dtypes.float32) + 0.5).reshape((-1, 8, 1, 1)) * 0.5
       sign_idx = scale_words.unsqueeze(-1).rshift(Tensor.const((0, 7, 14, 21), dtypes.uint32)).bitwise_and(0x7F).reshape((-1, 32)).cast(dtypes.int32)
-      even_signs = Tensor([i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)], dtype=dtypes.uint8, device=t.device)
-      signs = (q_to_uint8(even_signs[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
+      signs = (q_to_uint8(_ggml_iq_signs(t.device)[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
       grid = _ggml_iq_grid(t.device, _ggml.iq3xxs_grid, (256, 4))[blocks[:, 2:66]].reshape((-1, 8, 4, 8))
       return (db * grid * signs).flatten(-3)
     # IQ2_XXS: 256 elements per 66-byte block (d:2, qs:64). 8 groups of 32: 4 grid bytes + packed signs/scale.
@@ -102,8 +105,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       db = d * (qs_u32[:, :, 1].rshift(28).cast(dtypes.float32) + 0.5).reshape((-1, 8, 1, 1)) * 0.25
       sign_idx = qs_u32[:, :, 1].unsqueeze(-1).rshift(Tensor.const((0, 7, 14, 21), dtypes.uint32))
       sign_idx = sign_idx.bitwise_and(0x7F).reshape((-1, 32)).cast(dtypes.int32)
-      even_signs = Tensor([i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)], dtype=dtypes.uint8, device=t.device)
-      signs = (q_to_uint8(even_signs[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
+      signs = (q_to_uint8(_ggml_iq_signs(t.device)[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
       grid = _ggml_iq_grid(t.device, _ggml.iq2xxs_grid, (256, 8))[blocks[:, 2:].reshape((-1, 8, 8))[:, :, :4]].reshape((-1, 8, 4, 8))
       return (db * grid * signs).flatten(-3)
     # IQ2_XS: 256 elements per 74-byte block (d:2, qs:64 as uint16, scales:8)
@@ -112,8 +114,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       db = d * (q_to_uint8(blocks[:, 66:74].reshape((-1, 8, 1)), 4).reshape((-1, 16)).cast(dtypes.float32) + 0.5).reshape((-1, 16, 1, 1)) * 0.25
       qs = blocks[:, 2:66].bitcast(dtypes.uint16)
       sign_idx = qs.rshift(9).cast(dtypes.int32)
-      even_signs = Tensor([i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)], dtype=dtypes.uint8, device=t.device)
-      signs = (q_to_uint8(even_signs[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 16, 2, 8))
+      signs = (q_to_uint8(_ggml_iq_signs(t.device)[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 16, 2, 8))
       grid = _ggml_iq_grid(t.device, _ggml.iq2xs_grid, (512, 8))[qs.bitwise_and(511)].reshape((-1, 16, 2, 8))
       return (db * grid * signs).flatten(-3)
     # IQ1_S: 256 elements per 50-byte block (d:2, qs:32, qh:16). grid bytes are int8 {-1,0,1}.
@@ -147,7 +148,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     if ggml_type == 23:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32).reshape((-1, 1, 1))
       scale_shifts = Tensor.const((0, 2, 4, 6, 8, 10, 12, 14), dtypes.uint16)
-      iq4_xs_lut = Tensor.const(tuple(_ggml.kvalues_iq4nl), dtypes.float32)
+      iq4_xs_lut = Tensor.const(tuple(_ggml.kvalues_iq4nl), dtypes.float32).to(t.device, force=True)
       scales_l = Tensor.stack((sl:=blocks[:, 4:8]).bitwise_and(0xF), sl.rshift(4), dim=2).reshape((-1, 8))
       scales_h = blocks[:, 2:4].bitcast(dtypes.uint16).unsqueeze(-1).rshift(scale_shifts).bitwise_and(0x03).reshape((-1, 8)).cast(dtypes.uint8)
       scales = (scales_l.bitwise_or(scales_h.lshift(4)).bitcast(dtypes.int8) - 32).cast(dtypes.float32).reshape((-1, 8, 1))
@@ -194,30 +195,40 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
-  # TODO: remove the need for copy to default device
-  tensor = tensor.to(None).realize()
-  r = io.BufferedReader(TensorIO(tensor), 1_000_000)
-  magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
-  if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
+def gguf_parse(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, tuple[Tensor, tuple[int, ...], int]]]:
+  """
+  Parses a .gguf file, returning metadata and `(data, shape, ggml_type)` entries without decoding the weights.
+  Each `data` tensor is a bounded byte view on the source device; paths yield lazy DISK views.
+  Multi-part splits are auto-merged when loaded by path.
+  """
+  files, state_dict = [fn], {}
+  for i, file in enumerate(files):
+    tensor = file if isinstance(file, Tensor) else Tensor(pathlib.Path(file))
+    r = io.BufferedReader(TensorIO(tensor), 1_000_000)
+    magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
+    if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
 
-  kv_data = {}
-  for _ in range(n_kv):
-    k, typ = read_str(r), read_int32(r)
-    kv_data[k] = readers[typ](r)
+    kv = {}
+    for _ in range(n_kv):
+      k, typ = read_str(r), read_int32(r)
+      kv[k] = readers[typ](r)
+    if i == 0:
+      kv_data = kv
+      if (total := kv.get('split.count', 1)) > 1:
+        if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
+        if kv.get('split.no', 0) != 0: raise ValueError(f"multi-part GGUF must be loaded from the first split, got split.no={kv['split.no']}")
+        if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(fn))): raise ValueError(f"first split must end with -00001-of-NNNNN.gguf: {fn}")
+        files.extend(pathlib.Path(f"{m.group(1)}-{part:05d}-of-{total:05d}.gguf") for part in range(2, total+1))
 
-  t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
-  alignment, pos = kv_data.get("general.alignment", 32), r.tell()
-  data_start = round_up(pos, alignment)
-
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+    t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
+    data_start = round_up(r.tell(), kv.get("general.alignment", 32))
+    for name, dims, typ, off in t_infos:
+      if typ in _GGML_NATIVE: block, size = 1, _GGML_NATIVE[typ].itemsize
+      elif typ in _GGML_QUANT: block, size = _GGML_QUANT[typ]
+      else: raise ValueError(f"GGML type '{typ}' is not supported!")
+      start, nbytes = data_start + off, prod(dims)//block*size
+      state_dict[name] = (tensor[start:start+nbytes], tuple(reversed(dims)), typ)
   return kv_data, state_dict
-
-def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
-  if (total := kv.get('split.count', 1)) <= 1: return [path]
-  if kv.get('split.no', 0) != 0: raise ValueError(f"multi-part GGUF must be loaded from the first split, got split.no={kv['split.no']}")
-  if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
-  return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
 
 def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   """
@@ -232,10 +243,30 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv_data, state_dict = gguf_load(gguf_tensor)
   ```
 
-  NOTE: The provided tensor must be on a device that supports execution.
+  Packed weights are copied to the default device before constructing the lazy decoding expressions.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
-  if kv.get('split.count', 1) <= 1: return kv, sd
-  if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
-  return kv, sd
+  kv, entries = gguf_parse(fn)
+  return kv, gguf_shard(entries, (Device.DEFAULT,))
+
+def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
+               shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
+  """
+  Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
+  """
+  n, packed, shard_map = len(devices), {}, shard_map or {}
+  for name, (data, shape, typ) in entries.items():
+    if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
+    else:
+      if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
+        raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
+      parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
+      packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
+  # TODO: shard copies the full tensor to every device
+  for t in packed.values(): t.realize()
+  for d in devices: Device[d].allocator.free_cache()
+  def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
+    decoded = ggml_data_to_tensor(packed[name].flatten(), prod(shape), typ)
+    if (axis:=shard_map.get(name)) is None: return decoded.reshape(shape)
+    local = decoded.reshape(n, *shape[:axis], shape[axis]//n, *shape[axis+1:])
+    return local.permute(*range(1, axis+1), 0, *range(axis+1, local.ndim)).reshape(shape)
+  return {name: decode(name, shape, typ) for name, (_, shape, typ) in entries.items()}

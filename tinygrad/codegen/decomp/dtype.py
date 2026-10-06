@@ -83,13 +83,15 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
 def l2i_define(x:UOp) -> UOp:
   # cannot decomp a Variable
   if x.addrspace == AddrSpace.ALU: raise RuntimeError(f"long decomposition of variable {x.arg.name} unsupported")
-  return UOp(x.op, arg=replace(x.arg, dtype=l2i_dt[x.dtype], size=None if x.arg.size is None else x.arg.size*2), tag=x.tag)
+  return x.replace(arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(UOp.const(x.src[0].val*2) if x.shape else x.src[0], *x.src[1:]))
 
 def split_l2i(ctx:dict, op: Ops, dt: DType, *uops:UOp):
   # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself.
   # both word halves of a node ask for the same split, so ctx memos it for the pass
   if (key:=(op, dt, uops)) not in ctx: ctx[key] = l2i(op, dt, *graph_rewrite(UOp.sink(*uops), pm_long_decomp, ctx=ctx, bottom_up=True).src)
   return ctx[key]
+
+def l2i_rewrite_idx(ctx:dict, idx:UOp) -> UOp: return graph_rewrite(idx, pm_long_decomp, ctx=ctx, bottom_up=True)
 
 # ***** floats *****
 f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
@@ -106,8 +108,7 @@ def f2f(v, fr:DType, to:DType, sat=True):
     if fr in dtypes.fp8_fnuz:
       fnuz_nan = sign.ne(0) & nosign.eq(0)
       qnan = shl(shl(1, te) - 1, tm) | shl(1, tm - 1)
-      # the fnuz bias can exceed the target's: exp in [1, fb-tb] is normal in fr but lands below to's normal range, so it flushes like a denormal
-      return fnuz_nan.where(qnan, sign | (exp < max(fb - tb, 0) + 1).where(0, norm)).bitcast(to)
+      return fnuz_nan.where(qnan, sign | exp.eq(0).where(0, norm)).bitcast(to)
     # fp8e4m3 has only one nan
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
@@ -141,6 +142,8 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
+def f2f_rewrite(ctx:tuple, x:UOp) -> UOp: return graph_rewrite(x, pm_float_decomp, ctx=ctx, bottom_up=True)
+
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp: PatternMatcher = PatternMatcher([
   # the decomp's own bottom-up rewrite can mint bare consts mid-flight: word splitting commits them at the long sibling's dtype
@@ -171,7 +174,7 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
    split_l2i(ctx, x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda ctx,x,idx:
-   reindex(graph_rewrite(idx, pm_long_decomp, ctx=ctx, bottom_up=True), x.tag[0]).replace(tag=None).load() if x.tag is not None else None)
+   reindex(l2i_rewrite_idx(ctx, idx), x.tag[0]).replace(tag=None).load() if x.tag is not None else None)
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple
@@ -180,12 +183,12 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
    UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx[0]]), tag=ctx[0]) if x.dtype == ctx[0] else None),
   # INDEX into a LOAD/STACK selects a lane of an already converted value, the load rules below own those
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(GroupOp.All-{Ops.LOAD, Ops.STACK}),), allow_any_len=True, name="x"), lambda ctx,x:
-   UOp(x.op, src=(graph_rewrite(x.src[0], pm_float_decomp, ctx=ctx, bottom_up=True), *x.src[1:]), arg=x.arg, tag=ctx[0])
+   UOp(x.op, src=(f2f_rewrite(ctx, x.src[0]), *x.src[1:]), arg=x.arg, tag=ctx[0])
    if x.dtype == ctx[0] else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype == ctx[0] else None),
   # bitcasted load should just replace load
   (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
-   graph_rewrite(ld.src[0], pm_float_decomp, ctx=ctx, bottom_up=True).load(*ld.src[1:]).bitcast(bc.dtype) if ld.dtype == ctx[0] else None),
+   f2f_rewrite(ctx, ld.src[0]).load(*ld.src[1:]).bitcast(bc.dtype) if ld.dtype == ctx[0] else None),
   # bitcast from
   (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
    bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
@@ -194,7 +197,7 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
    f2f(x.bitcast(f2f_dt[ctx[0]]), ctx[0], ctx[1]) if bc.dtype == ctx[0] else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
    f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype == ctx[0] else None),
-  (UPat(GroupOp.All-GroupOp.Defines-{Ops.CAST, Ops.BITCAST, Ops.CONST}, dtypes.floats, name="x"), lambda ctx,x:
+  (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, dtypes.floats, name="x"), lambda ctx,x:
    UOp(x.op, src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src), arg=x.arg, tag=x.tag) if x.dtype == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
    st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
@@ -205,7 +208,7 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
   def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
   for fr in sorted(filter(_should_emulate, ctx[0])):
-    to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+    to = dtypes.int if fr == dtypes.long else dtypes.float
     if DEBUG >= 2: print(f"emulating {fr} as {to}")
     pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
     sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx={} if pm is pm_long_decomp else (fr, to), bottom_up=True)

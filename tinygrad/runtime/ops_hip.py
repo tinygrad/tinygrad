@@ -19,7 +19,7 @@ class HIPDevice(Compiled):
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(hip.hipGetDeviceCount(x))).value
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
 

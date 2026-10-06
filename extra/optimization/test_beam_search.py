@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.helpers import BEAM, Timing, prod
 from tinygrad import Variable, Device, Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.uop.ops import AxisType, Ops
+from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.codegen.opt.search import get_kernel_actions
@@ -87,11 +87,34 @@ class TestBeamSearch(unittest.TestCase):
     ast = a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0]
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     s.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
-    up = prod([x for x, t in zip(s.full_shape, s.axis_types) if t in (AxisType.UPCAST, AxisType.UNROLL)])
+    up = prod([x for x, t in zip(s.full_shape, s.axis_types) if t is AxisType.UPCAST])
     actions = get_kernel_actions(s, include_0=False, max_up=int(up))
-    upcasted = [s for s in actions.values() if any(o.op is OptOps.SPLIT and o.arg[1] in (AxisType.UPCAST, AxisType.UNROLL)
+    upcasted = [s for s in actions.values() if any(o.op is OptOps.SPLIT and o.arg[1] is AxisType.UPCAST
                                                   for o in s.applied_opts)]
     assert len(upcasted) > 0, f"expected upcast/unroll actions after TC with max_up={up}, but got none"
+
+  def test_reduce_upcast_actions(self):
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
+    s = Scheduler(ast, Device[Device.DEFAULT].renderer)
+    output_axis, reduce_axis = s.axes_of(reduce=False)[0], s.axes_of(reduce=True)[0]
+    actions = get_kernel_actions(s, include_0=False, max_up=32)
+    up_opts = {(o.axis, o.arg[0]) for candidate in actions.values()
+               if (o:=candidate.applied_opts[-1]).op is OptOps.SPLIT and o.arg[1] is AxisType.UPCAST}
+    self.assertIn((output_axis, 4), up_opts)
+    self.assertIn((reduce_axis, 4), up_opts)
+    self.assertIn((reduce_axis, 0), up_opts)  # full reduction unroll of 32 is allowed
+    self.assertNotIn((output_axis, 0), up_opts)  # full output upcast of 32 exceeds its limit
+
+  def test_reduce_upcast_budget(self):
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
+    s = Scheduler(ast, Device[Device.DEFAULT].renderer)
+    s.apply_opt(Opt(OptOps.SPLIT, s.axes_of(reduce=False)[0], (2, AxisType.UPCAST)))
+    reduce_axis = s.axes_of(reduce=True)[0]
+    actions = get_kernel_actions(s, include_0=False, max_up=4)
+    reduce_amounts = {o.arg[0] for candidate in actions.values() if (o:=candidate.applied_opts[-1]).op is OptOps.SPLIT
+                      and o.arg[1] is AxisType.UPCAST and o.axis == reduce_axis}
+    self.assertEqual(reduce_amounts, {2})  # output and reduction upcasts share the same budget
+    for candidate in actions.values(): self.assertLessEqual(candidate.upcast_size(), 4)
 
   def test_max_up(self):
     a = Tensor.rand(16, 16)
@@ -99,7 +122,7 @@ class TestBeamSearch(unittest.TestCase):
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     for max_up in (2, 4):
       actions = get_kernel_actions(s, include_0=False, max_up=max_up)
-      up_opts = [o for s in actions.values() for o in s.applied_opts if o.op is OptOps.SPLIT and o.arg[1] in (AxisType.UPCAST, AxisType.UNROLL)]
+      up_opts = [o for s in actions.values() for o in s.applied_opts if o.op is OptOps.SPLIT and o.arg[1] is AxisType.UPCAST]
       assert len([opt for opt in up_opts if opt.arg[0] > max_up]) == 0 and len([op for op in up_opts if op.arg[0] <= max_up]) > 0
 
 if __name__ == '__main__':

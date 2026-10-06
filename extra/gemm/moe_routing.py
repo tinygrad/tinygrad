@@ -123,8 +123,14 @@ def _gscatter_bwd(gradient:UOp, kernel:UOp) -> tuple:
   dev = src_u.device
   G, T_l, D = src_u.shape
   k = idx_u.shape[1] // T_l
+  if getenv("GGATHER_SUM_HIP", 0):
+    from extra.gptoss_kernels.gather_sum import gather_sum
+    assert k == 4
+    return None, gather_sum(Tensor(gradient), Tensor(idx_u)).uop, None
   sel = grouped_gather_rows(Tensor(gradient, device=dev), Tensor(idx_u, device=dev), G)
-  return (None, sel.reshape(G, T_l, k, D).sum(2).cast(src_u.dtype).uop, None)
+  # FP8 dispatch carries BF16 gradients back to the quantizer, not FP8-rounded gradients.
+  grad_dtype = dtypes.bfloat16 if src_u.dtype == dtypes.fp8e4m3 else src_u.dtype
+  return (None, sel.reshape(G, T_l, k, D).sum(2).cast(grad_dtype).uop, None)
 
 def grouped_scatter_rows(src:Tensor, idx:Tensor, m_l:int) -> Tensor:
   G, T_l, D = src.shape
@@ -135,18 +141,24 @@ def m_max_for(t_local:int, experts_per_tok:int, n_experts:int) -> int:
   return (-(-t_local * experts_per_tok // BLOCK_ROW) + n_experts) * BLOCK_ROW
 
 class Routing:
-  def __init__(self, weights:Tensor, dest_row:Tensor, off:Tensor, m_l:int, n_groups:int, t_local:int):
+  def __init__(self, weights:Tensor, dest_row:Tensor, off:Tensor, m_l:int, n_groups:int, t_local:int,
+               topi:Tensor|None=None, counts:Tensor|None=None):
     self.weights, self.dest_row = weights, dest_row
     self.off = off
+    self.topi = topi
+    self.counts = counts
     self.m_l, self.n_groups, self.t_local = m_l, n_groups, t_local
 
   @property
-  def rows_e(self) -> Tensor:
+  def tile_e(self) -> Tensor:
     G, E = self.off.shape[0], self.off.shape[1] - 1
     tr = Tensor.arange(self.m_l // BLOCK_ROW, dtype=dtypes.int32).reshape(1, -1, 1) * BLOCK_ROW
     tr = tr.shard(self.off.device) if isinstance(self.off.device, tuple) else tr.to(self.off.device)
-    tile_e = ((tr >= self.off[:, :E].reshape(G, 1, E)).sum(-1) - 1).cast(dtypes.int32)
-    return tile_e.reshape(-1, 1).expand(-1, BLOCK_ROW).reshape(-1)
+    return ((tr >= self.off[:, :E].reshape(G, 1, E)).sum(-1) - 1).cast(dtypes.int32).reshape(-1)
+
+  @property
+  def rows_e(self) -> Tensor:
+    return self.tile_e.reshape(-1, 1).expand(-1, BLOCK_ROW).reshape(-1)
 
 def n_groups_of(t:Tensor) -> int:
   return len(t.device) if isinstance(t.device, tuple) else 1
@@ -155,22 +167,46 @@ def route(logits:Tensor, experts_per_tok:int, n_experts:int) -> Routing:
   T, E = logits.shape
   k, G = experts_per_tok, n_groups_of(logits)
   assert T % G == 0, f"tokens {T} must split across {G} devices"
-  T_l, m_l = T // G, m_max_for(T // G, k, n_experts)
+  T_l = T // G
 
-  topv, topi = logits.reshape(G, T_l, E).topk(k)
-  weights = topv.softmax(-1)
+  if getenv("FUSED_ROUTER_TOPK", 0):
+    from extra.gptoss_kernels.router_topk import fused_router_topk
+    weights, topi = fused_router_topk(logits.reshape(G, T_l, E))
+  else:
+    topv, topi = logits.reshape(G, T_l, E).topk(k)
+    weights = topv.softmax(-1)
+  return route_topk(weights, topi, n_experts)
+
+def route_topk(weights:Tensor, topi:Tensor, n_experts:int) -> Routing:
+  G, T_l, k = weights.shape
+  E, m_l = n_experts, m_max_for(T_l, k, n_experts)
   m = topi.reshape(G, T_l * k).cast(dtypes.int32).one_hot(E).cast(dtypes.int32)
 
-  pad = ((m.sum(1) + (BLOCK_ROW - 1)) // BLOCK_ROW) * BLOCK_ROW
+  counts = m.sum(1)
+  pad = ((counts + (BLOCK_ROW - 1)) // BLOCK_ROW) * BLOCK_ROW
   off = pad.cumsum(1).pad(((0, 0), (1, 0)))
   dest_row = ((m.cumsum(1) + off[:, :E].reshape(G, 1, E)) * m).sum(-1).sub(1).cast(dtypes.int32)
-  return Routing(weights, dest_row, off, m_l, G, T_l)
+  return Routing(weights, dest_row, off, m_l, G, T_l, topi=topi, counts=counts)
 
 def dispatch(x:Tensor, r:Routing) -> Tensor:
   G, D = r.n_groups, x.shape[-1]
   return grouped_scatter_rows(x.reshape(G, r.t_local, D), r.dest_row, r.m_l).reshape(G * r.m_l, D)
 
+def dispatch_fp8(x:Tensor|tuple[Tensor, Tensor], r:Routing) -> tuple[Tensor, Tensor]:
+  from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
+  q, e8 = x if isinstance(x, tuple) else quantize_mxfp8_fused_qe8(x)
+  if getenv("DISPATCH_GATHER", 0):
+    from extra.gptoss_kernels.dispatch import inverse_rows, dispatch_gather
+    assert r.counts is not None
+    src_row = inverse_rows(r.dest_row, r.counts, r.off, r.m_l)
+    return tuple(dispatch_gather(t.reshape(r.n_groups, r.t_local, -1), r.dest_row, src_row) for t in (q, e8))
+  return dispatch(q, r), dispatch(e8, r)
+
 def combine(y:Tensor, r:Routing, n_tokens:int, experts_per_tok:int) -> Tensor:
   G, D, k = r.n_groups, y.shape[-1], experts_per_tok
+  if getenv("FUSED_COMBINE", 0):
+    from extra.gptoss_kernels.combine import fused_combine
+    assert k == 4
+    return fused_combine(y.reshape(G, r.m_l, D), r.dest_row, r.weights.reshape(G, r.t_local, k)).reshape(n_tokens, D)
   sel = grouped_gather_rows(y.reshape(G, r.m_l, D), r.dest_row, G).reshape(G, r.t_local, k, D)
   return (sel * r.weights.reshape(G, r.t_local, k, 1).cast(sel.dtype)).sum(2).reshape(n_tokens, D).cast(y.dtype)

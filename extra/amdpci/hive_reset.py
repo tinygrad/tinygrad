@@ -3,7 +3,7 @@
 import os
 from tinygrad.helpers import Context
 from tinygrad.runtime.support.system import System, PCIDevice
-from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev
 
 if __name__ == "__main__":

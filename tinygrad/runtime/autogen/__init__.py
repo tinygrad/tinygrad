@@ -10,7 +10,7 @@ rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.ta
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
-bnxt_src = ["https://raw.githubusercontent.com/torvalds/linux/v6.18/drivers/" + s for s in
+bnxt_src = ["https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/drivers/" + s + "?h=v6.18" for s in
             ("infiniband/hw/bnxt_re/roce_hsi.h", "infiniband/hw/bnxt_re/qplib_rcfw.h", "infiniband/hw/bnxt_re/qplib_res.h",
              "net/ethernet/broadcom/bnxt/bnxt_hwrm.h")]
 ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
@@ -18,12 +18,12 @@ cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cud
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
 opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
 comgr_2_src = "https://repo.radeon.com/rocm/apt/6.2/pool/main/c/comgr/comgr_2.8.0.60200-66~24.04_amd64.deb"
-macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+def macossdk(): return system("xcrun --show-sdk-path")
 
 llvm_lib = (
   (win_llvm:=r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ") +
   (mac_llvm:=repr([f'/opt/homebrew/opt/llvm@{i}/lib/libLLVM.dylib' for i in reversed(range(14, 21+1))]) + " if OSX else ") +
-  (other_llvm:=repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))])))
+  (other_llvm:=repr([f'LLVM-{i}' for i in reversed(range(14, 21+1))] + ['LLVM'])))
 clang_lib = win_llvm.replace("LLVM-C", "libclang") + (mac_llvm + other_llvm).replace("LLVM", "clang")
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
@@ -43,7 +43,7 @@ def load(name, files, **kwargs):
           with tarfile.open(fetch(src, gunzip=src.endswith("gz"))) as tf:
             tf.extractall(srcpath)
             if not isinstance(srcs, list): srcpath += tf.getnames()[0] # if we just have a single tarball, make this the root
-        else: fetch(src, name=srcpath + src.split('/')[-1])
+        else: fetch(src, name=srcpath + src.split('/')[-1].split('?')[0])
       files, kwargs['args'] = [str(f).format(srcpath) for f in files], [a.format(srcpath) for a in kwargs.get('args', [])]
       kwargs['anon_names'] = {k.format(srcpath):v for k,v in kwargs.get('anon_names', {}).items()}
       if (preprocess:=kwargs.pop('preprocess', None)): preprocess(srcpath)
@@ -169,14 +169,13 @@ def __getattr__(nm):
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   dll=clang_lib, prolog=["from tinygrad.helpers import WIN, OSX"], args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
-      return load("metal", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
+      return load("metal", lambda: [f"{macossdk()}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
-                  dll="'Metal'", args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
-    case "iokit": return load("iokit", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
-                              args=["-isysroot", macossdk])
-    case "corefoundation": return load("corefoundation",
-                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
-                                       dll="'CoreFoundation'",args=["-isysroot", macossdk])
+                  dll="'Metal'", args=lambda: ["-xobjective-c", "-isysroot", macossdk()], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", lambda: [f"{macossdk()}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
+                              args=lambda: ["-isysroot", macossdk()])
+    case "corefoundation": return load("corefoundation", lambda: [f"{macossdk()}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h"
+                                       for s in ["String", "Data"]], dll="'CoreFoundation'", args=lambda: ["-isysroot", macossdk()])
     case "llvm_qcom": return load("llvm_qcom", [root/"extra/tinydreno.h"], dll="'llvm-qcom'")
     case "ggml_common": return load("ggml_common", ["{}/ggml-common.h"], srcs=ggml_common_src,
                                     args=["-DGGML_COMMON_DECL_C", "-DGGML_COMMON_IMPL_C"], macros=False)
@@ -188,13 +187,13 @@ def __getattr__(nm):
                   preprocess=_extract_deb)
     case "bnxt":
       kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
-      return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1]}" for s in bnxt_src]],
+      return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1].split('?')[0]}" for s in bnxt_src]],
                   srcs=[linux_headers_kern_deb, *bnxt_src],
                   args=["-Du8=unsigned char", "-Du32=unsigned int", "-Du64=unsigned long long", "-D__le16=unsigned short",
                         "-D__le32=unsigned int", "-D__le64=unsigned long long", "-D__be16=unsigned short", "-D__be32=unsigned int", f"-I{kh}"],
-                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
+                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_(un)?rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
                             r"|vnic_(alloc|cfg)|cfa_l2_filter_alloc|port_phy_cfg)_(input|output)|(cmd|resp)_hdr)$",
-                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|register_mr)(_resp)?"
+                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|(de)?register_mr)(_resp)?"
                             r"|cq_(base|req)|sq_(rdma_hdr|sge))$",
                             r"(BNXT|CMDQ|CREQ|CQ|SQ|DBC|PTU|RCFW|HWRM|VNIC|RING_ALLOC|STAT_CTX|CFA_L2_FILTER|PORT_PHY_CFG|FIRMWARE_FIRST"
                             r"|FUNC_(QCAPS|QCFG|RESET|DRV_RGTR|BACKING_STORE))_"], preprocess=_extract_deb)

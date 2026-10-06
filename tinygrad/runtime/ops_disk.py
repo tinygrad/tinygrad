@@ -9,6 +9,8 @@ with contextlib.suppress(ImportError):
 class DiskDevice(Compiled):
   _tried_io_uring_init = False
 
+  def synchronize(self, timeout:int|None=None): pass
+
   def __init__(self, device:str):
     if not DiskDevice._tried_io_uring_init: self._iouring_setup()
 

@@ -48,8 +48,6 @@ jobs:
       run: |
         source /tmp/tinygrad_pytest_ci/bin/activate
         pytest -nauto --durations=20
-    - name: openpilot compile3 0.10.1 driving_vision
-      run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
   # TODO: reenable when not flaky
   #testframeworkpytest:
@@ -97,7 +95,6 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -109,7 +106,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -137,7 +134,6 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -149,7 +145,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -185,7 +181,6 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -197,7 +192,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -227,7 +222,6 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -239,7 +233,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -272,7 +266,6 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -284,7 +277,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -336,7 +329,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -353,14 +346,14 @@ jobs:
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "METAL" ]]; then
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           DEBUG=2 SHOULD_USE_TC=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 HALF=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 BFLOAT16=1 python3 extra/gemm/simple_matmul.py
           M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
         elif [[ "${{ matrix.dev }}" == "NV" ]]; then
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-          DEV=NV:PTX ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+          DEV=NV:PTX ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
           DEV=CUDA SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
@@ -371,9 +364,9 @@ jobs:
           # M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
           # DEV=NV:PTX M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
         else
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           # TODO: this is flaky
-          # DEV=AMD:LLVM python3 test/opt/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/runtime/test_tensor_cores.py
           SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
           # TODO: AMD compiler bug causes this to fail
@@ -444,41 +437,14 @@ jobs:
     strategy:
       matrix:
         dev: ['QCOM', 'QCOM:IR3']
-        version: ['0.11.0', '0.11.2']
-        model: ['vision', 'policy', 'supercombo', 'dmonitoring']
-        # exclude non-existent models
-        exclude: [{ version: '0.11.0', model: supercombo }, { version: '0.11.2', model: vision }, { version: '0.11.2', model: policy }]
+        model: [driving_supercombo, dmonitoring_model]
         include:
-          - version: '0.11.0'
-            model: vision
-            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-            timing: 18
-          - version: '0.11.0'
-            model: policy
-            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
-            timing: 3.4
-          - version: '0.11.0'
-            model: dmonitoring
-            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
-            timing: 13
-          - version: '0.11.2'
-            model: supercombo
-            url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
-            timing: 28
-          - dev: QCOM:IR3
-            version: '0.11.2'
-            model: supercombo
-            timing: 29
-          - version: '0.11.2'
-            model: dmonitoring
-            url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
-            timing: 12.5
-          # IR3 dmonitoring is slightly slower
-          - dev: QCOM:IR3
-            model: dmonitoring
-            timing: 13.0
+          - model: driving_supercombo
+            timing: 20
+          - model: dmonitoring_model
+            timing: 12
       fail-fast: false
-    name: openpilot ${{ matrix.version }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
+    name: openpilot ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, Linux, comma4]
     timeout-minutes: 5
     defaults:
@@ -487,8 +453,10 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     env:
       DEV: ${{ matrix.dev }}
+      # sha for https://huggingface.co/commaai/openpilot-lfs
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
+      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.model }}
       ASSERT_MIN_STEP_TIME: ${{ matrix.timing }}
-      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.version }}_${{ matrix.model }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -500,9 +468,18 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: compile
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }} openpilot.pkl
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl
     - name: run pickle
-      run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" RUN_PICKLE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py - openpilot.pkl
+      run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
+    - name: Compile driving warp
+      run: |
+        taskset -c 4-7 python examples/openpilot/compile_warp.py --output warp.pkl --benchmark-runs 1 \
+          --frame "1928,1208,2048,1216,608,${{ matrix.model == 'driving_supercombo' && '3735552' || '4804608' }}" \
+          --warp-to ${{ matrix.model == 'driving_supercombo' && '512x256' || '1440x960' }} \
+          --layout ${{ matrix.model == 'driving_supercombo' && 'yuv420' || 'luma' }} \
+          ${{ matrix.model == 'driving_supercombo' && '--frames 2' || '--border-fill 16 --transform-device NPY' }}
+    - name: run warp pickle
+      run: ASSERT_MIN_STEP_TIME=0 BENCHMARK_LOG="${BENCHMARK_LOG}_warp" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -537,6 +514,8 @@ jobs:
 
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
+    env:
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
     runs-on: [self-hosted, Linux, comma4]
     timeout-minutes: 14
     defaults:
@@ -551,14 +530,18 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: openpilot compile3 big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo PICKLE_OOB=1 PYTHONPATH="." TC_OPT=2 GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/10926f2c0911821ca0e72439c1c3bf3ec11f0a08789aa14b7ee8f25379b2afa4 openpilot.pkl
+    - name: openpilot compile big_driving_supercombo
+      run: |
+        GMMU=0 DEV=USB+AMD:LLVM taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band --retargetable
+        BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=25 taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band --retarget
     - name: openpilot load_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
-    - name: openpilot run_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle RUN_PICKLE=1 PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py - openpilot.pkl
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 taskset -c 4-7 python3 examples/openpilot/load_pickle.py openpilot.pkl --out-of-band
+    - name: compile driving warp
+      run: GMMU=0 DEV=USB+AMD:LLVM taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl --retargetable
+    - name: run warp pickle
+      run: BENCHMARK_LOG=usbgpu_openpilot_driving_warp GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl --retarget
     - name: Test copy speeds
-      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py
+      run: SIZE=64000000 GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 test/external/external_test_usb_asm24.py
 
   driverbenchmarks:
     name: PCI Driver Benchmark (DEV=${{ matrix.dev }})
@@ -566,7 +549,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD', 'NV']
+        dev: ['AMD::gfx1201', 'NV']
     timeout-minutes: 5
     defaults:
       run:
@@ -579,8 +562,8 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids --sudoless
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} rmmod --expect
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
@@ -593,21 +576,21 @@ jobs:
     - name: Test driver cold start time
       run: time DEBUG=3 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       run: time DEBUG=3 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test GPU crash recovery
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       run: python3 -m pytest -rA test/external/external_test_gpu_crash.py
     - name: Test tensor cores
       run: |
-        if [[ "${{ matrix.dev }}" == "AMD" ]]; then
+        if [[ "${{ matrix.dev }}" == "NV" ]]; then
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+        else
           # Fails on 9070
-          # python3 test/test_linearizer.py test/opt/test_tensor_cores.py
-          # DEV=AMD:LLVM python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+          # python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
           # SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
-        else
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
         fi
     - name: Test DISK copy time
       run: TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
@@ -625,6 +608,19 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Remote
+      if: ${{ matrix.dev != 'NV' }}
+      env:
+        DEV: PCI+AMD::gfx1201
+      run: |
+        PYTHONPATH=. python3 extra/remote/serve.py 6482 &
+        server_pid=$!
+        trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 python3 test/test_tiny.py
+        kill "$server_pid"
+        wait "$server_pid"
+        trap - EXIT
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 

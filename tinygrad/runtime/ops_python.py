@@ -3,14 +3,16 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
-import pickle, base64, itertools, time, sys, functools, ctypes
+import pickle, base64, itertools, time, sys, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, to_mv, mv_address
+from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address
 from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
+from tinygrad.runtime.support.elf import link_sym
+from tinygrad.runtime.support.c import DLL
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
@@ -30,46 +32,46 @@ def _store(m, i, v, dtype: DType):
   else:
     for k in range(dtype.itemsize // w): m[i+k] = (v >> 8*w*k) & ((1 << 8*w) - 1)
 
-# here are the models for the WMMA instruction on the different hardware
-def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
-  for cc, tinp, num in zip(("A", "B", "C"), inp, (NUM_A, NUM_B, NUM_C)):
-    assert len(tinp) == num, f"{cc} must have {num} elements per thread, it has {len(tinp)}"
-    assert len(flatten(tinp)) == num * warp_size, f"WMMA must have {num * warp_size} total elements for {cc} in WMMA"
-  assert warp_size > 0 and warp_size % WARP_THREADS == 0, f"must have multiples of {WARP_THREADS} warp threads"
-  out = [inp[2][elem_idx][:] for elem_idx in range(NUM_C)]
-  for goff in range(0, warp_size, WARP_THREADS):
-    for lane_id in range(WARP_THREADS):
-      for elem_idx in range(NUM_C): # calculate new muls and add to acc
-        (c_i, c_j) = c_map(lane_id, elem_idx)
-        out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
+def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
+  # cores sharing (dims, dtype_in, threads) share fragments, so the first match is the layout
+  tcore = next(x for x in tensor_cores if (x.dims, x.dtype_in, x.threads) == arg[:3])
+  frags = tcore.frag_coords()
+  for cc,x,co in zip("ABC", inp, frags): assert len(x) == len(co[0]), f"{cc} must have {len(co[0])} elements per thread, it has {len(x)}"
+  assert warp_size % tcore.threads == 0, f"must have multiples of {tcore.threads} warp threads"
+  out = [x[:] for x in inp[2]]
+  for goff in range(0, warp_size, tcore.threads):
+    a, b = ({c: x[e][goff+lane] for lane,lc in enumerate(co) for e,c in enumerate(lc)} for co,x in zip(frags[:2], inp))
+    for lane,lc in enumerate(frags[2]):
+      for e,(m,n) in enumerate(lc): out[e][goff+lane] += sum(a[m,k]*b[k,n] for k in range(tcore.dims[2]))
   return out
 
 class PythonProgram(Program['PythonDevice']):
-  def __init__(self, dev:'PythonDevice', obj:TinyELF):
-    self.uops: list[UOp] = pickle.loads(obj.lib)
+  def __init__(self, dev:'PythonDevice', obj:TinyELF, uops:list[UOp]|None=None):
+    self.uops: list[UOp] = uops or pickle.loads(obj.lib)
+    self.fxns = {u: PythonProgram(dev, obj, list(u.body.src)) for u in self.uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
+    self.tensor_cores = PythonRenderer(obj.target).tensor_cores
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op == Ops.END}
+    self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      values: dict[UOp, Any] = {}
+      values: dict[UOp, Any] = dict(env:=kw.get("env", ())) # a function runs with its params bound to the caller's args
       pbufs: list[int] = list(bufs)
       pvals: list[int] = list(vals)
       exec_masks = [[True] * warp_size]
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
-        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
+        src_values = [values[v] for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
+        if u.op is Ops.BACKEDGE:
+          i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
+          continue
         if u.op is Ops.END:
-          if len(u.src) == 3:
-            # conditional backedge on a loop: jump back while the condition is true
-            if values[u.src[2]][0]: i = self.uop_to_index[u.src[1]]
-            else: i += 1
-          else: i = self.uop_to_index[u.src[1]]
+          i = self.uop_to_index[u.src[1]]
           continue
         if u.op is Ops.IF:
           exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
@@ -79,7 +81,8 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
+          or (u.op is Ops.AFTER and u.src[0].op is Ops.NOOP): # the AFTER-wrapped NOOP bound of a void RANGE
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -104,6 +107,7 @@ class PythonProgram(Program['PythonDevice']):
             size = u.max_numel() * u.dtype.itemsize
             buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
+        elif u.op is Ops.BINARY: values[u] = [memoryview(u.arg)] * warp_size
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
           elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
@@ -117,7 +121,7 @@ class PythonProgram(Program['PythonDevice']):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
-            scale = u.src[0].dtype.itemsize // u.src[0].src[0].dtype.itemsize if u.src[0].op is Ops.BITCAST else 1
+            scale = v.dtype.itemsize // v.src[0].dtype.itemsize if (v:=u.src[0].without_after).op is Ops.BITCAST else 1
             for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
         elif u.op is Ops.RANGE:
@@ -140,73 +144,18 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
-        elif u.op is Ops.CALL:
-          assert u.dtype is dtypes.void
-          cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
+        elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
+        elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
+          restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
-            values[u].append(cfunc(call_args[0])(*call_args[1:]) if gate else None)
-        elif u.op is Ops.WMMA:
-          first_src_dtype = u.src[0].dtype
-          assert isinstance(first_src_dtype, DType) # mypy
-          dims, dtype_in, device, threads = u.arg[0], first_src_dtype, u.arg[2], u.arg[3]
-          wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
-          # TODO: refactor these to a shared TensorCoreLayout
-          if device == "METAL":
-            # A (2 elements on 32 threads): row major
-            def a_b_elem(x, i, j, goff): return x[(i%2)][goff+(i//2)%2+(j%4)*2+(i//4)*8+(j//4)*16]
-            # (i, j), C, D (2 elements on 32 threads): row major same as A/B
-            def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
-            values[u] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
-          elif device == "AMD" and threads == 64:
-            def a_elem(x, k, row, goff): return x[k%(dims[2]//4)][goff + (k//(dims[2]//4))*16 + row]
-            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
-            def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
-            values[u] = wmma_helper(64, dims[2], len(src_values[0]), len(src_values[1]), len(src_values[2]), a_elem, b_elem, c_map)
-          elif device == "AMD" and len(src_values[0]) == 8: # RDNA4
-            def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
-            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
-            def c_map(lane, elem): return (lane%16, (lane//16)*8 + elem)
-            values[u] = wmma_helper(32, 16, 8, 8, 8, a_elem, b_elem, c_map)
-          elif device == "AMD":
-            # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
-            def a_elem(x, k, row, goff):
-              assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
-              return x[k][goff+row]
-            # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
-            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
-            def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
-            values[u] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
-          elif device == "CUDA":
-            # (col, row) given (lane, elem) for C & D (4 elements on 32 threads); shared by all tc shapes with M=16 N=8
-            def c_map(lane, elem): return (elem%2 + (lane%4)*2, lane//4 + (elem//2)*8)
-
-            if dims == (8,16,16):
-              def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2 + (k//8)*4][goff + (k//2)%4 + (row%8)*4]
-              def b_elem(x, col, k, goff): return x[k%2 + (k//8)*2][goff + (k//2)%4 + col*4]
-              values[u] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
-
-            elif dims == (8,16,32):
-              def a_elem(x, k, row, goff): return x[k%4 + (row//8)*4 + (k//16)*8][goff + (k//4)%4 + (row%8)*4]
-              def b_elem(x, col, k, goff): return x[k%4 + (k//16)*4][goff + (k//4)%4  + col*4]
-              values[u] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
-
-            elif dims == (8,16,8) and dtype_in == dtypes.half:
-              def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2][goff + k//2 + (row%8)*4]
-              def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
-              values[u] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
-
-            elif dims == (8,16,8) and dtype_in == dtypes.float:
-              def a_elem(x, k, row, goff): return x[(k//4)*2 + row//8][goff + k%4 + (row%8)*4]
-              def b_elem(x, col, k, goff): return x[k//4][goff + k%4 + col*4]
-              values[u] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
-
-            else: raise NotImplementedError(f"unimplemented tensor core {u.arg}")
-          else: raise NotImplementedError(f"unimplemented tensor core {u.arg}")
+            values[u].append(cfunc(*call_args) if gate else None)
+        elif u.op is Ops.WMMA: values[u] = wmma(self.tensor_cores, u.arg, src_values, warp_size)
         elif u.op in GroupOp.ALU:
           assert all_same([len(x) for x in src_values]), f"{[len(x) for x in src_values]} doesn't match on {u.op}"
-          assert all_same([u.dtype] + src_dtypes) or u.op in {*GroupOp.Comparison, Ops.WHERE}, f"dtype mismatch on {u.op}"
+          assert all_same([u.dtype] + src_dtypes) or u.op in {*GroupOp.Comparison, Ops.WHERE, Ops.SHL, Ops.SHR}, f"dtype mismatch on {u.op}"
           values[u] = [exec_alu(u.op, u.dtype, p) for p in zip(*src_values)]
         assert u in values, u
         i += 1

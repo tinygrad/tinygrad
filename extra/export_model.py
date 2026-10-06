@@ -15,7 +15,7 @@ EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 _KERNEL_ASTS = {Ops.SINK, Ops.PROGRAM}
 def iter_kernel_calls(linear:UOp):
   """Yield kernel CALLs from a LINEAR UOp. Toposort descends naturally into CUSTOM_FUNCTION graph batches; gate stops at kernel ASTs."""
-  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.src[0].op in _KERNEL_ASTS)
+  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.body.op in _KERNEL_ASTS)
 
 def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], List, Dict[str,Tuple[int,DType,int]], Dict[str,Buffer]]:
   output_name = {id(b): f"output{i}" for i, b in enumerate(output_bufs)}
@@ -38,9 +38,9 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
-    functions[info.function_name] = prg.src[2].arg
+    functions[prg.src[0].arg.function_name] = prg.src[2].arg
     cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + list(info.vars)
-    statements.append((info.function_name, cargs, info.global_size, info.local_size))
+    statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 

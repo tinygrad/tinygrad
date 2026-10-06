@@ -150,18 +150,16 @@ class OnnxPBParser:
     """Entry point for parsing the ONNX model."""
     obj: dict[str, Any] = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len):
+      if fid == 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
+      else: self.reader.skip_field(wire_type)
+    self.opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
+    self.reader.seek(0)
+    for fid, wire_type in self._parse_message(self.reader.len):
       match fid:
         case 4: obj["domain"] = self.reader.read_string()
         case 5: obj["model_version"] = self.reader.read_int64()
         case 7: obj["graph"] = self._parse_GraphProto()
-        case 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
         case _: self.reader.skip_field(wire_type)
-
-    # update opset version
-    opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
-    for n in obj["graph"]["node"]:
-      n_ = n["parsed_node"]
-      n["parsed_node"] = OnnxNode(n_.op, OpSetId(n_.opset_id.domain, opset_imports.get(n_.opset_id.domain, 1)), n_.inputs, n_.outputs, n_.opts)
     return obj
 
   def _parse_GraphProto(self) -> dict:
@@ -191,7 +189,7 @@ class OnnxPBParser:
 
     # parse node
     attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in obj["attribute"]}
-    opset_id = OpSetId(Domain.from_onnx(obj.get('domain')), 1)  # default version, to be updated later in _parse_ModelProto
+    opset_id = OpSetId(domain:=Domain.from_onnx(obj.get('domain')), self.opset_imports.get(domain, 1))
     obj["parsed_node"] = OnnxNode(obj["op_type"], opset_id, tuple(obj["input"]), tuple(obj["output"]), attributes)
     return obj
 
@@ -485,6 +483,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     n = len(pads) // 2
     return tuple(x for i in range(n-1, -1, -1) for x in (pads[i], pads[i+n]))
 
+  def _flat_offset(idx:Tensor, spatial_sz:sint) -> Tensor:
+    return Tensor.arange(0, prod(idx.shape[:2])*spatial_sz, spatial_sz, dtype=dtypes.int64).reshape(*idx.shape[:2], *[1]*(idx.ndim-2))
+
   AUTO_PAD_OPTIONS = Literal["NOTSET", "SAME_UPPER", "SAME_LOWER", "VALID"]
   # (padding_height, padding_width) -> (padding_top, padding_left, padding_bottom, padding_right)
   def _auto_pad(pads, auto_pad: AUTO_PAD_OPTIONS):
@@ -584,15 +585,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)
-    return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
+    (n, m), a, b = cast(tuple[int, int], x.shape), max(k, 0), max(-k, 0)
+    return Tensor.eye(n+a, m+b, dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)[a:, b:]
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
   def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
   def ConstantOfShape(shape:list[int], value:Tensor|None=None):
     if value is None: value = Tensor(0, dtype=dtypes.float32)
-    if shape == [0]: return Tensor([], dtype=value.dtype)
-    return value.expand(shape)
+    return value.reshape(()).expand(shape)
 
   def Size(data:Tensor): return data.numel()
   def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64, device=data.device)
@@ -673,19 +673,21 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if select_last_index: return ((int(x.shape[axis])-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
     return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
   def ArgMin(x, axis:int=0, keepdims:int=1, select_last_index:int=0):
-    return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
+    return ArgMax(x._inverse(), axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
   # ***** Movement Ops *****
   def Reshape(data:Tensor, shape:Sequence[int], allowzero:int=0):
     return data.reshape([x if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(shape)])
   def Flatten(x:Tensor, axis:int=1): return x.reshape(prod(x.shape[0:axis]), -1)
   def Expand(x:Tensor, shape:list[int]): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
-  def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
+  def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0)).cast(x.dtype)
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
   def Squeeze(data:Tensor, axes:Sequence[int]|None=None):
-    return data.squeeze() if axes is None else functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
-  def Unsqueeze(data:Tensor, axes:Sequence[int]): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
+    if axes is None: return data.squeeze()
+    return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(map(data._resolve_dim, axes), reverse=True), data)
+  def Unsqueeze(data:Tensor, axes:Sequence[int]):
+    return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(data._resolve_dim(a, extra=len(axes)) for a in axes), data)
 
   def Tile(x:Tensor, repeats:list[int]): return x.repeat(repeats)
   def Concat(*xs:Tensor, axis:int): return Tensor.cat(*xs, dim=axis)
@@ -729,7 +731,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     pool_pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
     out = X.max_pool2d(tuple(kernel_shape), strides, dilations, pool_pads, ceil_mode=ceil_mode, return_indices=True)
     ret, idx = cast(tuple[Tensor, Tensor], out)
-    return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
+    spatial_shape = cast(tuple[int, ...], X.shape[2:])
+    if storage_order: idx = Tensor.usum(*(idx // prod(spatial_shape[i+1:]) % s * prod(spatial_shape[:i]) for i, s in enumerate(spatial_shape)))
+    return ret, idx + _flat_offset(idx, prod(spatial_shape))
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:tuple[int, ...]|int=1, group:int=1,
           kernel_shape:tuple[int, ...]|None=None, pads:tuple[int, ...]|int=0, strides:tuple[int, ...]|int=1):
@@ -752,11 +756,12 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     pads = _onnx_pads_to_tiny_pads(pads)
     return X.conv_transpose2d(W, B, group, strides_, dilations_, pads, output_padding_)
 
-  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:Sequence[int]|None=None, pads:tuple[int, ...]|int=0,
+  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Sequence[sint]|None=None, kernel_shape:Sequence[int]=(), pads:tuple[int, ...]|int=0,
                 strides:tuple[int, ...]|int=1):
-    if kernel_shape is None: kernel_shape = []
-    pads_: int | tuple[int, ...] = pads if isinstance(pads, int) else _onnx_pads_to_tiny_pads(pads)
-    return Tensor.max_unpool2d(xT, xI, tuple(kernel_shape), strides, 1, pads_, outshape if outshape is None else tuple(outshape))
+    if outshape is None:
+      s_, p_ = make_tuple(strides, n := len(kernel_shape)), make_tuple(pads, 2*n)
+      outshape = [*xT.shape[:2], *((i-1)*s - pb - pe + k for i,k,s,pb,pe in zip(xT.shape[2:], kernel_shape, s_, p_[:n], p_[n:]))]
+    return xT.max_unpool2d(xI - _flat_offset(xI, prod(outshape[2:])), output_size=outshape).reshape(outshape)
 
   def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
   def GlobalMaxPool(X:Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
@@ -795,16 +800,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
     if antialias: raise NotImplementedError("antialias is not implemented")
     axes = axes or list(range(X.ndim))
-    perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
-    # we pre-permute the axes and permute back after resize
-    # the permute aligns X's axes to scales, sizes, and roi
-    X = X.permute(*perm)
-
-    input_shape = cast(tuple[int, ...], X.shape[2:])
-    if scales is not None: assert all(sc==1 for sc in scales[:-len(input_shape)]), "resizing batch_size dim or channel dim not supported"
-    if sizes is not None: assert tuple(sizes[:-2]) == tuple(X.shape[X.ndim-len(sizes):-2]), "resizing batch_size dim or channel dim not supported"
-
-    scales, sizes = (None if scales is None else scales[-len(input_shape):]), (None if sizes is None else sizes[-len(input_shape):])
+    input_shape = [cast(int, X.shape[a]) for a in axes]
     if sizes is not None:
       if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
         scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
@@ -815,7 +811,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       assert scales is not None, "either sizes or scales must be provided"
       sizes = [int(sc * sh) for sc, sh in zip(scales, input_shape)]
 
-    if all(sz == sh for sz, sh in zip(sizes, input_shape)): return X.permute(*argsort(perm)) if perm else X
+    if all(sz == sh for sz, sh in zip(sizes, input_shape)): return X
+    axes, input_shape, sizes, scales = map(list, zip(*[t for t in zip(axes, input_shape, sizes, scales) if t[3] != 1]))
+    perm = [a for a in range(X.ndim) if a not in axes] + axes
+    X = X.permute(*perm)
 
     indexes = []
     for input_sz, output_sz, scale in zip(input_shape, sizes, scales):

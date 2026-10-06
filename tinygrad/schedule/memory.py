@@ -30,7 +30,7 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
-    if si.src[0].op is Ops.COPY: copy_bufs.update(si_bufs)
+    if si.src[0].op is Ops.STORE: copy_bufs.update(si_bufs)
   if not first_appearance: return linear
 
   # separate copy and compute buffers into different lanes to avoid introducing dependencies (copy->compute->copy)

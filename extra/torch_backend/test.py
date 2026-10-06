@@ -597,6 +597,12 @@ class TestTorchBackend(unittest.TestCase):
     cpu_res = torch.arange(6, dtype=torch.float32).reshape(2,3).sum().numpy()
     np.testing.assert_equal(torch_res, cpu_res)
 
+  def test_count_nonzero(self):
+    a = torch.tensor([[0, 2, 0], [3, 0, -4]], device=device)
+    torch_res = a.count_nonzero().cpu().numpy()
+    cpu_res = torch.tensor([[0, 2, 0], [3, 0, -4]]).count_nonzero().numpy()
+    np.testing.assert_equal(torch_res, cpu_res)
+
   def test_view_matches_torch(self):
     a = torch.arange(6, dtype=torch.float32, device=device)
     torch_res = a.view(2, 3).cpu().numpy()

@@ -20,7 +20,7 @@ def _custom_embedding_fwd(out:UOp, idx:UOp, weight:UOp) -> UOp:
 
 def gptoss_embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
   out_shape = idx.shape + (EMBED,)
-  out = alloc_like(out_shape, dtypes.bfloat16, idx.device, idx.uop.axis).contiguous()
+  out = alloc_like(out_shape, dtypes.bfloat16, idx.device, idx.uop.axis).clone()
   out, *_ = Tensor.custom_kernel(out, idx.reshape(-1), weight, fxn=_custom_embedding_fwd)
   return out
 
@@ -78,11 +78,13 @@ def _embedding_fwd_fxn(wp:UOp, ip:UOp, device:str|tuple[str, ...]) -> Tensor:
   return gptoss_embedding_fwd(Tensor(wp, device=device), Tensor(ip, device=device))
 
 def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
-  weight, idx = call.src[1:]
+  weight, idx = call.src[1:3]
   device = Tensor(weight).device
-  if isinstance(device, tuple):
-    grad_emb, idx = grad_emb.copy_to_device(device), idx.copy_to_device(device)
-  return embedding_bwd_owner(Tensor(grad_emb, device=device), Tensor(idx, device=device), weight.shape[0]).uop, None
+  def gather(u:UOp) -> Tensor:
+    t = Tensor(u, device=device)
+    if not isinstance(device, tuple) or (axis := t.uop.axis) is None: return t
+    return Tensor.cat(*t.chunk(len(device), dim=axis), dim=axis).contiguous()
+  return embedding_bwd_owner(gather(grad_emb), gather(idx), weight.shape[0]).uop, None
 
 class GPTOSSEmbedding(nn.Embedding):
   def __call__(self, idx:Tensor) -> Tensor:

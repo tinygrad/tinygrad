@@ -1,7 +1,14 @@
 import unittest
 from tinygrad import UOp
+from tinygrad.uop.ops import AxisType
 
 class TestUOpRepr(unittest.TestCase):
+  def test_range_arg(self):
+    for axis_type in AxisType:
+      r = UOp.range(4, 2, axis_type)
+      self.assertEqual(r.arg, (axis_type, 2))
+      self.assertEqual(r.replace(arg=(axis_type, 2, 0)).arg, (axis_type, 2, 0))
+
   def test_simple_const(self):
     a = UOp.const(42)
     self.assertEqual(repr(a), "UOp(Ops.CONST, arg=42, src=())")

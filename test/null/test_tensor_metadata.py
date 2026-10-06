@@ -95,7 +95,7 @@ class TestTensorMetadata(unittest.TestCase):
 
   def _has_metadata(self, h, name):
     linears = []
-    capturing.append(type("", (), {"add_linear": lambda _, linear, var_vals: linears.append(linear)})())
+    capturing.append(type("", (), {"add_linear": lambda _, linear: linears.append(linear)})())
     try: h.realize()
     finally: capturing.clear()
     calls = [call for linear in linears for call in linear.src]

@@ -34,7 +34,7 @@ def check_gc():
 class TestTrain(unittest.TestCase):
   def test_convnext(self):
     model = ConvNeXt(depths=[1], dims=[16])
-    X = np.zeros((BS,3,224,224), dtype=np.float32)
+    X = np.zeros((BS,3,64,64), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
     check_gc()

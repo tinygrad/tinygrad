@@ -65,13 +65,13 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   linear = lower_and_compile(out.schedule_linear())
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
-  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
+  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from bulk STORE
 
   for call in linear.src:
     ast = call.src[0]
     for bufs, _ in unwrap_multi(call, resolve_params(call, ())):
-      if ast.op is Ops.COPY:
-        # Handle COPY: extract source data to initialize destination buffer
+      if ast.op is Ops.STORE:
+        # Handle bulk STORE: extract source data to initialize destination buffer
         if len(bufs) >= 2:
           dst_buf, src_buf = bufs[0], bufs[1]
           dst_id = id(dst_buf)

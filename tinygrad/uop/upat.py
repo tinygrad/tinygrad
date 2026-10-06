@@ -6,6 +6,8 @@ from tinygrad.dtype import dtypes
 
 class UPatCompileError(Exception): pass
 
+def flatands(x:UOp) -> list[UOp]: return [x] if x.op is not Ops.AND else [y for s in x.src for y in flatands(s)]
+
 # **** UPat compiled ****
 # This file builds an IR of match predicates and compiles them to Python source.
 # Ops used: CUSTOM (format-string predicate over operands), CUSTOMI (inline string fragment),
@@ -20,8 +22,8 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   and_clause:list[UOp] = []
   if self.op is not None:
     if len(self.op) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(int(x) for x in self.op))), arg=("{0}.op in {1}", dtypes.void)))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("{0}.op == "+str(self.op[0].value), dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=frozenset(self.op))), arg=("{0}.op in {1}", dtypes.void)))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.op[0])), arg=("{0}.op is {1}", dtypes.void)))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("{0}.arg == "+str(int(self.arg)), dtypes.void)))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.arg)), arg=("{0}.arg == {1}", dtypes.void)))
@@ -31,14 +33,14 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.CUSTOMI, arg=(self.name, dtypes.void)), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_dtype))),
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype))),
                             arg=("{0}.dtype in {1}", dtypes.void)))
     else:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])),
-                            arg=("{0}.dtype == {1}", dtypes.void)))
+                            arg=("{0}.dtype is {1}", dtypes.void)))
   if self.match_tag is not None:
     if len(self.match_tag) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_tag))), arg=("{0}.tag in {1}", dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_tag))), arg=("{0}.tag in {1}", dtypes.void)))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_tag[0])), arg=("{0}.tag == {1}", dtypes.void)))
   if self.src is not None:
     # single match
@@ -48,7 +50,14 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
       it = UOp(Ops.CUSTOMI, arg=(f"ituop{depth}", dtypes.void))
       match = _get_clause(next(self.src[0]), it, depth+1)
-      and_clause.append(UOp(Ops.CUSTOM, src=(match, it, base), arg=("all([{0} for {1} in {2}.src])", dtypes.void)))
+      # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
+      stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
+      for st in stores:
+        first = st.src[1].substitute({it: base.index(0)})
+        pred.append(UOp(Ops.CUSTOM, src=(st.src[1], first), arg=("{0} is {1}", dtypes.void)))
+        and_clause.append(UOp(Ops.STORE, src=(st.src[0], first)))
+      if len(stores): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src) != 0", dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(UOp(Ops.AND, src=tuple(pred)), it, base), arg=("all([{0} for {1} in {2}.src])", dtypes.void)))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
@@ -116,16 +125,18 @@ def wrap(ctx, x) -> UOp:
 pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
-  # AND of CUSTOMI fragments inside a CUSTOM becomes a single CUSTOMI (joined with " and ")
-  (UPat(Ops.CUSTOM, src=(UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), UPat(), UPat()), name="r"),
-    lambda r,x: r.replace(src=(UOp(Ops.CUSTOMI, arg=("(" + ' and '.join(y.arg[0] for y in x.src) + ")", dtypes.void)),)+r.src[1:])),
+  # AND/OR of CUSTOMI fragments becomes a single CUSTOMI
+  (UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=("(" + ' and '.join(y.arg[0] for y in x.src) + ")", dtypes.void))),
+  (UPat(Ops.OR, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=("(" + ' or '.join(y.arg[0] for y in x.src) + ")", dtypes.void))),
 
   (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=(x.arg[0].format(*[y.arg[0] for y in x.src]), dtypes.void))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"),
-   lambda x,c,g: x.replace(arg=(x.arg[0]+f".src[{c.val}]", dtypes.void)))
+  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c"))),
+   lambda x,c: x.replace(arg=(x.arg[0]+f".src[{c.val}]", dtypes.void)))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
+  # if the whole clause collapsed to a single predicate (no binds), rewrap it
+  if x.op is Ops.CUSTOMI: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
   and_pieces, store_pieces = [], []
   or_pieces: list[str] = []
@@ -163,10 +174,10 @@ def _get_code(self:UPat, has_ctx:bool):
   return '\n'.join([f"# match for {self.location}", "def compiled_match(uop, ctx):"] + rendered + ["  return None"]), dyn_lookup
 
 @functools.cache
-def upat_compile(self:UPat, fxn) -> Callable|None:
+def upat_compile(self:UPat, fxn) -> Callable:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
   code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
-  if code is None: return None
+  if code is None: raise UPatCompileError(f"can't compile pattern defined at {self.location[0]}:{self.location[1]}")
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()
   globs["_fxn"] = real_fxn

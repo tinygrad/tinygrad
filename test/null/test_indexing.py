@@ -1,8 +1,6 @@
-# test cases are modified from pytorch test_indexing.py
-
 import unittest
-
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
+# test cases are modified from pytorch test_indexing.py
 
 class TestIndexing(unittest.TestCase):
   def test_single_int(self):
@@ -95,6 +93,36 @@ class TestNumpy(unittest.TestCase):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
     self.assertRaises(IndexError, a.contiguous().__setitem__, ([0, 1], [0, 1, 2]), 0)
+
+class TestUnitIndexing(unittest.TestCase):
+  def test_gather_invalid(self):
+    for dtype in (dtypes.int64, dtypes.float32):
+      shape = (2, 3, 1, 4)
+      t = (Tensor.randint(*shape, low=-9, high=10, dtype=dtype) if dtypes.is_int(dtype)
+           else Tensor.uniform(*shape, low=-9.0, high=9.0, dtype=dtype))
+      indices = t.argsort(dim=0)
+
+      # dim of `t` and `indices` does not match
+      with self.assertRaises(RuntimeError):
+        t.gather(0, indices[0])
+
+      # invalid `indices` dtype
+      with self.assertRaises(RuntimeError):
+        t.gather(0, indices.cast(dtypes.bool))
+
+      with self.assertRaises(RuntimeError):
+        t.gather(0, indices.cast(dtypes.float32))
+
+      # torch requires int64 indices; tinygrad accepts any int dtype
+      # with self.assertRaises(RuntimeError):
+      #   t.gather(0, indices.cast(dtypes.int32))
+
+      # invalid axis
+      with self.assertRaises(IndexError):
+        t.gather(-7, indices)
+
+      with self.assertRaises(IndexError):
+        t.gather(7, indices)
 
 if __name__ == '__main__':
   unittest.main()

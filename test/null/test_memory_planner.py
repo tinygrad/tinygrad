@@ -20,11 +20,7 @@ def _make_linear(buffer_lists, copies=None):
   calls = []
   for bufs in buffer_lists:
     is_copy = len(bufs) == 2 and frozenset((id(bufs[0]), id(bufs[1]))) in copy_pairs
-    if is_copy:
-      src0 = bufs[0].copy_to_device(bufs[1].device)
-    else:
-      src0 = UOp(Ops.SINK, src=tuple(bufs))
-    calls.append(src0.call(*bufs))
+    calls.append(bufs[0].store_call(bufs[1]) if is_copy else UOp.sink(*bufs).call(*bufs))
   return UOp(Ops.LINEAR, src=tuple(calls))
 
 def _get_planned_view(buf:UOp) -> tuple[UOp, int, int]|None:

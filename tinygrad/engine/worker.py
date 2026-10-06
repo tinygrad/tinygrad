@@ -1,4 +1,4 @@
-import multiprocessing, atexit, signal, sys, threading, contextlib
+import multiprocessing, multiprocessing.util, atexit, signal, sys, os, threading, contextlib, subprocess
 from multiprocessing.context import SpawnContext, SpawnProcess
 from tinygrad.helpers import Context, getenv, PARALLEL
 
@@ -25,6 +25,12 @@ def _without_main():
       yield
     finally:
       for name,value in saved.items(): delattr(main, name) if value is _missing else setattr(main, name, value)
+
+# spawn execs with the live environ, other threads changing os.environ (pytest) can break it: https://github.com/python/cpython/issues/157613
+def _spawnv_passfds(path, args, passfds):
+  (p:=subprocess.Popen(args, executable=path, pass_fds=passfds, env=getattr(os.environ, "_data").copy())).returncode = 0 # multiprocessing reaps it
+  return p.pid
+multiprocessing.util.spawnv_passfds = _spawnv_passfds
 
 class _WorkerProcess(SpawnProcess):
   @staticmethod

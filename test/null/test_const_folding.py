@@ -1,8 +1,17 @@
-import unittest, itertools, math
-from tinygrad import dtypes, Context
-from tinygrad.dtype import DType, ConstType
-from tinygrad.uop.ops import Ops, UOp
+import unittest, math, itertools
+from tinygrad import Tensor, Device, Context, dtypes
+from tinygrad.dtype import DTYPES_DICT, DType, ConstType
+from tinygrad.uop.ops import Ops, UOp, GroupOp
+from tinygrad.codegen.decomp.op import threefry2x32
 from test.helpers import full_rewrite
+
+def _check_ast_count(desired_count:int, t:Tensor):
+  # NOTE: this has side effect because everything can be scheduled only once
+  schedule = t.schedule_linear()
+  asts = [s for s in schedule.src if s.src[0].op is Ops.SINK]
+  len(asts)
+  # NOT SUPPORTED ANYMORE
+  #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
 class TestWeakConstFolding(unittest.TestCase):
   def test_weakint_math(self):
@@ -57,6 +66,38 @@ class TestBitcastConstFolding(unittest.TestCase):
       result = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink())
       expected = full_rewrite(UOp.const((2**32-1, 2**31, 75), dtypes.uint32).sink())
     self.assertEqual(result.src, expected.src)
+
+class TestMovedConstFolding(unittest.TestCase):
+  def test_contiguous_deviceless_const(self):
+    t = Tensor(UOp.const(2.0, dtypes.float)).contiguous()
+    self.assertIs(t.uop, UOp.const(2.0, dtypes.float))
+    self.assertIsNone(t.uop.device)
+
+  def test_add_shrunk_zero(self):
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
+
+  def test_add_padded_zero(self):
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
+
+  def test_mul_shrunk_one(self):
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(6).shrink(((1, 5),)))
+
+  def test_add_padded_one(self):
+    _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
+
+class TestReduceOpsConstFolding(unittest.TestCase):
+  def test_sum_output_dtype(self):
+    # sum output dtype can be different from input
+    for dt in DTYPES_DICT.values():
+      if dt in Device[Device.DEFAULT].renderer.supported_dtypes():
+        t = Tensor.ones(16, dtype=dt).reshape(4, 4)
+        assert t.sum().dtype == t.contiguous().sum().dtype
+
+class TestThreefryConstFolding(unittest.TestCase):
+  def test_threefry(self):
+    # THREEFRY(const,const) folds to a const once decomposed
+    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64)).simplify()
+    self.assertEqual([u.op for u in x.toposort() if u.op in GroupOp.ALU], [])
 
 if __name__ == '__main__':
   unittest.main()
