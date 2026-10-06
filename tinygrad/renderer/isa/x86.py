@@ -317,6 +317,8 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
+  # Stack pointer definition has to be placed at top of program
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=x.src + (stack_pointer,)) if rdef(x.src[-1]) is not RSP else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
@@ -698,14 +700,15 @@ class X86LinearContext(LinearContext):
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
     before, after = [], []
-    for u in uops:
-      if isinstance((r := rdef(u)), Register) and r in CALLEE_SAVED+(RSP,):
+    used = {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
+    for r in CALLEE_SAVED:
+      if r.name in used:
         a = alloc_reg(dtypes.uint64, r)
         slot = self.assign_spill_slot(r,a)
         before.append(self.ren.spill(slot,a))
         after.append(self.ren.fill(slot,a,r))
-    before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(imm(dtypes.int32, self.stack_size),)))
-    after.append(stack_pointer.ins(X86Ops.ADDi, src=(imm(dtypes.int32, self.stack_size),)))
+    before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+    after.append(stack_pointer.ins(X86Ops.ADDi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register, u:UOp) -> int:

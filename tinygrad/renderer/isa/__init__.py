@@ -10,7 +10,6 @@ class Register:
   name: str
   index: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
-  # vreg size represents the area an instructions output occupies, not necessarily the entire register
   size: int = 8
   @property
   def cons(self): return self._cons or (self,)
