@@ -222,7 +222,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
     return buf.after(*ended_stores)
 
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.ALLOC, src=UOp.device_range_src(x.arg.device), arg=ParamArg(next(ctx), dtype, size, device=x.arg.device))
+    buf = UOp(Ops.ALLOC, src=(UOp.const(size),)+UOp.device_range_src(x.arg.device), arg=ParamArg(next(ctx), dtype, device=x.arg.device))
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 
@@ -276,7 +276,7 @@ class LocalAddBufferContext:
   range:int = 0
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(buf.max_shape), addrspace=buf.addrspace, device=buf.device))
+  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),), arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))

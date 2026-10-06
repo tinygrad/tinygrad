@@ -138,9 +138,9 @@ def resolve_function(c:UOp) -> UOp|None:
     return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {p:args[p.arg.slot] for p in nodes if p.op is Ops.PARAM and p.arg.slot >= 0}
   for p, a in dict_map.items():
-    if p.arg.size is not None:
+    if p.shape:
       n, flat = flat_storage(a)
-      if p.arg.size != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      if p.src[0].val != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.src[0].val}, got {a.shape}")
       dict_map[p] = flat
     elif a.shape != ():
       raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
@@ -165,14 +165,14 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
   # the buffer takes the DEVICE range from the copy (no-op for single device copies)
-  buf = UOp(Ops.ALLOC, src=copy.src[1:],
-            arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+copy.src[1:],
+            arg=ParamArg(next(UOp.unique_num), copy.dtype, device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.ALLOC, src=UOp.device_range_src(x.device),
-            arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+UOp.device_range_src(x.device),
+            arg=ParamArg(next(UOp.unique_num), stg.dtype, device=x.device)).reshape(x.max_shape)
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 
