@@ -3,7 +3,7 @@ import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
+from tinygrad.helpers import partition, DEBUG, GlobalCounters, Context, fetch, profile_marker, getenv, round_up
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -145,10 +145,13 @@ def main():
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
-  parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
+  parser.add_argument("--benchmark", nargs='?', type=lambda s: tuple(int(x) for x in f"0,{s}".split(",")[-2:]), const=(1024, 20),
+                      metavar="[PREFILL,]DECODE", help="Benchmark tok/s on synthetic tokens: PREFILL prompt tokens then DECODE new tokens "
+                                                       "(default 1024,20)")
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
+  if args.benchmark: args.max_context = max(args.max_context, round_up(sum(args.benchmark)+1, 1024))
 
   # load the model
   st = time.perf_counter()
@@ -156,9 +159,9 @@ def main():
     model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
+  n_params, device = sum(x.numel() for x in nn.state.get_parameters(model)), nn.state.get_parameters(model)[0].device
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
-        f"and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
-        f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
+        f"and {n_params:,} params, max context {args.max_context} on {device}")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -186,17 +189,31 @@ def main():
 
   # do benchmark
   if args.benchmark is not None:
-    gen = model.generate(toks:=[tok.bos_id or 0])
-    for i in range(args.benchmark):
+    n_pp, n_tg = args.benchmark
+    model.warmup()
+    toks = [1000+i%1000 for i in range(n_pp-1)] + [tok.bos_id or 0]
+    GlobalCounters.reset()
+    gen, st = model.generate(toks), time.perf_counter()
+    if n_pp: next(gen)
+    dt, pm, dm, skip = (pt:=time.perf_counter()), GlobalCounters.global_mem, 0, 3 if n_tg > 3 else 0
+    for i in range(n_tg):
+      if i == skip: dt, dm = time.perf_counter(), 0
       profile_marker(f"decode @ {i}")
       GlobalCounters.reset()
       if (log:=getenv("BENCHMARK_LOG", "")): from extra.bench_log import WallTimeEvent, BenchEvent
-      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
-                  f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
-                  tok.decode(toks).replace("\n", "\\n")):
-        if log:
-          with WallTimeEvent(BenchEvent.STEP): next(gen)
-        else: next(gen)
+      if log:
+        with WallTimeEvent(BenchEvent.STEP): next(gen)
+      else: next(gen)
+      dm += GlobalCounters.global_mem
+    et = time.perf_counter()
+    row = {"Model": model_name, "Model Size": f"{n_params/1e9:.1f}B",
+           "Device": f"{device[0]}x{len(device)}" if isinstance(device, tuple) else device, "Prefill tokens": n_pp, "Decode tokens": n_tg,
+           "TTFT(ms)": f"{(pt-st)*1e3:.2f}" if n_pp else "-", "Prefill(tok/s)": f"{n_pp/(pt-st):.2f}" if n_pp else "-",
+           "Decode(tok/s)": f"{(n_tg-skip)/(et-dt):.2f}", "Prefill(GB/s)": f"{pm/(pt-st)/1e9:.2f}" if n_pp else "-",
+           "Decode(GB/s)": f"{dm/(et-dt)/1e9:.2f}", "Decode(MB/tok)": f"{dm/max(n_tg-skip, 1)/1e6:.0f}",
+           "Memory(GB)": f"{GlobalCounters.mem_used/1e9:.2f}"}
+    widths = [max(len(k), len(str(v))) for k, v in row.items()]
+    for cells in (row, ["-"*w for w in widths], row.values()): print("| " + " | ".join(str(c).ljust(w) for c, w in zip(cells, widths)) + " |")
     exit(0)
 
   # interactive chat
