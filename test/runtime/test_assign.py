@@ -70,6 +70,11 @@ class TestAssign(unittest.TestCase):
     self.assertListEqual(X.tolist(), [1,4,5,4])
     assert_kernel_count(2)
 
+  def test_assign_reshape(self):
+    X = Tensor([1.,2,3,4]).realize()
+    X.reshape(2,2).assign(Tensor([[5.,6],[7,8]]))
+    self.assertListEqual(X.tolist(), [5.,6,7,8])
+
   def test_assign_flip(self):
     ref = np.arange(16, dtype=np.float32)
     X = Tensor(ref).contiguous().realize()
