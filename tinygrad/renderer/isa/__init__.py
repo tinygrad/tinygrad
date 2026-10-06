@@ -34,6 +34,8 @@ class LinearContext:
   def __init__(self, ren:ISARenderer):
     self.ren, self.stack_size = ren, 0
     self.loop_label: dict[UOp, str] = {}
+  # post-regalloc optional hardware specific rewrite pass that directly linearized uops. ex. x86 prologue/epilogue
+  def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
   def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
 
 class ISARenderer(Renderer):

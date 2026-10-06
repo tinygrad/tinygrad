@@ -323,11 +323,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
-  # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally
-  (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, src=x.src + (stack_pointer,) + tuple(alloc_reg(dtypes.uint64, r) for r in CALLEE_SAVED)),))
-    if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   # conditional moves between addresses, lea both srcs
@@ -478,7 +473,7 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
   # register allocations dont live on stack
   if x.addrspace is AddrSpace.REG: return None
-  nx = UOp(Ops.INS, src=fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), arg=(X86Ops.LEA, x.dtype), tag=x.tag)
+  nx = UOp(Ops.INS, fold_address(stack_pointer.index(imm(dtypes.uint32, ctx.stack_size))), (X86Ops.LEA, x.dtype), x.tag)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [nx]
 
@@ -514,17 +509,9 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
-def alloc_stack(ctx:X86LinearContext, x:UOp):
-  if not ctx.stack_size or ctx.stack_allocated: return None
-  ctx.stack_allocated = True
-  return x, [stack_pointer.ins(X86Ops.SUBi, src=(imm(dtypes.int32, ctx.stack_size),)), x]
-
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # allocate the frame before any callee saves, regardless of the order of register definitions, and free it before RET
-  (UPat(Ops.INS, name="x"), alloc_stack),
-  (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [stack_pointer.ins(X86Ops.ADDi, src=(imm(dtypes.int32, ctx.stack_size),)), x])
-    if ctx.stack_size and x.arg[0] is X86Ops.RET else None),
+  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(X86Ops.RET)])),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
@@ -707,6 +694,20 @@ class X86LinearContext(LinearContext):
     super().__init__(ren)
     self.lock: UOp|None = None
     self.stack_allocated = False
+
+  # stack alloc/dealloc and callee saved handling
+  def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
+    before, after = [], []
+    for u in uops:
+      if isinstance((r := rdef(u)), Register) and r in CALLEE_SAVED+(RSP,):
+        a = alloc_reg(dtypes.uint64, r)
+        slot = self.assign_spill_slot(r,a)
+        before.append(self.ren.spill(slot,a))
+        after.append(self.ren.fill(slot,a,r))
+    before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(imm(dtypes.int32, self.stack_size),)))
+    after.append(stack_pointer.ins(X86Ops.ADDi, src=(imm(dtypes.int32, self.stack_size),)))
+    return before + uops[:-1] + after + [uops[-1]]
+
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
     sz = r.cons[0].size
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
