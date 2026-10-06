@@ -70,7 +70,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       rk = queue.popleft()
       k = rk.src[0] if rk.op is Ops.END else rk
       assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+      buf_uops = tuple(s if s.addrspace is AddrSpace.ALU else _unwrap_src(s).buf_uop for s in k.src[1:])
       linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
