@@ -513,7 +513,7 @@ class NVKIface:
 
   def map(self, buf:Buffer) -> BufferStorage:
     mem = buf.meta
-    if buf.device == self.dev.host:
+    if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.device.startswith("NV")), None)) is None:
         return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta, True))

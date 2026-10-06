@@ -143,7 +143,8 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
 
   if (device:=get_enqueue_devs(call)) is None: return None
   host = Device[device].host
-  if device != host and any(Device[d].peer_group != Device[device].peer_group and d != host for d in devs):
+  mappable = [Device[d].peer_group == Device[device].peer_group or (d.split(":")[0] in {"CPU", "PYTHON"} and Device[d].host == host) for d in devs]
+  if device != host and not all(mappable):
     (staging:=_staging(host)).get_buf(device)
     base, it, copies = UOp.from_buffer(staging, dtypes.uint8), src.dtype.itemsize, []
     chunk = (STAGING_SIZE // STAGING_SLOTS) // it
