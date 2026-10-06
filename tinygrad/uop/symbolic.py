@@ -267,7 +267,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
   # ALU/variable min==max -> CONST
   (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.AFTER, Ops.SPECIAL}, name="x"),
-   lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+   lambda x: x.const_like(x.vmin) if x.dtype is not dtypes.void and x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat.cvar().or_casted(),), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
@@ -438,11 +438,10 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK_LIKE = {Ops.NOOP, Ops.STACK, Ops.SINK, Ops.GROUP}
+REMOVE_FROM_SINK_LIKE = {Ops.NOOP, Ops.STACK, Ops.SINK, Ops.AFTER}
 pm_clean_up_group_sink = PatternMatcher([
-  # clean up GROUP/SINK
-  (UPat(Ops.GROUP, src=(UPat.var("x"),)), lambda x: x),
-  (UPat((Ops.SINK, Ops.GROUP), name="root"),
+  # clean up SINK
+  (UPat(Ops.SINK, name="root"),
     lambda root: UOp(root.op, src=tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), arg=root.arg)
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])

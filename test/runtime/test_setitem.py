@@ -35,6 +35,11 @@ class TestSetitem(unittest.TestCase):
     t[4:1:-2] = 11
     self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
 
+  def test_setitem_reshape_only_view(self):
+    t = Tensor([[1.,2,3,4]]).realize()
+    t[0] = 7
+    self.assertListEqual(t.tolist(), [[7.,7,7,7]])
+
   def test_setitem_inplace_mul(self):
     t = Tensor.arange(10).clone().realize()
     t[:3] *= 10
