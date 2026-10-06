@@ -171,9 +171,9 @@ class LLVMRenderer(Renderer):
 
     local_args: list[str] = []
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST}: continue
+      if u.op in {Ops.NOOP, Ops.CONST} or (u.op is Ops.STACK and not u.src): continue
       if u.op is Ops.AFTER:
-        if u.src[0].op is Ops.NOOP: continue
+        if u.dtype is dtypes.void: continue
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.SINK:
