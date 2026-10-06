@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
+from tinygrad.helpers import DEV
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -51,7 +52,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM: too many registers without mergedregs")
+  @unittest.skipIf(Device.DEFAULT == "QCOM" and DEV.renderer == "IR3", "IR3: too many registers without mergedregs")
   def test_grouped_reduce_with_local_upcast_padto(self):
     Tensor.manual_seed(7)
     a = Tensor.rand(7, 11, 13)
