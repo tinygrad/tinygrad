@@ -154,6 +154,7 @@ jobs:
           - 'CPU:LLVM'
           - 'CPU:X86'
           - 'WEBGPU'
+          - 'NULL'
 
     name: Windows (DEV=${{ matrix.dev }})
     runs-on: windows-2025
@@ -169,12 +170,20 @@ jobs:
           pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}\n" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
+        if: matrix.dev != 'NULL'
         shell: bash
         run: |
           python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
           DEBUG=4 python test/test_tiny.py TestTiny.test_plus
       - name: Run test_tiny and device tests
+        if: matrix.dev != 'NULL'
         shell: bash
-        run: python -m pytest -n=auto test/test_tiny.py test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+        run: |
+          python -m pytest -n=auto test/test_tiny.py test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+      - name: Run CUDARenderer failure tests
+        if: matrix.dev == 'NULL'
+        shell: bash
+        run: |
+          DEBUG=4 python test/device/cuda/test_renderer_failures.py
