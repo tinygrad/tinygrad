@@ -1,5 +1,5 @@
 from typing import cast
-import ctypes, struct, sys, time, functools, itertools
+import ctypes, struct, time, functools, itertools
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv, to_tuple, flatten
 from tinygrad.dtype import dtypes, DType, AddrSpace
@@ -470,4 +470,4 @@ pm_usb_bufferize = PatternMatcher([
   (UPat(Ops.PARAM, name="b"), lambda b: Buffer("CPU", b.max_numel(), b.dtype, preallocate=True) if str(b.tag).startswith("cmdbuf_copy") else None),
 ])
 
-if DEV.interface.startswith("MOCK") and sys.platform != "win32": from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
+if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
