@@ -341,7 +341,7 @@ class _Ctx:
       self.accvgpr = _Ctx._accvgpr_cache[wave_size]
     else:
       self.accvgpr = self.vgpr
-    self.branch_cond = None
+    self.branch_cond: UOp | None = None
 
   def range(self, n: int | None = None) -> UOp:
     """Create a lane range UOp with unique axis ID."""
