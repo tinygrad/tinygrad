@@ -122,6 +122,17 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
 
 class TestFp8sConversions(unittest.TestCase):
+  def test_native_fp8_conversions(self):
+    for dt in (d for d in dtypes.fp8s if d in supported_dtypes):
+      with self.subTest(dtype=dt):
+        values = np.array([fp8_to_float(x, dt) for x in range(256)], dtype=np.float32)
+        np.testing.assert_equal(Tensor(np.arange(256, dtype=np.uint8)).bitcast(dt).float().numpy(), values)
+        finite = np.unique(values[np.isfinite(values)])
+        midpoints = (finite[:-1] + finite[1:]) / 2
+        samples = np.concatenate((finite, [-0.0], midpoints, np.nextafter(midpoints, -np.inf), np.nextafter(midpoints, np.inf))).astype(np.float32)
+        expected = np.array([float_to_fp8(float(x), dt) for x in samples], dtype=np.uint8)
+        np.testing.assert_equal(Tensor(samples).cast(dt).bitcast(dtypes.uint8).numpy(), expected)
+
   def test_min_max_representable(self):
     # e4m3 and the fnuz fp8s have no inf, so their extremes (the MAX/MIN reduce identities) are finite values that round trip
     for dt in dtypes.fp8s: self.assertEqual(Tensor([dt.min, dt.max], dtype=dt).float().tolist(), [dt.min, dt.max])
