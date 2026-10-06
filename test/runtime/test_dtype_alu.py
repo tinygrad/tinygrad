@@ -77,7 +77,8 @@ def universal_test(a, b, dtype, op):
     numpy_value = truncate[dtype](op[1](ta.numpy(), tb.numpy()).item())
   else: tensor_value, numpy_value = (op[0](ta, tb)).numpy(), op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.floats:
-    if dtype not in supported_dtypes or dtype in EMULATED_DTYPES.tolist(dtypes): # denormals are zero
+    if dtype not in supported_dtypes or dtype in EMULATED_DTYPES.tolist(dtypes) or \
+       (Device.DEFAULT == "QCOM" and dtype == dtypes.half): # denormals are zero
       fe, fm = dtypes.finfo(dtype)
       atol, rtol = 2 ** (2 - (1 << (fe - 1))), 2 ** (-fm)
     else: atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1),
@@ -135,7 +136,6 @@ class TestDTypeALU(unittest.TestCase):
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM flushes half denormals to zero")
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
