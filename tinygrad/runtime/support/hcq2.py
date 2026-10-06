@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Any, Sequence
+from typing import cast, Any, Sequence, Iterable, Iterator
 import functools, itertools, weakref, ctypes, struct
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
@@ -10,7 +10,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp
 from tinygrad.uop.ops import pm_renumber_slots
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
-from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins
+from tinygrad.engine.realize import get_call_args, get_call_arg_uops, get_call_prg_args, get_call_name, get_call_outs_ins
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
 
 # *****************
@@ -71,9 +71,16 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, de
 
 # C FFI
 
-def layout_args(args:Sequence[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
+def kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...], images:bool=True) -> Iterator[UOp]:
+  args = []
+  for p,a in get_call_prg_args(call, prg):
+    if images or p.arg.image is None: args.append(a.ccast(p.dtype) if p.addrspace is AddrSpace.ALU else a.getaddr(devs))
+  yield from args
+
+def layout_args(args:Iterable[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
   words = [a if isinstance(a, UOp) else UOp.const(a, dtypes.uint32) for a in args]
-  return [(offset + o, w) for (o, _), w in zip(TinyELF.iter_sig(tuple((None, i, w.dtype, ()) for i, w in enumerate(words))), words)]
+  signature = tuple(UOp.param(i, w.dtype, addrspace=AddrSpace.ALU) for i,w in enumerate(words))
+  return [(offset + o, w) for (o, _, _), w in zip(TinyELF.iter_sig(signature), words)]
 
 def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   words, end = [], 0
@@ -113,7 +120,8 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b:
 def unwrap_call(call:UOp) -> UOp|None:
   if get_enqueue_devs(call) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
   dnum = UOp.variable("_device_num", 0, n - 1, dtypes.int)
-  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
+  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body,
+                                   *[a if a.addrspace is AddrSpace.ALU else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
                                    for i in range(n)))
 pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
@@ -232,9 +240,9 @@ class BatchCtx:
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
 
 def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UOp]:
-  bufs, write = list(get_call_arg_uops(call)), get_call_outs_ins(call)[0]
+  bufs, write = get_call_args(call), get_call_outs_ins(call)[0]
   latest:dict[tuple[str, str], int] = {} # (producer device, queue) -> the latest submit tag to wait on, same-queue submits are fifo
-  for d, q, t in ctx.tracker.access_resources(bufs, list(range(len(bufs)) if write is None else write), (device, queue, tag)):
+  for d, q, t in ctx.tracker.access_resources([b for _,b in bufs], [j for j,(i,_) in enumerate(bufs) if i in write], (device, queue, tag)):
     if t < tag and (d, q) != (device, queue): latest[(d, q)] = max(latest.get((d, q), 0), t)
 
   # NV waits break QMD chaining, so also wait for the previous launch
@@ -292,9 +300,11 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
   stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
   profile_keys = [c.body.key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
-  args = [[unwrap_lane(bs[g])[:2] for g in getattr(c.body.arg, "globals", range(len(bs)))] for c, _, _ in ctx.batch for bs in [get_call_arg_uops(c)]]
+  args = [[unwrap_lane(c.src[1+g])[:2] for g in c.body.arg.globals] if c.body.op is Ops.PROGRAM else
+          [unwrap_lane(b)[:2] for b in get_call_arg_uops(c)] for c, _, _ in ctx.batch]
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
-  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
+  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs,
+                    [get_call_outs_ins(c, compact=True) for c, _, _ in ctx.batch]))
   host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
                          for host in to_tuple(buf.device) if host not in ctx.queues))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
