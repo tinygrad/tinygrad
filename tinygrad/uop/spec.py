@@ -32,11 +32,10 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
   return rng.op is Ops.RANGE and rng.axis_type is AxisType.DEVICE and int(rng.vmax)+1 == len(device)
 
 def valid_size_const(x:UOp) -> bool:
-  # PARAM/BUFFER/ALLOC carry their size as one weakint CONST src: 0 gives shape (), anything else gives shape (size,)
-  # any other srcs (after the CONST) are the DEVICE range of a multi-device buffer
+  # a size CONST gives (size,), an empty STACK gives (); remaining sources are DEVICE ranges
+  if not x.src: return False
   c = x.src[0]
-  return c.op is Ops.CONST and c.dtype is dtypes.weakint and type(c.val) is int and \
-    all(s.op is not Ops.CONST for s in x.src[1:])
+  return (c.op is Ops.CONST and c.dtype is dtypes.weakint and type(c.val) is int) or (c.op is Ops.STACK and not c.src)
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
@@ -94,10 +93,10 @@ spec_shared = PatternMatcher([
   (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), name="x"),
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
-  # PARAM/BUFFER carry their size as one weakint CONST src, no shape input
-  (UPat(Ops.PARAM, src=(UPat.cvar(dtype=dtypes.weakint),), name="x"),
+  # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
+  (UPat(Ops.PARAM, src=(UPat(),), name="x"),
    lambda x: isinstance(x.arg, ParamArg) and valid_size_const(x)),
-  (UPat(Ops.BUFFER, src=(UPat.cvar(dtype=dtypes.weakint),), allow_any_len=True, name="x"),
+  (UPat(Ops.BUFFER, src=(UPat(),), name="x"),
    lambda x: isinstance(x.arg, ParamArg) and valid_size_const(x) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
@@ -167,7 +166,7 @@ spec_tensor = PatternMatcher([
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
   # a Variable is a scalar ALU PARAM with a value range and no device
-  (UPat(Ops.PARAM, src=(UPat.cvar(dtype=dtypes.weakint),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
+  (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -273,8 +272,8 @@ spec_kernel_graph = PatternMatcher([
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # PARAM is caller-provided storage (or a Variable in the ALU addrspace), ALLOC is call-local storage;
-  # the size is one weakint CONST src, no shape input
-  (UPat(Ops.PARAM, src=(UPat.cvar(dtype=dtypes.weakint),), name="x"),
+  # the size is a weakint CONST, or an empty STACK for scalars
+  (UPat(Ops.PARAM, src=(UPat(),), name="x"),
    lambda x: isinstance(x.arg, ParamArg) and valid_size_const(x)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and valid_size_const(x)
    and valid_device_range(x.arg.device, x.src[1:]) and

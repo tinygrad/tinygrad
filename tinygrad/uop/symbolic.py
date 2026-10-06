@@ -353,8 +353,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   all_candidates = []
   for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
-    # a CONST expr (e.g. a folded gate) has no range to substitute: it would also alias the size CONST on the fake Variable
-    if expr.op is not Ops.CONST: all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
+    all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
 
     if try_simplex and expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
       # For X0 + X1 + ... > 0, check whether every Xi > 0 gives the same simplified output.

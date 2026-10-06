@@ -83,9 +83,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
 def l2i_define(x:UOp) -> UOp:
   # cannot decomp a Variable
   if x.addrspace == AddrSpace.ALU: raise RuntimeError(f"long decomposition of variable {x.arg.name} unsupported")
-  # the size CONST doubles with the dtype: a scalar (0) stays a scalar, (n,) becomes (2n,)
-  sz = x.src[0].val
-  return x.replace(arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(UOp.const(0 if sz == 0 else sz*2), *x.src[1:]))
+  return x.replace(arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(UOp.const(x.src[0].val*2) if x.shape else x.src[0], *x.src[1:]))
 
 def split_l2i(ctx:dict, op: Ops, dt: DType, *uops:UOp):
   # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself.

@@ -69,7 +69,7 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   if output is None:
     output = UOp(Ops.ALLOC, src=(UOp.const(red.max_numel()),)+UOp.device_range_src(red.device),
                  arg=ParamArg(next(UOp.unique_num), red.dtype, device=red.device))
-    output = (output if output.shape == red.max_shape else UOp.flat_view(output, red.max_shape)).shrink_to(red.shape)
+    output = output.reshape(red.max_shape).shrink_to(red.shape)
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)

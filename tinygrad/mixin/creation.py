@@ -47,7 +47,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
         return cls._wrap_uop(cls.empty(*local, device=dev, dtype=dt)._uop.unshard(axis))
     u = UOp(Ops.ALLOC, src=(UOp.const(prod(max_shape)),)+UOp.device_range_src(dev),
             arg=ParamArg(next(UOp.unique_num), dt, device=dev, bind_on_realize=True))
-    u = (u if u.shape == max_shape else UOp.flat_view(u, max_shape)).shrink_to(new_shape)
+    u = u.reshape(max_shape).shrink_to(new_shape)
     return cls._wrap_uop(u)
 
   def empty_like(self, dtype: DTypeLike|None=None, device: str|tuple[str, ...]|None=None) -> Self:

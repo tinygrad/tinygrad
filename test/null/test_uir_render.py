@@ -48,7 +48,7 @@ def parse_ssa(text:str) -> UOp:
   nodes, root = {}, None
   def parse_tok(tok:str) -> UOp:
     if tok.startswith("%"): return nodes[int(tok[1:])]
-    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in tok[1:-1].split(", ")))
+    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in tok[1:-1].split(", ") if t))
     return _parse_const(tok)
   for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_uir
     line = raw.strip()

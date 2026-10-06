@@ -352,10 +352,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
-        # the size is one weakint CONST src: 0 gives shape (), anything else gives shape (size,)
+        # a size CONST gives shape (size,), an empty STACK gives ()
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
-        sz = self.src[0].val
-        return () if sz == 0 else (sz,)
+        return self.src[0].as_shape
       case Ops.CUSTOM | Ops.CUSTOMI:
         if self.dtype is dtypes.void: return None
         input_shapes = [x._shape for x in self.src if x._shape is not None]
@@ -847,18 +846,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.unshard(axis) if axis is not None else ret
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
-    if isinstance(x, bytes):
-      buf, data = UOp.new_buffer("PYTHON", n:=len(x)//dtype.itemsize, dtype), x
-      ret = buf if n else UOp.flat_view(buf, (n,))
+    if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
     else:
       # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
       bdtype = dtypes.float32 if dtype in [dtypes.bfloat16, *dtypes.fp8s] else dtype
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
-      buf = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), bdtype)
-      ret = buf if buf.shape == shape else UOp.flat_view(buf, shape)
+      ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), bdtype).reshape(shape)
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
-    if not data: buf.buffer.allocate(memoryview(bytearray()))
-    else: (abuf:=buf.buffer.ensure_allocated()).allocator._copyin(abuf._buf, memoryview(data))
+    if not data: ret.buffer.allocate(memoryview(bytearray()))
+    else: (buf:=ret.buffer.ensure_allocated()).allocator._copyin(buf._buf, memoryview(data))
     if ret.dtype != dtype: ret = ret.cast(dtype)
     return ret
   def clone(self, device=None) -> UOp:
@@ -999,7 +995,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
     # a Variable is a scalar ALU PARAM with a name and a value range; binding it sets the val payload on the arg
-    return UOp(Ops.PARAM, src=(UOp.const(0),),
+    return UOp(Ops.PARAM, src=(UOp(Ops.STACK),),
                arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of,
                             addrspace=AddrSpace.ALU))
   @property
@@ -1180,12 +1176,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
-  def flat_view(u:UOp, max_shape:tuple[int, ...]) -> UOp:
-    """view flat storage (shape () or (n,)) as max_shape. a 0 in max_shape is an EXPAND of the scalar () storage:
-    0-sized storage has no flat shape, every view of it is degenerate"""
-    return u.expand(max_shape) if 0 in max_shape else u.reshape(max_shape)
-
-  @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None):
     ret = UOp(Ops.ALLOC, src=(UOp.const(prod(to_max_shape(shape))),)+UOp.device_range_src(device),
@@ -1204,7 +1194,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       assert device is None, "LOCAL and REG placeholders cannot have a device"
       ret = UOp(Ops.BUFFER, src=(UOp.const(prod(shape)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
-    if len(shape) > 1 or 0 in shape: ret = UOp.flat_view(ret, shape)
+    if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
@@ -1224,7 +1214,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     if isinstance(shape, (int, UOp)): shape = (shape,)
     if shape is None or len(shape) == 0:
-      return UOp(Ops.PARAM, src=(UOp.const(0),),
+      return UOp(Ops.PARAM, src=(UOp(Ops.STACK),),
                 arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, device, volatile))
     max_shape = to_max_shape(shape)
     ret = UOp(Ops.PARAM, src=(UOp.const(prod(max_shape)),),
@@ -1242,9 +1232,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
     max_shape = to_max_shape(shape)
-    # a multi-dim shape with a 0 is an EXPAND of the scalar () storage: 0-sized storage has no flat shape.
-    # a flat (0,) view is the () storage itself, it stays addressable (e.g. for GETADDR)
-    ret = UOp.flat_view(self, max_shape) if 0 in max_shape and len(shape) > 1 else (self.reshape(max_shape) if len(shape) > 1 else self)
+    ret = self.reshape(max_shape) if len(shape) > 1 else self
     if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
     return ret if axis is None else ret.unshard(axis)
 

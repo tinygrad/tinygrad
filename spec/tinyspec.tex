@@ -59,7 +59,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src ($0$ for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
+\texttt{ParamArg} contains slot, dtype, value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
@@ -253,8 +253,8 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \toprule
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
-\op{Buffer}, \op{Alloc} & from arg & $(n)$ from src, $()$ if $n{=}0$ & from arg & dtype range \\
-\op{Param} & from arg & $(n)$ from src, $()$ if $n{=}0$ & from arg & from src or dtype range \\
+\op{Buffer}, \op{Alloc} & from arg & $(n)$ from src, or $()$ & from arg & dtype range \\
+\op{Param} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
