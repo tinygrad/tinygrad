@@ -5,10 +5,10 @@ from test.mockgpu.qcom.qcomgpu import QCOMGPU
 
 A630_CHIP_ID = 0x06030000
 
-def _ioctl_nr(ioctl: functools.partial) -> int: return ioctl.args[2]
+def _ioctl_nr(ioctl:functools.partial) -> int: return ioctl.args[2]
 WAIT_IOCTLS = {_ioctl_nr(kgsl.IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID), _ioctl_nr(kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID)}
 
-class EmulatorError(Exception): pass # not a RuntimeError: QCOMDevice._wait_signal suppresses those around the timestamp ioctls
+class EmulatorError(Exception): pass # QCOMDevice._wait_signal swallows RuntimeError
 
 class KGSLFileDesc(VirtFileDesc):
   def __init__(self, fd, driver):
@@ -25,7 +25,7 @@ class QCOMDriver(VirtDriver):
   def __init__(self):
     super().__init__()
     self.tracked_files += [VirtFile('/dev/kgsl-3d0', functools.partial(KGSLFileDesc, driver=self))]
-    self.mappings:dict[tuple[str, int], tuple[int, int]] = {} # memory the gpu can access: (addr, size)
+    self.mappings:dict[tuple[str, int], tuple[int, int]] = {}
     self.gpu, self.next_fd, self.next_id, self.timestamp = QCOMGPU(self.mappings), 1 << 30, 1, 0
 
   def open(self, name, flags, mode, virtfile):
@@ -35,10 +35,10 @@ class QCOMDriver(VirtDriver):
   def kgsl_ioctl(self, req, argp):
     nr = req & 0xFF
     self.gpu.progress()
-    # GPU_COMMAND comes from a ctypes callback, which can't raise, and frees come from Buffer.__del__, so errors wait for a wait ioctl
+    # GPU_COMMAND runs in a ctypes callback that can't raise, errors surface on the next wait
     if self.gpu.errors and nr in WAIT_IOCTLS:
       err = self.gpu.report_error()
-      raise EmulatorError(f"{type(err).__name__}: {err}") from err
+      raise EmulatorError(str(err)) from err
     if nr == _ioctl_nr(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE): kgsl.struct_kgsl_drawctxt_create.from_address(argp).drawctxt_id = 1
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY):
       prop = kgsl.struct_kgsl_device_getproperty.from_address(argp)

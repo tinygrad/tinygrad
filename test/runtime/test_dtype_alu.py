@@ -197,7 +197,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM rounds half results toward zero, so overflow is 65504, not inf")
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM rounds half toward zero")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 

@@ -622,7 +622,9 @@ jobs:
       - name: Run pytest (qcom)
         run: python -m pytest -n=auto test/test_tiny.py test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/runtime/test_search.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/device/qcom --durations=20
       - name: Run pytest (qcom IMAGE=1)
-        run: IMAGE=1 python -m pytest -n=auto test/runtime/test_ops.py --durations=20
+        run: |
+          IMAGE=1 DEBUG=7 python3 test/runtime/test_ops.py TestOps.test_gemm | grep isam
+          IMAGE=1 python -m pytest -n=auto test/runtime/test_ops.py --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/runtime/test_ops.py::TestOps::test_sin test/runtime/test_ops.py::TestOps::test_cos test/runtime/test_ops.py::TestOps::test_tan test/runtime/test_ops.py::TestOps::test_exp test/runtime/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -674,7 +676,6 @@ jobs:
       fail-fast: false
       matrix:
         dev:
-          - 'NULL:IR3:a630'
           - 'NULL:QCOMCL:a630'
           - 'NULL:NAK:sm_120'
     name: Compile-only (DEV=${{ matrix.dev }})

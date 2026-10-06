@@ -12,12 +12,9 @@ class QCOMGPU:
     self.regs:dict[int, int] = {}
     self.mappings = mappings
     self.consts, self.shader = np.zeros(4096, np.uint32), b""
-    self.textures:list[emu.Image] = []
-    self.ibos:list[emu.Image] = []
-    # a failed packet halts the CP; once reported, the IBs queued before it only drain (signals, no dispatches)
     self.errors:list[Exception] = []
     self.pending:list[list[int]] = []
-    self.draining = 0 # how many of the oldest pending IBs only drain
+    self.draining = 0 # after an error, IBs already queued only signal
 
   def report_error(self) -> Exception:
     err, self.draining = self.errors[0], len(self.pending)
@@ -64,10 +61,10 @@ class QCOMGPU:
       return to_mv(u64(d[1], d[2]), 4).cast("I")[0] & d[4] >= d[3]
     elif op == mesa.CP_REG_TO_MEM:
       if field(d[0], "CP_REG_TO_MEM_0_REG") != mesa.REG_A6XX_CP_ALWAYS_ON_COUNTER: raise RuntimeError(f"unsupported CP_REG_TO_MEM {d[0]:#x}")
-      to_mv(u64(d[1], d[2]), 8).cast("Q")[0] = time.perf_counter_ns() * 192 // 10000 # the 19.2MHz always on counter
+      to_mv(u64(d[1], d[2]), 8).cast("Q")[0] = time.perf_counter_ns() * 192 // 10000 # 19.2MHz ticks
     elif op == mesa.CP_LOAD_STATE6_FRAG: self._load_state(d)
     elif op == mesa.CP_EXEC_CS: self._exec_cs(d[1:4])
-    elif op == mesa.CP_RUN_OPENCL: raise RuntimeError("CP_RUN_OPENCL (the QCOMCL renderer) is not emulated, use DEV=MOCK+QCOM:IR3")
+    elif op == mesa.CP_RUN_OPENCL: raise RuntimeError("CP_RUN_OPENCL is not emulated, use QCOM:IR3")
     else: raise RuntimeError(f"unsupported pkt7 opcode {op:#x}")
     return True
 
@@ -77,28 +74,44 @@ class QCOMGPU:
     if src != mesa.SS6_INDIRECT: raise RuntimeError(f"unsupported load state {d[0]:#x}")
     if (typ, block) == (mesa.ST_CONSTANTS, mesa.SB6_CS_SHADER): self.consts[off*4:(off+num)*4] = np.frombuffer(to_mv(addr, num * 16), np.uint32)
     elif (typ, block) == (mesa.ST_SHADER, mesa.SB6_CS_SHADER): self.shader = bytes(to_mv(addr, num * 128))
-    elif (typ, block) == (mesa.ST_CONSTANTS, mesa.SB6_CS_TEX): self.textures = self._images(addr, num)
-    elif (typ, block) == (mesa.ST6_UAV, mesa.SB6_CS_SHADER): self.ibos = self._images(addr, num)
-    elif (typ, block) != (mesa.ST_SHADER, mesa.SB6_CS_TEX): raise RuntimeError(f"unsupported load state {d[0]:#x}") # samplers: unnormalized, clamp
+    elif (typ, block) in ((mesa.ST_CONSTANTS, mesa.SB6_CS_TEX), (mesa.ST6_UAV, mesa.SB6_CS_SHADER)): pass # read through the base registers
+    elif (typ, block) == (mesa.ST_SHADER, mesa.SB6_CS_TEX):
+      for k in range(num):
+        s = to_mv(addr + k * 16, 16).cast("I")
+        wrap = [field(s[0], f"A6XX_TEX_SAMP_0_WRAP_{c}") for c in "STR"]
+        if wrap != [mesa.A6XX_TEX_CLAMP_TO_BORDER] * 3 or s[0] & 0x1e or not s[1] & mesa.A6XX_TEX_SAMP_1_UNNORM_COORDS:
+          raise RuntimeError(f"unsupported sampler {s[0]:#x} {s[1]:#x}")
+    else: raise RuntimeError(f"unsupported load state {d[0]:#x}")
 
-  def _images(self, addr:int, num:int) -> list[emu.Image]: # A6XX_TEX_CONST descriptors, 16 dwords each
+  def _reg64(self, r:int) -> int: return u64(self.regs[r], self.regs[r + 1])
+
+  def _images(self, addr:int, num:int, tex:bool) -> list[emu.Image]: # A6XX_TEX_CONST descriptors, 16 dwords each
     ret = []
     for k in range(num):
       d = to_mv(addr + k * 64, 64).cast("I")
       fmt = field(d[0], "A6XX_TEX_CONST_0_FMT")
       if fmt not in (mesa.FMT6_32_32_32_32_FLOAT, mesa.FMT6_16_16_16_16_FLOAT): raise RuntimeError(f"unsupported image format {fmt}")
+      swiz = [field(d[0], f"A6XX_TEX_CONST_0_SWIZ_{c}") for c in "XYZW"]
+      if field(d[2], "A6XX_TEX_CONST_2_TYPE") != mesa.A6XX_TEX_2D or (tex and swiz != [mesa.A6XX_TEX_X, mesa.A6XX_TEX_Y,
+                                                                                         mesa.A6XX_TEX_Z, mesa.A6XX_TEX_W]):
+        raise RuntimeError(f"unsupported image descriptor {d[0]:#x} {d[2]:#x}")
       img = emu.Image(u64(d[4], d[5]), field(d[1], "A6XX_TEX_CONST_1_WIDTH"), field(d[1], "A6XX_TEX_CONST_1_HEIGHT"),
                       field(d[2], "A6XX_TEX_CONST_2_PITCH"), np.dtype(np.float32 if fmt == mesa.FMT6_32_32_32_32_FLOAT else np.float16))
       if not any(st <= img.addr and img.addr + img.pitch * img.height <= st + sz for st, sz in self.mappings.values()):
-        raise RuntimeError(f"image at {img.addr:#x} is not in mapped memory")
+        raise RuntimeError(f"unmapped image {img.addr:#x}")
       ret.append(img)
     return ret
 
   def _exec_cs(self, groups:list[int]):
-    nd, cfg = self.regs[mesa.REG_A6XX_SP_CS_NDRANGE_0], self.regs[mesa.REG_A6XX_SP_CS_CONST_CONFIG_0]
+    nd, cfg, mode = self.regs[mesa.REG_A6XX_SP_CS_NDRANGE_0], self.regs[mesa.REG_A6XX_SP_CS_CONST_CONFIG_0], self.regs[mesa.REG_A6XX_SP_MODE_CNTL]
+    if not mode & mesa.A6XX_SP_MODE_CNTL_CONSTANT_DEMOTION_ENABLE or field(mode, "A6XX_SP_MODE_CNTL_ISAMMODE") != mesa.ISAMMODE_GL:
+      raise RuntimeError(f"unsupported SP_MODE_CNTL {mode:#x}") # emu.py demotes f32 consts for half ops and runs isam in GL mode
     local = tuple(field(nd, f"A6XX_SP_CS_NDRANGE_0_LOCALSIZE{c}") + 1 for c in "XYZ")
     lmem_size = (field(self.regs[mesa.REG_A6XX_SP_CS_CNTL_0 + 1], "A6XX_SP_CS_CNTL_1_SHARED_SIZE") + 1) * 1024
     pvt_size = field(self.regs[mesa.REG_A6XX_SP_CS_PVT_MEM_PARAM], "A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM") * 512
+    ntex, nuav = (field(self.regs[mesa.REG_A6XX_SP_CS_CONFIG], f"A6XX_SP_CS_CONFIG_{f}") for f in ("NTEX", "NUAV"))
+    textures = self._images(self._reg64(mesa.REG_A6XX_SP_CS_TEXMEMOBJ_BASE), ntex, tex=True) if ntex else []
+    ibos = self._images(self._reg64(mesa.REG_A6XX_SP_CS_UAV_BASE), nuav, tex=False) if nuav else []
     emu.run(emu.Dispatch(self.shader, self.consts, local, tuple(groups), field(cfg, "A6XX_SP_CS_CONST_CONFIG_0_LOCALIDREGID"),
                          field(cfg, "A6XX_SP_CS_CONST_CONFIG_0_WGIDCONSTID"), lmem_size, pvt_size, list(self.mappings.values()),
-                         self.textures, self.ibos))
+                         textures, ibos))
