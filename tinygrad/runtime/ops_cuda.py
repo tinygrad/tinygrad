@@ -1,10 +1,10 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
-from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
-from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
+from tinygrad.engine.realize import get_call_var_uops
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -41,8 +41,9 @@ class CUDAQueue(HWQueue):
   def extern(self, tag) -> UOp: return UOp.alloc((1,), dtypes.uint64, 0, device=self.devs[0]).rtag(tag).getaddr(self.dev.host)
 
   def exec(self, call:UOp, prg:UOp):
-    obj, bufs, vals = prg.to_elf(), get_call_arg_uops(call), get_call_var_uops(call, prg)
-    rows = layout_args([bufs[i].getaddr(self.devs) for i in prg.arg.globals] + [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)], 8)
+    obj, vals = prg.to_elf(), get_call_var_uops(call, prg)
+    bufs = [call.src[1+i].getaddr(self.devs) for i in prg.arg.globals]
+    rows = layout_args(TinyELF.args(obj.signature, bufs, [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)]), 8)
     size = max([o + w.dtype.itemsize for o, w in rows], default=8) - 8
     addr = UOp(Ops.LINEAR, src=tuple(pack_args([(0, UOp.const(size, dtypes.uint64))] + rows, 8 + size)), arg="kernargs").getaddr(self.devs)
     # extra: [buffer pointer, &args, buffer size, &size, end]
