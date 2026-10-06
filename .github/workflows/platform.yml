@@ -170,7 +170,7 @@ jobs:
           pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}\n" >> $GITHUB_ENV
+        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         if: matrix.dev != 'NULL'
         shell: bash
@@ -180,10 +180,8 @@ jobs:
       - name: Run test_tiny and device tests
         if: matrix.dev != 'NULL'
         shell: bash
-        run: |
-          python -m pytest -n=auto test/test_tiny.py test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+        run: python -m pytest -n=auto test/test_tiny.py test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
       - name: Run CUDARenderer failure tests
         if: matrix.dev == 'NULL'
         shell: bash
-        run: |
-          DEBUG=4 python test/device/cuda/test_renderer_failures.py
+        run: DEBUG=4 python test/device/cuda/test_renderer_failures.py
