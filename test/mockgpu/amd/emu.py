@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv
+from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv, ContextVar
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -149,6 +149,8 @@ def _val_to_u32(val: UOp) -> UOp:
   return val.cast(dtypes.uint32)
 
 _pcode_fixes = {
+  'V_CVT_F32_FP8': ('VGPR[laneId][SRC0.u32]', 'S0'),
+  'V_CVT_F32_BF8': ('VGPR[laneId][SRC0.u32]', 'S0'),
   'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
     'D0.f32 = (exponent(S2.f32) > 127) ? (2.0F ** 64 * fma(S0.f32, S1.f32, S2.f32)) : (2.0F ** -64 * fma(S0.f32, S1.f32, S2.f32))'),
   'V_DIV_FMAS_F64': ('D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
@@ -320,7 +322,7 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'inst_addr')
+  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'inst_addr', 'branch_cond')
   sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
@@ -339,6 +341,7 @@ class _Ctx:
       self.accvgpr = _Ctx._accvgpr_cache[wave_size]
     else:
       self.accvgpr = self.vgpr
+    self.branch_cond: UOp | None = None
 
   def range(self, n: int | None = None) -> UOp:
     """Create a lane range UOp with unique axis ID."""
@@ -684,6 +687,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
             'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest.startswith('PC'):
+        if val.op is Ops.WHERE: ctx.branch_cond = val.src[0]
         lo, hi = _split64(val.cast(dtypes.uint64))
         return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
   return UOp.sink(*ctx.inc_pc())
@@ -964,7 +968,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
   if isinstance(inst, (ir3.VOP1, ir4.VOP1, irc.VOP1)):
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
     s0, src0_off = _load_vsrc0(ctx, inst, lane, bits, literal, is_f64, is_float, d0)
-    srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0}
+    srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0, 'OPSEL': _c(0)}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
@@ -1327,30 +1331,30 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   src2_r = ctx.inst_field(type(inst).src2)
   is_c_vgpr = src2_r >= _c(256)
   src2_r = is_c_vgpr.where(src2_r - _c(256), src2_r)  # also keeps the unused VGPR-side index in bounds when src2 is a constant
-  output_type = op_name.split("WMMA_", 1)[1].split("_", 1)[0]
-  is_bf16, is_rdna4 = 'BF16' in op_name, isinstance(inst, ir4.VOP3P)
-  cvt = _FUNCS['bf16_to_f32' if is_bf16 else 'f16_to_f32']
-  sz = 8 if any(t in op_name for t in ('IU8', 'FP8', 'BF8')) else 16  # input element size
+  output_type, _, *input_types = op_name.split("WMMA_", 1)[1].split("_")
+  a_fmt, b_fmt = input_types if len(input_types) == 2 else input_types * 2
+  is_rdna4 = isinstance(inst, ir4.VOP3P)
+  sz = 8 if a_fmt in ('IU8', 'FP8', 'BF8') else 16  # input element size
 
   # read a source element from VGPRs: (src, lane, vgpr, element-in-vgpr) -> f32/i32
-  def gval(src, lane, vgpr, ridx):
+  def gval(src, lane, vgpr, ridx, *, fmt):
     v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(lane, dtypes.int))
     pkd = v >> UOp.const(ridx * sz, dtypes.uint32) if ridx > 0 else v
     pkd = pkd & UOp.const((1 << sz) - 1, dtypes.uint32)
-    if "F" in output_type: return cvt(pkd)
+    if not fmt.startswith('IU'): return _FUNCS[f'{fmt.lower()}_to_f32'](pkd)
     return (pkd << _c(24, dtypes.uint)).bitcast(dtypes.int32) >> _c(24, dtypes.int32)  # sign extend
 
   # RDNA3 f16/bf16: 16 lanes x 8 VGPRs x 2 halves,    k maps linearly
   # RDNA3 iu8:      16 lanes x 4 VGPRs x 4 quarters,  k maps linearly
   # RDNA4:          32 lanes x 4 VGPRs x 2 halves, k bits are scrambled (k[2] goes to lane bit 4)
-  def read_mat(src):
+  def read_mat(src, fmt):
     n = 32 // sz  # values per vgpr
     def ab_map(i, k):  # (row, k) -> (lane, vgpr, element-in-vgpr)
       elem, lane = ((k & 3) | ((k >> 1) & 4), i + ((k >> 2) & 1) * 16) if is_rdna4 else (k, i)
       return lane, elem // n, elem % n
-    return [gval(src, *ab_map(row, k)) for row in range(16) for k in range(16)]
+    return [gval(src, *ab_map(row, k), fmt=fmt) for row in range(16) for k in range(16)]
 
-  mat_a, mat_b = read_mat(src0_r), read_mat(src1_r)
+  mat_a, mat_b = read_mat(src0_r, a_fmt), read_mat(src1_r, b_fmt)
   def d_map(m, n):  # output (row, col) -> (lane, vgpr)
     lane_bit, vgpr = (m >> 3, m & 7) if is_rdna4 else (m & 1, m >> 1)
     return n + lane_bit * 16, vgpr
@@ -1359,9 +1363,10 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   # src2 may be a VGPR or an inline/scalar constant (128 = int 0, the usual ", 0" C form); the runner must handle both dynamically
   out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
   cbits = ctx.rsrc_dyn(src2_r, None, 32)
-  cval_const = cvt(cbits & UOp.const(0xFFFF, dtypes.uint32)) if output_type in ("F16", "BF16") else cbits.bitcast(out_dt)
+  cval_const = _FUNCS[f'{output_type.lower()}_to_f32'](cbits & UOp.const(0xFFFF, dtypes.uint32)) \
+    if output_type in ("F16", "BF16") else cbits.bitcast(out_dt)
   if output_type in ("F16", "BF16"):
-    mat_c = [is_c_vgpr.where(gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0))), cval_const)
+    mat_c = [is_c_vgpr.where(gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)), fmt=output_type), cval_const)
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
   else:
     mat_c = [is_c_vgpr.where(ctx.rvgpr_dyn(src2_r + _c(vgpr), UOp.const(lane, dtypes.int)).bitcast(out_dt), cval_const)
@@ -1373,7 +1378,7 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     return ctx.wvgpr_dyn(vdst_reg + _c(vgpr_off), UOp.const(lane_i, dtypes.int), val, exec_mask)
   if output_type in ("F16", "BF16"):
     def to_bits(v: UOp) -> UOp:  # f32 result -> 16 output bits
-      return ((v.bitcast(dtypes.uint32) >> UOp.const(16, dtypes.uint32)) & UOp.const(0xFFFF, dtypes.uint32)) if is_bf16 \
+      return ((v.bitcast(dtypes.uint32) >> UOp.const(16, dtypes.uint32)) & UOp.const(0xFFFF, dtypes.uint32)) if output_type == "BF16" \
         else v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
     if is_rdna4:  # pack 2 outputs per VGPR (adjacent m values share a VGPR)
       stores = [w_store(m, n, to_bits(mat_d[m*16+n]) | (to_bits(mat_d[(m+1)*16+n]) << UOp.const(16, dtypes.uint32)), d_map(m, n)[1] // 2)
@@ -1956,15 +1961,17 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   st._write_sgpr(SGPR_COUNT - 16 + 4, hw_id)  # HW_REGISTERS[4] = HW_ID
   return st
 
+# lift assembly to a CALL graph and execute
+ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND", "CPU")
+
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   lifted = None
-  if getenv("ASM_CALL"):
+  if ASM_CALL:
     from test.mockgpu.amd.call import lift
-    backend = getenv("ASM_CALL_BACKEND", "CPU")
-    prg = lift(lib, lib_sz, arch, backend)
-    lifted = (prg, get_runtime(backend, prg))
+    prg = lift(lib, lib_sz, arch, ASM_CALL_BACKEND)
+    lifted = (prg, get_runtime(ASM_CALL_BACKEND, prg))
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512

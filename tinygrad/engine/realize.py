@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -25,12 +25,6 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   if ast.op is Ops.STORE: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
-
-def get_call_written_bufs(call:UOp) -> list[UOp]:
-  if isinstance(call.arg.aux, HCQInfo): return list(call.arg.aux.written_bufs)
-  arg_uops, (outs, ins) = get_call_arg_uops(call), get_call_outs_ins(call)
-  bufs = [b.src[0].storage_base if (b:=arg_uops[k].storage_base).op is Ops.MSELECT else b for k in outs if k not in ins]
-  return dedup([b for b in bufs if b.op is Ops.BUFFER])
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
@@ -233,7 +227,7 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   # collect the kernels to lower and compile, deduped by their compile cache key
-  if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
+  if not len(ar:={c: a for c in linear.toposort(enter_calls=False) if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 
   # lower and compile what's not cached, in parallel if there's a worker pool
   keys = {c: to_program_key(*a) for c, a in ar.items()}
@@ -255,7 +249,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
       raise
 
   # swap the compiled PROGRAMs into the calls
-  return linear.substitute({c: c.replace(src=(c.body.substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
+  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
 from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo # noqa: E402 # down here, hcq2 imports realize

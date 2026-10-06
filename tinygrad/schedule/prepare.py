@@ -122,7 +122,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),))
 
 def resolve_function(c:UOp) -> UOp|None:
   if not c.is_inline_call: return None
@@ -138,9 +138,9 @@ def resolve_function(c:UOp) -> UOp|None:
     return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {p:args[p.arg.slot] for p in nodes if p.op is Ops.PARAM and p.arg.slot >= 0}
   for p, a in dict_map.items():
-    if p.arg.size is not None:
+    if p.shape:
       n, flat = flat_storage(a)
-      if p.arg.size != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      if p.src[0].val != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.src[0].val}, got {a.shape}")
       dict_map[p] = flat
     elif a.shape != ():
       raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
@@ -152,7 +152,7 @@ def resolve_function(c:UOp) -> UOp|None:
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
   x = bc.src[0]
-  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith("DISK")): return None
+  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or x.on_disk(): return None
   new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
   if ns > os:
     tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))
@@ -165,14 +165,14 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
   # the buffer takes the DEVICE range from the copy (no-op for single device copies)
-  buf = UOp(Ops.ALLOC, src=copy.src[1:],
-            arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+copy.src[1:],
+            arg=ParamArg(next(UOp.unique_num), copy.dtype, device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.ALLOC, src=UOp.device_range_src(x.device),
-            arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+UOp.device_range_src(x.device),
+            arg=ParamArg(next(UOp.unique_num), stg.dtype, device=x.device)).reshape(x.max_shape)
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 
@@ -224,8 +224,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** stage rules **
 
   # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
-  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"),
-   lambda x,stg: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+  (UPat(Ops.STAGE, src=(UPat.var("x"),)),
+   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
 
   # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
   (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
@@ -246,8 +246,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # remove two STOREs that store the same thing to the same place: TestSchedule.test_dedup_Assign
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),
 
-  # store a buffer's own current contents back into itself: TestAssign.test_nested_after_contiguous_store_no_init
-  (UPat.var("buf").after(UPat.var("buf").store(UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1"))), lambda buf,src,a1:a1),
+  # store a buffer's own current contents back into itself: TestAssign.test_assign_from_alias
+  (UPat.var("buf").after(UPat.var("buf").store(UPat.var("buf").after(UPat.var("buf").store(UPat()), name="a1"))), lambda buf,a1:a1),
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),

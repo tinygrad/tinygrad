@@ -1,7 +1,8 @@
-from tinygrad.dtype import dtypes
+import re
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort, sint
-from tinygrad.helpers import strip_parens
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, CallInfo, range_str, sint
+from tinygrad.helpers import strip_parens, colored
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
   def dfs(x:UOp, cache:dict):
@@ -13,13 +14,68 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
   cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
-# ***** uop helpers *****
+# ***** SSA wire format *****
 
-def print_uops(uops:list[UOp]):
-  uops_index = {u:i for i,u in enumerate(uops)}
-  for i,u in enumerate(uops):
-    formatted_srcs = [(uops_index[x] if x.op is not Ops.CONST else f"{x.val}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
+               Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
+               Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
+               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
+               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
+               Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
+               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
+               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
+               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
+               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
+
+def _render_arg(x:UOp) -> str:
+  """arg rendering: bare scalars, keyed fields, mini-grammars for real structures"""
+  match x.op:
+    case Ops.CONST:
+      if x.is_invalid: return "invalid"
+      dt, v = x.dtype, x.val
+      if dtypes.is_bool(dt): return str(bool(v)).lower()
+      if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
+      if dtypes.is_float(dt): return f"{dt.name}:{float(v).hex()}"   # float.hex() roundtrips exactly, inf/nan included
+      return f"{dt.name}:{v}"
+    case Ops.PARAM | Ops.BUFFER | Ops.ALLOC:
+      a, opts = x.arg, ""
+      if a.vmin_vmax is not None: opts += f" bounds=[{a.vmin_vmax[0]},{a.vmin_vmax[1]}]"
+      if a.multiple_of is not None: opts += f" multiple_of={a.multiple_of}"
+      if a.addrspace not in (None, AddrSpace.GLOBAL): opts += f" addrspace={a.addrspace.name}"
+      if a.device is not None:
+        opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))
+      if a.volatile: opts += " volatile=true"
+      name = f'"{a.name}" ' if a.name is not None else ""
+      return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
+    case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
+    case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
+    case Ops.CALL if isinstance(a:=x.arg, CallInfo):
+      call_opts = [f"name={a.name!r}"] if a.name is not None else []
+      if a.grad_fxn is not None: call_opts.append(f"grad_fxn={getattr(a.grad_fxn, '__name__', type(a.grad_fxn).__name__)}")
+      call_opts += [f"{k}=true" for k in ("precompile", "precompile_backward") if getattr(a, k)]
+      return " ".join(call_opts)
+    case Ops.REDUCE: return f"op={x.arg[0].name.lower()}" + (f" pop={x.arg[1]}" if x.arg[1] else "")
+    case Ops.CAST | Ops.BITCAST: return x.arg.name   # one scalar -> bare
+    case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
+    case _: return repr(x.arg) if x.arg is not None else ""
+
+# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
+def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
+
+def render_uir(root:UOp|list[UOp]) -> str:
+  nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
+  table = {u:i for i,u in enumerate(nodes)}
+  def src_str(u:UOp) -> str:
+    if not _inline(u): return f"%{table[u]}"
+    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
+  lines = []
+  for i,u in enumerate(nodes):
+    line = f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}"
+    if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
+    if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
+    lines.append(line)
+  return "\n".join(lines)
+
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.FLOORDIV: "//", Ops.FLOORMOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
@@ -45,7 +101,7 @@ def render_marg(ctx,x:UOp):
 renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
-   x.arg.name if isinstance(x.arg, ParamArg) and x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
+   x.arg.name if x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
   (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.axis_id[0]}"),
@@ -79,45 +135,6 @@ renderer_infer = PatternMatcher([
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast({ctx[x.src[0]]}, {x.src[0].dtype!r}, {x.dtype!r})"),
 ]) + renderer
 
-# *** pyrender ***
-
-def srcs(ctx, src): return f"({ctx[src[0]]},)" if len(src) == 1 else f"({', '.join([ctx[x] for x in src])})"
-
-sugar = {Ops.SINK, Ops.END, Ops.BACKEDGE, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
-         Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.BARRIER, Ops.DETACH}
-pm_pyrender_extra = PatternMatcher([
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
-  (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
-  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)})"),
-  (UPat(Ops.COPY, src=(UPat(name="x"),), allow_any_len=True, name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),
-  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
-  (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {tuple(range(r.arg[1]))})" if r.arg[1] else None),
-  # NOTE: range has srcs sometimes after control flow
-  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
-    f"UOp.range({c.val}, {x.axis_id[0]}, {x.axis_type}"+
-      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+")" if len(x.axis_id) == 1 else None),
-  # TODO: movement ops simplify stuff, this can break SPEC=2
-  #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
-  # NOTE: CMPNE doesn't work cause there's no __rne__
-  # explicit trunc ops: `//` and `%` parse as FLOORDIV/FLOORMOD, so render CDIV/CMOD via .alu()
-  (UPat(Ops.CDIV, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.CDIV, {ctx[x.src[1]]})"),
-  (UPat(Ops.CMOD, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.CMOD, {ctx[x.src[1]]})"),
-  # `.where` re-promotes its operands, so render WHERE via .alu() too
-  (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.WHERE, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
-  # the binary operators re-promote their operands (a weak src meeting a strong one gets a cast), render those via .alu() too
-  (UPat(set(syms.keys())-{Ops.SUB, Ops.CDIV, Ops.CMOD}, name="x"), lambda ctx,x:
-    strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")
-    if x.src[0]._broadcasted(x.src[1]) == x.src else f"{ctx[x.src[0]]}.alu({x.op}, {ctx[x.src[1]]})"),
-  (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join(([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
-  (UPat(sugar, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}("+', '.join([ctx[y] for y in x.src[1:]] + \
-    ([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
-])
-
-# NOTE: you can remove pm_pyrender_extra and it'll still be correct
-pm_pyrender = pm_pyrender_extra+PatternMatcher([
-  (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
-])
-
 def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], split_depth:int=100) -> dict[str, str]:
   r: dict[UOp, str] = {}
   ret: dict[str, str] = {}
@@ -135,30 +152,3 @@ def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], sp
       r[u] = f"c{i}" if u is not lst[-1] else "ast"
       ret[r[u]] = ren
   return ret
-
-def pyrender(ast:UOp) -> str:
-  lst = list(ast.toposort())
-
-  cmap = consumer_map_from_toposort(lst)
-  not_rendered = {Ops.CONST}
-  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.STACK,
-                     Ops.BUFFER, Ops.ALLOC, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END, Ops.BACKEDGE}
-
-  to_render: set[UOp] = {ast}
-  for u in lst:
-    if u.op in {Ops.SINK}:
-      for s in u.src: to_render.add(s)
-    if u.op is Ops.STORE: to_render.add(u.src[1])
-    if u.op is Ops.REDUCE: to_render.add(u.src[0])
-    # a call on a program, or with a grad_fxn or an aux, can't be reconstructed from code
-    if u.op is Ops.CALL and (u.body.op is Ops.PROGRAM or u.arg.grad_fxn is not None or u.arg.aux is not None):
-      raise NotImplementedError("call can't be pyrendered")
-    # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
-    if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")
-    if u.op in not_rendered: continue
-    # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
-    if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
-    to_render.add(u)
-
-  ret = _render_with_splits(lst, pm_pyrender, to_render)
-  return '\n'.join([f"{k} = {strip_parens(v)}" for k,v in ret.items()])

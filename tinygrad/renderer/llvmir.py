@@ -37,7 +37,8 @@ def lcast(input_type:DType, output_type:DType):
 
 def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
-            **{d: (".fp8.fp8", ".bf8.bf8")[fp8_index(d)] for d in dtypes.fp8s}, dtypes.int8: "iu8", dtypes.int32: "i32"}
+            **{d: ("." if cdna else "") + ("fp8.fp8", "bf8.bf8")[fp8_index(d)] for d in dtypes.fp8s},
+            dtypes.int8: "iu8", dtypes.int32: "i32", dtypes.uint32: "i32"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
   N,M,K = wmma.arg[0]
   if cdna:
@@ -60,7 +61,7 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
   if wmma.arg[1] == dtypes.int8: args = ["i1 true", args[0], "i1 true", args[1], args[2]]  # iu8 flags A/B signed
   if wmma.dtype != dtypes.float: args.append("i1 false") # opsel
-  suffix = f".v{wmma.max_numel()}{dt_map[wmma.dtype]}.v{wmma.src[0].max_numel()}{dt_map[wmma.arg[1]]}" if rdna4 else ""
+  suffix = f".v{wmma.max_numel()}{dt_map[wmma.dtype]}.v{wmma.src[0].max_numel()}{dt_map[wmma.src[0].dtype]}" if rdna4 else ""
   return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
     f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
@@ -143,7 +144,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
 
   # call a function by the name of its body, the args in param order
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
    ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
 
@@ -172,6 +173,7 @@ class LLVMRenderer(Renderer):
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST}: continue
       if u.op is Ops.AFTER:
+        if u.src[0].op is Ops.NOOP: continue
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.SINK:

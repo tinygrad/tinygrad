@@ -20,11 +20,12 @@ class CreationMixin(DTypeMixin, MovementMixin):
     return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).unshard(self._uop.axis))
 
   @classmethod
-  def empty(cls, *shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Self:
+  def empty(cls, *shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None, axis:int|None=None) -> Self:
     """
     Creates an empty tensor with the given shape.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    With multiple devices, optionally specify which `axis` to shard on.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.empty(2, 3)
@@ -38,7 +39,14 @@ class CreationMixin(DTypeMixin, MovementMixin):
     new_shape = argfix(*shape)
     max_shape = to_max_shape(new_shape)
     dev = canonicalize_device(device)
-    u = UOp(Ops.ALLOC, src=UOp.device_range_src(dev), arg=ParamArg(next(UOp.unique_num), dt, prod(max_shape), device=dev, bind_on_realize=True))
+    if axis is not None and isinstance(dev, tuple):
+      axis = range(max(1, len(new_shape)))[axis]
+      if new_shape:
+        if new_shape[axis] % len(dev) != 0: raise RuntimeError(f"can't split {new_shape} on axis {axis} over {dev}")
+        local = tuple(s//len(dev) if i == axis else s for i,s in enumerate(new_shape))
+        return cls._wrap_uop(cls.empty(*local, device=dev, dtype=dt)._uop.unshard(axis))
+    u = UOp(Ops.ALLOC, src=(UOp.const(prod(max_shape)),)+UOp.device_range_src(dev),
+            arg=ParamArg(next(UOp.unique_num), dt, device=dev, bind_on_realize=True))
     u = u.reshape(max_shape).shrink_to(new_shape)
     return cls._wrap_uop(u)
 

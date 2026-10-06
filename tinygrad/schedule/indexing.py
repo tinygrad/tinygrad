@@ -95,7 +95,6 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   return new_srcs
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.STAGE, Ops.INDEX}: return None
   return x.replace(src=tuple(create_bufferize_and_index_srcs(ctx, x)))
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
@@ -141,7 +140,7 @@ pm_apply_rangeify = PatternMatcher([
   # STACK -> WHERE select on the leading range
   (UPat(Ops.STACK, name="x"), convert_stack_to_where),
   # finally, apply_rangeify
-  (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
+  (UPat(GroupOp.All-{Ops.STAGE, Ops.INDEX}, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
 ])
@@ -206,7 +205,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
-    if x.op in {Ops.CALL, Ops.LINEAR}: continue
+    if x.op is Ops.CALL: continue
 
     # AFTER doesn't have range
     if x.op is Ops.AFTER: continue
@@ -297,7 +296,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
 
     # REDUCE creates ranges for the axes it is reducing
-    if x.op is Ops.REDUCE and x.arg[1]:
+    if x.op is Ops.REDUCE:
       rngs = tuple(rctx.new_range(s) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
 
     if debug:

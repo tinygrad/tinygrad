@@ -93,7 +93,7 @@ class TestLowerIndexDtype(unittest.TestCase):
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
-    self.assertEqual(reg.arg.size, 4)
+    self.assertIs(reg.src[0], UOp.const(4))
     lowered = graph_rewrite(reg.sink(), pm_lower_weak)
     self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
                     "lowering must resolve every weak width, except a typed literal's value half")
@@ -507,7 +507,7 @@ class TestUOpRender(unittest.TestCase):
     shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, 32), offset, UOp.const(2, dtypes.int)))
     self.assertIsNot(shrink.src[1], shrink.marg[0][0])
     self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
-    self.assertEqual(UOp.range(1, 0, src=(shrink,), dtype=dtypes.int).render(simplify=False), "r0")
+    self.assertEqual(UOp.range(UOp.const(1, dtypes.int).after(shrink), 0, dtype=dtypes.int).render(simplify=False), "r0")
 
   def test_render_vectorize_empty(self):
     u = UOp(Ops.STACK, src=())

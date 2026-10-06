@@ -46,11 +46,11 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Buffer} & () & \texttt{ParamArg} &
+\op{Buffer} & ($n$) & \texttt{ParamArg} &
   Persistent storage on device. \\
-\op{Alloc} & () & \texttt{ParamArg} &
-  Unbound storage of $\mathrm{size}$ elements. \\
-\op{Param} & () & \texttt{ParamArg} &
+\op{Alloc} & ($n$) & \texttt{ParamArg} &
+  Unbound storage of $n$ elements. \\
+\op{Param} & ($n$) & \texttt{ParamArg} &
   Caller-provided storage. \\
 \op{Const} & () & value &
   A scalar constant with shape $(\ )$. \\
@@ -59,7 +59,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, concrete size (or \textsc{null} for a scalar), value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+\texttt{ParamArg} contains slot, dtype, value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
@@ -253,8 +253,8 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \toprule
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
-\op{Buffer}, \op{Alloc} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\
-\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\
+\op{Buffer}, \op{Alloc} & from arg & $(n)$ from src, or $()$ & from arg & dtype range \\
+\op{Param} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
