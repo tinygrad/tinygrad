@@ -4,9 +4,9 @@ import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, h
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args
-from tinygrad.runtime.support.hcq2 import pack_args
+from tinygrad.runtime.support.hcq2 import pack_args, make_program
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
-from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
+from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
 from tinygrad.helpers import ceildiv, unwrap, pluralize, ContextVar, VIZ, DEV
@@ -182,18 +182,15 @@ class AMDComputeQueue(HWQueue):
   def prof_buf(self, name:str) -> UOp:
     return UOp.alloc((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs[0]).rtag(self.dev.tag(name))
 
-  def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None:
-    if not (self.dev.pmc_enabled or self.dev.sqtt_enabled): return None
+  def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp:
     slot = (self.prof_buf("prof_log").index(0).load() + len(self.profiled)) % self.dev.prof_slots
-    tag = UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64)
-    self.profiled.append(self.prof_buf("prof_log").index(1 + slot.cast(dtypes.int)).store(tag))
+    self.profiled.append(self.prof_buf("prof_log").index(1 + slot.cast(dtypes.int)).store(UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64)))
     if self.dev.sqtt_enabled:
       self.sqtt_start(slot)
       self.sqtt_setup_exec(data, info)
     return slot
 
-  def prof_stop(self, slot:UOp|None):
-    if slot is None: return
+  def prof_stop(self, slot:UOp):
     if self.dev.pmc_enabled: self.pmc_read(slot)
     if self.dev.sqtt_enabled: self.sqtt_stop(slot)
 
@@ -408,7 +405,7 @@ class AMDComputeQueue(HWQueue):
     dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
       **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
     self.acquire_mem(gli=0, gl2=0)
-    slot = self.prof_start(data, prg.arg, lib)
+    if (prof:=self.dev.pmc_enabled or self.dev.sqtt_enabled): slot = self.prof_start(data, prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
@@ -423,7 +420,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
-    self.prof_stop(slot)
+    if prof: self.prof_stop(slot)
 
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
@@ -465,12 +462,12 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
-    slot = self.prof_start(data, prg.arg, lib)
+    if (prof:=self.dev.pmc_enabled or self.dev.sqtt_enabled): slot = self.prof_start(data, prg.arg, lib)
     self.close_run(len(self.blob))
     self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w
                   for w in dispatch_packet(data, prg.arg, lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))]
     self.run_start = len(self.blob)
-    self.prof_stop(slot)
+    if prof: self.prof_stop(slot)
 
   def submit(self, cmdbuf:UOp) -> UOp: # the doorbell is the last packet's index
     self.close_run(cmdbuf.max_numel())
@@ -526,18 +523,10 @@ class AMDProgramData:
   private_segment_size:int; group_segment_size:int; kernargs_segment_size:int # noqa: E702
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int # noqa: E702
 
-_amd_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[AMDProgramData, UOp]] = {}
-_amd_program_prof:dict[UOp, tuple[str, bytes, bytes]] = {} # placeholder -> (name, lib, key) for its profile event
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
-  # the image parses once per lib, each device set gets its own program buffer of it
-  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, devs))) is None:
-    data, image = _amd_program_image(dev, lib)
-    buf = UOp.alloc((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs[0]).rtag("program")
-    cached = _amd_program_cache[key] = (data, buf.after(buf.store(UOp(Ops.BINARY, src=(), arg=image).bitcast(buf.dtype))))
-    if PROFILE: _amd_program_prof[buf] = (prg.src[0].arg.function_name, lib, prg.key)
-  return cached
+  data, image = _amd_program_image(dev, prg.src[3].arg)
+  return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
-@functools.cache
 def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
   image, sections, relocs = elf_loader(lib)
   rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
@@ -1025,14 +1014,6 @@ class AMDDevice(Compiled):
   def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8, host=False)
   @functools.cached_property
   def sqtt_wptrs(self) -> Buffer: return self._prof_buffer(self.prof_slots * self.sqtt_ses, dtypes.uint32)
-
-  def program_buffer(self, b:UOp) -> Buffer:
-    if b not in self.prog_bufs:
-      buf = self.prog_bufs[b] = Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
-      if PROFILE:
-        name, lib, key = _amd_program_prof[b]
-        Compiled.profile_events.append(ProfileProgramEvent(self.device, name, lib, buf._buf, b.arg.slot, key))
-    return self.prog_bufs[b]
 
   def sqtt_trace(self, slot:int, se:int) -> bytes:
     off = (se * self.prof_slots + slot) * self.sqtt_win

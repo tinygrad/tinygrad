@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
-from tinygrad.runtime.support.hcq2 import layout_args
+from tinygrad.runtime.support.hcq2 import layout_args, make_program
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
@@ -277,7 +277,7 @@ class NVProgramData:
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.image = image.ljust(round_up(len(image), 0x1000) + 0x1000, b'\x00')
     # constant buffer 0 holds the driver params and every argument after them, and starts 256 aligned like all constant buffers
-    self.kernargs_size = round_up(max(self.constbufs[0][1], len(self.cbuf_0) * 4 + len(signature) * 8), 256)
+    self.kernargs_size:int = round_up(max(self.constbufs[0][1], len(self.cbuf_0) * 4 + len(signature) * 8), 256)
 
     # Ensure device has enough local memory to run the program
     dev._ensure_has_local_memory(lcmem)
@@ -311,14 +311,11 @@ class NVProgramData:
       yield typ, param, sh.content[start_off+4:start_off+sz+4] if typ == 0x4 else sz
       start_off += (sz if typ == 0x4 else 0) + 4
 
-_nv_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[NVProgramData, UOp]] = {}
 def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
-  if (cached:=_nv_program_cache.get(key:=(prg.src[3].arg, devs))) is None:
-    data = NVProgramData(dev, prg.to_elf())
-    buf = UOp.alloc((len(data.image),), dtypes.uint8, next(UOp.unique_num), device=devs[0]).rtag("program")
-    rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
-    cached = _nv_program_cache[key] = (data, patch(buf, rows, data.image))
-  return cached
+  data = NVProgramData(dev, prg.to_elf())
+  buf = make_program(prg, len(data.image), devs[0])
+  rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
+  return data, patch(buf, rows, data.image)
 
 class NVAllocator(Allocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
