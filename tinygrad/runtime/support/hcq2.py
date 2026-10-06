@@ -4,8 +4,8 @@ import functools, itertools, weakref, ctypes, struct
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
-from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV
+from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
@@ -59,6 +59,13 @@ def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTAC
 
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.alloc((2,), dtypes.uint64, 0, device=devs[0]).rtag("timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
+
+program_info:dict[int, ProfileProgramEvent] = {} # placeholder slot -> its profile event, the link fills in the base
+
+def make_program(prg:UOp, size:int, device:str) -> UOp: # one placeholder per program and device: the calls of a linear share it, its link owns it
+  slot = int.from_bytes(prg.key[:8], "little")
+  if PROFILE: program_info[slot] = ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key)
+  return UOp.alloc((size,), dtypes.uint8, slot, device=device).rtag("program")
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, deps:tuple[UOp, ...]=()) -> UOp: # the order is on the arg
   lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)).after(*deps)
@@ -537,8 +544,13 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
 # 5. link
 
 Compiled.pm_batch = Compiled.pm_encode = Compiled.pm_lower = PatternMatcher([]) # a device adds its own rules
+def program_buffer(b:UOp) -> Buffer: # a buffer per link, the profile needs its address
+  buf = Buffer(b.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True), preallocate=True) # a free waits for the gpu
+  if PROFILE: Compiled.profile_events.append(replace(program_info[b.arg.slot], base=buf._buf))
+  return buf
+
 Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.ALLOC, tag="timeline", name="b"), lambda b: Device[b.device].timeline),
-                                        (UPat(Ops.ALLOC, tag="program", name="b"), lambda b: Device[b.device].program_buffer(b))])
+                                        (UPat(Ops.ALLOC, tag="program", name="b"), program_buffer)])
 
 @dataclass
 class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702

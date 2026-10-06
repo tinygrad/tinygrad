@@ -4,9 +4,9 @@ import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, h
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args
-from tinygrad.runtime.support.hcq2 import pack_args
+from tinygrad.runtime.support.hcq2 import pack_args, make_program
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
-from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
+from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
 from tinygrad.helpers import ceildiv, unwrap, pluralize, ContextVar, VIZ, DEV
@@ -526,18 +526,10 @@ class AMDProgramData:
   private_segment_size:int; group_segment_size:int; kernargs_segment_size:int # noqa: E702
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int # noqa: E702
 
-_amd_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[AMDProgramData, UOp]] = {}
-_amd_program_prof:dict[UOp, tuple[str, bytes, bytes]] = {} # placeholder -> (name, lib, key) for its profile event
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
-  # the image parses once per lib, each device set gets its own program buffer of it
-  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, devs))) is None:
-    data, image = _amd_program_image(dev, lib)
-    buf = UOp.alloc((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs[0]).rtag("program")
-    cached = _amd_program_cache[key] = (data, buf.after(buf.store(UOp(Ops.BINARY, src=(), arg=image).bitcast(buf.dtype))))
-    if PROFILE: _amd_program_prof[buf] = (prg.src[0].arg.function_name, lib, prg.key)
-  return cached
+  data, image = _amd_program_image(dev, prg.src[3].arg)
+  return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
-@functools.cache
 def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
   image, sections, relocs = elf_loader(lib)
   rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
@@ -1025,14 +1017,6 @@ class AMDDevice(Compiled):
   def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8, host=False)
   @functools.cached_property
   def sqtt_wptrs(self) -> Buffer: return self._prof_buffer(self.prof_slots * self.sqtt_ses, dtypes.uint32)
-
-  def program_buffer(self, b:UOp) -> Buffer:
-    if b not in self.prog_bufs:
-      buf = self.prog_bufs[b] = Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
-      if PROFILE:
-        name, lib, key = _amd_program_prof[b]
-        Compiled.profile_events.append(ProfileProgramEvent(self.device, name, lib, buf._buf, b.arg.slot, key))
-    return self.prog_bufs[b]
 
   def sqtt_trace(self, slot:int, se:int) -> bytes:
     off = (se * self.prof_slots + slot) * self.sqtt_win
