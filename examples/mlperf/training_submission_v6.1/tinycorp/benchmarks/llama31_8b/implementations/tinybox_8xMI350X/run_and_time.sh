@@ -59,5 +59,7 @@ python3 extra/amdpci/hive_reset.py
 # beam
 FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee "$LOGFILE"
 
+python3 extra/amdpci/hive_reset.py
+
 # run
 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a "$LOGFILE"
