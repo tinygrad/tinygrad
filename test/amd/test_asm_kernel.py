@@ -299,5 +299,16 @@ class TestAsmKernel(unittest.TestCase):
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
 
+  def test_cfg_loop_handmade(self):
+    def cfg_kernel_handmade(x:UOp):
+      acc = UOp.alloc((1,), x.dtype, addrspace=AddrSpace.REG)
+      acc = acc.after(acc[0].store(0))
+      loop = UOp.loop(0)
+      body = acc[0].store(acc.after(loop)[0] + 1)
+      acc = acc.after(body.backedge(loop, acc[0] < 4))
+      return x[0].store(acc[0]).sink(arg=KernelInfo("handmade"))
+    out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel_handmade)[0]
+    self.assertListEqual(out.tolist(), [4])
+
 if __name__ == "__main__":
   unittest.main()
