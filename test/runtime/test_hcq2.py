@@ -272,7 +272,7 @@ class TestHostCalls(unittest.TestCase):
     def put(out:UOp, v:UOp): return out.index(0).store(v).sink()
     a, b = [cpu_buf(dtype=dtypes.uint64, tag=t) for t in ("cb", "enc")]
     lowered = lower_hcq(put(a, UOp.const(1, dtypes.uint64)), put(b, UOp.const(2, dtypes.uint64)))
-    self.assertEqual(len({c.body for c in lowered.toposort() if c.op is Ops.CALL and c.arg.name == "put"}), 1)
+    self.assertEqual(len({c.body for c in lowered.toposort(enter_calls=True) if c.op is Ops.CALL and c.arg.name == "put"}), 1)
 
   def test_one_function_with_registers(self): # a body numbers its own registers and loops: two traces are one function
     @uopfunc
