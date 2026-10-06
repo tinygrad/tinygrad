@@ -224,7 +224,8 @@ class Buffer:
       self.allocator.dev.synchronize()
       if allow_zero_copy: return mv
       with cpu_profile(f"{self.device} -> TINY", f"{self.device}:COPY"): return memoryview(bytearray(mv))
-    return Buffer("PYTHON", self.nbytes, preallocate=True).copy_from(self).as_memoryview()
+    Buffer("NPY", self.nbytes, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
+    return mv
 
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
