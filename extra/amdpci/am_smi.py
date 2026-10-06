@@ -118,7 +118,9 @@ class SMICtx:
 
   def _open_am_device(self, pcibus):
     if pcibus not in self.opened_pci_resources:
-      if not os.path.exists(f"/sys/bus/pci/devices/{pcibus}"): return
+      if not os.path.exists(f"/sys/bus/pci/devices/{pcibus}"):
+        if DEBUG >= 2: print(f"/sys/bus/pci/devices/{pcibus} not found")
+        return
       bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
       bar_size = {0: get_bar0_size(pcibus), 2: os.fstat(bar_fds[2]).st_size, 5: os.fstat(bar_fds[5]).st_size}
 
