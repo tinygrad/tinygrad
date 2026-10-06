@@ -537,11 +537,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
-  def stack(*srcs:UOp, dim:int=0) -> UOp:  # pylint: disable=no-self-argument
-    return super(UOp, srcs[0]).stack(*srcs[1:], dim=dim) if srcs else UOp(Ops.STACK)
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
-    return UOp.stack().after(*[x for x in srcs if x is not None], **kwargs)
+    return UOp(Ops.STACK).after(*[x for x in srcs if x is not None], **kwargs)
   @property
   def body(self) -> UOp:
     """the body of a CALL: the program, copy or function reference being called (its first src)"""
