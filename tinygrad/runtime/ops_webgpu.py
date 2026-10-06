@@ -1,5 +1,6 @@
 import functools, struct
 from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program, TinyELF
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv
 from tinygrad.runtime.autogen import webgpu
@@ -51,7 +52,7 @@ QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webg
 
 class WebGPUProgram(Program['WebGpuDevice']):
   def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
-    self.dev, self.name = dev, to_wgpu_str(obj.name)
+    self.dev, self.name, self.signature = dev, to_wgpu_str(obj.name), obj.signature
 
     # Creating shader module
     shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(obj.lib.decode()),
@@ -66,16 +67,19 @@ class WebGPUProgram(Program['WebGpuDevice']):
   @suppress_finalizing
   def __del__(self): webgpu.wgpuShaderModuleRelease(self.prg)
 
-  def __call__(self, *bufs:webgpu.WGPUBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
+  def __call__(self, args:dict, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw) -> float|None:
     wait = wait and webgpu.WGPUFeatureName_TimestampQuery in self.dev.features
 
-    # Creating bind group layout
-    def bgl_entry(n:int, ty:str):
-      return webgpu.WGPUBindGroupLayoutEntry(binding=n, visibility=webgpu.WGPUShaderStage_Compute,
-                                             buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
-    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(bufs)+len(vals)))(
-      bgl_entry(0, 'Uniform'), *(bgl_entry(i+1, 'Uniform' if i >= len(bufs) else 'Storage') for i in range(len(bufs)+len(vals))))
+    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(self.signature)))()
+    bindings = (webgpu.WGPUBindGroupEntry * (1+len(self.signature)))()
+    for i,p in enumerate((None, *self.signature)):
+      ty = 'Uniform' if p is None or p.addrspace is AddrSpace.ALU else 'Storage'
+      bind_entries[i] = webgpu.WGPUBindGroupLayoutEntry(binding=i, visibility=webgpu.WGPUShaderStage_Compute,
+                        buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
+    for i,p in enumerate((None, *self.signature)):
+      uniform = p is None or p.addrspace is AddrSpace.ALU
+      buf = self.dev.create_uniform(float('inf') if p is None else args[p]) if uniform else args[p]
+      bindings[i] = webgpu.WGPUBindGroupEntry(binding=i, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
 
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     bind_layout = webgpu.wgpuDeviceCreateBindGroupLayout(self.dev.device_res,
@@ -89,12 +93,6 @@ class WebGPUProgram(Program['WebGpuDevice']):
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     pipeline_layout = webgpu.wgpuDeviceCreatePipelineLayout(self.dev.device_res, pipeline_layout_desc)
     if err := self.dev.pop_error(): raise RuntimeError(f"Error creating pipeline layout: {err}")
-
-    # Creating bind group
-    def bg_entry(n:int, x:webgpu.WGPUBuffer|int|float):
-      buf = x if isinstance(x, webgpu.WGPUBuffer) else self.dev.create_uniform(x)
-      return webgpu.WGPUBindGroupEntry(binding=n, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
-    bindings = (webgpu.WGPUBindGroupEntry * (1+len(bufs)+len(vals)))(bg_entry(0, float('inf')), *(bg_entry(i+1, x) for i,x in enumerate(bufs+vals)))
 
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_layout, entryCount=len(bindings), entries=bindings)
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
