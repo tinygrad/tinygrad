@@ -192,8 +192,7 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
-# NOTE: has to maintain identity throughout lowering, ALLOC is swapped. stack and address handling should be more robust
-stack_pointer = alloc_reg(dtypes.void, RSP).replace(op=Ops.BUFFER)
+stack_pointer = alloc_reg(dtypes.void, RSP)
 
 # ***** X86 instruction selection *****
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
@@ -265,7 +264,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x))
 def is_address(x:UOp):
   if x.op is Ops.INS and x.arg[0] is X86Ops.MOV: return (len(x.src) == 1 or x.src[0] is stack_pointer) and is_address(x.src[0])
-  if (x is stack_pointer) or (x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG): return True
+  if x.op in {Ops.BUFFER, Ops.ALLOC} and (isinstance(x.tag, tuple) and x.tag[0] == RSP or x.addrspace is not AddrSpace.REG): return True
   if x.op is Ops.PARAM and x.addrspace is AddrSpace.GLOBAL: return True
   return x.op is Ops.INS and (x.arg[0] is X86Ops.LEA or (x.arg[0] in X86GroupOp.Copy and is_address(x.src[0])))
 
