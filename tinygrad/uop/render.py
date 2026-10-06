@@ -1,7 +1,7 @@
 import re
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, range_str, sint
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, CallInfo, range_str, sint
 from tinygrad.helpers import strip_parens, colored
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
@@ -49,6 +49,11 @@ def _render_arg(x:UOp) -> str:
       return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
     case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
     case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
+    case Ops.CALL if isinstance(a:=x.arg, CallInfo):
+      call_opts = [f"name={a.name!r}"] if a.name is not None else []
+      if a.grad_fxn is not None: call_opts.append(f"grad_fxn={getattr(a.grad_fxn, '__name__', type(a.grad_fxn).__name__)}")
+      call_opts += [f"{k}=true" for k in ("precompile", "precompile_backward") if getattr(a, k)]
+      return " ".join(call_opts)
     case Ops.REDUCE: return f"op={x.arg[0].name.lower()}" + (f" pop={x.arg[1]}" if x.arg[1] else "")
     case Ops.CAST | Ops.BITCAST: return x.arg.name   # one scalar -> bare
     case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
