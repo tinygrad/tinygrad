@@ -7,7 +7,7 @@ from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
-from tinygrad.dtype import DType, truncate
+from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters
 from tinygrad.renderer import Renderer
@@ -145,7 +145,8 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   prg = to_program(UOp.store(g.index(UOp.const(0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = dev.runtime(prg.to_elf())
   out_buf = Buffer("PYTHON", 1, uop.dtype, preallocate=True)
-  prog(out_buf._buf, *[b.buf for b in bufs], vals=vals)
+  prog(dict(zip((p for p in prg.to_elf().signature if p.addrspace != AddrSpace.ALU), [out_buf._buf, *[b.buf for b in bufs]])) |
+       dict(zip((p for p in prg.to_elf().signature if p.addrspace == AddrSpace.ALU), vals)))
   return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
