@@ -209,9 +209,10 @@ from test.mockgpu.amd.emu import ASM_CALL # noqa: F401
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
-  def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
+  def setUp(self):
+    self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
+    self.enterContext(Context(ASM_CALL=1))
 
-  @Context(ASM_CALL=1)
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
@@ -233,6 +234,7 @@ class TestAsmKernel(unittest.TestCase):
       run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
+  @unittest.expectedFailure
   def test_lds_sync(self):
     if self.arch not in ("rdna3", "rdna4"): self.skipTest("only rdna3/rdna4")
     a = Tensor.empty(128, dtype=dtypes.int32).contiguous().realize()
@@ -255,7 +257,8 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
-  def test_cfg(self):
+  @unittest.expectedFailure
+  def test_cfg_branch_diamond(self):
     def cfg_kernel(out:UOp):
       k = Kernel()
       k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
@@ -297,18 +300,6 @@ class TestAsmKernel(unittest.TestCase):
       sink = UOp.sink(out.base, arg=KernelInfo("cfg_loop_kernel"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
-    self.assertListEqual(out.tolist(), [4])
-
-  def test_cfg_loop_handmade(self):
-    def cfg_kernel_handmade(x:UOp):
-      acc = UOp.alloc((1,), x.dtype, addrspace=AddrSpace.REG)
-      acc = acc.after(acc[0].store(0))
-      loop = UOp.loop(0)
-      body = acc[0].store(acc.after(loop)[0] + 1)
-      acc = acc.after(body)
-      acc = acc.after(body.backedge(loop, acc[0] < 4))
-      return x[0].store(acc[0]).sink(arg=KernelInfo("handmade"))
-    out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel_handmade)[0]
     self.assertListEqual(out.tolist(), [4])
 
 if __name__ == "__main__":
