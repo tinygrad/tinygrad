@@ -180,7 +180,7 @@ class LLVMRenderer(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op is Ops.PARAM:
-        r[u] = f"%data{u.arg.slot}"
+        r[u] = f"%{u.param_name}"
         args.append((r[u], u))
       elif u.op is Ops.BUFFER:
         r[u] = f"%{'local' if u.addrspace == AddrSpace.LOCAL else 'reg'}_{str(u.arg.slot)}"
