@@ -455,7 +455,8 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
-  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
+  params = prg.arg.params if isinstance(ctx, ISARenderer) else tuple(u for u in lin.src if u.op is Ops.PARAM)
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=replace(prg.arg, params=params))
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
@@ -497,7 +498,9 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       if full_sink.arg.estimates is None:
         full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+      isel_ctx = IselContext(full_sink)
+      prog_info = replace(prog_info, params=tuple(u for u in isel_ctx.func_args if u.op is Ops.PARAM))
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))

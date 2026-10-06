@@ -1,13 +1,15 @@
 from typing import Optional, Any
-import unittest, math
+import unittest, math, itertools
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, ProgramInfo
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.engine.realize import run_linear
+from tinygrad.codegen import to_program
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 
@@ -84,6 +86,86 @@ class TestBitcastBufferView(unittest.TestCase):
                 for i, dt in enumerate((src_dt, dst_dt))]
         run_uops([dst.store(src.load())], bufs)
         self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(range(16)))
+
+class TestArgumentOrder(unittest.TestCase):
+  def _test_order(self, scalar_dtype):
+    for order in itertools.permutations(range(4)):
+      with self.subTest(order=order, dtype=scalar_dtype):
+        # Skip an unused buffer in the middle of the call.
+        slots = [i if i < 2 else i+1 for i in range(4)]
+        params = [UOp.param(slots[order.index(i)], dt, (1,) if i < 2 else (), addrspace=AddrSpace.GLOBAL if i < 2 else AddrSpace.ALU)
+                  for i,dt in enumerate((scalar_dtype, dtypes.int, dtypes.int, scalar_dtype))]
+        out, inp, scale, bias = params
+        sink = out[0].store((inp[0] * scale + bias).cast(scalar_dtype)).sink(arg=KernelInfo())
+        obuf = Buffer(Device.DEFAULT, 1, scalar_dtype).allocate()
+        ibuf = Buffer(Device.DEFAULT, 1, dtypes.int, initial_value=np.array([5], dtype=np.int32).tobytes())
+        unused = UOp.from_buffer(Buffer(Device.DEFAULT, 1, dtypes.int).allocate())
+        bias_value = 13 if scalar_dtype == dtypes.int else 2**35+13
+        for v in (-7, 11):
+          args = [UOp.from_buffer(obuf), UOp.from_buffer(ibuf), UOp.const(v, dtypes.int), UOp.const(bias_value, scalar_dtype)]
+          args = [args[i] for i in order]
+          args.insert(2, unused)
+          run_linear(UOp(Ops.LINEAR, src=(sink.call(*args),)))
+          self.assertEqual(obuf.as_memoryview().cast(scalar_dtype.fmt)[0], 5*v+bias_value)
+          # Reverse the ABI order as well as the call order.
+          prg = to_program(sink, Device[Device.DEFAULT].renderer)
+          lin = prg.src[1]
+          if not any(u.op is Ops.INS for u in lin.src):
+            params = [u for u in lin.src if u.op is Ops.PARAM]
+            end = max(i for i,u in enumerate(lin.src) if u.op is Ops.PARAM)+1
+            lin = lin.replace(src=tuple(u for u in lin.src[:end] if u.op is not Ops.PARAM)+tuple(reversed(params))+lin.src[end:])
+            prg = to_program(prg.replace(src=(prg.src[0], lin)), Device[Device.DEFAULT].renderer)
+            obuf.copy_from(Buffer(Device.DEFAULT, 1, scalar_dtype, initial_value=bytes(scalar_dtype.itemsize)))
+            run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)))
+            self.assertEqual(obuf.as_memoryview().cast(scalar_dtype.fmt)[0], 5*v+bias_value)
+
+  def test_eight_used_arguments(self):
+    for mixed in (False, True):
+      with self.subTest(mixed=mixed):
+        params = [UOp.param(i, dtypes.int, () if mixed and i%2 else (1,),
+                            addrspace=AddrSpace.ALU if mixed and i%2 else AddrSpace.GLOBAL) for i in range(8)]
+        values = [p if mixed and i%2 else p[0].load() for i,p in enumerate(params[1:], 1)]
+        sink = params[0][0].store(sum((v*i for i,v in enumerate(values, 1)), UOp.const(0, dtypes.int))).sink(arg=KernelInfo())
+        buffers = [Buffer(Device.DEFAULT, 1, dtypes.int, initial_value=np.array([i], dtype=np.int32).tobytes())
+                   for i in range(8) if not mixed or i%2 == 0]
+        buf_iter = iter(buffers)
+        args = [UOp.const(i, dtypes.int) if mixed and i%2 else UOp.from_buffer(next(buf_iter)) for i in range(8)]
+        prg = to_program(sink, Device[Device.DEFAULT].renderer)
+        self.assertEqual(len(prg.to_elf().signature), 8)
+        run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)))
+        self.assertEqual(buffers[0].as_memoryview().cast('i')[0], 140)
+
+  @unittest.skipUnless(Device.DEFAULT in ("CPU", "PYTHON") and
+                       isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer, PythonRenderer)), "requires nested calls")
+  def test_nested_rendered_order(self):
+    renderer = Device[Device.DEFAULT].renderer
+    out = UOp.param(0, dtypes.int, (1,))
+    a, b = [UOp.param(i, dtypes.int, addrspace=AddrSpace.ALU) for i in (1, 2)]
+    inner = to_program(out[0].store(a*10+b).sink(arg=KernelInfo()), renderer).src[1]
+    inner = inner.replace(src=tuple(u for u in inner.src if u.op is not Ops.SINK))
+    params = [u for u in inner.src if u.op is Ops.PARAM]
+    end = max(i for i,u in enumerate(inner.src) if u.op is Ops.PARAM)+1
+    inner = inner.replace(src=tuple(u for u in inner.src[:end] if u.op is not Ops.PARAM)+tuple(reversed(params))+inner.src[end:], arg="nested")
+    sink = inner.call(out, UOp.const(5, dtypes.int), UOp.const(7, dtypes.int)).sink(arg=KernelInfo())
+    obuf = Buffer(Device.DEFAULT, 1, dtypes.int).allocate()
+    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort(enter_calls=False)))),
+              arg=ProgramInfo.from_sink(sink, renderer.target))
+    run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(obuf)),)))
+    self.assertEqual(obuf.as_memoryview().cast('i')[0], 57)
+
+  @Context(VALIDATE_WITH_CPU=1)
+  def test_scheduled_scalar_first(self):
+    out = UOp.param(1, dtypes.int, (1,))
+    scale = UOp.param(0, dtypes.int, addrspace=AddrSpace.ALU)
+    sink = out[0].store(scale*2).sink(arg=KernelInfo())
+    for scale_arg,expected in ((UOp.const(-3, dtypes.int), -6), (UOp.variable("scale", -10, 10).bind(4), 8)):
+      buf = UOp.from_buffer(Buffer(Device.DEFAULT, 1, dtypes.int).allocate())
+      self.assertEqual(Tensor(buf.after(sink.call(scale_arg, buf))).tolist(), [expected])
+
+  def test_buffers_and_args(self): self._test_order(dtypes.int)
+
+  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires 64-bit ints")
+  def test_buffers_and_mixed_width_args(self): self._test_order(dtypes.long)
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):

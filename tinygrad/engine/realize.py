@@ -6,17 +6,24 @@ from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flat
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
 
-def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_bound_var)
+def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]:
+  if not any(s.is_bound_var for s in call.src[1:]): return call.src[1:]
+  params = call.body.arg.vars if call.body.op is Ops.PROGRAM else call.body.toposort() if call.body.op is Ops.SINK else ()
+  positional = {v.arg.slot:v.dtype for v in params if v.op is Ops.PARAM and v.addrspace is AddrSpace.ALU and not v.is_variable}
+  return tuple(UOp.const(s.arg.val, positional[i]) if s.is_bound_var else s
+               for i,s in enumerate(call.src[1:]) if not s.is_bound_var or i in positional)
 def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
   # a bound value is a bare CONST: the Variable states the width
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  return [bound.get(v.expr, v) for v in prg.arg.vars]
+  args = get_call_arg_uops(call)
+  return [bound.get(v.expr, v) if v.is_variable else args[v.arg.slot] for v in prg.arg.vars]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -154,25 +161,30 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  for device, (bufs, device_vars) in zip(devices or to_tuple(call.device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: vals = tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
+    try: vals = tuple(var_vals[v.expr] if v.is_variable else resolved[v.arg.slot].val for v in ast.arg.vars)
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
     ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_sz, local_size=local_sz, vals=vals, wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  prg = to_program(ast.src[0], Device["CPU"].renderer)
+  resolved = resolve_params(call, ctx.input_uops)
+  n = len(resolved)//2
+  args = [resolved[i] for i in prg.arg.globals] + [resolved[n+i] for i in prg.arg.globals]
+  for bufs, device_vars in unwrap_multi(call, args):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
     var_vals = {**ctx.var_vals, **device_vars}
-    cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
-    for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+    vals = tuple(var_vals[v.expr] if v.is_variable else resolved[v.arg.slot].val for v in prg.arg.vars)
+    get_runtime("CPU", prg)(*[b.ensure_allocated()._buf for b in bufs], global_size=global_size, local_size=local_size, vals=vals)
+    for i,g in enumerate(prg.arg.globals):
+      if g in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -201,8 +213,9 @@ pm_flatten_linear = PatternMatcher([
 
 def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, params))
+  shadows = tuple(p if p.addrspace is AddrSpace.ALU else
+                  UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
+  copies = tuple(s.store_call(p) for s, p in zip(shadows, params) if p.addrspace is not AddrSpace.ALU)
   return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 

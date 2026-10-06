@@ -133,7 +133,7 @@ class MetalQueue(HWQueue):
 
   def exec(self, call:UOp, prg:UOp):
     bufs, vals, obj = get_call_arg_uops(call), get_call_var_uops(call, prg), prg.to_elf()
-    args = [bufs[i].getaddr(self.devs) for i in prg.arg.globals] + [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)]
+    args = obj.bind([bufs[i].getaddr(self.devs) for i in prg.arg.globals], [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)])
     self.rows += (rows:=layout_args(args, off:=round_up(self.nbytes, 256)))
     self.nbytes = max([o + w.dtype.itemsize for o, w in rows], default=off + 8)
 

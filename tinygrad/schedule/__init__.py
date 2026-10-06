@@ -16,6 +16,7 @@ def _unwrap_src(s: UOp) -> UOp:
 
 # a buffer state is AFTER | BUFFER | ALLOC | PARAM. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
+  if s.addrspace is AddrSpace.ALU: return []
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
@@ -70,8 +71,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
       rk = queue.popleft()
       k = rk.src[0] if rk.op is Ops.END else rk
       assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-      linearized.append(k.replace(src=(k.body, *buf_uops)))
+      args = tuple(s if s.addrspace is AddrSpace.ALU else _unwrap_src(s).buf_uop for s in get_call_arg_uops(k))
+      linearized.append(k.replace(src=(k.body, *args)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -79,7 +80,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
 from tinygrad.schedule.memory import memory_plan_rewrite
-from tinygrad.engine.realize import capturing, pm_flatten_linear
+from tinygrad.engine.realize import capturing, pm_flatten_linear, get_call_arg_uops
 from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import get_kernel_graph
@@ -279,7 +280,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
   # vars used in the schedule
-  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  used_vars = set().union(*[{v.expr for v in si.src[0].variables() if v.is_variable} for si in linear.src])
   # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:

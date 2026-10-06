@@ -229,7 +229,10 @@ class TestAsmKernel(unittest.TestCase):
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
     a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
-    linear = a.schedule_linear()
+    linear = lower_and_compile(a.schedule_linear())
+    prg = linear.src[-1].body
+    self.assertFalse(any(u.op is Ops.PARAM for u in prg.src[1].src))
+    self.assertEqual(len(prg.to_elf().signature), 3)
     for i in range(4):
       run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())

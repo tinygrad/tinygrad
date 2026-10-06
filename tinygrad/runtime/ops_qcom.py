@@ -94,18 +94,20 @@ class QCOMComputeQueue(HWQueue):
 
   def kernargs(self, call:UOp, prg:UOp, data:QCOMProgramData) -> UOp:
     bufs, vals = [get_call_arg_uops(call)[g] for g in prg.arg.globals], get_call_var_uops(call, prg)
-    ubos = [bufs[slot] for _,slot,_,shape in data.signature if slot < len(bufs) and not is_image_shape(shape)]
-    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in data.signature if slot < len(bufs) and is_image_shape(shape)]
+    signature = prg.to_elf().signature # launch slots are specific to this program
+    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in signature if slot < len(bufs) and is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:data.ibo_cnt], [uavs[data.ibo_cnt + (data.tex_to_image[i] if data.NIR else i)] for i in range(data.tex_cnt)]
 
     args = [(off, UOp.const(val, dtypes.uint32 if sz == 4 else dtypes.uint16)) for val,off,sz in data.consts_info]
     args += layout_args(data.samplers, data.samp_off)
-    vals = [v.ccast(dt) for v,(_,_,dt,_) in zip(vals, data.signature[len(bufs):])]
+    vals = [v.ccast(var.dtype) for v,var in zip(vals, prg.arg.vars)]
+    words = [bufs[slot].getaddr(self.devs) if slot < len(bufs) else vals[slot-len(bufs)]
+             for _,slot,_,shape in signature if slot >= len(bufs) or not is_image_shape(shape)]
     if data.NIR:
-      args += layout_args([b.getaddr(self.devs) for b in ubos] + vals, data.buf_off)
+      args += layout_args(words, data.buf_off)
       if data.wgsz != 0xfc: args += layout_args(list(prg.arg.local_size), data.wgsz * 4)
-    else: args += list(zip(data.buf_offs, [b.getaddr(self.devs) for b in ubos] + vals))
+    else: args += list(zip(data.buf_offs, words))
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
@@ -207,7 +209,7 @@ class QCOMComputeQueue(HWQueue):
 
 class QCOMProgramData:
   def __init__(self, dev:QCOMDevice, obj:TinyELF):
-    self.signature, self.name, self.NIR = obj.signature, obj.name, isinstance(dev.renderer, IR3Renderer)
+    self.name, self.NIR = obj.name, isinstance(dev.renderer, IR3Renderer)
 
     if self.NIR:
       from tinygrad.runtime.support.compiler_mesa import IR3Compiler

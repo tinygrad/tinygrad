@@ -1,12 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING, Sequence
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
+from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV, T, U
 from tinygrad.dtype import dtypes, DType, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
@@ -354,17 +354,24 @@ class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
+  # (name, slot in buffers+vals, dtype, shape), in rendered parameter order
   signature: tuple[tuple[str|None, int, DType, tuple], ...]
   profile_key: bytes|None = None
 
+  def bind(self:TinyELF|Program, bufs:Sequence[T], vals:Sequence[U]) -> list[T|U]:
+    args:list[T|U] = [*bufs, *vals]
+    return [args[slot] for _,slot,_,_ in self.signature]
+
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
+  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0, nbufs:int=0) -> Generator[tuple[int, DType], None, None]:
+    for _,slot,dt,_ in signature:
+      if slot < nbufs: dt = dtypes.uint64
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
 
 class Program(Generic[DeviceType]):
+  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  bind = TinyELF.bind
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
                wait=False) -> float|None: pass

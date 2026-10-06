@@ -29,7 +29,8 @@ class NullQueue(HWQueue):
   def cmd(self, op, *args): self.q(*[a.getaddr(self.devs) if isinstance(a, UOp) else UOp.const(a, dtypes.uint64) for a in (op, *args, 0, 0, 0)][:4])
   def event(self, device:str, name:str, key:bytes|None=None) -> int: return null_events.setdefault((device, name, key), len(null_events))
   def exec(self, call:UOp, prg:UOp):
-    args = [a.getaddr(self.devs) for a in get_call_arg_uops(call)] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
+    args = prg.to_elf().bind([get_call_arg_uops(call)[i].getaddr(self.devs) for i in prg.arg.globals],
+                             [v.ccast(var.dtype) for v,var in zip(get_call_var_uops(call, prg), prg.arg.vars)])
     kernargs = UOp(Ops.LINEAR, src=tuple(pack_args(layout_args(args), 8 * max(len(args), 1))), arg="kernargs")
     self.cmd(EXEC, kernargs, len(args), self.event(self.devs[0], prg.src[0].arg.function_name, prg.key))
   def copy(self, dst:UOp, src:UOp, sz:int): self.cmd(COPY, dst, src, self.event(f"{src.device}:SDMA:0", f"{src.device} -> {dst.device}"))
@@ -39,7 +40,7 @@ class NullQueue(HWQueue):
   def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0]).rtag("doorbell"))
 
 class NullProgram(Program['NullDevice']):
-  def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
+  def __init__(self, dev, obj): self.streams = [(slot, prod(s)) for n,slot,_,s in obj.signature if (n or "").startswith("cmdbuf")]
   def __call__(self, *bufs, **kwargs):
     st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(bufs[i], n, fmt='Q')[:]]
     # timestamps are emulated: every exec and copy takes 1us
