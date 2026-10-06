@@ -40,6 +40,14 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) \
         | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
 
+def _kfd_event(q) -> tuple[UOp, int]|None:
+  # kfd wakes an event only if the interrupt carries its id and its event page slot was written
+  qe = getattr(getattr(q.dev, "iface", None), "queue_event_arr", None)
+  if qe is None or not hasattr(KFDIface, "event_page"): return None
+  eid = int(qe[0].event_id)
+  page = UOp.alloc((0x8000,), dtypes.uint8, 0, device=q.devs[0]).rtag(q.dev.tag("kfd_event_page"))
+  return page.getaddr(q.devs) + UOp.const(8 * eid, dtypes.uint64), eid
+
 @dataclass(frozen=True)
 class ProfileSQTTEvent(ProfileEvent): device:str; kern:int; se:int; blob:bytes; itrace:bool; exec_tag:int # noqa: E702
 
@@ -434,8 +442,14 @@ class AMDComputeQueue(HWQueue):
 
   def signal(self, signal:UOp, value:UOp):
     with self.pred_exec(xcc_mask=0b1):
-      self.release_mem(signal.getaddr(self.devs), value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
-                       self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+      if (ev := _kfd_event(self)) is None:
+        self.release_mem(signal.getaddr(self.devs), value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+                         self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+      else:
+        self.release_mem(signal.getaddr(self.devs), value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+                         self.pm4.int_sel__mec_release_mem__none, cache_flush=True)
+        self.release_mem(ev[0], ev[1], self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+                         self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=ev[1])
 
   def submit(self, cmdbuf:UOp) -> UOp: # the ring gets an indirect buffer packet: 4 dwords, put stays aligned so it never wraps mid packet
     base, off = unwrap_view(cmdbuf)
@@ -511,7 +525,9 @@ class AMDSDMAQueue(HWQueue):
 
   def signal(self, signal:UOp, value:UOp):
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
-    self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
+    if (ev := _kfd_event(self)) is None: self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
+    else: self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), op, ev[0], UOp.const(ev[1], dtypes.uint32),
+                 self.sdma.SDMA_OP_TRAP, ev[1])
 
   def submit(self, cmdbuf:UOp) -> UOp: return amd_sdma_submit(cmdbuf, *_queue_args(self, unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))))
 
@@ -889,6 +905,7 @@ class AMDDevice(Compiled):
     # Scratch setup
     self.max_private_segment_size = 0
     Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=self.tag("scratch"), name="b"), lambda b, d=self: d.scratch_buffer(b.max_numel())),
+                                             (UPat(Ops.ALLOC, tag=self.tag("kfd_event_page")), lambda: KFDIface.event_page),
                                              (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.queue_buffer(b.tag))])
     if self.is_usb: setup_usb_rules(self)
 
