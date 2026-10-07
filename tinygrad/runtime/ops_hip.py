@@ -36,9 +36,9 @@ class HIPProgram(Program[HIPDevice]):
 
   def __call__(self, args:dict, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
-    self.c_args = TinyELF.pack(self.signature, args)
-    arg_size = ctypes.c_size_t(len(self.c_args))
-    vargs = (ctypes.c_void_p * 5)(1, mv_address(self.c_args), 2, ctypes.addressof(arg_size), 3)
+    c_args = TinyELF.pack(self.signature, args)
+    arg_size = ctypes.c_size_t(len(c_args))
+    vargs = (ctypes.c_void_p * 5)(1, mv_address(c_args), 2, ctypes.addressof(arg_size), 3)
 
     if wait: check(hip.hipEventRecord(self.dev.time_event_st, None))
 
