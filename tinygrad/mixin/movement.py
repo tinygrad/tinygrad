@@ -527,8 +527,8 @@ class MovementMixin:
     """
     if (dim1:=self._resolve_dim(dim1)) == (dim2:=self._resolve_dim(dim2)): raise RuntimeError("dim1 and dim2 cannot be the same dimension")
     x = self.permute(*[i for i in range(self.ndim) if i != dim1 and i != dim2], dim1, dim2)
-    if offset >= 0: x = x.shrink(tuple(None for _ in x.shape[:-1]) + ((offset, x.shape[-1]),))
-    else: x = x.shrink(tuple(None for _ in x.shape[:-2]) + ((-offset, x.shape[-2]), None))
+    if offset >= 0: x = x.shrink(tuple(None for _ in x.shape[:-1]) + ((min(offset, x.shape[-1]), x.shape[-1]),))
+    else: x = x.shrink(tuple(None for _ in x.shape[:-2]) + ((min(-offset, x.shape[-2]), x.shape[-2]), None))
     if (d := min(int(x.shape[-2]), int(x.shape[-1]))) <= 0: return x.reshape(*x.shape[:-2], 0)
     nones, x = tuple(None for _ in x.shape[:-2]), x.shrink_to(tuple(None for _ in x.shape[:-2]) + (d, d))
     return x.flatten(-2).pad_to(nones+(d*(d+1),)).unflatten(-1, (d, d+1)).shrink_to(nones+(None, 1)).squeeze(-1)
