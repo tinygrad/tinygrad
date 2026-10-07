@@ -145,9 +145,8 @@ def main():
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
-  parser.add_argument("--benchmark", nargs='?', type=lambda s: tuple(int(x) for x in f"0,{s}".split(",")[-2:]), const=(1024, 20),
-                      metavar="[PREFILL,]DECODE", help="Benchmark tok/s on synthetic tokens: PREFILL prompt tokens then DECODE new tokens "
-                                                       "(default 1024,20)")
+  parser.add_argument("--benchmark", nargs='?', type=lambda s: tuple(int(x) for x in (s if "," in s else f"0,{s}").split(",", 1)), const=(1024, 20),
+                      metavar="[PREFILL,]DECODE", help="Benchmark tok/s (PREFILL prompt tokens then DECODE new tokens, default 1024,20)")
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
@@ -181,7 +180,7 @@ def main():
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # warmup the JIT
-  if args.warmup or args.serve:
+  if args.warmup or args.serve or args.benchmark is not None:
     with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
 
   # start server
@@ -190,14 +189,12 @@ def main():
   # do benchmark
   if args.benchmark is not None:
     n_pp, n_tg = args.benchmark
-    model.warmup()
+    assert n_pp >= 0 and n_tg >= 0 and n_pp + n_tg < model.max_context, f"{n_pp},{n_tg} must be positive and fit the context of {model.max_context}"
     toks = [1000+i%1000 for i in range(n_pp-1)] + [tok.bos_id or 0]
-    GlobalCounters.reset()
     gen, st = model.generate(toks), time.perf_counter()
     if n_pp: next(gen)
-    dt, pm, dm, skip = (pt:=time.perf_counter()), GlobalCounters.global_mem, 0, 3 if n_tg > 3 else 0
+    dt, dm = (pt:=time.perf_counter()), 0
     for i in range(n_tg):
-      if i == skip: dt, dm = time.perf_counter(), 0
       profile_marker(f"decode @ {i}")
       GlobalCounters.reset()
       if (log:=getenv("BENCHMARK_LOG", "")): from extra.bench_log import WallTimeEvent, BenchEvent
@@ -206,12 +203,11 @@ def main():
       else: next(gen)
       dm += GlobalCounters.global_mem
     et = time.perf_counter()
-    row = {"Model": model_name, "Model Size": f"{n_params/1e9:.1f}B",
-           "Device": f"{device[0]}x{len(device)}" if isinstance(device, tuple) else device, "Prefill tokens": n_pp, "Decode tokens": n_tg,
-           "TTFT(ms)": f"{(pt-st)*1e3:.2f}" if n_pp else "-", "Prefill(tok/s)": f"{n_pp/(pt-st):.2f}" if n_pp else "-",
-           "Decode(tok/s)": f"{(n_tg-skip)/(et-dt):.2f}", "Prefill(GB/s)": f"{pm/(pt-st)/1e9:.2f}" if n_pp else "-",
-           "Decode(GB/s)": f"{dm/(et-dt)/1e9:.2f}", "Decode(MB/tok)": f"{dm/max(n_tg-skip, 1)/1e6:.0f}",
-           "Memory(GB)": f"{GlobalCounters.mem_used/1e9:.2f}"}
+    row = {"Model": model_name, "Model Size": f"{n_params/1e9:.1f}B", "Device": f"{device[0]}x{len(device)}" if isinstance(device, tuple) else device,
+           "Prefill tokens": n_pp, "Decode tokens": n_tg, "TTFT(ms)": f"{(pt-st)*1e3:.2f}" if n_pp else "-",
+           "Prefill(tok/s)": f"{n_pp/(pt-st):.2f}" if n_pp else "-", "Decode(tok/s)": f"{n_tg/(et-dt):.2f}",
+           "Decode(ms/tok)": f"{(et-dt)*1e3/n_tg:.2f}" if n_tg else "-",
+           "Decode(GB/s)": f"{dm/(et-dt)/1e9:.2f}", "Memory(GB)": f"{GlobalCounters.mem_used/1e9:.2f}"}
     widths = [max(len(k), len(str(v))) for k, v in row.items()]
     for cells in (row, ["-"*w for w in widths], row.values()): print("| " + " | ".join(str(c).ljust(w) for c, w in zip(cells, widths)) + " |")
     exit(0)
