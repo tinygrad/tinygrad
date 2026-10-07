@@ -17,11 +17,9 @@ def get_call_args(call:UOp) -> tuple[tuple[int, UOp], ...]: return tuple((i,s) f
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for _,s in get_call_args(call))
 def get_call_prg_args(call:UOp, prg:UOp) -> Iterator[tuple[UOp, UOp]]:
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  args = []
   for p in prg.to_elf().signature:
     a = bound.get(p.expr, p) if p.arg.slot < 0 else call.src[1+p.arg.slot]
-    args.append((p, UOp.const(a.arg.val) if a.is_bound_var else a))
-  yield from args
+    yield p, UOp.const(a.arg.val) if a.is_bound_var else a
 
 def get_call_outs_ins(call:UOp, compact:bool=False) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
