@@ -9,11 +9,12 @@ from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.weak import pm_uncast_const
 
 # TODO: symbolic shouldn't be importing from codegen
-from tinygrad.codegen.decomp.transcendental import xpow
+from tinygrad.codegen.decomp.transcendental import xpow, xpow_int
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
+  if c.val < 0 and dtypes.is_int(x.dtype): return None
   if c.val < 0: return x.reciprocal().pow(-c.val)
   if c.val == 0: return x.const_like(1)
   if (h := c.val-0.5) < c.val and int(h)+0.5 == c.val: return x.pow(h) * x.sqrt()
@@ -187,7 +188,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
   # positive const ** x
-  (UPat.cvar("c").alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 else None),
+  (UPat.cvar("c").alu(Ops.POW, UPat.var("x")),
+   lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 and dtypes.is_float(x.dtype) else None),
   # unpack a uint64 packed from two uint32 (threefry)
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y', dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x', dtypes.uint32).cast(dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
@@ -448,7 +450,7 @@ pm_clean_up_group_sink = PatternMatcher([
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** pow **
-  ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
+  ((UPat(Ops.POW, name="p"), lambda p: xpow_int(p.src[0], p.src[1], p.dtype) if dtypes.is_int(p.dtype) else xpow(*p.src))),
   # ** load/store folding **
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
