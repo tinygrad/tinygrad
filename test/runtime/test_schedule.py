@@ -174,6 +174,14 @@ class TestLimitBufs(unittest.TestCase):
         base = (idx >= i).where(a + b, base)
       assert all(x > 0 for x in base.tolist())
 
+  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "requires WEBGPU")
+  def test_webgpu_buffer_limit(self):
+    from tinygrad.runtime.autogen import webgpu
+    dev = Device["WEBGPU"]
+    limits = webgpu.WGPUSupportedLimits()
+    self.assertEqual(webgpu.wgpuDeviceGetLimits(dev.device_res, limits), webgpu.WGPUStatus_Success)
+    self.assertEqual(dev.max_kernel_buffers, limits.limits.maxStorageBuffersPerShaderStage)
+
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
     Tensor.manual_seed(0)

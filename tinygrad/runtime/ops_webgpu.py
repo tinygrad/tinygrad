@@ -184,6 +184,7 @@ class WebGpuDevice(Compiled):
     # Requesting a device
     self.device_res = AdapterRequestDevice(adapter_res, dev_desc)
     self.queue = webgpu.wgpuDeviceGetQueue(self.device_res)
+    self.max_kernel_buffers = supported_limits.limits.maxStorageBuffersPerShaderStage
 
     webgpu.wgpuAdapterRelease(adapter_res)
 

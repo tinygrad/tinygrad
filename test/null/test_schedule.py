@@ -1,5 +1,6 @@
 # schedule tests that pass on NULL backend (no copyout needed)
 import unittest, time, gc
+from unittest.mock import patch
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.helpers import GlobalCounters, Context, all_same
@@ -2073,6 +2074,13 @@ class TestInvalidTensor(unittest.TestCase):
     check_schedule(t, 0)
 
 class TestLimitBufs(unittest.TestCase):
+  def test_limit_bufs_from_device(self):
+    with Context(MAX_KERNEL_BUFFERS=0, SCACHE=0):
+      bufs = [Tensor.empty(16, device="NULL").realize() for _ in range(8)]
+      for limit, kernels in ((8, 2), (16, 1)):
+        with patch.object(Device["NULL"], "max_kernel_buffers", limit, create=True):
+          check_schedule(sum(bufs[1:], bufs[0]), kernels)
+
   def test_limit_bufs_linear_scaling(self):
     def sched_time(n):
       with Context(TRACK_MATCH_STATS=0, DEBUG=0, PARALLEL=0):

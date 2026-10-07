@@ -10,6 +10,7 @@ from tinygrad.helpers import get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.schedule.prepare import pm_mops
+from tinygrad.device import Device
 
 # creation can recurse a lot
 import sys
@@ -171,7 +172,7 @@ class LimitBufsContext:
 def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
-  if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
+  if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or getattr(Device[device], "max_kernel_buffers", 0)): return None
 
   def visitor(u:UOp) -> frozenset[UOp]:
     if u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: return frozenset((u,))
