@@ -67,9 +67,7 @@ class CPUProgram(Program['CPUDevice']):
         addr = mv_address(lvp_args)
         struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), len(self.signature)*2)
         self.fxn(addr)
-      else:
-        ordered_args = [args[p] for p in self.signature]
-        self.fxn(*[ctypes.c_uint64(x) for x in ordered_args])
+      else: self.fxn(*[ctypes.c_uint64(args[p]) for p in self.signature])
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
 
   @suppress_finalizing
