@@ -155,6 +155,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
   for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+    if not isinstance(call.arg.aux, HCQInfo) and Device[device].pending: Device[device].synchronize(timeout=ctx.timeout)
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
