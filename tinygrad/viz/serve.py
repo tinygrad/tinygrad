@@ -182,10 +182,9 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink),
-           "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
-           "upat":(upat_loc, match_repr), "_sink":new_sink}
+    diff = difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink), "upat":(upat_loc, match_repr), "_sink":new_sink,
+           "change":[id(x) for x in u1.toposort() if id(x) in sink_json], "diff":[ansistrip(x) for x in diff if not x.startswith(("---","+++","@@"))]}
     if not ctx.bottom_up: next_sink = new_sink
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
