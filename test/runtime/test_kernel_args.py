@@ -7,6 +7,7 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import get_call_outs_ins, run_linear
 from tinygrad.helpers import Context, Target
 from tinygrad.uop.ops import KernelInfo, Ops, UOp
+from test.helpers import needs_second_gpu
 
 class TestKernelArgs(unittest.TestCase):
   def test_arbitrary_order(self):
@@ -62,6 +63,17 @@ class TestKernelArgs(unittest.TestCase):
       run_linear(UOp(Ops.LINEAR, src=(sink.call(UOp.variable('factor', 0, 10, dtypes.int32).bind(3), out, x),)), wait=True)
     self.assertEqual(out.buffer.numpy().tolist(), [3, 6, 9])
 
+  @needs_second_gpu
+  def test_multi_device_scalar_first(self):
+    devices = (Device.DEFAULT, f'{Device.DEFAULT}:1')
+    x = Tensor([1, 2, 3], dtype=dtypes.int32).shard(devices, axis=None).realize().uop
+    out = UOp.new_buffer(devices, 3, dtypes.int32)
+    a, p, q = UOp.param(0, dtypes.int32, addrspace=AddrSpace.ALU), UOp.param(1, dtypes.int32, 3), UOp.param(2, dtypes.int32, 3)
+    idx, dnum = UOp.range(3, 0), UOp.variable('_device_num', 0, 1, dtypes.int32)
+    sink = p.index(idx).store(q.index(idx).load()*a + dnum).end(idx).sink(arg=KernelInfo(name='multi_argument_order'), tag=1)
+    run_linear(UOp(Ops.LINEAR, src=(sink.call(UOp.variable('factor', 0, 10, dtypes.int32).bind(3), out, x),)), wait=True)
+    for i,buf in enumerate(out.buffer.bufs): self.assertEqual(buf.numpy().tolist(), [3+i, 6+i, 9+i])
+
   def test_pack_repeated_slot(self):
     # IMAGE can have distinct ABI descriptors that share a CALL slot.
     p = UOp.param(2, dtypes.float32, 4)
@@ -70,5 +82,7 @@ class TestKernelArgs(unittest.TestCase):
     obj = TinyELF(b'', 'pack', Target(), (scalar, image, p))
     self.assertEqual(TinyELF.pack(obj.signature, {scalar: -3, image: 0x1000, p: 0x1000})[:24],
                      struct.pack('<h6xQQ', -3, 0x1000, 0x1000))
+    self.assertEqual(TinyELF.pack((p, scalar), {scalar: -3, p: 0x1000}, 12), bytearray(12) + struct.pack('<Qh', 0x1000, -3))
+    self.assertEqual(TinyELF.pack((), {}, 12), bytearray(12))
 
 if __name__ == '__main__': unittest.main()
