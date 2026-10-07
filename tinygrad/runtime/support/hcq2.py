@@ -72,10 +72,8 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, de
 # C FFI
 
 def kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...], images:bool=True) -> Iterator[UOp]:
-  args = []
   for p,a in get_call_prg_args(call, prg):
-    if images or p.arg.image is None: args.append(a.ccast(p.dtype) if p.addrspace is AddrSpace.ALU else a.getaddr(devs))
-  yield from args
+    if images or p.arg.image is None: yield a.ccast(p.dtype) if p.addrspace is AddrSpace.ALU else a.getaddr(devs)
 
 def layout_args(args:Iterable[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
   words = [a if isinstance(a, UOp) else UOp.const(a, dtypes.uint32) for a in args]
