@@ -1,6 +1,7 @@
+import ctypes
 import unittest, pickle
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType, to_dtype, Invalid, InvalidType
+from tinygrad.dtype import CDTYPES_MAP, dtypes, DType, to_dtype, Invalid, InvalidType
 
 class TestEqStrDType(unittest.TestCase):
   def test_strs(self):
@@ -24,6 +25,11 @@ class TestToDtype(unittest.TestCase):
     res = to_dtype(dtype)
     self.assertIsInstance(res, DType)
     self.assertEqual(res, dtypes.int32)
+
+class TestCtypesToDtype(unittest.TestCase):
+  def test_mapped_dtype_equal_size(self):
+    for ct, dt in CDTYPES_MAP.items():
+      self.assertEqual(ctypes.sizeof(ct), dt.itemsize, f"size of ctypes {ct} doesn't match mapped dtype {dt}")
 
 class TestCastConvenienceMethod(unittest.TestCase):
   def test_method(self):
