@@ -368,10 +368,9 @@ class TinyELF:
   @staticmethod
   def pack(signature:tuple[UOp, ...], args:dict[UOp, Any], offset:int=0) -> bytearray:
     data = bytearray(offset + len(signature)*8)
-    values = {p: args[p] if p.addrspace is AddrSpace.ALU or isinstance(args[p], int) else ctypes.cast(args[p], ctypes.c_void_p).value
-              for p in signature}
     for off,p,dt in TinyELF.iter_sig(signature):
-      struct.pack_into(f'<{dt.fmt}', data, offset+off, values[p])
+      value = args[p] if p.addrspace is AddrSpace.ALU or isinstance(args[p], int) else ctypes.cast(args[p], ctypes.c_void_p).value
+      struct.pack_into(f'<{dt.fmt}', data, offset+off, value)
     return data[:offset+off+dt.itemsize] if signature else data
 
 class Program(Generic[DeviceType]):
