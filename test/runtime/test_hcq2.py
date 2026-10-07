@@ -282,5 +282,13 @@ class TestHostCalls(unittest.TestCase):
     calls = [put(cpu_buf(dtype=dtypes.uint64), UOp.const(1, dtypes.uint64)) for _ in range(2)]
     self.assertIs(calls[0].body, calls[1].body)
 
+  def test_write_half(self):
+    gc.collect()
+    poison = Tensor(np.full(24576, np.nan, dtype=np.float16)).realize()
+    del poison
+    gc.collect()
+    x = Tensor.zeros(24576, dtype=dtypes.half).numpy()
+    assert (x == 0).all(), f"{np.isnan(x).sum()} nan found"
+
 if __name__ == "__main__":
   unittest.main()
