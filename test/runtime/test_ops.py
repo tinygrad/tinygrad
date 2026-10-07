@@ -714,25 +714,44 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x: x**29, vals=[[-2,0,2]], forward_only=True, atol=0)
     self.helper_test_exception(None, lambda x: x**-2, vals=[[-2,0,2]], forward_only=True, expected=RuntimeError)
 
-  @unittest.skip("not supported")
   def test_pow_int(self):
-    def _test(base, exponent): helper_test_op(None, lambda x,y: x**y, vals=[base, exponent], forward_only=True)
+    def _test(base, exponent): helper_test_op(None, lambda x,y: x**y, vals=[base, exponent], forward_only=True, atol=0)
 
     for base in ([1, 2, 3], [-1, -2, -3]):
       for exponent in ([2, 3, 4], [-2, -3, -4]):
         _test(base, exponent)
     # NOTE: torch 0 ** -1 is 0
     _test([0, 0, 0], [0, 1, 2])
+    _test([0, 1, -1, 1, -1], [-1, -5, -5, -6, -6])
+    # overflow wraps
+    _test([11, 3, 2, -3, 7], [7, 40, 31, 21, 2**30])
+    # exponent bounds past its dtype
+    helper_test_op(None, lambda x,y: x**(y*4), vals=[[2, 3, 2], [1, 2, -1]], forward_only=True, atol=0)
 
-    np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
-    np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
-    # TODO: fix non-precise int pow
-    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
-    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
+    if not COMPILE_ONLY:
+      np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
+      np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
+      np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
+      np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
 
     # pow to a const int
     helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
                        lambda: Tensor([2]) ** Tensor(-2), forward_only=True)
+    # const int base
+    helper_test_op(None, lambda x: 3**x, vals=[[0, 1, 5, 19, 20]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: (-2)**x, vals=[[0, 1, 2, 3, 31]], forward_only=True, atol=0)
+    # const base wraps to the dtype
+    for c in (255, 257):
+      helper_test_op([], lambda: c ** torch.tensor([-1, -2, 1, 2], dtype=torch.int8), lambda: c ** Tensor([-1, -2, 1, 2], dtype=dtypes.int8),
+                     forward_only=True, atol=0)
+
+  def test_pow_int_dtypes(self):
+    for dt, tdt in ((dtypes.uint8, torch.uint8), (dtypes.int8, torch.int8), (dtypes.int16, torch.int16), (dtypes.int64, torch.int64)):
+      base, exponent = [3, 2, 1, 0, 5], [5, 7, 100, 3, 9]
+      if dt is not dtypes.uint8: base, exponent = base + [-3, -1, 2], exponent + [3, -7, -1]
+      if dt is dtypes.int64: base, exponent = base + [3, 2], exponent + [2**40, 63]
+      helper_test_op([], lambda: torch.tensor(base, dtype=tdt) ** torch.tensor(exponent, dtype=tdt),
+                         lambda: Tensor(base, dtype=dt) ** Tensor(exponent, dtype=dt), forward_only=True, atol=0)
 
   def test_pow_int_base_float_exponent(self):
     for exponent in (0.5, 1.5, 2.0, -1.0, 0.0):
