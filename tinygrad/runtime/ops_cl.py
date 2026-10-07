@@ -54,7 +54,7 @@ class CLProgram(Program['CLDevice']):
 
   def __call__(self, args:dict, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait=False, **kw) -> float|None:
-    addr = mv_address(_argbuf:=TinyELF.pack(self.signature, args))
+    addr = mv_address(_argbuf:=TinyELF.pack(self.signature, args) or bytearray(1))
     for i,(off,p,dt) in enumerate(TinyELF.iter_sig(self.signature)):
       if (shape:=p.arg.image) is not None:
         pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * p.arg.dtype.itemsize

@@ -2013,7 +2013,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
     if lifted is not None:
       prg, runtime = lifted
-      for st, c_bufs in waves: runtime(*[c_bufs[g].value for g in prg.arg.globals])
+      for st, c_bufs in waves: runtime({p: c_bufs[p.arg.slot].value for p in runtime.signature})
       return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):

@@ -33,7 +33,8 @@ class TestKernelArgs(unittest.TestCase):
     x = Tensor([1, 2, 3], dtype=dtypes.int32).realize().uop
     unused = Tensor([999], dtype=dtypes.int32).realize().uop
     for order in itertools.permutations(('out', 'x', 'a', 'b')):
-      for scalar_dtype in (dtypes.int16, dtypes.int32, dtypes.int64):
+      # WGSL uniform scalars support 32-bit integers; narrower storage types and 64-bit variables have no scalar ABI.
+      for scalar_dtype in ((dtypes.int32,) if Device.DEFAULT == 'WEBGPU' else (dtypes.int16, dtypes.int32, dtypes.int64)):
         with self.subTest(order=order, scalar_dtype=scalar_dtype):
           names = ('unused', *order)
           out = UOp.new_buffer(Device.DEFAULT, 3, dtypes.int32)
