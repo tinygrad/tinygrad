@@ -1,5 +1,5 @@
 import unittest
-import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
+import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib, gc
 from dataclasses import dataclass
 from typing import Generator
 
@@ -40,6 +40,7 @@ class VizTrace:
 @contextlib.contextmanager
 def save_viz():
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
+  gc.collect()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -322,8 +323,6 @@ class TestVizTree(unittest.TestCase):
     self.assertStepEqual(steps[4], {"name":"branch_1", "depth":1, "match_count":1})
     self.assertStepEqual(steps[5], {"name":"leaf_left", "depth":2, "match_count":1})
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
-
-import gc
 
 def bufs_allocated() -> int:
   gc.collect()
