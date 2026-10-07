@@ -33,7 +33,7 @@ class ElementwiseMixin(CreationMixin):
       return t.cast(out_dtype)
     return promote(x), promote(y)
 
-  def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
+  def _binop(self, op: Ops, x: 'Self | ConstType | UOp', reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
     return lhs.alu(op, rhs)
 
@@ -80,7 +80,7 @@ class ElementwiseMixin(CreationMixin):
     """
     return self.logical_not() if self.dtype == dtypes.bool else self * (-1)
 
-  def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def add(self, x: 'Self | ConstType | UOp', reverse: bool = False) -> Self:
     """
     Adds `self` and `x`.
     Equivalent to `self + x`.
@@ -263,7 +263,7 @@ class ElementwiseMixin(CreationMixin):
   def __invert__(self) -> Self:
     return self.bitwise_not()
 
-  def __add__(self, x: Self | ConstType) -> Self:
+  def __add__(self, x: 'Self | ConstType | UOp') -> Self:
     return self.add(x)
 
   def __sub__(self, x: Self | ConstType) -> Self:

@@ -1,9 +1,12 @@
 from __future__ import annotations
-from typing import Final, ClassVar, Callable, Literal
+from typing import Final, ClassVar, Callable, Literal, TYPE_CHECKING
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, DEFAULT_FLOAT, DEFAULT_INT
 from enum import IntEnum, auto
+
+if TYPE_CHECKING:
+  from tinygrad.uop.ops import sint
 
 class ConstFloat(float):
   """Float subclass that distinguishes -0.0 from 0.0 and where nan == nan."""
@@ -168,7 +171,7 @@ assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a f
 assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
   return {dtypes.weakint: dtypes.default_int, dtypes.weakfloat: dtypes.default_float}.get(dtype, dtype)
-def commit_int(lo:int|float, hi:int|float, default_int:DType|None=None) -> DType:
+def commit_int(lo:sint|float, hi:sint|float, default_int:DType|None=None) -> DType:
   if lo == hi and not dtypes.long.min <= lo <= dtypes.ulong.max: raise OverflowError(f"{lo} does not fit any int")
   ladder = (dtypes.default_int if default_int is None else default_int, dtypes.int, dtypes.long, dtypes.ulong)
   return next((dt for dt in ladder if dt.min <= lo and hi <= dt.max), dtypes.long)

@@ -163,7 +163,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return (type(self).uprod(*per_dim) if per_dim else type(self).const(True)).where(vb, self)
 
   @classmethod
-  def arange(cls, start, stop=None, step=1, dtype:DTypeLike|None=None) -> Self:
+  def arange(cls, start:sint|float, stop:sint|float|None=None, step:sint|float=1, dtype:DTypeLike|None=None) -> Self:
     """
     Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
 
