@@ -82,14 +82,11 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
     end = offset + arg.dtype.itemsize
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
-RET_MAP = {
-  **CDTYPES_MAP,
-  None: dtypes.void,
-  ctypes.c_void_p: dtypes.uint64
-}
+RET_MAP = { **CDTYPES_MAP, ctypes.c_void_p: dtypes.uint64 }
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
-  return UOp.custom_function(fn.__name__, dtype=RET_MAP[fn.restype]).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
+  ret = dtypes.void if fn.restype is None else RET_MAP[fn.restype]
+  return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
 
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 
