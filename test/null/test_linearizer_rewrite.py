@@ -4,7 +4,7 @@ from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.late.linearizer import do_split_ends
 from tinygrad.uop.ops import KernelInfo, AxisType, UOp, Ops
-from test.helpers import to_uops_list
+from test.helpers import to_uops_list, get_uops
 
 class TestLinearizerRewrite(unittest.TestCase):
   def test_range_order(self):
@@ -68,6 +68,15 @@ class TestLinearizerRewrite(unittest.TestCase):
                      [Ops.RANGE, Ops.RANGE, Ops.STORE, Ops.END, Ops.STORE, Ops.END])
     rngs, ends = [u for u in uops if u.op is Ops.RANGE], [u for u in uops if u.op is Ops.END]
     self.assertEqual([e.src[1] for e in ends], rngs[::-1])
+
+  def test_short_loop_does_not_capture_outer_value(self):
+    buf, out, src = UOp.param(0, dtypes.int, 16), UOp.param(1, dtypes.int, 4), UOp.param(2, dtypes.int, 4)
+    outer = UOp.range(4, 0, AxisType.LOOP)
+    inner = UOp.range(UOp.variable("k", 0, 1), 1)
+    store = buf.index(outer * 4 + inner).store(src.index(inner).load()).end(inner)
+    uops = get_uops(out.after(store).index(outer).store(UOp.const(2, dtypes.int)).end(outer).sink(arg=KernelInfo(opts_to_apply=())))
+    for e in [u for u in uops if u.op is Ops.END]:
+      self.assertEqual([u.op for u in uops[uops.index(e.src[1]):uops.index(e)] if e.src[1] not in u.ranges], [])
 
 if __name__ == '__main__':
   unittest.main()
