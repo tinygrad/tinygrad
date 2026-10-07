@@ -362,9 +362,8 @@ class _Ctx:
 
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
-    addr = UOp.const(self.inst_addr, dtypes.uint64) if self.inst_addr is not None else self.rpc()
-    if dword_idx != 0: addr = addr + UOp.const(dword_idx * 4, dtypes.uint64)
-    return self.vmem.index(addr >> UOp.const(2, dtypes.uint64)).load()
+    addr = self.inst_addr if self.inst_addr is not None else self.rpc()
+    return self.vmem.index((addr >> 2) + dword_idx).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""

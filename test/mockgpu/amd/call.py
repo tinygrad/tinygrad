@@ -3,8 +3,8 @@ from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
-from tinygrad.dtype import Invalid
-from tinygrad.helpers import Context, getenv, TracingKey
+from tinygrad.dtype import Invalid, AddrSpace
+from tinygrad.helpers import Context, getenv, TracingKey, dedup
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX
 
 asm_call_counter = itertools.count(1)
@@ -13,9 +13,17 @@ def pc_index(idx:int) -> UPat:
   reg, null = UPat.const(idx).cast(), UPat.const(124).cast()
   return UPat.any(reg, reg.ne(null).where(reg, UPat.const(Invalid)))
 
+def set_inst_index(call:UOp) -> UOp|None:
+  idxs = dedup(u.src[1] for u in call.body.toposort() if u.op is Ops.INDEX and u.src[0].op is Ops.PARAM and u.src[0].arg.name == "vmem"
+               and u.src[1].op is Ops.CONST)
+  if not idxs: return None
+  rep = {idx:UOp.param(len(call.src)-1+i, idx.commit_dtype(), name=f"inst_{i}", addrspace=AddrSpace.ALU) for i,idx in enumerate(idxs)}
+  return call.replace(src=(call.body.substitute(rep, walk=True), *call.src[1:], *idxs))
+
 pm_asm_call = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.PARAM, name="buf").index(UPat.any(pc_index(PC_LO_IDX), pc_index(PC_HI_IDX))),), allow_any_len=True),
    lambda buf: UOp(Ops.NOOP) if buf.arg.name == "sgpr" else None),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), set_inst_index),
 ])
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
