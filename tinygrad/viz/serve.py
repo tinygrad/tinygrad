@@ -184,7 +184,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink),
            "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
+           "diff":[ansistrip(x) for x in difflib.ndiff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
            "upat":(upat_loc, match_repr), "_sink":new_sink}
     if not ctx.bottom_up: next_sink = new_sink
 
