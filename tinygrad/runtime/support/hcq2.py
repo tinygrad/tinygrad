@@ -4,8 +4,8 @@ import functools, itertools, weakref, ctypes, struct
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
-from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV
+from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
@@ -17,7 +17,7 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # 0. helpers
 
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM", "CUDA", "NULL", "METAL")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "NULL", "METAL"))
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -59,6 +59,11 @@ def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTAC
 
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.alloc((2,), dtypes.uint64, 0, device=devs[0]).rtag("timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
+
+def make_program(prg:UOp, size:int, device:str) -> UOp:
+  slot = int.from_bytes(prg.key[:8], "little")
+  if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
+  return UOp.alloc((size,), dtypes.uint8, slot, device=device).rtag("program")
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, deps:tuple[UOp, ...]=()) -> UOp: # the order is on the arg
   lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)).after(*deps)
@@ -537,8 +542,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
 # 5. link
 
 Compiled.pm_batch = Compiled.pm_encode = Compiled.pm_lower = PatternMatcher([]) # a device adds its own rules
-Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.ALLOC, tag="timeline", name="b"), lambda b: Device[b.device].timeline),
-                                        (UPat(Ops.ALLOC, tag="program", name="b"), lambda b: Device[b.device].program_buffer(b))])
+Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.ALLOC, tag="timeline", name="b"), lambda b: Device[b.device].timeline)])
 
 @dataclass
 class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
@@ -607,7 +611,7 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
   if allow_cache and (linked:=link_linear_cache.get(linear)) is not None: return linked
 
   # if we have any link time buffers, do not cache this linear
-  cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
+  cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort(enter_calls=False) if u.op is Ops.PARAM)
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")

@@ -43,6 +43,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
 
 # ***** new specs *****
 def matches_dtype(x:UOp, dtype:DType) -> bool: return x.dtype == dtype or x.base.is_invalid  # Invalid matches any dtype
+p_size = UPat.any(UPat.cvar(dtype=dtypes.weakint), UPat(Ops.STACK, src=()))
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
@@ -87,20 +88,17 @@ spec_shared = PatternMatcher([
   (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), name="x"),
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
-  # PARAM/BUFFER have a size in the arg, no shape input
-  (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
+  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
-
-  # GROUP combines void effects, not values.
-  (UPat(Ops.GROUP, dtypes.void, src=UPat(dtype=dtypes.void)), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
   # CONST/CAST/NOOP are range bounds: RANGE(AFTER(CONST, other_range)) orders a loop after a sibling
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS,
-                                                     Ops.CONST, Ops.CAST, Ops.NOOP})),),
+                                                     Ops.CONST, Ops.CAST, Ops.NOOP, Ops.STACK})),),
         allow_any_len=True), lambda: True),
   # an AFTER can wrap a scalar ALU (e.g. a computed RANGE bound) to order it after effect ops
   (UPat(Ops.AFTER, src=(UPat(GroupOp.ALU),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == ()),
@@ -147,17 +145,17 @@ spec_tensor = PatternMatcher([
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
   # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
-  (UPat(Ops.BUFFER, name="buf"), lambda buf:
-   isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device) and buf.arg.buffer is not None
-   and valid_device_range(buf.arg.device, buf.src) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
-  (UPat(Ops.ALLOC, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
+  (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="buf"), lambda buf:
+   isinstance(buf.dtype, DType) and is_device(buf.arg.device) and buf.arg.buffer is not None
+   and valid_device_range(buf.arg.device, buf.src[1:]) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
-   and buf.arg.buffer is None and (buf.arg.size is None or isinstance(buf.arg.size, int))
+   and buf.arg.buffer is None
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
-   and valid_device_range(buf.arg.device, buf.src)),
+   and valid_device_range(buf.arg.device, buf.src[1:])),
 
   # a Variable is a scalar ALU PARAM with a value range and no device
-  (UPat(Ops.PARAM, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
+  (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -202,8 +200,8 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # every width in a program is stated: a CONST appears only under the CAST stating its width, and is the only weak node
-  (UPat(GroupOp.All, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
+  # a bare CONST only appears under its width CAST or as a PARAM/BUFFER/ALLOC size
+  (UPat(GroupOp.All-GroupOp.Defines, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
 
   # allow special SHRINK of a buffer or its bitcast
@@ -213,7 +211,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.Movement), lambda: False),
 
   # REG/LOCAL buffer
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  (UPat((Ops.BUFFER, Ops.ALLOC), src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
@@ -259,12 +257,13 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # PARAM is caller-provided storage (or a Variable in the ALU addrspace), ALLOC is call-local storage; size is in the arg, no shape input
-  (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src) and
+  # PARAM is caller-provided storage (or a Variable in the ALU addrspace), ALLOC is call-local storage
+  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="x"), lambda x:
+   isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and
    (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),
-  (UPat(Ops.ALLOC, name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None and valid_device_range(x.arg.device, x.src)),
+  (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="x"), lambda x:
+   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None and valid_device_range(x.arg.device, x.src[1:])),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),

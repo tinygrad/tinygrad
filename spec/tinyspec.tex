@@ -46,11 +46,11 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Buffer} & () & \texttt{ParamArg} &
+\op{Buffer} & ($n$) & \texttt{ParamArg} &
   Persistent storage on device. \\
-\op{Alloc} & () & \texttt{ParamArg} &
-  Unbound storage of $\mathrm{size}$ elements. \\
-\op{Param} & () & \texttt{ParamArg} &
+\op{Alloc} & ($n$) & \texttt{ParamArg} &
+  Unbound storage of $n$ elements. \\
+\op{Param} & ($n$) & \texttt{ParamArg} &
   Caller-provided storage. \\
 \op{Const} & () & value &
   A scalar constant with shape $(\ )$. \\
@@ -59,7 +59,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, concrete size (or \textsc{null} for a scalar), value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+\texttt{ParamArg} contains slot, dtype, value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
@@ -115,6 +115,8 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \midrule
 \op{Load} & (buf, alt?, gate?) & --- & Read from buffer into AddrSpace.ALU. \\
 \op{Copy} & (buf,) & device & Copy buf to device arg. \\
+\op{Stage} & $(T, r_0, r_1, \ldots)$ & \texttt{BufferizeOpts?} & Materialize $T$ into storage. \\
+  & & & Ranges become leading dimensions. \\
 \bottomrule
 \end{tabular}
 
@@ -141,7 +143,6 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \op{End} & (body, $range_0$, $range_1$, \ldots) & --- & Close one or more \op{Range} loop. \\
 \op{Backedge} & (body, range, condition) & --- & Conditional loop. \\
 \op{After} & (buf, deps\ldots) & --- & Passthrough of buf; guarantees deps execute first. \\
-\op{Group} & $(u_0, u_1, \ldots)$ & --- & Void no-op that merges multiple \op{Store}s into one node, unordered. \\
 \op{Sink} & $(s_0, s_1, \ldots)$ & --- & Collect side effects into a single root node. \\
 \op{Linear} & (uops\ldots) & --- & Linearized (toposorted) instruction sequence. \\
 \bottomrule
@@ -166,8 +167,10 @@ Unary & $(T,)$
   & Convert to target dtype (specified in arg). \\
   \\[4pt]
 Binary & $(A, B)$
-  & \op{Add}, \op{Mul}, \op{Max}, \op{Mod}, \op{Idiv}
-  & $a+b$, $a \cdot b$, $\max(a,b)$, $a \bmod b$, $\lfloor a/b \rfloor$ \\
+  & \op{Add}, \op{Mul}, \op{Max}
+  & $a+b$, $a \cdot b$, $\max(a,b)$ \\
+& & \op{Floordiv}, \op{Floormod}
+  & $\lfloor a/b \rfloor$, $a-b\lfloor a/b \rfloor$ \\
 & & \op{CmpLt}, \op{CmpNe}
   & $[a < b]$, $[a \ne b]$ \\
 & & \op{Xor}, \op{Or}, \op{And}, \op{Shr}, \op{Shl}
@@ -190,6 +193,8 @@ Ternary & $(P, A, B)$
 \op{Neg} & \op{Mul}($A$, $-1$) & $-x$ \\
 \op{Sub} & \op{Add}($A$, \op{Neg}($B$)) & $a - b$ \\
 \op{Div} & \op{Mul}($A$, \op{Recip}($B$)) & $a / b$ \\
+\op{Cdiv} & $q+c$ & Integer division toward zero. \\
+\op{Cmod} & $r-bc$ & Remainder with dividend's sign (or zero). \\
 \op{CmpGt} & \op{CmpLt}($B$, $A$) & $[a > b]$ \\
 \op{CmpGe} & \op{CmpNe}(\op{CmpLt}($A$, $B$),\, $1$) & $[a \ge b]$ \\
 \op{CmpLe} & \op{CmpNe}(\op{CmpLt}($B$, $A$),\, $1$) & $[a \le b]$ \\
@@ -253,8 +258,8 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \toprule
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
-\op{Buffer}, \op{Alloc} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\
-\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\
+\op{Buffer}, \op{Alloc} & from arg & $(n)$ from src, or $()$ & from arg & dtype range \\
+\op{Param} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\

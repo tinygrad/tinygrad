@@ -3,7 +3,7 @@ import os, ctypes, functools, mmap, struct, array, math, sys, contextlib
 assert sys.platform != 'win32'
 from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
-from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args
+from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, libc
@@ -284,14 +284,9 @@ class QCOMProgramData:
     reg_desc_off = _read_lib(lib, 0x34)
     self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
 
-_qcom_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[QCOMProgramData, UOp]] = {}
 def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
-  if (cached:=_qcom_program_cache.get(key:=(prg.src[3].arg, devs))) is None:
-    data = QCOMProgramData(dev, prg.to_elf())
-    image = bytes(data.image).ljust(round_up(len(data.image), 4), b"\x00")
-    buf = UOp.alloc((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs[0]).rtag("program")
-    cached = _qcom_program_cache[key] = (data, patch(buf, [], image))
-  return cached
+  image = bytes((data:=QCOMProgramData(dev, prg.to_elf())).image).ljust(round_up(len(data.image), 4), b"\x00")
+  return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
 class QCOMAllocator(Allocator['QCOMDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
