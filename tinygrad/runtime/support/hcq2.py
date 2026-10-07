@@ -142,8 +142,8 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if any(d.startswith("RDMA") for d in devs): return None # over the nic
 
   if (device:=get_enqueue_devs(call)) is None: return None
-  host = Device[device].host
-  mappable = [Device[d].peer_group == Device[device].peer_group or (d.split(":")[0] in {"CPU", "PYTHON"} and Device[d].host == host) for d in devs]
+  host, hostmem = Device[device].host, {"CPU", "PYTHON"} | ({"NPY", "DISK"} if getattr(Device[device], "is_usb", False) else set()) # usb memcpys
+  mappable = [Device[d].peer_group == Device[device].peer_group or (d.split(":")[0] in hostmem and Device[d].host == host) for d in devs]
   if device != host and not all(mappable):
     (staging:=_staging(host)).get_buf(device)
     base, it, copies = UOp.from_buffer(staging, dtypes.uint8), src.dtype.itemsize, []
