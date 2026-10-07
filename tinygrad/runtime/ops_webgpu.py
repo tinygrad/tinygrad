@@ -74,11 +74,9 @@ class WebGPUProgram(Program['WebGpuDevice']):
     bindings = (webgpu.WGPUBindGroupEntry * (1+len(self.signature)))()
     for i,p in enumerate((None, *self.signature)):
       ty = 'Uniform' if p is None or p.addrspace is AddrSpace.ALU else 'Storage'
+      buf = self.dev.create_uniform(float('inf') if p is None else args[p]) if ty == 'Uniform' else args[p]
       bind_entries[i] = webgpu.WGPUBindGroupLayoutEntry(binding=i, visibility=webgpu.WGPUShaderStage_Compute,
                         buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
-    for i,p in enumerate((None, *self.signature)):
-      uniform = p is None or p.addrspace is AddrSpace.ALU
-      buf = self.dev.create_uniform(float('inf') if p is None else args[p]) if uniform else args[p]
       bindings[i] = webgpu.WGPUBindGroupEntry(binding=i, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
 
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
