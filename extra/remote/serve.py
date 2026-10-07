@@ -3,7 +3,9 @@ import socket, struct, sys, signal
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
-from tinygrad.device import Device, TinyELF
+from tinygrad.device import Device, TinyELF, KernelParam
+from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.uop.ops import ParamArg
 from tinygrad.helpers import DEBUG, Target, to_mv
 
 def resp(resp0=0, resp1=0, status=0): return struct.pack(REMOTE_RESP, status, resp0, resp1)
@@ -79,7 +81,9 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     programs.append(Device["CPU"].runtime(TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), ())))
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
-    et = programs[arg0](*struct.unpack(f'<{arg1}Q', conn.recv(arg1 * 8, socket.MSG_WAITALL)), wait=bool(arg2))
+    # The wire format already contains arguments in native ABI order as 64-bit words.
+    programs[arg0].signature = tuple(KernelParam(ParamArg(i, dtypes.uint64, addrspace=AddrSpace.ALU), 1) for i in range(arg1))
+    et = programs[arg0](dict(zip(programs[arg0].signature, struct.unpack(f'<{arg1}Q', conn.recv(arg1 * 8, socket.MSG_WAITALL)))), wait=bool(arg2))
     if (mock:=sys.modules.get("test.mockgpu.mockgpu")) is not None: # native programs bypass the mock's memoryview hooks
       for d in mock.drivers: d._emulate_execute()
     if arg2: conn.sendall(resp(int(et * 1e9)))
