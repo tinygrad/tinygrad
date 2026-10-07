@@ -306,9 +306,15 @@ class GPTOSS:
         (dispatch_fp8 if getenv("FP8_DISPATCH", 0) else dispatch)(_pad_cols(inp.cast(dtypes.bfloat16)), r)
       h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
       y = swiglu(h, self.swiglu_limit)
-      z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
-          + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
-      out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
+      if getenv("FUSED_COMBINE", 0):
+        from extra.gptoss_kernels.combine import down_combine
+        yq, ye8, _ = quantize_mxfp8(_pad_cols(y.cast(dtypes.bfloat16)))
+        out, z = down_combine(yq, ye8, w_down, w_down_scale, r.off, w_down_bias, r.dest_row, r.weights)
+        out = out.reshape(bsz, seqlen, dim)
+      else:
+        z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
+            + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
+        out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
       return out, [x_normed, rrms, *(xg if isinstance(xg, tuple) else (xg,)), h, y, z, r.weights, r.topi, r.dest_row, r.off,
                    *([quantized[1]] if quantized is not None else [])]
     else:
