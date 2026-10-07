@@ -258,8 +258,9 @@ class Tensor(RandMixin):
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(store := self.uop.store(x.uop))
-    ib = self.uop
-    while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
+    views = [self.uop]
+    while views[-1].op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: views.append(views[-1].src[0])
+    ib = next((u for u in reversed(views) if u.has_buffer_identity() and (u is self.uop or _tensor_holds(u))), views[-1])
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
@@ -561,7 +562,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.unbound(), *[UOp.const(s) for s in shape]), arg="encdec")
+    fn = UOp.custom_function("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

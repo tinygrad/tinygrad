@@ -64,8 +64,8 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
-        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
+        src_values = [values[v] for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.BACKEDGE:
           i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
@@ -81,7 +81,8 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env:
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
+          or (u.op is Ops.AFTER and u.dtype is dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -120,7 +121,7 @@ class PythonProgram(Program['PythonDevice']):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
-            scale = u.src[0].dtype.itemsize // u.src[0].src[0].dtype.itemsize if u.src[0].op is Ops.BITCAST else 1
+            scale = v.dtype.itemsize // v.src[0].dtype.itemsize if (v:=u.src[0].without_after).op is Ops.BITCAST else 1
             for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
         elif u.op is Ops.RANGE:
@@ -146,7 +147,7 @@ class PythonProgram(Program['PythonDevice']):
         elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
-          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg, list(DLL._loaded_.values())))
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]

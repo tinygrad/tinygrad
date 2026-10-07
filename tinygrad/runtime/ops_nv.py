@@ -3,12 +3,11 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertool
 assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
-from tinygrad.runtime.support.hcq2 import layout_args
+from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
+from tinygrad.runtime.support.hcq2 import layout_args, make_program
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
-from tinygrad.runtime.support.system import FileIOInterface
-from tinygrad.runtime.support.system import filter_visible_devices
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType
@@ -96,6 +95,14 @@ class QMD:
 # *****************
 # queues
 
+@uopfunc
+def nv_submit(cmdbuf:UOp, ring:UOp, gpput:UOp, doorbell:UOp, put:UOp, token:int) -> UOp: # the ring gets a gpfifo entry for the cmdbuf
+  gpentry = cmdbuf.getaddr(cmdbuf.device) + UOp.const((cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64)
+  p, n = put.index(0).load(), ring.max_numel()
+  written = UOp.barrier(ring.index((p % n).cast(dtypes.int)).store(gpentry), put.index(0).store(p + 1))
+  queued = UOp.barrier(gpput.after(written).index(0).store(((p + 1) % n).cast(dtypes.uint32)))
+  return doorbell.after(queued).index(0).store(UOp.const(token, dtypes.uint32)).sink()
+
 class NVQueue(HWQueue):
   dev:NVDevice
   q_rewrite = HWQueue.q_rewrite + PatternMatcher([
@@ -115,17 +122,11 @@ class NVQueue(HWQueue):
     if not timestamp: self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    fifo, ib, off = self.dev.fifos[self.queue], *unwrap_view(cmdbuf)
-
-    ring, gpput, doorbell, put, gpentry = [UOp.placeholder((sz,), dt, device=self.devs, volatile=True, tag=to_name(nm, self.queue))
-      for nm, dt, sz in (("ring", dtypes.uint64, fifo.entries), ("gpput", dtypes.uint32, 1), ("doorbell", dtypes.uint32, 1),
-                         ("put_value", dtypes.uint64, 1), ("gpentry", dtypes.uint64, 1))]
-    gpentry = patch(gpentry, [(0, ib.getaddr(self.devs) + UOp.const(off | (cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64))])
-
-    p = put.index(0).load()
-    written = UOp.barrier(ring.after(cmdbuf).index((p % fifo.entries).cast(dtypes.int)).store(gpentry.index(0).load()), put.index(0).store(p + 1))
-    queued = UOp.barrier(gpput.after(written).index(0).store(((p + 1) % fifo.entries).cast(dtypes.uint32)))
-    return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32))
+    fifo, dev = self.dev.fifos[self.queue], self.devs[0]
+    bufs = (("ring", dtypes.uint64, fifo.entries, dev), ("gpput", dtypes.uint32, 1, dev), ("doorbell", dtypes.uint32, 1, dev),
+            ("put_value", dtypes.uint64, 1, self.dev.host))
+    ring, gpput, doorbell, put = [UOp.alloc((sz,), dt, device=d).rtag(self.dev.tag(nm, self.queue)) for nm, dt, sz, d in bufs]
+    return nv_submit(cmdbuf, ring, gpput, doorbell, put, fifo.token)
 
 class NVComputeQueue(NVQueue):
   def __init__(self, submit):
@@ -134,7 +135,7 @@ class NVComputeQueue(NVQueue):
     progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
     self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
-    self.qmd_buf = UOp.placeholder((len(progs) * self.stride,), dtypes.uint8, device=self.devs, tag=to_name("qmd", self.queue))
+    self.qmd_buf = UOp.alloc((len(progs) * self.stride,), dtypes.uint8, device=self.devs[0]).rtag(to_name("qmd", self.queue))
     self.qmds:list[QMD] = []
     self.prev_qmd:QMD|None = None # the launch the next one chains onto
 
@@ -150,7 +151,7 @@ class NVComputeQueue(NVQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     if self.qmds:
       patches = [(i * self.stride + off, w) for i, q in enumerate(self.qmds) for off, w in q.patches.items()]
-      cmdbuf = cmdbuf.after(patch(self.qmd_buf, patches, b"".join(q.mv for q in self.qmds)))
+      cmdbuf = cmdbuf.after(patch(self.qmd_buf.after(cmdbuf), patches, b"".join(q.mv for q in self.qmds)))
     return super().submit(cmdbuf)
 
   def memory_barrier(self):
@@ -276,7 +277,7 @@ class NVProgramData:
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.image = image.ljust(round_up(len(image), 0x1000) + 0x1000, b'\x00')
     # constant buffer 0 holds the driver params and every argument after them, and starts 256 aligned like all constant buffers
-    self.kernargs_size = round_up(max(self.constbufs[0][1], len(self.cbuf_0) * 4 + len(signature) * 8), 256)
+    self.kernargs_size:int = round_up(max(self.constbufs[0][1], len(self.cbuf_0) * 4 + len(signature) * 8), 256)
 
     # Ensure device has enough local memory to run the program
     dev._ensure_has_local_memory(lcmem)
@@ -310,14 +311,11 @@ class NVProgramData:
       yield typ, param, sh.content[start_off+4:start_off+sz+4] if typ == 0x4 else sz
       start_off += (sz if typ == 0x4 else 0) + 4
 
-_nv_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[NVProgramData, UOp]] = {}
 def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
-  if (cached:=_nv_program_cache.get(key:=(prg.src[3].arg, devs))) is None:
-    data = NVProgramData(dev, prg.to_elf())
-    buf = UOp.placeholder((len(data.image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
-    rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
-    cached = _nv_program_cache[key] = (data, patch(buf, rows, data.image))
-  return cached
+  data = NVProgramData(dev, prg.to_elf())
+  buf = make_program(prg, len(data.image), devs[0])
+  rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
+  return data, patch(buf, rows, data.image)
 
 class NVAllocator(Allocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
@@ -560,10 +558,10 @@ class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute"), UPat()), name="s"), lambda s: encode_submit(NVComputeQueue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy"), UPat()), name="s"), lambda s: encode_submit(NVCopyQueue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_encdec"), UPat()), name="s"), lambda s: encode_submit(NVEncDecQueue(s))),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw"), UPat()), name="s"), lambda s: encode_submit(NVQueue(s))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_compute"), UPat()), name="s"), lambda s: NVComputeQueue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_copy"), UPat()), name="s"), lambda s: NVCopyQueue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_encdec"), UPat()), name="s"), lambda s: NVEncDecQueue(s).encode()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_raw"), UPat()), name="s"), lambda s: NVQueue(s).encode()),
   ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
@@ -657,8 +655,8 @@ class NVDevice(Compiled):
       gpput=self.gpfifo_buf.view(1, dtypes.uint32, gpput_off).ensure_allocated(),
       doorbell=Buffer("CPU", 1, dtypes.uint32, options=BufferSpec(external_ptr=self.gpu_mmio.addr + 0x90), preallocate=True),
       put_value=Buffer("CPU", 1, dtypes.uint64, initial_value=bytes(8)), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag=to_name(n, name)), lambda ctx, b=getattr(fifo, n): b)
-                                        for n in ("ring", "gpput", "doorbell", "put_value")]) + self.pm_bufferize
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=self.tag(n, name)), lambda b=getattr(fifo, n): b)
+                                             for n in ("ring", "gpput", "doorbell", "put_value")])
     return fifo
 
   def _query_gpu_info(self, *reqs):
@@ -681,7 +679,7 @@ class NVDevice(Compiled):
       UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
       UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
       UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue, fn="submit_nv_raw")
-    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
+    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)
 

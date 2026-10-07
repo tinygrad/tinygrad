@@ -36,6 +36,9 @@ def normalize_messages(messages:list[dict]) -> None:
       if "function" in tc and isinstance(args := tc["function"].get("arguments"), str):
         try: tc["function"]["arguments"] = json.loads(args)
         except json.JSONDecodeError: pass
+    # string-only templates need text parts joined and explicit null content emptied
+    if m.get("content", "") is None: m["content"] = ""
+    elif isinstance(c := m.get("content"), list) and all(p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse

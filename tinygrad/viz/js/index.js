@@ -16,11 +16,18 @@ const darkenHex = (h, p = 0) =>
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
-const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
-  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
+const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[38;2;(\d+);(\d+);(\d+)m([\s\S]*?)\u001b\[0m)|(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
+  ([_, r, g, b, rgb_st, code, colored_st, st]) => ({ st: rgb_st ?? colored_st ?? st, color: r != null ? `rgb(${r},${g},${b})`
+    : code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
-const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof n === "string" ? parseColors(n) : n).join("span")
-                       .style("color", d => d.color).text(d => d.st)).node();
+const highlightUir = id => d3.selectAll(".uir-ref").classed("highlight", d => d.id === id);
+const colored = n => d3.create("span").call(s => s.selectAll("span")
+  .data((typeof n === "string" ? [{st:n}] : n).flatMap(t => parseColors(t.st, t.color).map(p => ({...t, ...p})))).join("span")
+  .style("color", d => d.id == null ? d.color : null).text(d => d.st).classed("uir-ref", d => d.id != null).on("click", (e,d) => {
+    if (d.id == null) return;
+    highlightUir(d.id);
+    d3.select("#nodes").selectAll("g.node").filter(n => n.id === d.id).dispatch("click");
+  })).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
@@ -82,6 +89,7 @@ const drawGraph = (data) => {
       const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
       d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
       d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
+      highlightUir(d.id);
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
@@ -457,8 +465,8 @@ async function renderProfiler(path, opts) {
     if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
-      const levels = [];
-      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor });
+      const levels = [], ends = [];
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor, ends });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), fmt:JSON.parse(strings[u32()])};
@@ -501,6 +509,7 @@ async function renderProfiler(path, opts) {
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
+        if (e.name.includes("WAVEEND")) ends.push(e.st+e.dur);
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
@@ -629,7 +638,7 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor, ends }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
@@ -667,6 +676,11 @@ async function renderProfiler(path, opts) {
             const key = e.arg.key; if (key === focusedShape || key === link0 || key === link1) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); continue; }
           }
           if (splitRects && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
+        }
+        for (let i=0; i<ends.length; i++) {
+          const end = ends[i]; if (end<st || end>et) continue;
+          const x = xscale(end)+0.5;
+          drawLine(ctx, [x, x], [offsetY-padding/2-0.5, offsetY+trackHeight-padding/2-0.5], { color:"#22232a" });
         }
       }
       // draw row line
@@ -1070,11 +1084,16 @@ async function main() {
   showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
   showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
-  metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
-  if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
-  if (step.trace) metadata.appendChild(traceBlock(step.trace));
-  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  let uop = data.uop != null ? metadata.querySelector("#uop") : null;
+  for (const child of [...metadata.children]) if (child !== uop) child.remove();
+  if (ckey.includes("rewrites")) for (const label of [showIndexing.label, showCallSrc.label, showSink.label]) metadata.insertBefore(label, uop);
+  if (step.code_line != null) metadata.insertBefore(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), uop);
+  if (step.trace) metadata.insertBefore(traceBlock(step.trace), uop);
+  if (data.uop != null) {
+    if (uop == null) { uop = metadata.appendChild(codeBlock(data.uop, "txt", { wrap:false })); uop.id = "uop"; }
+    else { uop.querySelector("code").replaceChildren(colored(data.uop)); }
+    uop.classList.toggle("full-height", step.match_count === 0);
+  }
   // ** multi graph in one page
   if (!step.match_count) return;
   const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -1101,13 +1120,9 @@ async function main() {
 
 // **** collapse/expand
 
-let isCollapsed = false;
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
-  isCollapsed = !isCollapsed;
-  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed");
   e.currentTarget.blur();
-  e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -1200,6 +1215,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
+  // cmd shift \ toggles sidebars
+  if (event.code === "Backslash" && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    return document.querySelector(".collapse-btn").click();
+  }
 });
 
 main()

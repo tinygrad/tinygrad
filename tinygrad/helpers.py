@@ -21,6 +21,7 @@ BASEDIR = pathlib.Path(__file__).parent
 if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
+def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def argfix(*x):
   if x and x[0].__class__ in (tuple, list):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
@@ -39,6 +40,9 @@ def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstan
 def is_numpy_ndarray(x) -> TypeGuard[numpy.ndarray]: return str(type(x)) == "<class 'numpy.ndarray'>"
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st
+  if isinstance(color, str) and color.startswith("#"):  # hex -> truecolor
+    r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    return f"\u001b[{48 if background else 38};2;{r};{g};{b}m{st}\u001b[0m"
   colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
   return f"\u001b[{10*background+60*(color.upper() == color)+30+colors.index(color.lower())}m{st}\u001b[0m" if color is not None else st
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
@@ -244,7 +248,8 @@ SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), Contex
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
 ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
-VALIDATE_WITH_CPU, HCQ2 = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("HCQ2", 1)
+VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
+HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)

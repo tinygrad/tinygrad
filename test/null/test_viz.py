@@ -3,7 +3,7 @@ import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -244,7 +244,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides exclude=True nodes by default
-    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertEqual(list(graphs[0]), [id(a.src[0]), id(a), id(z), id(alu), id(y), id(sink)])
     self.assertTrue(graphs[0][id(z)]["exclude"])
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
@@ -370,7 +370,8 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     # schedule graph CALL nodes have a link to jump to codegen
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
-    viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
+    # steps is the presentation list; use the trace index from the step's query (extra presentation steps break 1:1 alignment)
+    viz_kernel = next(int(s["query"].rsplit("=", 1)[1]) for s in lst[sched_idx]["steps"] if s["name"] == "View Kernel Graph")
     graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
@@ -488,9 +489,9 @@ class TestVizIntegration(unittest.TestCase):
     bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
     assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
     # Ops.LINEAR renders
-    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
-    self.assertIn("Ops.SINK", lin_render)
-    self.assertIn("Ops.CUSTOMI", lin_render)
+    lin_render = ansistrip(get_render(viz.data, steps[lin_idx]["query"])["src"])
+    self.assertIn("sink", lin_render)
+    self.assertIn("customi", lin_render)
     # Ops.SOURCE renders
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertIn("undeclared_name", src_render)
@@ -872,6 +873,15 @@ class TestCfg(unittest.TestCase):
     cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
 
+  def test_repeat(self):
+    k = Kernel()
+    for _ in range(3): k.emit(s_add_u32(s[1], s[1], 1))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("repeat", k)["data"]
+    block = next(iter(cfg["blocks"].values()))
+    self.assertEqual(sum(cfg["pc_tokens"][pc][0]["st"] == "s_add_u32" for pc in block), 3)
+
   def test_operands(self):
     k = Kernel()
     k.emit(s_getpc_b64(s[2:3]))
@@ -1151,10 +1161,10 @@ class TestCLI(unittest.TestCase):
       with Context(DEBUG=5):
         out = run_cli(*files, "-s", "TINY")
     i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
-    # next print is the CALL graph, CLI outputs exactly as web in TestVizIntegration.test_link_sched_codegen
-    call_nodes = [n for n in out[i+1].values() if n["label"].startswith("CALL")]
-    for i,n in enumerate(call_nodes):
-      assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
+    # next print is the CALL graph, with codegen names annotated on the UIR calls
+    calls = [line for line in out[i+1]["value"].splitlines() if " = call " in line]
+    self.assertTrue(calls)
+    self.assertEqual([line.rsplit(" # ", 1)[-1] for line in calls], prgs[:len(calls)])
 
   def test_interval(self):
     def emit_kernel(name:str): Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(name=name)))[0].realize()
@@ -1174,6 +1184,45 @@ class TestCLI(unittest.TestCase):
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
     assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
+
+  @needs_tracked_pm
+  def test_nested_calls_codegen_ls(self):
+    @uopfunc
+    def inner(out:UOp): return out[0].store(1).sink()
+    @uopfunc
+    def outer(out:UOp):
+      # call inner twice, it should not codegen inner twice
+      call = inner(out)
+      return inner(out.after(call)).sink()
+    def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
+    with save_viz() as viz, Context(SCACHE=0):
+      Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
+    with write_files(viz) as files:
+      rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+      with Context(NO_COLOR=1):
+        uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
+    codegen_count = [s for s in rewrites if "View Output AST" in s]
+    self.assertEqual(len(codegen_count), 4)
+    self.assertIn(" = linear ", uops)
+    self.assertIn(" = call ", uops)
+
+  @needs_tracked_pm
+  def test_nested_calls_schedule_ls(self):
+    from tinygrad.schedule import schedule_cache
+    @function(precompile=True)
+    def inner(x:Tensor): return (x+x).contiguous()
+    @function(precompile=True)
+    def outer(x:Tensor):
+      # call inner twice, SCACHE should not schedule inner twice
+      return inner(inner(x))
+    schedule_cache.clear()
+    with save_viz() as viz:
+      outer(Tensor.empty(4, device="NULL")).realize()
+    with write_files(viz) as files:
+      schedule = [s["name"] for s in run_cli(*files, "-s", "TINY") if s["name"].startswith("Schedule")][-1]
+      rewrites = run_cli(*files, "-s", "TINY", schedule, "--ls", json_fmt=False)[0]["out"].split("\n")
+    sched_count = [s for s in rewrites if "View Kernel Graph" in s]
+    self.assertEqual(len(sched_count), 3)
 
 if __name__ == "__main__":
   unittest.main()

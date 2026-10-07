@@ -30,7 +30,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         # do the merge
         new_range = r0.replace(src=(s0*s1,))
         nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+                             name=f"check_merge_{r0.axis_id}_{r1.axis_id}")
 
         # check if it simplifies. return after one merge so the next rewrite uses the new ranges,
         # rather than continuing with stale pairs from the original ended_ranges.
@@ -71,12 +71,12 @@ def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.axis_id+(0,k.axis_type))*v + k.replace(src=(v,), arg=k.axis_id+(1,k.axis_type)))),
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg+(0,))*v + k.replace(src=(v,), arg=k.arg+(1,)))),
 ])
 
 # **** reduce simplification ****
 
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
+def no_range(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
   if red.arg[0] not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
@@ -148,7 +148,7 @@ pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=(Ops.ADD, 0), name="red"), reduce_collapse),
 ])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
-def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
+def no_load(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.INDEX)
 pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse

@@ -69,9 +69,21 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_(devices_2, 0)
     assert X.uop.src[0].shape == (128,)
     # the MULTI carries and ends the DEVICE range as its second src
-    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
+    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].axis_type is AxisType.DEVICE
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
+
+  def test_empty_axis(self):
+    GlobalCounters.reset()
+    x = Tensor.empty(4, 6, device=devices_2, axis=1).realize()
+    assert_kernel_count(0)
+    self.assertEqual((x.shape, x.uop.axis), ((4, 6), 1))
+    self.assertEqual(x.uop.base.buffer.size, 12)
+    x.assign(Tensor.arange(24).float().reshape(4, 6).shard(devices_2, axis=1)).realize()
+    np.testing.assert_equal(x.numpy(), np.arange(24).reshape(4, 6))
+    scalar = Tensor.empty((), device=devices_2, axis=0).realize()
+    self.assertEqual(scalar.shape, ())
+    self.assertEqual(scalar.uop.base.buffer.size, 1)
 
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
@@ -929,7 +941,7 @@ class Test2DShard(unittest.TestCase):
   @needs_second_gpu
   def setUp(self):
     self.devices_4 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    self.rng = UOp.range(4, -1, AxisType.DEVICE)
+    self.rng = UOp.range(4, 0, AxisType.DEVICE)
     self.rng0, self.rng1 = self.rng // 2, self.rng % 2
 
   def _shard_2d(self, t:Tensor) -> Tensor:

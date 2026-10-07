@@ -2,7 +2,7 @@
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
@@ -40,21 +40,11 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, CallInfo
-from tinygrad.uop.render import print_uops, pyrender
+from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.render import render_uir, uops_colors, _inline, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
-uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
-               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
-               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
-               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
-               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
-               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
-               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
 addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
 
@@ -99,7 +89,7 @@ def load_rewrites(data:VizData) -> None:
 
 class GraphRewriteDetails(TypedDict):
   graph: dict                            # JSON serialized UOp for this rewrite step
-  uop: str                               # strigified UOp for this rewrite step
+  uop: list[dict]                        # uir tokens for this rewrite step
   diff: list[str]|None                   # diff of the single UOp that changed
   change: list[int]|None                 # the new UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
@@ -107,14 +97,18 @@ class GraphRewriteDetails(TypedDict):
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
-def pystr(u:UOp) -> str:
-   # pyrender may check for shape mismatch
-  try: return pyrender(u)
-  except Exception: return str(u)
-
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
+
+def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
+  nodes = [u for u in root.toposort() if not _inline(u)]
+  refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
+  lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", line) if s] for line in render_uir(root).split("\n")]
+  for u,line in zip(nodes, lines):
+    if u.op is Ops.CALL and (ref:=data.ref_map.get(canonicalize_ast(u.body))) is not None:
+      line.append({"st":f" # {fmt_colored(data.ctxs[ref]['name'])}"})
+  return [t for i,line in enumerate(lines) for t in ([{"st":"\n"}] if i else [])+line]
 
 def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
@@ -128,13 +122,13 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
   for u in toposort:
-    argst = codecs.decode(str(u.arg), "unicode_escape")
+    argst = codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
     with soft_err():
       if u.op in GroupOp.Movement and u.marg: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
-    label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if u.arg is not None else ''}"
+    label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
       if x in excluded:
@@ -151,7 +145,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op is Ops.CALL:
         label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
       if u.op in {Ops.INDEX, Ops.STAGE}:
-        if len(u.src) > 1: label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
+        if len(u.src) > 1: label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "\nINDEX TOO LARGE"
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
@@ -162,8 +156,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING LABEL>"
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
-    # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None: label += "\n"+str(u.metadata)
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
@@ -171,13 +164,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 
-def _reconstruct(data:VizData, a:int, depth:int|None=None):
+def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
   if depth is None and a in data.all_uops: return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
-  # mirror of the trace_num encoding, viz must not save buffers
-  if op is Ops.CALL and isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
-    arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs),
-                                   inputs=tuple((_reconstruct(data, u, depth), d, i) for u, d, i in aux.inputs)))
   if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
   ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
@@ -185,7 +174,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
-  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
+  yield {"graph":uop_to_json(data, next_sink), "uop":tokenize_uir(data, next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
@@ -193,8 +182,10 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr), "_sink":new_sink}
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink),
+           "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
+           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
+           "upat":(upat_loc, match_repr), "_sink":new_sink}
     if not ctx.bottom_up: next_sink = new_sink
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
@@ -381,7 +372,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   pc_map = {addr:str(inst) for addr,inst in decoded.items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
-  curr_barrier:dict[int, ProfileRangeEvent] = {}
+  curr_barrier:dict[tuple[int, int], ProfileRangeEvent] = {}
   exec_pending:dict[str, list[tuple[str, str]]] = {}
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
@@ -390,6 +381,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
     # extend packets to the architectural instruction issue interval
     start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
+    if isinstance(p, CDNA_WAVEEND): start_time, end_time = start_time+4, end_time+4
     # exec links to dispatch, dispatch links to PC
     link:dict|None = {"pc":info.pc} if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
@@ -428,8 +420,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
-      if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
-      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[wave] = e
+      if (barrier:=curr_barrier.pop((simd or 0, wave), None)) is not None: barrier.en = Decimal(p._time)
+      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[(simd or 0, wave)] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
@@ -445,13 +437,14 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       if name == "VALU_MAI" and unwrap(info).inst.op_name.startswith(("V_MFMA_F", "V_MFMA_I", "V_MFMA_SCALE_")): name += "_MFMA"
+      if isinstance(p, CDNA_INST) and unwrap(info).inst.op_name == "S_BARRIER": name = "BARRIER"
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
     if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
         if p.mask & (1 << wave):
-          if wave in curr_barrier: yield from add("WAVERDY", p, wave=wave)
+          if (0, wave) in curr_barrier: yield from add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
@@ -583,9 +576,7 @@ def is_acc_operand(inst, name:str) -> bool:
   return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amdgpu_cfg(lib:bytes, target:str) -> dict:
-  # decode
-  pc_table = amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)
+def get_cfg(pc_table:dict[int, Inst]) -> dict:
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
@@ -617,29 +608,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default:
         tokens.append({"st":repr(val - (1 << 32) if name == "literal" and val >= (1 << 31) else val), "keys":[repr(val)], "kind":1})
-  # show a smaller view for repeated instructions in the graph
   lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pcs in blocks.values():
-    new_pcs:list[int] = []
-    i, n = 0, len(pcs)
-    while i < n:
-      j = i+1
-      while j<n and pc_table[pcs[j]] == pc_table[pcs[i]]: j += 1
-      new_pcs.append(pcs[i])
-      if j-i>1:
-        pc_tokens[pcs[i]].append({"st":f"({j-i}x)", "keys":[], "kind":0})
-        for k in range(i+1, j): del pc_tokens[pcs[k]]
-      lines.append(f"{disasm[pcs[i]]:<{asm_width}}  # {pcs[i]:012X}"+(f"...{pcs[j-1]:012X} ({j-i}x)" if j-i>1 else ""))
-      i = j
-    pcs[:] = new_pcs
-  from tinygrad.runtime.autogen import amdgpu_kd
-  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
-  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python",
-          "metadata":[[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
-                                                                     ("Scratch", kd.private_segment_fixed_size)] if v>0]]}
+    for pc in pcs: lines.append(f"{disasm[pc]:<{asm_width}}  # {pc:012X}")
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python"}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -650,18 +624,28 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ret:dict = {}
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort())[:-1])
+    return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
-    ret:dict = {}
+    ret = {}
     renderer, idx = data
     if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     lib:bytes = sink.src[3].arg
-    if renderer.target.arch.startswith("gfx"):
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
+    if (target:=renderer.target.arch).startswith("gfx"):
+      with soft_err(lambda err: ret.update(err)):
+        ret.update(get_cfg(amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
+      with soft_err(lambda err: ret.update(err)):
+        from tinygrad.runtime.autogen import amdgpu_kd
+        kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
+        vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
+        ret["metadata"] = [[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
+                                                                          ("Scratch", kd.private_segment_fixed_size)] if v>0]]
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":

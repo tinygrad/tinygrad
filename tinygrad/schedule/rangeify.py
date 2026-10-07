@@ -18,13 +18,11 @@ sys.setrecursionlimit(10000)
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.NOOP}
-
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
   if not b.arg.removable: return None
-  # don't optimize ALWAYS_RUN_OPS or AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
-  if b.src[0].op in ALWAYS_RUN_OPS or b.src[0].op is Ops.AFTER: return None
+  # don't optimize AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
+  if b.src[0].op is Ops.AFTER: return None
 
   new_rng = []
   hit = False
@@ -53,13 +51,12 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
-  if src.op in ALWAYS_RUN_OPS or not buf.arg.removable: return None
+  if not buf.arg.removable: return None
 
   # *** here is where we compute the cost ***
   # if we return None, the bufferize is kept
 
   accessed_buffers: list[UOp] = []
-  indexes: list[UOp] = []
   reduces: list[UOp] = []
   def red_gate(x:UOp):
     if x.op is Ops.AFTER:
@@ -73,8 +70,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       return False
     if x.op is Ops.PARAM:
       accessed_buffers.append(x)
-    if x.op is Ops.INDEX:
-      indexes.append(x)
     if x.op is Ops.REDUCE: reduces.append(x)
     return True
   src.toposort(gate=red_gate)
@@ -188,9 +183,9 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
     srcs = []
     for s in root.src:
       if s.op in GroupOp.Elementwise and s.device is not None:
-        # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.WEAK, the DEVICE range stays a launched axis
+        # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
         orig_ranges = s.ranges
-        end_ranges = [x.replace(arg=(next(ctx.range_idx), AxisType.WEAK)) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
+        end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x
                       for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
@@ -227,7 +222,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
     return buf.after(*ended_stores)
 
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.ALLOC, src=UOp.device_range_src(x.arg.device), arg=ParamArg(next(ctx), dtype, size, device=x.arg.device))
+    buf = UOp(Ops.ALLOC, src=(UOp.const(size),)+UOp.device_range_src(x.arg.device), arg=ParamArg(next(ctx), dtype, device=x.arg.device))
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 
@@ -252,7 +247,7 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   return None
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
-  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx)),
+  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
 
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
   # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE
@@ -281,7 +276,7 @@ class LocalAddBufferContext:
   range:int = 0
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(buf.max_shape), addrspace=buf.addrspace, device=buf.device))
+  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),), arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
@@ -298,14 +293,14 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
+  ret = r.replace(arg=(r.axis_type, ctx.range)+r.axis_id[1:], tag=None)
   ctx.range += 1
   return ret
 
 def check_buf_states(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, UOp] = {}
-  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM} and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
+  if any((buf:=idx.buf_uop).op in GroupOp.Defines and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
 
 to_define_global = PatternMatcher([
@@ -313,7 +308,7 @@ to_define_global = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
-   None if buf.tag != () or buf.addrspace is AddrSpace.ALU or buf._shape is None else debuf(ctx, buf)),
+   None if buf.tag != () or buf.addrspace is AddrSpace.ALU else debuf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
@@ -356,7 +351,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink,
                         symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
-  next_range = max((x.arg[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
+  next_range = max((x.axis_id[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 

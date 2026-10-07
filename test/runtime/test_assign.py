@@ -70,6 +70,11 @@ class TestAssign(unittest.TestCase):
     self.assertListEqual(X.tolist(), [1,4,5,4])
     assert_kernel_count(2)
 
+  def test_assign_reshape(self):
+    X = Tensor([1.,2,3,4]).realize()
+    X.reshape(2,2).assign(Tensor([[5.,6],[7,8]]))
+    self.assertListEqual(X.tolist(), [5.,6,7,8])
+
   def test_assign_flip(self):
     ref = np.arange(16, dtype=np.float32)
     X = Tensor(ref).contiguous().realize()
@@ -578,13 +583,13 @@ class TestAssign(unittest.TestCase):
     assert_kernel_count(3)  # TODO: first copy is dead, could be 2
     self.assertEqual(base.tolist(), [1,4,3])
 
-  def test_nested_after_contiguous_store_no_init(self):
-    # Same shape as test_nested_after_contiguous_store, but without the initial assign.
+  def test_assign_from_alias(self):
+    # alias is a second Tensor on base's buffer, so assigning it to base stores the buffer's own contents back into itself
     base = Tensor.empty(3, dtype=dtypes.int64)
-    contig = base.contiguous()
-    contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
+    alias = Tensor(base.uop)
+    alias.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
-    base.assign(contig).realize()
+    base.assign(alias).realize()
     assert_kernel_count(1)
     self.assertEqual(base.tolist(), [1,4,3])
 

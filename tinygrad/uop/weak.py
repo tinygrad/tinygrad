@@ -72,9 +72,9 @@ pm_lower_weak = PatternMatcher([
   # two stacked weak casts are two kind conversions: each resolves at its own kind's default
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
    lambda u,x: x.cast(u.src[0].commit_dtype(dtypes.int)).cast(u.commit_dtype(dtypes.int)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
-  (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), dtype=dtypes.weakint, name="u"),
+  (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(arg=replace(u.arg, dtype=u.commit_dtype(dtypes.int))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
-  (UPat(GroupOp.All, name="u"), lower_weak_node),
+  (UPat(GroupOp.All-GroupOp.Defines, name="u"), lower_weak_node),
 ])
 
 # drop the CAST off a committed const where the consumer re-derives it anyway, so bare-CONST rules keep matching.
@@ -95,4 +95,4 @@ def cast_consts(u:UOp) -> UOp|None:
   # .cast folds at the dtypes a bare CONST derives, so the width is forced. Invalid never commits.
   return u.replace(src=tuple(UOp.cconst(s.val, s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and not s.is_invalid else s for s in u.src))
 
-pm_cast_const = PatternMatcher([(UPat(GroupOp.All, name="u", custom_early_reject={Ops.CONST}), cast_consts)])
+pm_cast_const = PatternMatcher([(UPat(GroupOp.All-GroupOp.Defines, name="u", custom_early_reject={Ops.CONST}), cast_consts)])

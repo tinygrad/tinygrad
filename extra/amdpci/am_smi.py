@@ -118,6 +118,9 @@ class SMICtx:
 
   def _open_am_device(self, pcibus):
     if pcibus not in self.opened_pci_resources:
+      if not os.path.exists(f"/sys/bus/pci/devices/{pcibus}"):
+        if DEBUG >= 2: print(f"/sys/bus/pci/devices/{pcibus} not found")
+        return
       bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
       bar_size = {0: get_bar0_size(pcibus), 2: os.fstat(bar_fds[2]).st_size, 5: os.fstat(bar_fds[5]).st_size}
 
@@ -161,7 +164,7 @@ class SMICtx:
         case (13,0,6): table_t = dev.smu.smu_mod.MetricsTableV0_t
         case (13,0,12): table_t = dev.smu.smu_mod.MetricsTable_t
         case _: table_t = dev.smu.smu_mod.SmuMetricsExternal_t
-      tables[dev] = dev.smu.read_table(table_t, dev.smu.smu_mod.SMU_TABLE_SMU_METRICS) if dev.pci_state == "D0" else None
+      tables[dev] = dev.smu.read_table(table_t, getattr(dev.smu.smu_mod, "TABLE_SMU_METRICS", dev.smu.smu_mod.SMU_TABLE_SMU_METRICS)) if dev.pci_state == "D0" else None
     return tables
 
   def _pick_nonzero_avg(self, vals) -> int:
