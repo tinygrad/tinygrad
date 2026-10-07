@@ -342,7 +342,7 @@ class Tensor(RandMixin):
     if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype))
     np_dtype = _to_np_dtype(self.dtype)
     assert np_dtype is not None, f"no np dtype for {self.dtype}"
-    return np.frombuffer(self._buffer().as_memoryview(), dtype=np_dtype).reshape(self.shape)
+    return np.frombuffer(self._data(), dtype=np_dtype).reshape(self.shape)
 
   def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
     """

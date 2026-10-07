@@ -271,8 +271,7 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      # Accept old saved profiles at ingestion, but encode only bytes in the viewer protocol.
-      nbytes = min(1_000_000_000_000, e.arg["nbytes"] if "nbytes" in e.arg else e.arg["sz"] * e.arg["dtype"].itemsize)
+      nbytes = min(1_000_000_000_000, e.arg["nbytes"])
       events.append(struct.pack("<BIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, nbytes))
       temp[e.key] = nbytes
       mem += nbytes
