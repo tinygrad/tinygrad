@@ -635,7 +635,6 @@ class KFDIface:
     if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta.handle, True))
-    if buf.device.split(":")[0] != "AMD": raise RuntimeError(f"Cannot map {buf.device} on {self.dev.device}")
     self._map_handle(buf.meta.handle)
     return BufferStorage(buf._buf, (buf.meta.handle, False))
 

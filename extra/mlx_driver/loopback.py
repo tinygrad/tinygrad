@@ -40,8 +40,8 @@ print(f"src paddr=0x{src_paddr:x} dst paddr=0x{dst_paddr:x}")
 
 # fill src, zero dst
 test_msg = b"Hello from loopback send/recv!"
-buf_src.copy_from(Buffer("PYTHON", BUF_SIZE, opaque=memoryview(bytearray(test_msg.ljust(BUF_SIZE, b'\x00')))))
-buf_dst.copy_from(Buffer("PYTHON", BUF_SIZE, opaque=memoryview(bytearray(BUF_SIZE))))
+buf_src.copy_from(Buffer("PYTHON", BUF_SIZE, initial_value=bytes(test_msg.ljust(BUF_SIZE, b'\x00'))))
+buf_dst.copy_from(Buffer("PYTHON", BUF_SIZE, initial_value=bytes(BUF_SIZE)))
 gpu.synchronize()
 
 # post recv WQE on RQ from CPU (scatter entry: byte_count, lkey, addr)
