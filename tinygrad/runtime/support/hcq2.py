@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes, CDTYPES_MAP, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
@@ -83,14 +83,8 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
 RET_MAP = {
+  **CDTYPES_MAP,
   None: dtypes.void,
-  ctypes.c_bool: dtypes.bool,
-  ctypes.c_int8: dtypes.int8,   ctypes.c_uint8: dtypes.uint8,
-  ctypes.c_int16: dtypes.int16, ctypes.c_uint16: dtypes.uint16,
-  ctypes.c_int32: dtypes.int32, ctypes.c_uint32: dtypes.uint32,
-  ctypes.c_int64: dtypes.int64, ctypes.c_uint64: dtypes.uint64,
-  ctypes.c_float: dtypes.float32,
-  ctypes.c_double: dtypes.float64,
   ctypes.c_void_p: dtypes.uint64
 }
 
