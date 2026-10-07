@@ -88,12 +88,11 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
 
 @uopfunc
-def do_get_time_ms(ms:UOp) -> UOp: # libc's clock_gettime(CLOCK_MONOTONIC) in ms, linux and macos
+def do_get_time_ms(ms:UOp) -> UOp:
   ts = UOp.placeholder((2,), dtypes.uint64, addrspace=AddrSpace.REG)
   ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.int).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.int), ts.index(0)))
-  return ms.index(0).store(ts.index(0).load() * 1000 + ts.index(1).load() // 1000000).sink()
-def get_time_ms(dep:UOp) -> UOp: # read after dep
-  return (ms:=UOp.placeholder((1,), dtypes.uint64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep))).index(0).load()
+  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
+def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.uint64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
 
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 
