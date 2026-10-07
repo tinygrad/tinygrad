@@ -180,7 +180,7 @@ class Tensor(RandMixin):
 
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     tensor_map:dict[UOp, UOp] = {}
-    for x in sink.toposort(enter_calls=False):
+    for x in sink.toposort():
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
       if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, x.max_numel(), x.dtype)
       elif x in bases and u.needs_storage():
@@ -202,7 +202,7 @@ class Tensor(RandMixin):
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
     becomes_map = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape)
-                   for u in sink.toposort(enter_calls=False) if is_store_after(u)}
+                   for u in sink.toposort() if is_store_after(u)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")

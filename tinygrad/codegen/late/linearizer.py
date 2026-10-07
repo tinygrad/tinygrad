@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort(enter_calls=False))
+  lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
