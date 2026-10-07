@@ -1,8 +1,9 @@
-import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+import unittest, functools
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
+from tinygrad.engine.realize import run_linear
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
@@ -34,6 +35,13 @@ def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   C, B = C.flatten(), B.flatten()
   i = UOp.range(C.numel(), 0)
   return C[i].store(B[i] + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
+
+def custom_add_scalar(*args:UOp, scalar_slot:int, extra_var=False) -> UOp:
+  out, *inputs = [a.flatten() for i,a in enumerate(args) if i != scalar_slot]
+  i = UOp.range(out.numel(), 0)
+  value = sum((b[i] for b in inputs), UOp.const(0, dtypes.int)) + args[scalar_slot]
+  if extra_var: value += UOp.variable("k", 0, 100, dtypes.int)
+  return out[i].store(value).end(i).sink(arg=KernelInfo())
 
 def custom_sum(B:UOp, A:UOp) -> UOp:
   i = UOp.range(A.shape[0], 0, axis_type=AxisType.LOOP)
@@ -179,6 +187,58 @@ class TestCustomKernel(unittest.TestCase):
     a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
     out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
     self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
+  def test_scalar_arg_any_position(self):
+    for slot in range(3):
+      with self.subTest(slot=slot):
+        args = [Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()]
+        args.insert(slot, Tensor(Variable("n", 0, 100, dtypes.int).bind(5)))
+        out = Tensor.custom_kernel(*args, fxn=functools.partial(custom_add_scalar, scalar_slot=slot))[1 if slot == 0 else 0]
+        self.assertEqual(out.tolist(), [6, 7, 8, 9])
+
+  def test_scalar_arg_first_other_device(self):
+    device = "CPU" if Device.DEFAULT == "PYTHON" else "PYTHON"
+    args = [Tensor(Variable("n", 0, 100, dtypes.int).bind(5), device=device), Tensor.empty(4, dtype=dtypes.int, device=device),
+            Tensor([1, 2, 3, 4], dtype=dtypes.int, device=device).realize()]
+    out = Tensor.custom_kernel(*args, fxn=functools.partial(custom_add_scalar, scalar_slot=0))[1]
+    with Context(DEBUG=2, PROFILE=1): self.assertEqual(out.tolist(), [6, 7, 8, 9])
+
+  def test_scalar_arg_with_other_variable(self):
+    other = (Tensor([1, 2, 3, 4], dtype=dtypes.int) + Variable("m", 0, 100, dtypes.int).bind(70)).contiguous()
+    out = Tensor.custom_kernel(Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(),
+                               Tensor(Variable("n", 0, 100, dtypes.int).bind(5)),
+                               fxn=functools.partial(custom_add_scalar, scalar_slot=2))[0]
+    Tensor.realize(other, out)
+    self.assertEqual(other.tolist(), [71, 72, 73, 74])
+    self.assertEqual(out.tolist(), [6, 7, 8, 9])
+
+  def test_scalar_arg_past_registers(self):
+    args = [Tensor.empty(4, dtype=dtypes.int)] + [Tensor([i, 2*i, 3*i, 4*i], dtype=dtypes.int).realize() for i in range(1, 8)]
+    args.insert(4, Tensor(Variable("n", 0, 100, dtypes.int).bind(5)))
+    out = Tensor.custom_kernel(*args, fxn=functools.partial(custom_add_scalar, scalar_slot=4))[0]
+    self.assertEqual(out.tolist(), [33, 61, 89, 117])
+
+  def test_unused_arg_then_var(self):
+    def kernel(out, unused, inp, n): return custom_add_scalar(out, inp, n, scalar_slot=2, extra_var=True)
+    out = Tensor.custom_kernel(Tensor.empty(4, dtype=dtypes.int), Tensor.empty(4, dtype=dtypes.int),
+                               Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(),
+                               Tensor(Variable("n", 0, 100, dtypes.int).bind(5)), fxn=kernel)[0]
+    linear, vals = out.linear_with_vars()
+    run_linear(linear, {**vals, "k":10})
+    self.assertEqual(out.tolist(), [16, 17, 18, 19])
+
+  def test_scalar_arg_jit_changes(self):
+    def kernel(n, out, inp):
+      i = UOp.range(n, 0)
+      return out[i].store(inp[i]+n).end(i).sink(arg=KernelInfo())
+    @TinyJit
+    def run(inp, n):
+      out = Tensor.zeros(8, dtype=dtypes.int).contiguous().realize()
+      return Tensor.custom_kernel(Tensor(n), out, inp, fxn=kernel)[1].realize()
+    inp = Tensor.arange(1, 9, dtype=dtypes.int).clone().realize()
+    for n in (3, 5, 2, 7):
+      self.assertEqual(run(inp, Variable("n", 1, 8, dtypes.int).bind(n)).tolist(),
+                       [i+n for i in range(1, n+1)]+[0]*(8-n))
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])

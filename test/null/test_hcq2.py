@@ -3,7 +3,7 @@ from typing import cast
 from types import SimpleNamespace
 from collections import defaultdict
 from unittest.mock import patch
-from tinygrad import Device, Tensor, TinyJit, dtypes
+from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
 from tinygrad.device import Buffer, Compiled, ProfileGraphEvent
 from tinygrad.helpers import Context, unwrap, to_tuple
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
@@ -38,7 +38,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
     lin = orig(l, profile)
     batches.extend(c for c in lin.src if c.op is Ops.CALL and isinstance(c.arg.aux, HCQInfo))
     return lin
-  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].schedule_linear(*ts[1:]), **kwargs)
+  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_vars(*ts[1:])[0], **kwargs)
   return batches
 
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
@@ -159,6 +159,17 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def test_a_peer_kernel_runs_after_the_copy_that_feeds_it(self):
     self.assertEqual(orders(self.batch((self.x.to("NULL:1") + 1).contiguous())), {(0, 1)})
+
+  def test_copy_waits_for_scalar_first_kernel(self):
+    def kernel(n, out, inp):
+      i = UOp.range(out.numel(), 0)
+      return out[i].store(inp[i]+n).end(i).sink(arg=KernelInfo())
+    n = Tensor(Variable("n", 0, 100, dtypes.int).bind(5))
+    inp = Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
+    out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), inp, fxn=kernel)[1]
+    batch = self.batch(out.to("NULL:1"))
+    kernel_index = next(i for i,c in enumerate(calls(batch)) if c.body.op is Ops.PROGRAM)
+    self.assertEqual({order[0] for order in orders(batch)}, {kernel_index})
 
   def test_lanes_of_a_sharded_kernel_do_not_wait_for_each_other(self):
     s = Tensor.ones(8).contiguous().realize().shard(("NULL", "NULL:1"), axis=0).contiguous().realize()

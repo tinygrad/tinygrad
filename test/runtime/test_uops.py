@@ -162,6 +162,42 @@ class TestArgumentOrder(unittest.TestCase):
       buf = UOp.from_buffer(Buffer(Device.DEFAULT, 1, dtypes.int).allocate())
       self.assertEqual(Tensor(buf.after(sink.call(scale_arg, buf))).tolist(), [expected])
 
+  @unittest.skipUnless(Device.DEFAULT in ("CPU", "PYTHON"), "requires callable runtime")
+  def test_generated_parameter_order(self):
+    from tinygrad.renderer.isa import ISARenderer
+    renderer = Device[Device.DEFAULT].renderer
+    if isinstance(renderer, ISARenderer): self.skipTest("native ABI order is chosen before instruction selection")
+    out = UOp.param(0, dtypes.int, (1,))
+    a, b = [UOp.param(i, dtypes.int, addrspace=AddrSpace.ALU) for i in (1, 2)]
+    sink = out[0].store(a*10+b).sink(arg=KernelInfo())
+    prg = to_program(sink, renderer)
+    params = [u for u in prg.src[1].src if u.op is Ops.PARAM]
+    end = max(i for i,u in enumerate(prg.src[1].src) if u.op is Ops.PARAM)+1
+    lin = prg.src[1].replace(src=tuple(u for u in prg.src[1].src[:end] if u.op is not Ops.PARAM)+
+                            (params[0], params[2], params[1])+prg.src[1].src[end:])
+    prg = to_program(prg.replace(src=(prg.src[0], lin)), renderer)
+    buf = Buffer(Device.DEFAULT, 1, dtypes.int).allocate()
+    Device[Device.DEFAULT].runtime(prg.to_elf())(buf.get_buf(Device.DEFAULT), vals=(5, 7), wait=True)
+    self.assertEqual(buf.as_memoryview().cast('i')[0], 57)
+    self.assertEqual([slot for _,slot,_,_ in prg.to_elf().signature], [0, 2, 1])
+
+  def test_scalar_first_reporting(self):
+    from tinygrad.helpers import cpu_events, ProfilePointEvent
+    for device in ("CPU", "PYTHON"):
+      for profile in (0, 1):
+        with self.subTest(device=device, profile=profile), Context(DEBUG=2, PROFILE=profile):
+          scale = UOp.param(0, dtypes.int, addrspace=AddrSpace.ALU)
+          out = UOp.param(1, dtypes.int, (1,))
+          buf = Buffer(device, 1, dtypes.int).allocate()
+          sink = out[0].store(scale*2).sink(arg=KernelInfo())
+          start = len(cpu_events)
+          run_linear(UOp(Ops.LINEAR, src=(sink.call(UOp.const(-3, dtypes.int), UOp.from_buffer(buf)),)))
+          self.assertEqual(buf.as_memoryview().cast('i')[0], -6)
+          if profile:
+            events = [e for e in cpu_events[start:] if isinstance(e, ProfilePointEvent) and e.device == device and e.arg.get("outputs")]
+            self.assertTrue(events)
+            self.assertEqual(events[0].arg["outputs"], (0,))
+
   def test_buffers_and_args(self): self._test_order(dtypes.int)
 
   @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires 64-bit ints")

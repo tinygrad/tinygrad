@@ -12,6 +12,21 @@ class TestProgramArguments(unittest.TestCase):
   signature = (("scale", 2, dtypes.int, ()), ("input", 1, dtypes.float, (1,)),
                ("bias", 3, dtypes.long, ()), ("output", 0, dtypes.float, (1,)))
 
+  def test_image_and_pointer_share_input(self):
+    base = UOp.param(0, dtypes.float, (4,))
+    image = base.replace(arg=replace(base.arg, image=(1, 1)))
+    pointer = UOp.param(0, dtypes.float, (4,))
+    scalar = UOp.param(1, dtypes.int, addrspace=AddrSpace.ALU)
+    params = (image, scalar, pointer)
+    sink = UOp.sink(*params, arg=KernelInfo())
+    from tinygrad.codegen import to_program
+    from tinygrad.renderer.cstyle import OpenCLRenderer
+    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=params)), arg=ProgramInfo.from_sink(sink))
+    prg = to_program(prg, OpenCLRenderer(Target("CL")))
+    obj = prg.to_elf()
+    self.assertEqual([(slot,shape) for _,slot,_,shape in obj.signature], [(0, (1, 1, 4)), (1, ()), (0, (4,))])
+    self.assertEqual(obj.bind((0x11,), (5,)), [0x11, 5, 0x11])
+
   def test_hip_interleaved_args_and_update(self):
     from tinygrad.runtime.ops_hip import HIPProgram
     program = HIPProgram.__new__(HIPProgram)

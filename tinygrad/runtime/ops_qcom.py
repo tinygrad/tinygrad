@@ -13,7 +13,7 @@ from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_ima
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
-from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
+from tinygrad.engine.realize import get_call_var_uops
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -93,7 +93,7 @@ class QCOMComputeQueue(HWQueue):
              value.cast(dtypes.uint32), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
   def kernargs(self, call:UOp, prg:UOp, data:QCOMProgramData) -> UOp:
-    bufs, vals = [get_call_arg_uops(call)[g] for g in prg.arg.globals], get_call_var_uops(call, prg)
+    bufs, vals = [call.src[1+g] for g in prg.arg.globals], get_call_var_uops(call, prg)
     signature = prg.to_elf().signature # launch slots are specific to this program
     uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in signature if slot < len(bufs) and is_image_shape(shape)]
     # NIR can reorder images to different texture slots

@@ -174,7 +174,7 @@ class NVComputeQueue(NVQueue):
     qmd.set_program_addr(lib.getaddr(self.devs) + data.prog_off)
     for j, (off, _) in data.constbufs.items():
       qmd.set_constant_buf_addr(j, qmd_addr + UOp.const(self.qmd_sz, dtypes.uint64) if j == 0 else lib.getaddr(self.devs) + off)
-    bufs, vals = [get_call_arg_uops(call)[j] for j in prg.arg.globals], get_call_var_uops(call, prg)
+    bufs, vals = [call.src[1+j] for j in prg.arg.globals], get_call_var_uops(call, prg)
     qmd.mv[self.qmd_sz:(at:=self.qmd_sz + len(data.cbuf_0) * 4)] = array.array('I', data.cbuf_0).tobytes() # constant buffer 0: the driver params
     if isinstance(self.dev.iface, MOCKIface):
       struct.pack_into('<2I', qmd.mv, self.qmd_sz + 80*4, len(bufs), len(vals)) # mockgpu argument counts belong to this launch

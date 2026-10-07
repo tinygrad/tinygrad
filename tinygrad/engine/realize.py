@@ -6,7 +6,7 @@ from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flat
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -14,21 +14,22 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 # **************** Helpers ****************
 
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]:
-  if not any(s.is_bound_var for s in call.src[1:]): return call.src[1:]
-  params = call.body.arg.vars if call.body.op is Ops.PROGRAM else call.body.toposort() if call.body.op is Ops.SINK else ()
-  positional = {v.arg.slot:v.dtype for v in params if v.op is Ops.PARAM and v.addrspace is AddrSpace.ALU and not v.is_variable}
-  return tuple(UOp.const(s.arg.val, positional[i]) if s.is_bound_var else s
-               for i,s in enumerate(call.src[1:]) if not s.is_bound_var or i in positional)
+  # Buffer arguments only. ProgramInfo slots index call.src[1:], not this filtered tuple.
+  return tuple(s for s in call.src[1:] if s.addrspace is not AddrSpace.ALU)
 def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
-  # a bound value is a bare CONST: the Variable states the width
-  bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  args = get_call_arg_uops(call)
-  return [bound.get(v.expr, v) if v.is_variable else args[v.arg.slot] for v in prg.arg.vars]
+  return [v.replace(arg=replace(v.arg, slot=-1)) if v.is_variable else
+          UOp.const(call.src[1+v.arg.slot].arg.val, v.dtype) if call.src[1+v.arg.slot].is_bound_var else
+          call.src[1+v.arg.slot] for v in prg.arg.vars]
 
-def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
+def get_call_outs_ins(call:UOp, compact:bool=False) -> tuple[tuple[int, ...], tuple[int, ...]]:
+  # Launch slots are raw call positions. Profile events refer to the compact buffer list.
   ast = call.body
   if isinstance(call.arg.aux, HCQInfo): return (), ()
-  if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
+  if ast.op is Ops.PROGRAM:
+    if compact:
+      return (tuple(i for i,g in enumerate(ast.arg.globals) if g in ast.arg.outs),
+              tuple(i for i,g in enumerate(ast.arg.globals) if g in ast.arg.ins))
+    return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.STORE: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
@@ -39,7 +40,7 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
     return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
-  return [(d, call, None) for d in to_tuple(call.src[1].device)]
+  return [(d, call, None) for d in to_tuple(call.device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -73,14 +74,15 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   if DEBUG < 2 and not PROFILE: return
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
-  args = [] if isinstance(call.arg.aux, HCQInfo) else resolve_params(call, ctx.input_uops)
-  lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
+  args = [] if isinstance(call.arg.aux, HCQInfo) else [call.src[1+g] for g in call.body.arg.globals] \
+         if call.body.op is Ops.PROGRAM else list(get_call_arg_uops(call))
+  lanes = list(unwrap_multi(call, [_resolve(s, ctx.input_uops) for s in args])) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None
     bufs = lanes[i][0] if i < len(lanes) else [cast(Buffer, ctx.input_uops[s].buffer) for s in (stats[3] if stats else ())]
     display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
-      outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
+      outputs, inputs = get_call_outs_ins(kcall, compact=True) if stats is None else stats[4]
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < (3 if stats is None and isinstance(call.arg.aux, HCQInfo) else 2) or not ctx.update_stats: continue
@@ -127,6 +129,7 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
+  if b.is_bound_var: return UOp.const(b.arg.val, b.commit_dtype(dtypes.int))
   if b.op in (Ops.MSELECT, Ops.SHRINK, Ops.BITCAST, Ops.GETADDR): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
@@ -160,7 +163,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
-  resolved = resolve_params(call, ctx.input_uops)
+  resolved = [_resolve(s, ctx.input_uops) for s in call.src[1:]]
   for device, (bufs, device_vars) in zip(devices or to_tuple(call.device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
@@ -174,7 +177,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   prg = to_program(ast.src[0], Device["CPU"].renderer)
-  resolved = resolve_params(call, ctx.input_uops)
+  resolved = [_resolve(s, ctx.input_uops) for s in call.src[1:]]
   n = len(resolved)//2
   args = [resolved[i] for i in prg.arg.globals] + [resolved[n+i] for i in prg.arg.globals]
   for bufs, device_vars in unwrap_multi(call, args):
@@ -212,7 +215,7 @@ pm_flatten_linear = PatternMatcher([
 ])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  params = get_call_arg_uops(call)
+  params = call.src[1:]
   shadows = tuple(p if p.addrspace is AddrSpace.ALU else
                   UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
   copies = tuple(s.store_call(p) for s, p in zip(shadows, params) if p.addrspace is not AddrSpace.ALU)
