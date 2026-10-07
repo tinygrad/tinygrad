@@ -243,7 +243,7 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
   word_addr = addr >> UOp.const(2, adt)
   idx = mem.index(word_addr.valid(active))
-  if data_bits == 32: return [idx.store(active.where(_to_u32(val), idx))]
+  if data_bits == 32: return _mem_store_bytes(mem.bitcast(dtypes.uint8), addr, val, active)
   # Sub-word store: read-modify-write with mask
   byte_pos = addr.cast(dtypes.uint32) & _c(3)
   byte_shift = byte_pos * _c(8)
