@@ -73,11 +73,11 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, de
 
 def kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...], images:bool=True) -> Iterator[UOp]:
   for p,a in get_call_prg_args(call, prg):
-    if images or p.arg.image is None: yield a.ccast(p.dtype) if p.addrspace is AddrSpace.ALU else a.getaddr(devs)
+    if images or p.arg.image is None: yield a.ccast(p.arg.dtype) if p.arg.addrspace is AddrSpace.ALU else a.getaddr(devs)
 
 def layout_args(args:Iterable[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
   words = [a if isinstance(a, UOp) else UOp.const(a, dtypes.uint32) for a in args]
-  signature = tuple(UOp.param(i, w.dtype, addrspace=AddrSpace.ALU) for i,w in enumerate(words))
+  signature = tuple(UOp.param(i, w.dtype, addrspace=AddrSpace.ALU).kernel_param for i,w in enumerate(words))
   return [(offset + o, w) for (o, _, _), w in zip(TinyELF.iter_sig(signature), words)]
 
 def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:

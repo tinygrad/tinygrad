@@ -59,15 +59,15 @@ class DSPProgram(Program['DSPDevice']):
   def __init__(self, dev:DSPDevice, obj:TinyELF): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
 
   def __call__(self, args:dict, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
-    bufs = [args[p] for p in self.signature if p.addrspace == AddrSpace.GLOBAL]
+    bufs = [args[p] for p in self.signature if p.arg.addrspace == AddrSpace.GLOBAL]
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray(len(self.signature)*8)),
                                          memoryview(array.array('I', [b.offset for b in bufs]))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     for i,p in enumerate(self.signature):
-      struct.pack_into(unwrap(p.dtype.fmt) if p.addrspace == AddrSpace.ALU else 'i', var_vals_mv, i*8,
-                       args[p] if p.addrspace == AddrSpace.ALU else args[p].size)
+      struct.pack_into(unwrap(p.arg.dtype.fmt) if p.arg.addrspace == AddrSpace.ALU else 'i', var_vals_mv, i*8,
+                       args[p] if p.arg.addrspace == AddrSpace.ALU else args[p].size)
     self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
@@ -280,11 +280,11 @@ class MockDSPProgram(Program[DSPDevice]):
       dsp_lib.flush()
       os.chmod(dsp_lib.name, 0o0777)
       proc = subprocess.run(["qemu-hexagon-static", *(['-strace'] if DEBUG >= 5 else []), dsp_lib.name],
-        input=b''.join(struct.pack(unwrap(p.dtype.fmt), args[p]) if p.addrspace == AddrSpace.ALU else
+        input=b''.join(struct.pack(unwrap(p.arg.dtype.fmt), args[p]) if p.arg.addrspace == AddrSpace.ALU else
                        to_mv(args[p].va_addr, args[p].size) for p in self.signature),
         stdout=subprocess.PIPE, check=True)
     offset = 4
-    for x in (args[p] for p in self.signature if p.addrspace == AddrSpace.GLOBAL):
+    for x in (args[p] for p in self.signature if p.arg.addrspace == AddrSpace.GLOBAL):
       to_mv(x.va_addr, x.size)[:] = proc.stdout[offset:offset+x.size]
       offset += x.size
     assert offset == len(proc.stdout)

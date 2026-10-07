@@ -57,8 +57,8 @@ class CLProgram(Program['CLDevice']):
     addr = mv_address(_argbuf:=TinyELF.pack(self.signature, args))
     for i,(off,p,dt) in enumerate(TinyELF.iter_sig(self.signature)):
       if (shape:=p.arg.image) is not None:
-        pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * p.dtype.itemsize
-        fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[p.dtype.itemsize])
+        pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * p.arg.dtype.itemsize
+        fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[p.arg.dtype.itemsize])
         desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], image_row_pitch=pitch, buffer=args[p])
         img = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
       check(cl.clSetKernelArg(self.kernel, i, dt.itemsize, ctypes.byref(img) if shape is not None else ctypes.c_void_p(addr+off)))

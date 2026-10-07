@@ -1,4 +1,4 @@
-import itertools, struct, unittest
+import itertools, struct, unittest, weakref
 from dataclasses import replace
 from tinygrad import Device, Tensor
 from tinygrad.codegen import to_program
@@ -10,6 +10,25 @@ from tinygrad.uop.ops import KernelInfo, Ops, UOp
 from test.helpers import needs_second_gpu
 
 class TestKernelArgs(unittest.TestCase):
+  def test_signature_does_not_own_uops(self):
+    p = UOp.param(997, dtypes.int32, 997, name='signature_lifetime')
+    ref, signature = weakref.ref(p), (p.kernel_param,)
+    del p
+    self.assertIsNone(ref())
+    self.assertEqual(signature[0].arg.slot, 997)
+
+  def test_stack_arguments(self):
+    inputs = [Tensor([i], dtype=dtypes.int32).realize().uop for i in range(1, 9)]
+    out = UOp.new_buffer(Device.DEFAULT, 1, dtypes.int32)
+    scalar = UOp.param(0, dtypes.int32, addrspace=AddrSpace.ALU)
+    params = [UOp.param(i, dtypes.int32, 1) for i in range(1, 10)]
+    sink = params[-1].index(0).store(sum(p.index(0).load() for p in params[:-1]) + scalar).sink(
+      arg=KernelInfo(name='stack_arguments'), tag=1)
+    prg = to_program(sink, Device[Device.DEFAULT].renderer)
+    self.assertEqual(len(prg.to_elf().signature), 10)
+    run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.variable('factor', 0, 10, dtypes.int32).bind(2), *inputs, out),)), wait=True)
+    self.assertEqual(out.buffer.numpy().tolist(), [38])
+
   def test_arbitrary_order(self):
     x = Tensor([1, 2, 3], dtype=dtypes.int32).realize().uop
     unused = Tensor([999], dtype=dtypes.int32).realize().uop
@@ -76,9 +95,9 @@ class TestKernelArgs(unittest.TestCase):
 
   def test_pack_repeated_slot(self):
     # IMAGE can have distinct ABI descriptors that share a CALL slot.
-    p = UOp.param(2, dtypes.float32, 4)
-    image = p.replace(arg=replace(p.arg, image=(1, 1)))
-    scalar = UOp.param(0, dtypes.int16, addrspace=AddrSpace.ALU)
+    p = UOp.param(2, dtypes.float32, 4).kernel_param
+    image = p._replace(arg=replace(p.arg, image=(1, 1)))
+    scalar = UOp.param(0, dtypes.int16, addrspace=AddrSpace.ALU).kernel_param
     obj = TinyELF(b'', 'pack', Target(), (scalar, image, p))
     self.assertEqual(TinyELF.pack(obj.signature, {scalar: -3, image: 0x1000, p: 0x1000})[:24],
                      struct.pack('<h6xQQ', -3, 0x1000, 0x1000))

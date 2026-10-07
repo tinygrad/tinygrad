@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
-from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, KernelParam
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
@@ -15,11 +15,11 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 def get_call_args(call:UOp) -> tuple[tuple[int, UOp], ...]: return tuple((i,s) for i,s in enumerate(call.src[1:]) if s.addrspace is not AddrSpace.ALU)
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for _,s in get_call_args(call))
-def get_call_prg_args(call:UOp, prg:UOp) -> Iterator[tuple[UOp, UOp]]:
+def get_call_prg_args(call:UOp, prg:UOp) -> Iterator[tuple[KernelParam, UOp]]:
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  for p in prg.to_elf().signature:
+  for p in (p for p in (prg.arg.params or prg.src[1].src) if p.op is Ops.PARAM):
     a = bound.get(p.expr, p) if p.arg.slot < 0 else call.src[1+p.arg.slot]
-    yield p, UOp.const(a.arg.val) if a.is_bound_var else a
+    yield p.kernel_param, UOp.const(a.arg.val) if a.is_bound_var else a
 
 def get_call_outs_ins(call:UOp, compact:bool=False) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -165,7 +165,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     buffers = dict(zip(ast.arg.globals, bufs))
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: args = {p: (var_vals[a.expr] if a.is_variable else _resolve(a, ctx.input_uops).val) if p.addrspace is AddrSpace.ALU else
+    try: args = {p: (var_vals[a.expr] if a.is_variable else _resolve(a, ctx.input_uops).val) if p.arg.addrspace is AddrSpace.ALU else
                     buffers[p.arg.slot].ensure_allocated().get_buf(device) for p,a in get_call_prg_args(call, ast)}
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
     ets.append(rt(args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))

@@ -269,7 +269,7 @@ class NVProgramData:
       min_cbuf0_entries = 224 if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 12
       self.cbuf_0 = [0] * max(cbuf0_size // 4, min_cbuf0_entries)
 
-    if mock: self.cbuf_0[80:82] = [sum(p.addrspace is not AddrSpace.ALU for p in signature), sum(p.addrspace is AddrSpace.ALU for p in signature)]
+    if mock: self.cbuf_0[80:82] = [len(signature)-(n:=sum(p.arg.addrspace is AddrSpace.ALU for p in signature)), n]
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.image = image.ljust(round_up(len(image), 0x1000) + 0x1000, b'\x00')
