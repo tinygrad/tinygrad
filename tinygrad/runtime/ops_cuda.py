@@ -76,9 +76,7 @@ class CUDAAllocator(Allocator['CUDADevice']):
     check((cuda.cuMemFreeHost if options.host or options.cpu_access else cuda.cuMemFree_v2)(storage.buf))
 
   def _map(self, buf:Buffer) -> BufferStorage:
-    if buf.device.startswith("CUDA"):
-      if buf.get_storage().host is None: raise RuntimeError(f"{buf.device} device memory is only reachable through the host")
-      return BufferStorage(buf._buf)
+    if buf.device.startswith("CUDA"): return BufferStorage(buf._buf)
     if (host:=buf.get_storage().host) is None or host.addr % mmap.PAGESIZE: raise RuntimeError(f"{buf.device} memory is not page aligned host memory")
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if (status:=cuda.cuMemHostRegister_v2(host.addr, buf.nbytes, 0)) != cuda.CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:

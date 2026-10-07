@@ -14,7 +14,7 @@ def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
   for x in inputs: x.realize()
   sz = 1 if local_size is None else prod(local_size)
   outs = [UOp.new_buffer(Device.DEFAULT, sz, u.src[1].dtype) for u in sink.src if u.op is Ops.STORE]
-  for u in outs: u.buffer.allocate().copy_from(Buffer("PYTHON", u.buffer.nbytes, opaque=memoryview(bytearray(u.buffer.nbytes))))
+  for u in outs: u.buffer.allocate().copy_from(Buffer("PYTHON", u.buffer.nbytes, initial_value=bytes(u.buffer.nbytes)))
   run_linear(UOp(Ops.LINEAR, src=(sink.call(*outs, *(x.uop.base for x in inputs)),)))
   return [Tensor(u).numpy() for u in outs]
 

@@ -301,7 +301,7 @@ def copyout_outputs(outbufs:list[UOp]) -> list[np.ndarray]:
   return [np.frombuffer(x.buffer.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def reset_bufs(bufs:list[Buffer]):
-  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.nbytes, opaque=memoryview(bytearray(buf.nbytes))))
+  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.nbytes, initial_value=bytes(buf.nbytes)))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
