@@ -1466,6 +1466,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if not (self.ndim > 0 and w.ndim > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {self.ndim=}, {w.ndim=}")
     if self.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {self.shape} and {w.shape}")
 
+    if self.ndim == 1 and w.ndim >= 2: return self.unsqueeze(0).image_dot(w, dtype=dtype).squeeze(-2)
+    if self.ndim >= 2 and w.ndim >= 2:
+      batch_shape = _broadcast_shape(self.shape[:-2], w.shape[:-2])
+      self, w = self._broadcast_to(batch_shape + self.shape[-2:]), w._broadcast_to(batch_shape + w.shape[-2:])
+
     bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
     out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout,)
 
