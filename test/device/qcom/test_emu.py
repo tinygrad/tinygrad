@@ -72,7 +72,7 @@ class TestQCOMEmu(unittest.TestCase):
     out = Tensor(np.array([894.0, 17.52, 2418.0], np.float16)).reciprocal().numpy()
     np.testing.assert_equal(out.view(np.uint16), np.array([0x1494, 0x2b4e, 0x0ec6], np.uint16))
 
-  def test_predication(self): # IMAGE matmul has a predt/predf block
+  def test_predication(self):
     a, b = np.arange(15, dtype=np.float32).reshape(5, 3), np.arange(15, dtype=np.float32).reshape(3, 5) - 7
     with Context(IMAGE=1): np.testing.assert_equal((Tensor(a) @ Tensor(b)).numpy(), a @ b)
 
@@ -89,12 +89,13 @@ class TestQCOMEmu(unittest.TestCase):
     np.testing.assert_equal(Tensor.custom_kernel(Tensor.empty(64), a, fxn=kernel)[0].numpy(), a.sum(1).numpy())
 
   @unittest.skipUnless(DEV.interface.startswith("MOCK"), "MOCK only")
-  def test_predf_first(self): # IMAGE triu starts with predf, a zeroed register file would hide a skipped mov
+  def test_predf_first(self): # a zeroed register file would hide a skipped mov
     from test.mockgpu.qcom import emu
     init = emu.Threads.__init__
     def poisoned(t, d, n):
       init(t, d, n)
-      t.r[:], t.h[:] = 0x7777, 0x7777
+      t.r[:] = 0x77777777
+      if isinstance(t.h, np.ndarray): t.h[:] = 0x7777
     a = np.arange(1, 26, dtype=np.float32).reshape(5, 5)
     with patch.object(emu.Threads, "__init__", poisoned), Context(IMAGE=1): np.testing.assert_equal(Tensor(a).triu(1).numpy(), np.triu(a, 1))
 
@@ -104,8 +105,8 @@ class TestQCOMEmu(unittest.TestCase):
     from test.mockgpu.qcom.qcomdriver import EmulatorError
     linear = lower_and_compile((Tensor.empty(4) + 1).schedule_linear())
     binary = next(u for u in linear.toposort() if u.op is Ops.BINARY)
-    lib = binary.arg.replace((mesa.OPC_END << 55).to_bytes(8, "little"), (mesa.OPC_RET << 55).to_bytes(8, "little"), 1)
-    with self.assertRaisesRegex(EmulatorError, "OPC_RET is not emulated"):
+    lib = binary.arg.replace((mesa.OPC_END << 55).to_bytes(8, "little"), (mesa.OPC_KILL << 55).to_bytes(8, "little"), 1)
+    with self.assertRaisesRegex(EmulatorError, "OPC_KILL is not emulated"):
       run_linear(linear.substitute({binary: binary.replace(arg=lib)}, enter_calls=True))
       Device[Device.DEFAULT].synchronize()
 
