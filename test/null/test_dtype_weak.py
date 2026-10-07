@@ -155,14 +155,16 @@ class TestWeakPromotion(unittest.TestCase):
     for t in (Tensor.full((1,), 1, dtype=dtypes.int64, device="NULL") + 2**40,
               Tensor.full((1,), 1.0, dtype=dtypes.float64, device="NULL") + (1.0 + 2**-40)):
       t.realize()
-      self.assertNotIn(t.uop.buffer.dtype, dtypes.weaks)
+      self.assertNotIn(t.uop.dtype, dtypes.weaks)
+      self.assertEqual(t.uop.buffer.nbytes, t.numel() * t.dtype.itemsize)
 
   def test_computed_float_index_lowers(self):
     # a half-pixel nearest index resolves its float-scaled range before the gather
     idx = (Tensor.arange(8) + 0.5) / 4 - 0.5
     idx = (idx.clip(0, 1) - 0.5).ceil().int()
     out = Tensor([0, 1], device="NULL")[idx].contiguous().realize()
-    self.assertNotIn(out.uop.buffer.dtype, dtypes.weaks)
+    self.assertNotIn(out.uop.dtype, dtypes.weaks)
+    self.assertEqual(out.uop.buffer.nbytes, out.numel() * out.dtype.itemsize)
 
 class TestWeakStorageBoundary(unittest.TestCase):
   # weak has no storage: a weak assignment source casts when it defers to the destination, everything else raises

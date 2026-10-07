@@ -680,8 +680,8 @@ class TestVizProfiler(unittest.TestCase):
                                     ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
                               deps=[[], [0]], sigs=[St, En, St, En]),
             # memory alloc on both GPUs
-            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"sz":1024, "dtype":dtypes.float}, ts=St),
-            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"sz":512, "dtype":dtypes.float}, ts=St)]
+            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"nbytes":4096}, ts=St),
+            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"nbytes":2048}, ts=St)]
     j = load_profile(prof)
     # graph grouped with its device, memory at the end
     self.assertListEqual(list(j['layout']),

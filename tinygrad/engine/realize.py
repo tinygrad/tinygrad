@@ -166,13 +166,19 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  from tinygrad.dtype import _to_np_dtype
+  resolved = resolve_params(call, ctx.input_uops)
+  for bufs, device_vars in unwrap_multi(call, resolved):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
     cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
-    for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+    for i in prg.arg.outs:
+      dt = _to_np_dtype(resolved[i].dtype)
+      assert dt is not None, f"no np dtype for {resolved[i].dtype}"
+      np.testing.assert_allclose(np.frombuffer(dev_bufs[i].ensure_allocated().as_memoryview(), dt),
+                                 np.frombuffer(bufs[i].as_memoryview(), dt), rtol=1e-3, atol=1e-3)
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:

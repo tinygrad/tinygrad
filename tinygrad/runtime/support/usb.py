@@ -441,11 +441,11 @@ def _host_block(dev) -> Buffer:
   xfers = [libusb.libusb_alloc_transfer(0).contents for _ in range(2)]
   for t in xfers: t.dev_handle, t.endpoint, t.type, t.timeout = dev.iface.pci_dev.usb.usb.handle, 0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, 10000
   words = [ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())] + [0] + [ctypes.addressof(t) for t in xfers]
-  return Buffer("CPU", HOST_SIZE, dtypes.uint8, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
+  return Buffer("CPU", HOST_SIZE, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
 
 @functools.cache
 def _go(dev) -> Buffer:
-  return Buffer(dev.device, 1, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
+  return Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
 
 def usb_reset(dev):
   for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
@@ -456,6 +456,6 @@ def setup_usb_rules(dev):
   Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)), # placeholders the gpu owns
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_go")), lambda d=dev: _go(d)),
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
-  dev.error_state = _host_block(dev).view(1, dtypes.int64, 40) # the link's error word
+  dev.error_state = _host_block(dev).view(8, 40) # the link's error word
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

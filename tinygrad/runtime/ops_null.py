@@ -71,4 +71,5 @@ class NullDevice(Compiled):
     Compiled.pm_bufferize += PatternMatcher([ # its memory is fake: every placeholder on it is a link buffer
       (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.link_buffer(b.max_numel(), b.dtype) if b.device == d.device else None)])
 
-  def link_buffer(self, n, dt): return Buffer(self.device, n, dt, opaque=memoryview(bytearray(n * dt.itemsize)), options=BufferSpec(external_ptr=1))
+  def link_buffer(self, n, dt):
+    return Buffer(self.device, n * dt.itemsize, opaque=memoryview(bytearray(n * dt.itemsize)), options=BufferSpec(external_ptr=1))
