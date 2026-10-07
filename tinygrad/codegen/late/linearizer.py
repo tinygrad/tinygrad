@@ -59,7 +59,7 @@ class CFGContext:
     # everything is nested inside the sink
     deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
-    for u in sink.toposort(enter_calls=False):
+    for u in sink.toposort():
       # get the deps from the src
       deps[u] = {}
       for s in u.src_without_body: deps[u] |= deps[s]

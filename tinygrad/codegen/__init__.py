@@ -248,7 +248,7 @@ def add_raw_barrier(after:UOp):
   # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
   if after.addrspace is not AddrSpace.LOCAL: return None
   # one toposort over all the deps
-  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op is not Ops.BARRIER)
+  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op is not Ops.BARRIER, enter_calls=True)
   if not any(_is_local_store(x) for x in deps): return None
   return after.src[0].after(UOp(Ops.BARRIER, src=after.src[1:]))
 
@@ -269,7 +269,7 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
-  if DEBUG >= 5: print(render_uir(list(ast.toposort())))
+  if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
@@ -384,7 +384,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     if os.environ.get("DBGTV"):
       try: type_verify(sink, spec_program)
       except RuntimeError:
-        print(render_uir(list(sink.toposort())))
+        print(render_uir(sink))
         raise
     else: type_verify(sink, spec_program)
 

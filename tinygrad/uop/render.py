@@ -63,7 +63,7 @@ def _render_arg(x:UOp) -> str:
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
 def render_uir(root:UOp|list[UOp]) -> str:
-  nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
+  nodes = [u for u in (list(root.toposort(enter_calls=True)) if isinstance(root, UOp) else list(root)) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
     if not _inline(u): return f"%{table[u]}"

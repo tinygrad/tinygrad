@@ -86,7 +86,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     ranges = [((b:=dev.rt_buffer(spec))._buf, b._buf + b.nbytes) for spec in specs]
     x, f = chain_input(device=dev.device), TinyJit(lambda a: chain(a, 2).realize())
     for _ in range(2): f(x)
-    for u in f.captured.linear.toposort():
+    for u in f.captured.linear.toposort(enter_calls=True):
       if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and (buf:=u.buffer).device == dev.device:
         self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
@@ -274,7 +274,7 @@ class TestHostCalls(unittest.TestCase):
     def put(out:UOp, v:UOp): return out.index(0).store(v).sink()
     a, b = [cpu_buf(dtype=dtypes.uint64, tag=t) for t in ("cb", "enc")]
     lowered = lower_hcq(put(a, UOp.const(1, dtypes.uint64)), put(b, UOp.const(2, dtypes.uint64)))
-    self.assertEqual(len({c.body for c in lowered.toposort() if c.op is Ops.CALL and c.arg.name == "put"}), 1)
+    self.assertEqual(len({c.body for c in lowered.toposort(enter_calls=True) if c.op is Ops.CALL and c.arg.name == "put"}), 1)
 
   def test_one_function_with_registers(self): # a body numbers its own registers and loops: two traces are one function
     @uopfunc
