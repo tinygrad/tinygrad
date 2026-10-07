@@ -1,5 +1,5 @@
 import unittest, ctypes, struct, time, array
-from tinygrad import Device, Tensor, dtypes
+from tinygrad import Device, Tensor
 from tinygrad.helpers import to_mv, DEV
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.engine.realize import get_runtime
@@ -47,8 +47,8 @@ class TestHCQ(unittest.TestCase):
 
   def setUp(self):
     TestHCQ.d0.synchronize()
-    TestHCQ.a.uop.buffer.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
-    TestHCQ.b.uop.buffer.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 0)))))
+    TestHCQ.a.uop.buffer.copy_from(Buffer("PYTHON", 8, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+    TestHCQ.b.uop.buffer.copy_from(Buffer("PYTHON", 8, opaque=memoryview(bytearray(struct.pack("ff", 0, 0)))))
     TestHCQ.d0.synchronize() # wait for copyins to complete
 
   def test_run_1000_times_one_submit(self):
@@ -256,8 +256,8 @@ class TestHCQ(unittest.TestCase):
   def test_copy_bandwidth(self):
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
     SZ = 2_000_000_000
-    a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
-    b = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+    a = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
+    b = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
     q = TestHCQ.copy_queue()
     q.copy(a._buf, b._buf, SZ)
     et = _time_queue(q, TestHCQ.d0)
@@ -267,8 +267,8 @@ class TestHCQ(unittest.TestCase):
 
   def test_cross_device_copy_bandwidth(self):
     SZ = 2_000_000_000
-    b = Buffer(f"{Device.DEFAULT}:1", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
-    a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+    b = Buffer(f"{Device.DEFAULT}:1", SZ, options=BufferSpec(nolru=True)).allocate()
+    a = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
     TestHCQ.d0._gpu_map(b._buf)
     q = TestHCQ.copy_queue()
     q.copy(a._buf, b._buf, SZ)

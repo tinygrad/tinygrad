@@ -78,12 +78,12 @@ class TestMultiTensor(unittest.TestCase):
     x = Tensor.empty(4, 6, device=devices_2, axis=1).realize()
     assert_kernel_count(0)
     self.assertEqual((x.shape, x.uop.axis), ((4, 6), 1))
-    self.assertEqual(x.uop.base.buffer.size, 12)
+    self.assertEqual(x.uop.base.buffer.nbytes, 12 * x.dtype.itemsize)
     x.assign(Tensor.arange(24).float().reshape(4, 6).shard(devices_2, axis=1)).realize()
     np.testing.assert_equal(x.numpy(), np.arange(24).reshape(4, 6))
     scalar = Tensor.empty((), device=devices_2, axis=0).realize()
     self.assertEqual(scalar.shape, ())
-    self.assertEqual(scalar.uop.base.buffer.size, 1)
+    self.assertEqual(scalar.uop.base.buffer.nbytes, scalar.dtype.itemsize)
 
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
@@ -706,7 +706,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_from_multibuffer(self):
     buf = UOp.mstack(*(Tensor([i, i+1], device=d).realize().uop for i,d in enumerate((d0, d1)))).buffer
-    u = UOp.from_buffer(buf)
+    u = UOp.from_buffer(buf, dtypes.int32)
     self.assertEqual((u.device, u.shape, u.buffer), (buf.device, (2,), buf))
     self.assertEqual(Tensor(u.unshard(0)).to(Device.DEFAULT).tolist(), [0, 1, 1, 2])
 
@@ -842,7 +842,7 @@ class TestMultiTensor(unittest.TestCase):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
     t.shard_(devices, axis=0).realize()
-    assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.uop.src])
+    assert all([lb is lb.base and lb.realized.base.nbytes == 4 * 16 * lb.dtype.itemsize for lb in t.uop.src])
 
   def test_clone(self):
     for axis in (None, 0):

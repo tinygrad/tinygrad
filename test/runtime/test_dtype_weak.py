@@ -144,7 +144,8 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(weak_val().data().format, strong.fmt)
       self.assertEqual(weak_val().numpy().dtype.itemsize, strong.itemsize)
       self.assertEqual(weak_val().tolist(), [value])
-      self.assertEqual(weak_val().cast(strong).realize().uop.buffer.dtype, strong)
+      typed = weak_val().cast(strong).realize().uop
+      self.assertEqual((typed.dtype, typed.buffer.nbytes), (strong, strong.itemsize))
       self.assertEqual(weak_val().contiguous().dtype, weak)                 # no layout to fix, stays weak
       self.assertEqual(weak_val().realize().dtype, weak)                    # no width to store, stays weak
       self.assertEqual(weak_val().clone().dtype, strong)                    # storage commits at the default

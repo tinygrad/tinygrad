@@ -80,7 +80,8 @@ class USB3:
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
     if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
     checked(libusb.libusb_bulk_transfer, "bulk IN 0x81 failed")(self.handle, 0x81, self._bulk_buf, length, self._transferred, timeout)
-    return self._bulk_mv[:self._transferred.value]
+    if self._transferred.value != length: raise RuntimeError(f"bulk IN short read: {self._transferred.value}/{length} bytes")
+    return self._bulk_mv[:length]
 
   # NOTE: keep it for flash.py
   def send_batch(self, cdbs:list[bytes], odata:list[bytes|None]|None=None):
@@ -228,8 +229,9 @@ def usb_stack(dt:DType, *vals:UOp|int) -> UOp:
 def usb_fail(link:UOp, code:UOp) -> UOp: return link.index(UOp.const(5).valid(link.after(code).index(5).load().eq(0))).store(code.cast(dtypes.uint64))
 def usb_ctrl(link:UOp, rtype:int, req:int, val:UOp|int, idx:UOp|int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp:
   return usb_fail(link, ccall(libusb.libusb_control_transfer, link.index(0).load(), rtype, req, val, idx, data, n, timeout).minimum(0))
-def usb_bulk(link:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=10000) -> UOp: # NULL actual_length
-  return usb_fail(link, ccall(libusb.libusb_bulk_transfer, link.index(0).load(), ep, data, n, UOp.const(0, dtypes.uint64), timeout).minimum(0))
+def usb_bulk(link:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp: # shorter transfer fails
+  rc = ccall(libusb.libusb_bulk_transfer, link.index(0).load(), ep, data, n, (got:=usb_stack(dtypes.int32, 0)).index(0), timeout)
+  return usb_fail(link, rc.minimum(0).minimum(-got.after(rc).index(0).load().ne(n).cast(dtypes.int)))
 
 @uopfunc
 def usb_poke(link:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: a dword
@@ -441,11 +443,11 @@ def _host_block(dev) -> Buffer:
   xfers = [libusb.libusb_alloc_transfer(0).contents for _ in range(2)]
   for t in xfers: t.dev_handle, t.endpoint, t.type, t.timeout = dev.iface.pci_dev.usb.usb.handle, 0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, 10000
   words = [ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())] + [0] + [ctypes.addressof(t) for t in xfers]
-  return Buffer("CPU", HOST_SIZE, dtypes.uint8, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
+  return Buffer("CPU", HOST_SIZE, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
 
 @functools.cache
 def _go(dev) -> Buffer:
-  return Buffer(dev.device, 1, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
+  return Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
 
 def usb_reset(dev):
   for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
@@ -456,6 +458,6 @@ def setup_usb_rules(dev):
   Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)), # placeholders the gpu owns
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_go")), lambda d=dev: _go(d)),
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
-  dev.error_state = _host_block(dev).view(1, dtypes.int64, 40) # the link's error word
+  dev.error_state = _host_block(dev).view(8, 40) # the link's error word
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

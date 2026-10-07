@@ -341,11 +341,11 @@ class QCOMDevice(Compiled):
       (UPat(Ops.ALLOC, tag=self.tag("border_color")), lambda d=self: d.border_color)])
 
   @functools.cached_property
-  def dummy(self) -> Buffer: return Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True) # cache flush target
+  def dummy(self) -> Buffer: return Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), preallocate=True) # cache flush target
 
   @functools.cached_property
   def border_color(self) -> Buffer: # zeros: the samplers clamp to a black border
-    return Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), initial_value=bytes(0x1000))
+    return Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), initial_value=bytes(0x1000))
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> BufferStorage:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
@@ -384,7 +384,7 @@ class QCOMDevice(Compiled):
   def _ensure_stack_size(self, sz:int) -> Buffer: # one stack for the device, grown to the deepest program's private memory
     if self._stack is None or self._stack.nbytes < sz:
       if self._stack is not None: self.synchronize()
-      self._stack = Buffer(self.device, sz, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+      self._stack = Buffer(self.device, sz, options=BufferSpec(nolru=True), preallocate=True)
     return self._stack
 
   def _at_profile_finalize(self):
