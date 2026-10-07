@@ -276,7 +276,7 @@ class TestTinygrad(unittest.TestCase):
   def test_tensor_from_blob(self):
     x = memoryview(bytearray(16)).cast('I')
 
-    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CPU")
+    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device=Device.DEFAULT)
     z = (t+1)
     np.testing.assert_equal(z.numpy(), [1, 1, 1, 1])
 

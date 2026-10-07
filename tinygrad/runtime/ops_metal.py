@@ -171,7 +171,15 @@ class MetalQueue(HWQueue):
 
 class MetalAllocator(Allocator['MetalDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    mtl = metal.MTLBuffer(options.external_ptr) if options.external_ptr else \
+    # external_ptr is a raw host address (see Tensor.from_blob), not an existing MTLBuffer.
+    # Calling metal.MTLBuffer(<int>) built a Spec whose value was that integer, so every later
+    # message send (contents/release/mark_resident) used a bogus pointer and segfaulted.
+    # Wrap the caller's memory zero-copy instead: from_blob promises the tensor aliases the
+    # source, so a copying constructor would be wrong (the source is rewritten between reads).
+    mtl = objc.msg("newBufferWithBytesNoCopy:length:options:deallocator:", metal.MTLBuffer,
+                   [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, objc.id_], retain=True)(
+                     self.dev.sysdevice, ctypes.c_void_p(options.external_ptr), size,
+                     metal.MTLResourceStorageModeShared, None) if options.external_ptr else \
           self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
     if mtl.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     self.dev.mark_resident(mtl, True)
