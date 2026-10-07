@@ -196,6 +196,15 @@ def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("void", "weak", "_"))}
+CDTYPES_MAP = {
+  ctypes.c_bool: dtypes.bool,
+  ctypes.c_int8: dtypes.int8,   ctypes.c_uint8: dtypes.uint8,
+  ctypes.c_int16: dtypes.int16, ctypes.c_uint16: dtypes.uint16,
+  ctypes.c_int32: dtypes.int32, ctypes.c_uint32: dtypes.uint32,
+  ctypes.c_int64: dtypes.int64, ctypes.c_uint64: dtypes.uint64,
+  ctypes.c_float: dtypes.float32,
+  ctypes.c_double: dtypes.float64
+}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
