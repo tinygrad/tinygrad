@@ -545,6 +545,16 @@ class TestVizIntegration(unittest.TestCase):
           if u.op is Ops.INDEX: labels.append(step["graph"][id(u)]["label"])
     for label in labels: self.assertNotIn("UOp(", label)
 
+  def test_estimates(self):
+    with save_viz() as viz:
+      n = Variable("n", 1, 16).bind(7)
+      (Tensor.empty(16, device="NULL")[:n] + 1).realize()
+      (Tensor.empty(16, device="NULL")[:7] + 1).realize()
+    profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
+    for e in profile["layout"]["NULL"]["events"]:
+      for key, count in (("FLOPS", 7), ("B/s mem", 7*4*2), ("B/s lds", 7*4*2)):
+        self.assertEqual(e["fmt"][key], int(count / (e["dur"]*1e-6)))
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
