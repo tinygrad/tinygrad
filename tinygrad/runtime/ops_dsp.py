@@ -36,8 +36,7 @@ class DSPRenderer(ClangRenderer):
     msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{slots[i]+3}].dma.fd,0)+((int*)pra[1].buf.pv)[{slots[i]}];'
              for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    params = [f'buf_{i}' if i in slots else f'sz_or_val_{i}' for i in range(len(bufs))]
-    msrc += [f"{function_name}({', '.join(params)});"]
+    msrc += [f"{function_name}({', '.join(f'buf_{i}' if i in slots else f'sz_or_val_{i}' for i in range(len(bufs)))});"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
     msrc += ["return 0; }"]
