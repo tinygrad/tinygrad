@@ -1296,8 +1296,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    params = [u for u in self.src[1].src if u.op is Ops.PARAM]
-    sig = tuple(params)
+    sig = tuple(u for u in self.src[1].src if u.op is Ops.PARAM)
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
   @property
