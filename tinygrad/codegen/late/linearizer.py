@@ -59,10 +59,10 @@ class CFGContext:
     # everything is nested inside the sink
     deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
-    for u in sink.toposort():
+    for u in sink.toposort(enter_calls=False):
       # get the deps from the src
       deps[u] = {}
-      for s in u.src: deps[u] |= deps[s]
+      for s in u.src_without_body: deps[u] |= deps[s]
 
       if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
