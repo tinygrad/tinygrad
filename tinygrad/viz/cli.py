@@ -18,7 +18,8 @@ def decode_profile(data:bytes) -> dict:
     off += struct.calcsize(fmt)
     return vals
   total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values()
+  index = json.loads(ret[off:off+index_len])
+  strings, markers = index["strings"], index["markers"]
   off += index_len
   layout:dict[str, dict] = {}
   # 0 means None, otherwise it's an enum value
@@ -42,7 +43,7 @@ def decode_profile(data:bytes) -> dict:
           v["events"].append({"event":"freq", "ts":ts, "value":value})
         else:
           alloc, ts, key = u("<BII")
-          if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+          if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"nbytes":u("<Q")[0]}})
           else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[(k, strings[rep], num, mode) \
               for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}

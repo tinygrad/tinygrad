@@ -102,7 +102,7 @@ def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
 
 def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
-  nodes = [u for u in root.toposort() if not _inline(u)]
+  nodes = [u for u in root.toposort(enter_calls=True) if not _inline(u)]
   refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
   lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", line) if s] for line in render_uir(root).split("\n")]
   for u,line in zip(nodes, lines):
@@ -110,11 +110,11 @@ def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
       line.append({"st":f" # {fmt_colored(data.ctxs[ref]['name'])}"})
   return [t for i,line in enumerate(lines) for t in ([{"st":"\n"}] if i else [])+line]
 
-def uop_to_json(data:VizData, x:UOp, enter_calls:bool=False) -> dict[int, dict]:
+def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
-  for u in (toposort:=x.toposort(enter_calls=enter_calls)):
+  for u in (toposort:=x.toposort(enter_calls=True)):
     # always exclude CONST
     if u.op is Ops.CONST and u is not x: excluded.add(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
@@ -174,8 +174,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
-  yield {"graph":uop_to_json(data, next_sink, ctx.enter_calls), "uop":tokenize_uir(data, next_sink),
-         "change":None, "diff":None, "upat":None, "_sink":next_sink}
+  yield {"graph":uop_to_json(data, next_sink), "uop":tokenize_uir(data, next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
@@ -183,10 +182,10 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink, ctx.enter_calls)), "uop":tokenize_uir(data, new_sink),
-           "change":[id(x) for x in u1.toposort(enter_calls=ctx.enter_calls) if id(x) in sink_json],
-           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
-           "upat":(upat_loc, match_repr), "_sink":new_sink}
+    diff = difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink), "upat":(upat_loc, match_repr), "_sink":new_sink,
+           "change":[id(x) for x in u1.toposort(enter_calls=True) if id(x) in sink_json],
+           "diff":[ansistrip(x) for x in diff if not x.startswith(("---","+++","@@"))]}
     if not ctx.bottom_up: next_sink = new_sink
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
@@ -259,7 +258,7 @@ def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict)
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
   return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
-def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
+def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int],
                  scache:dict[str, int]) -> tuple[str, bytes|None]:
   if k.startswith("LINE:"):
     xy = [(rel_ts(e.ts, start_ts, f"line '{k}' on {e.device}"), e.key) for st,_,_,e in dev_events if isinstance(e, ProfilePointEvent)]
@@ -272,10 +271,9 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      events.append(struct.pack("<BIIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
-      dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
-      temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
+      nbytes = min(1_000_000_000_000, e.arg["nbytes"])
+      events.append(struct.pack("<BIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, nbytes))
+      temp[e.key] = nbytes
       mem += nbytes
       if mem > peak: peak = mem
     if e.name == "exec" and e.arg["bufs"]:
@@ -490,15 +488,14 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
-  dtype_size:dict[str, int] = {}
   with soft_err():
     for k,v in dev_events.items():
       v.sort(key=lambda e:e[0])
       layout[k] = timeline_layout(data, v, start_ts, scache)
-      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
+      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size,
+  index = json.dumps({"strings":list(scache),
                       "markers":[{"ts":rel_ts(e.ts, start_ts, f"marker '{e.arg.get('name','?')}'"), **e.arg} for e in markers],
                       **ext_data}).encode()
   return struct.pack("<IQII", rel_ts(unwrap(end_ts), start_ts, "end_ts"), max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)

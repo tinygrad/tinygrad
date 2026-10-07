@@ -28,7 +28,7 @@ class BNXTIface(PCIIfaceBase):
     mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
     return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
   def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
-    return Buffer(self.dev.device, mem.nbytes, dtypes.uint8, opaque=self.storage(mem, paddrs, snooped))
+    return Buffer(self.dev.device, mem.nbytes, opaque=self.storage(mem, paddrs, snooped))
 
   @functools.cached_property
   def doorbell(self) -> Buffer:
@@ -80,7 +80,7 @@ def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
   qps = {nic.device: BNXTQP(nic.iface.dev_impl) for nic in nics}
   for nic, q in zip(nics, qps.values()):
     bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
-    bufs |= {name: Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
+    bufs |= {name: Buffer(nic.device, 8, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
     Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=to_name("rdma", *pair, n)), lambda b=b: b) for n, b in bufs.items()])
   for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
   return qps

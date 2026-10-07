@@ -47,7 +47,7 @@ def _render_arg(x:UOp) -> str:
       if a.volatile: opts += " volatile=true"
       name = f'"{a.name}" ' if a.name is not None else ""
       return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
-    case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
+    case Ops.RANGE: return f"{x.arg[0].name} {' '.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK 1 2
     case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
     case Ops.CALL if isinstance(a:=x.arg, CallInfo):
       call_opts = [f"name={a.name!r}"] if a.name is not None else []
@@ -63,16 +63,15 @@ def _render_arg(x:UOp) -> str:
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
 def render_uir(root:UOp|list[UOp]) -> str:
-  nodes = [u for u in (list(root.toposort()) if isinstance(root, UOp) else list(root)) if not _inline(u)]
+  nodes = [u for u in (list(root.toposort(enter_calls=True)) if isinstance(root, UOp) else list(root)) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
-  def srcs(u:UOp) -> tuple[UOp, ...]: return u.src_without_body if u.op is Ops.CALL and (not u.src or u.src[0] not in table) else u.src
   def src_str(u:UOp) -> str:
     if not _inline(u): return f"%{table[u]}"
-    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in srcs(u)) + ")"
+    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
   lines = []
   for i,u in enumerate(nodes):
     line = f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}"
-    if len(ss:=srcs(u)): line += " " + ", ".join(src_str(s) for s in ss)
+    if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
     if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
     lines.append(line)
   return "\n".join(lines)

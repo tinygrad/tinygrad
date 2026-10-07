@@ -181,7 +181,7 @@ class TestTensorVariable(unittest.TestCase):
     # with self.assertRaises(AssertionError): t = Tensor.empty(3, v)
     vb = v.bind(3)
     t = Tensor.empty(3, vb).realize()
-    assert t.uop.base.buffer.size == 30
+    assert t.uop.base.buffer.nbytes == 30 * t.dtype.itemsize
     assert t.uop.shape == (3, vb)
 
   def test_symbolic_chunk(self):

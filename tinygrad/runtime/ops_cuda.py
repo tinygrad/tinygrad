@@ -20,7 +20,7 @@ def check(status:int):
 def as_int(handle) -> int: return unwrap(ctypes.cast(handle, ctypes.c_void_p).value)
 
 def host_stamp(slot:int): ctypes.c_uint64.from_address(slot).value = time.perf_counter_ns()
-def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, opaque=BufferStorage(ptr, meta))
+def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.value, 8, opaque=BufferStorage(ptr, meta))
 
 # *****************
 # queue
@@ -76,9 +76,7 @@ class CUDAAllocator(Allocator['CUDADevice']):
     check((cuda.cuMemFreeHost if options.host or options.cpu_access else cuda.cuMemFree_v2)(storage.buf))
 
   def _map(self, buf:Buffer) -> BufferStorage:
-    if buf.device.startswith("CUDA"):
-      if buf.get_storage().host is None: raise RuntimeError(f"{buf.device} device memory is only reachable through the host")
-      return BufferStorage(buf._buf)
+    if buf.device.startswith("CUDA"): return BufferStorage(buf._buf)
     if (host:=buf.get_storage().host) is None or host.addr % mmap.PAGESIZE: raise RuntimeError(f"{buf.device} memory is not page aligned host memory")
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if (status:=cuda.cuMemHostRegister_v2(host.addr, buf.nbytes, 0)) != cuda.CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:
@@ -109,7 +107,7 @@ class CUDADevice(Compiled):
 
   @functools.cached_property
   def handles(self) -> Buffer:
-    return Buffer(HCQ_RUNTIME_DEV.value, 4, dtypes.uint64, initial_value=struct.pack("4Q", *[as_int(h) for h in (self.context, *self.streams)], 0))
+    return Buffer(HCQ_RUNTIME_DEV.value, 32, initial_value=struct.pack("4Q", *[as_int(h) for h in (self.context, *self.streams)], 0))
 
   @functools.cached_property
   def stamp(self) -> Buffer: return extern(as_int(fn:=cuda.CUhostFn(host_stamp)), fn)

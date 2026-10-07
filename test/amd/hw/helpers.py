@@ -106,10 +106,10 @@ def run_rdna4(instructions: list, out_reg: int = 2) -> list[int]:
 
   dev = Device['AMD']
   if not dev.renderer.target.arch.startswith('gfx12'): raise unittest.SkipTest('requires RDNA4 hardware')
-  out_gpu = Buffer(dev.device, WAVE_SIZE, dtypes.uint32).ensure_allocated()
+  out_gpu = Buffer(dev.device, WAVE_SIZE * 4).ensure_allocated()
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (WAVE_SIZE,)), UOp.special(WAVE_SIZE, 'lidx0'), arg=KernelInfo('test'))
   prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in instructions))))
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu)),)), wait=True)
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   hw = list(out_gpu.as_memoryview().cast('I'))
   if emu != hw:
     diffs = [f"lane {i}: emu=0x{e:08x} hw=0x{h:08x}" for i, (e, h) in enumerate(zip(emu, hw)) if e != h]
@@ -213,7 +213,6 @@ def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   from tinygrad.device import Device, TinyELF, Buffer
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
   from tinygrad.helpers import Target
-  from tinygrad.dtype import dtypes
 
   dev = Device["AMD"]
   compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
@@ -266,7 +265,7 @@ amdhsa.kernels:
   prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
 
   buf_sz = _out_bytes(n_lanes)
-  out_gpu = Buffer(dev.device, buf_sz, dtypes.uint8, preallocate=True)
+  out_gpu = Buffer(dev.device, buf_sz, preallocate=True)
   assert out_gpu._buf % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu._buf:x}"
   prg(out_gpu._buf, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
 
