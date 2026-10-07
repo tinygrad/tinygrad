@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv, flatten
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
 from tinygrad.device import Buffer, BufferSpec, Compiled
-from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV, HCQ_DEVS, CDTYPE, ccall, patch, unwrap_view, all_devices_in, to_name
+from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV, HCQ_DEVS, CDTYPE, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -317,10 +317,11 @@ def usb_reap(link:UOp, xfer:UOp) -> UOp: # poll while pending (0xff), any other 
 
 @uopfunc
 def usb_drain(link:UOp, fence:UOp, need:UOp) -> UOp: # fence == need - 1 or need, mod 256
-  loop, slot = UOp.range(UOp(Ops.NOOP).after(link), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.uint32, 0)
+  loop, slot = UOp.range(UOp(Ops.NOOP).after(link, start:=get_time_ms(link)), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.uint32, 0)
   read = usb_ctrl(link.after(loop), 0xC0, 0xE4, fence, 0, slot.index(0), 1)
-  lag = (need - slot.after(read).index(0).load().cast(dtypes.uint64)) & 0xff
-  return read.backedge(loop, link.after(read).index(5).load().eq(0) & (lag > 1)).sink()
+  def behind(dep:UOp) -> UOp: return ((need - slot.after(dep).index(0).load().cast(dtypes.uint64)) & 0xff) > 1
+  done = read.backedge(loop, link.after(read).index(5).load().eq(0) & behind(read) & (get_time_ms(read) - start < 1000))
+  return usb_fail(link.after(done), behind(done).cast(dtypes.int) * libusb.LIBUSB_ERROR_TIMEOUT).sink()
 
 @uopfunc
 def usb_begin(link:UOp, fence:UOp, prev:UOp) -> UOp: # previous batch drained, count restarts
