@@ -39,7 +39,7 @@ class TestAllreduceCast(unittest.TestCase):
     with Context(ALLREDUCE_CAST=allreduce_cast, RING=0, SCACHE=0):
       t = Tensor.empty(4, 4, dtype=dtype).shard(ds, axis=0)
       linear = t.sum(0).linear_with_vars()[0]
-      return {si.src[1].buffer.dtype for si in linear.src if si.src[0].op is Ops.STORE}
+      return {si.src[1].dtype for si in linear.src if si.src[0].op is Ops.STORE}
 
   def test_allreduce_cast_bf16(self):
     # with ALLREDUCE_CAST, allreduce copies stay in bfloat16 instead of promoting to float32

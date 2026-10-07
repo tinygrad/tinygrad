@@ -92,7 +92,7 @@ rt = get_runtime(Device.DEFAULT, ps)
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.PARAM]), key=lambda u: u.arg)
 # print(len(gs))
 # print([g.dtype for g in gs])
-bufs = [Buffer(ps.arg.device, g.max_numel(), g.dtype).ensure_allocated() for g in gs]
+bufs = [Buffer(ps.arg.device, g.max_numel() * g.dtype.itemsize).ensure_allocated() for g in gs]
 
 gsize, lsize = ps.arg.launch_dims({})
 t = rt(*[b._buf for b in bufs], global_size=gsize, local_size=lsize, vals=ps.arg.vals({}), wait=True)

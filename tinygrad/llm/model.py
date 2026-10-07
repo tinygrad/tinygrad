@@ -433,10 +433,12 @@ class Transformer:
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     shard_map:dict[str, int] = {}
     if shard > 1:
-      assert not kv.get(f"{arch}.attention.kv_lora_rank"), "tensor parallel doesn't support MLA attention"
-      assert n_kv_heads % shard == 0, f"tensor parallel needs the kv heads to split over {shard} devices"
+      heads = n_heads if kv.get(f'{arch}.attention.kv_lora_rank') else n_kv_heads
+      assert heads % shard == 0, f"tensor parallel needs the attention heads to split over {shard} devices"
+      # shard MLA heads and routed experts while replicating latent projections, KV cache and shared experts
       rules = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'ffn_gate.weight',
-        'ffn_up.weight')}, **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight')}}
+        'ffn_up.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
+        **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')}, 'ffn_down_exps.weight':2}
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     state_dict = gguf_shard(entries, devices, shard_map)

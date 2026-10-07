@@ -257,7 +257,7 @@ def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict)
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
   return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
-def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
+def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int],
                  scache:dict[str, int]) -> tuple[str, bytes|None]:
   if k.startswith("LINE:"):
     xy = [(rel_ts(e.ts, start_ts, f"line '{k}' on {e.device}"), e.key) for st,_,_,e in dev_events if isinstance(e, ProfilePointEvent)]
@@ -270,10 +270,9 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      events.append(struct.pack("<BIIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
-      dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
-      temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
+      nbytes = min(1_000_000_000_000, e.arg["nbytes"])
+      events.append(struct.pack("<BIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, nbytes))
+      temp[e.key] = nbytes
       mem += nbytes
       if mem > peak: peak = mem
     if e.name == "exec" and e.arg["bufs"]:
@@ -488,15 +487,14 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
-  dtype_size:dict[str, int] = {}
   with soft_err():
     for k,v in dev_events.items():
       v.sort(key=lambda e:e[0])
       layout[k] = timeline_layout(data, v, start_ts, scache)
-      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
+      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size,
+  index = json.dumps({"strings":list(scache),
                       "markers":[{"ts":rel_ts(e.ts, start_ts, f"marker '{e.arg.get('name','?')}'"), **e.arg} for e in markers],
                       **ext_data}).encode()
   return struct.pack("<IQII", rel_ts(unwrap(end_ts), start_ts, "end_ts"), max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)

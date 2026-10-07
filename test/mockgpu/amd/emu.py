@@ -243,7 +243,7 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
   word_addr = addr >> UOp.const(2, adt)
   idx = mem.index(word_addr.valid(active))
-  if data_bits == 32: return [idx.store(active.where(_to_u32(val), idx))]
+  if data_bits == 32: return _mem_store_bytes(mem.bitcast(dtypes.uint8), addr, val, active)
   # Sub-word store: read-modify-write with mask
   byte_pos = addr.cast(dtypes.uint32) & _c(3)
   byte_shift = byte_pos * _c(8)
@@ -362,9 +362,8 @@ class _Ctx:
 
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
-    addr = UOp.const(self.inst_addr, dtypes.uint64) if self.inst_addr is not None else self.rpc()
-    if dword_idx != 0: addr = addr + UOp.const(dword_idx * 4, dtypes.uint64)
-    return self.vmem.index(addr >> UOp.const(2, dtypes.uint64)).load()
+    addr = self.inst_addr if self.inst_addr is not None else self.rpc()
+    return self.vmem.index((addr >> 2) + dword_idx).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -1884,11 +1883,11 @@ class WaveState:
   def __init__(self, n_lanes: int, wave_size: int = 32):
     self.n_lanes, self.wave_size = n_lanes, wave_size
     vgpr_size = 256 * wave_size
-    self.vgpr_buf = Buffer('CPU', vgpr_size, dtypes.uint32).ensure_allocated()
-    self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
+    self.vgpr_buf = Buffer('CPU', vgpr_size * 4).ensure_allocated()
+    self.sgpr_buf = Buffer('CPU', SGPR_COUNT * 4).ensure_allocated()
     # CDNA (wave64) has separate ACCVGPR file; RDNA shares with VGPR
     if wave_size == 64:
-      self.accvgpr_buf = Buffer('CPU', vgpr_size, dtypes.uint32).ensure_allocated()
+      self.accvgpr_buf = Buffer('CPU', vgpr_size * 4).ensure_allocated()
       ctypes.memset(self.accvgpr_buf._buf, 0, vgpr_size * 4)
     else:
       self.accvgpr_buf = self.vgpr_buf
@@ -1979,11 +1978,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   wave_size = _wave_size(arch)
 
   # Use Buffer objects with external_ptr=0 for vmem
-  vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
-  lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
+  vmem_buf = Buffer('CPU', 1 << 42, options=BufferSpec(external_ptr=0)).ensure_allocated()
+  lds_buf = Buffer('CPU', max(lds_size // 4, 1) * 4).ensure_allocated()
   # Scratch is per-lane private memory: each wave needs its own region so data spilled before s_barrier survives other waves' execution.
   n_waves = -(-total_threads // wave_size)
-  scratch_buf = Buffer('CPU', scratch_size * wave_size * n_waves, dtypes.uint8).ensure_allocated() if scratch_size else None
+  scratch_buf = Buffer('CPU', scratch_size * wave_size * n_waves).ensure_allocated() if scratch_size else None
 
   # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
   if PROFILE:

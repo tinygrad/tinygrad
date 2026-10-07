@@ -302,6 +302,20 @@ class TestAsmKernel(unittest.TestCase):
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
 
+  def test_store_offset2(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def store_kernel(out:UOp):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        v_mov_b32_e32(v[0], 2), v_mov_b32_e32(v[1], 0x12345678),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
+      ]
+      sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("unaligned_global_store"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor.full((8,), 0xA5, dtype=dtypes.uint8).contiguous().realize()
+    out = out.custom_kernel(fxn=store_kernel)[0]
+    self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
+
   def test_plus_tensor(self):
     out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
     self.assertListEqual(out.tolist(), [5, 7, 9])

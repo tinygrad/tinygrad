@@ -6,7 +6,7 @@ from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCount
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, KernelParam
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, _to_np_dtype
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -176,7 +176,11 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer))
   for args, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = dict(zip(slots := [i for i,_ in get_call_args(call)][:len(args)//2], args)), dict(zip(slots, args[len(slots):]))
-    for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+    for i in prg.arg.outs:
+      dt = _to_np_dtype(call.src[1+i].dtype)
+      assert dt is not None, f"no np dtype for {call.src[1+i].dtype}"
+      np.testing.assert_allclose(np.frombuffer(dev_bufs[i].ensure_allocated().as_memoryview(), dt),
+                                 np.frombuffer(bufs[i].as_memoryview(), dt), rtol=1e-3, atol=1e-3)
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:

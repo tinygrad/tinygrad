@@ -16,6 +16,8 @@ def ldt(dt:DType, count=1, ptr=False):
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", **{d: "i8" for d in dtypes.fp8s},
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
+def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.op is Ops.INDEX) # an external function's arg, an index is its address
+
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
@@ -143,7 +145,9 @@ base_rewrite = PatternMatcher([
 
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
 
-  # call a function by the name of its body, the args in param order
+  # calls
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
+   f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
    ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
@@ -215,7 +219,10 @@ class CPULLVMRenderer(LLVMRenderer):
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in UOp.sink(*uops).toposort() if b.op is Ops.LINEAR)}
     defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
     return "\n".join((k:=self._render_kernel(uops, fns=fns))[0] + (k[1], *defs, self._render_footer(uops)))
-  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def _render_footer(self, uops: list[UOp]) -> str:
+    decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
+             for x in UOp.sink(*uops).toposort() if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+    return "\n".join([*decls.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
