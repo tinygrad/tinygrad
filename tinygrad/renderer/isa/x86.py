@@ -317,8 +317,6 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # Stack pointer definition has to be placed at top of program
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=x.src + (stack_pointer,)) if not len(x.src) or rdef(x.src[-1]) is not RSP else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
@@ -475,16 +473,17 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
   # register allocations dont live on stack
   if x.addrspace is AddrSpace.REG: return None
-  nx = UOp(Ops.INS, fold_address(stack_pointer.index(imm(dtypes.uint32, ctx.stack_size))), (X86Ops.LEA, x.dtype), x.tag)
+  sp = stack_pointer.replace(op=Ops.BUFFER)
+  nx = UOp(Ops.INS, fold_address(sp.index(imm(dtypes.uint32, ctx.stack_size))), (X86Ops.LEA, x.dtype), x.tag)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
-  return nx, [nx]
+  return nx, [sp, nx]
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), alloc_buffer),
   (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
-# ***** post register allocation *****
+# ***** post rgister allocation *****
 # TODO: control flow should be overhauled so that this isn't necessary
 def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.axis_id)
