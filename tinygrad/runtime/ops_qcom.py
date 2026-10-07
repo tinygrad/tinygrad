@@ -149,7 +149,8 @@ class QCOMComputeQueue(HWQueue):
              cast_int(global_size[0], ceil=True), cast_int(global_size[1], ceil=True), cast_int(global_size[2], ceil=True))
 
     self.reg(mesa.REG_A6XX_SP_CS_CNTL_0,
-             qreg.a6xx_sp_cs_cntl_0(threadsize=mesa.THREAD64, halfregfootprint=data.hregs, fullregfootprint=data.fregs, branchstack=data.brnchstck),
+             qreg.a6xx_sp_cs_cntl_0(threadsize=mesa.THREAD64, halfregfootprint=data.hregs, fullregfootprint=data.fregs, branchstack=data.brnchstck,
+                                    mergedregs=getattr(data, "mergedregs", False)),
              qreg.a6xx_sp_cs_cntl_1(constantrammode=mesa.CONSTLEN_256, shared_size=data.shared_size), # should this be CONSTLEN_512?
              0, data.prg_offset, lib_addr,
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=data.pvtmem_size_per_item), stack_addr,
@@ -228,7 +229,7 @@ class QCOMProgramData:
                        qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0] * self.samp_cnt
 
       self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
-      self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
+      self.fregs, self.hregs, self.mergedregs = v.info.max_reg + 1, v.info.max_half_reg + 1, bool(v.mergedregs)
     else: self._parse_lib(obj.lib)
 
     self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9

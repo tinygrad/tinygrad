@@ -114,7 +114,8 @@ class IR3Compiler(Compiler):
     mesa.ir3_finalize_nir(self.cc, mesa.struct_ir3_shader_nir_options(), nir_shader)
     shader = rzalloc(mesa.struct_ir3_shader, compiler=ctypes.pointer(self.cc), type=mesa.MESA_SHADER_COMPUTE, nir=nir_shader).contents
     mesa.ir3_nir_post_finalize(shader)
-    v = rzalloc(mesa.struct_ir3_shader_variant, type=shader.type, compiler=ctypes.pointer(self.cc), key=mesa.struct_ir3_shader_key()).contents
+    v = rzalloc(mesa.struct_ir3_shader_variant, type=shader.type, compiler=ctypes.pointer(self.cc), key=mesa.struct_ir3_shader_key(),
+                mergedregs=self.cc.mergedregs).contents
     v.const_state, shader.variants, shader.variant_count = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v)), ctypes.pointer(v), 1
     v.num_uavs = (info:=nir_shader.contents.info).num_ssbos + info.num_images
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
