@@ -100,6 +100,10 @@ class CUDADevice(Compiled):
     self.cu_device = init_c_var(cuda.CUdevice, lambda x: check(cuda.cuDeviceGet(ctypes.byref(x), device_id)))
     self.context = init_c_var(cuda.CUcontext, lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major:=ctypes.c_int()), ctypes.byref(minor:=ctypes.c_int()), device_id))
+    # HCQ2 sync needs 64-bit stream memory ops, pre-Volta GPUs don't have them: fail fast instead of hanging silently (see #18669)
+    if not init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetAttribute(ctypes.byref(x),
+        cuda.CU_DEVICE_ATTRIBUTE_CAN_USE_64_BIT_STREAM_MEM_OPS, self.cu_device))).value:
+      raise RuntimeError(f"CUDA:{device_id} is sm_{major.value}{minor.value}, 64-bit stream memory ops required since \"cuda to hcq2\" (#18243)")
     self.streams = [init_c_var(cuda.CUstream, lambda x: check(cuda.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
     super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], None, arch=f"sm_{major.value}{minor.value}")
     Compiled.pm_bufferize += PatternMatcher([
