@@ -627,7 +627,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     ret:dict = {}
-    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort(enter_calls=True))[:-1])
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort())[:-1])
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
