@@ -1883,11 +1883,11 @@ class WaveState:
   def __init__(self, n_lanes: int, wave_size: int = 32):
     self.n_lanes, self.wave_size = n_lanes, wave_size
     vgpr_size = 256 * wave_size
-    self.vgpr_buf = Buffer('CPU', vgpr_size, dtypes.uint32).ensure_allocated()
-    self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
+    self.vgpr_buf = Buffer('CPU', vgpr_size * 4).ensure_allocated()
+    self.sgpr_buf = Buffer('CPU', SGPR_COUNT * 4).ensure_allocated()
     # CDNA (wave64) has separate ACCVGPR file; RDNA shares with VGPR
     if wave_size == 64:
-      self.accvgpr_buf = Buffer('CPU', vgpr_size, dtypes.uint32).ensure_allocated()
+      self.accvgpr_buf = Buffer('CPU', vgpr_size * 4).ensure_allocated()
       ctypes.memset(self.accvgpr_buf._buf, 0, vgpr_size * 4)
     else:
       self.accvgpr_buf = self.vgpr_buf
@@ -1978,11 +1978,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   wave_size = _wave_size(arch)
 
   # Use Buffer objects with external_ptr=0 for vmem
-  vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
-  lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
+  vmem_buf = Buffer('CPU', 1 << 42, options=BufferSpec(external_ptr=0)).ensure_allocated()
+  lds_buf = Buffer('CPU', max(lds_size // 4, 1) * 4).ensure_allocated()
   # Scratch is per-lane private memory: each wave needs its own region so data spilled before s_barrier survives other waves' execution.
   n_waves = -(-total_threads // wave_size)
-  scratch_buf = Buffer('CPU', scratch_size * wave_size * n_waves, dtypes.uint8).ensure_allocated() if scratch_size else None
+  scratch_buf = Buffer('CPU', scratch_size * wave_size * n_waves).ensure_allocated() if scratch_size else None
 
   # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
   if PROFILE:

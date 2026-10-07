@@ -140,7 +140,7 @@ class TestWaitLoop(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT in ("CPU", "AMD", "NV"), "need proper uncached=True handling")
 class TestVolatileLoops(unittest.TestCase):
   def test_async_wait_ext(self):
-    sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+    sig_buf = Buffer(Device.DEFAULT, 4, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     try: sig_view = sig_buf.host.view(fmt='i')
     except (AssertionError, NotImplementedError): self.skipTest(f"{Device.DEFAULT} does not support host-visible buffers")
     sig_view[0] = 0
@@ -151,7 +151,7 @@ class TestVolatileLoops(unittest.TestCase):
 
     sync = threading.Thread(target=set_signal, daemon=True)
     sync.start()
-    run_linear(UOp(Ops.LINEAR, src=(wait_ext_kernel().call(UOp.from_buffer(sig_buf)),)), wait=True)
+    run_linear(UOp(Ops.LINEAR, src=(wait_ext_kernel().call(UOp.from_buffer(sig_buf, dtypes.int32)),)), wait=True)
     sync.join(timeout=3)
 
 
