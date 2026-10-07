@@ -1622,6 +1622,15 @@ tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
 
+# find the unittest frame we're capturing in
+PROCESS_REPLAY_LOC = ContextVar("PROCESS_REPLAY_LOC", "")
+def get_process_replay_loc() -> str:
+  if PROCESS_REPLAY_LOC.value: return PROCESS_REPLAY_LOC.value
+  frm = sys._getframe(1)
+  while (f_back:=frm.f_back) is not None and f_back.f_globals.get("__name__", "").split(".")[0] not in ("unittest", "_pytest"):
+    frm = f_back
+  return f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+
 if CAPTURE_PROCESS_REPLAY:
   replay_capture: list[bytes] = []
   import atexit, uuid
@@ -1670,14 +1679,9 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
           tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
           e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
       if CAPTURE_PROCESS_REPLAY and replay:
-        # find the unittest frame we're capturing in
-        frm = sys._getframe(1)
-        while (f_back:=frm.f_back) is not None and f_back.f_globals.get("__name__", "").split(".")[0] not in ("unittest", "_pytest"):
-          frm = f_back
-        replay_loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
-        inputs = (fn, args, kwargs, ContextVar._cache)
-        replay_capture.append(pickle.dumps(inputs+(replay_loc, ret)))
+        with Context(PROCESS_REPLAY_LOC=get_process_replay_loc()):
+          replay_capture.append(pickle.dumps((fn, args, kwargs, ContextVar._cache, ret)))
       return ret
     return __wrapper
   return _decorator
