@@ -188,6 +188,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
+  for d in info.device:
+    if (err:=Device[d].error_state.host.view(fmt='q')[0]): raise RuntimeError(f"{d} failed with {err}")
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
