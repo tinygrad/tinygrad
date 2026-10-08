@@ -194,7 +194,7 @@ class TestViz(unittest.TestCase):
     x = UOp.param(0, dtypes.float, (16, 16))
     for _ in range(2_000): x = x * x
     i = UOp.variable("i", 0, 14)
-    u = x.index(i+1, 2)
+    u = x[i+1, 2]
     self.assertIn("\n[i+1][2]", uop_to_json(VizData(), u)[id(u)]["label"])
 
   def test_colored_label_multiline(self):
