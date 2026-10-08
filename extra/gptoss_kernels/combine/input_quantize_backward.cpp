@@ -23,7 +23,7 @@ extern "C" __global__ __launch_bounds__(256) void gptoss_combine_input_quantize_
       continue;
     }
     const int token = group * TOKENS + src / 4;
-    const float weight = (float)(__hip_bfloat16)weights[token * 4 + src % 4];
+    const float weight = weights[token * 4 + src % 4];
     const uint4v input = *reinterpret_cast<const uint4v*>(&dout[(long long)token * 2880 + d]);
     uint4v output;
     float2 values[4];
@@ -32,11 +32,7 @@ extern "C" __global__ __launch_bounds__(256) void gptoss_combine_input_quantize_
     for (int i = 0; i < 4; i++) {
       const unsigned bits = input[i];
       const float2 dy = make_float2(__builtin_bit_cast(float, bits << 16), __builtin_bit_cast(float, bits & 0xffff0000u));
-      // Match the BF16 multiply and the stock scatter's positive-zero accumulation before quantizing.
-      const float2 product = __bfloat1622float2(__float22bfloat162_rn(make_float2(dy.x * weight, dy.y * weight)));
-      float2 value = make_float2(0.0f + product.x, 0.0f + product.y);
-      value.x = value.x == 0.0f ? 0.0f : value.x;
-      value.y = value.y == 0.0f ? 0.0f : value.y;
+      const float2 value = __bfloat1622float2(__float22bfloat162_rn(make_float2(dy.x * weight, dy.y * weight)));
       values[i] = value;
       const __hip_bfloat162 rounded_pair = __float22bfloat162_rn(value);
       output[i] = (unsigned)__bfloat16_as_ushort(rounded_pair.x) | ((unsigned)__bfloat16_as_ushort(rounded_pair.y) << 16);
