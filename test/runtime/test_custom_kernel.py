@@ -1,5 +1,5 @@
 import unittest, functools
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 import numpy as np
@@ -239,6 +239,13 @@ class TestCustomKernel(unittest.TestCase):
     linear, var_vals = out.linear_with_vars()
     run_linear(linear, {**var_vals, "k": 10})
     self.assertEqual(out.tolist(), [16, 17, 18, 19])
+
+  def test_scalar_arg_jit(self):
+    # the scalar changes every call, a replay must not keep the value it was captured with
+    kernel = functools.partial(custom_add_var_kernel, n_slot=0)
+    jf = TinyJit(lambda B, n: Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), B, fxn=kernel)[1].contiguous().realize())
+    B, n = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
+    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
