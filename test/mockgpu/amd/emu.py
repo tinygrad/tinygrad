@@ -331,7 +331,7 @@ class _Ctx:
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
 
-  def __init__(self, inst_size: int, wave_size: int = 32, inst_addr: int | None = None):
+  def __init__(self, inst_size: int, wave_size: int = 32, inst_addr: UOp | None = None):
     self.inst_size, self._axis_id, self.wave_size, self.inst_addr = inst_size, 0, wave_size, inst_addr
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
     if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
@@ -2012,7 +2012,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
     if lifted is not None:
       prg, runtime = lifted
-      for st, c_bufs in waves: runtime(*[c_bufs[g].value for g in prg.arg.globals])
+      for st, c_bufs in waves: runtime(*[c_bufs[g].value for g in prg.arg.globals], vals=(lib,))
       return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):
