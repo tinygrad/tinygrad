@@ -22,7 +22,7 @@ def dump_pickle(obj, path):
       if not isinstance(b, Buffer) or b.device != Device.DEFAULT: return None
       offset += buffers.write(bytes((-offset) % 256))
       offset = (off:=offset) + buffers.write(b.as_memoryview())
-      return b.size, b.dtype, off
+      return b.nbytes, off
 
     p = pickle.Pickler(opcodes)
     p.persistent_id = persistent_id
