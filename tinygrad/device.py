@@ -383,7 +383,6 @@ class Compiled:
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
-    self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
 
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
@@ -428,7 +427,6 @@ class Compiled:
     if err[0]: raise RuntimeError(f"{self.device} failed with {err[0]}")
 
   def synchronize(self, timeout:int|None=None):
-    for d in [*self.pending]: d._wait_signal(d.timeline.host.view(fmt='Q'), self.pending.pop(d), timeout) # a failed peer raises its own error, once
     try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
