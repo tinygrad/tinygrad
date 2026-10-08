@@ -36,6 +36,11 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
   cfg = get_cfg(insts)["data"]
+  # initialize workgroups and waves
+  wave_size, total_threads = _wave_size(arch), lx*ly*lz
+  n_waves = (total_threads+wave_size-1)//wave_size
+  wg = UOp.range(gx*gy*gz, 0)
+  wave = UOp.range(n_waves, 1)
   # construct CALL graph
   lib_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   inst_addr = UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU)
@@ -66,7 +71,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       if loop_path is COND_NOT_TAKEN: branch_cond = branch_cond.logical_not()
       backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
       afters = {b:arg.after(backedge) for b,arg in afters.items()}
-  sink = UOp.sink(*afters.values(), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
+  sink = UOp.sink(UOp.sink(*afters.values()).end(wave).end(wg), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device[backend].renderer)
