@@ -1084,6 +1084,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def vmax(self) -> PyConst: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> tuple[PyConst, PyConst]:
+    lo, hi = self._unclamped_min_max()
+    # fixed width ints wrap
+    if self.dtype in dtypes.ints and (lo < self.dtype.min or self.dtype.max < hi): return self.dtype.min, self.dtype.max
+    return lo, hi
+  def _unclamped_min_max(self) -> tuple[PyConst, PyConst]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
