@@ -219,11 +219,10 @@ class CStyleLanguage(Renderer):
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST, Ops.CUSTOM_FUNCTION}: continue
+      if u.op in {Ops.NOOP, Ops.CONST, Ops.CUSTOM_FUNCTION}: continue
       if u.op == Ops.STACK and len(u.src) == 0: continue
       if u.op is Ops.AFTER:
-        # the AFTER-wrapped NOOP bound of a void RANGE is never rendered
-        if u.src[0].op is Ops.NOOP: continue
+        if u.dtype is dtypes.void: continue
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.SINK:

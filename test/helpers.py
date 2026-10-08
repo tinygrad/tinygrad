@@ -7,7 +7,7 @@ from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
-from tinygrad.dtype import DType, truncate
+from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters
 from tinygrad.renderer import Renderer
@@ -30,6 +30,10 @@ def get_uops(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
 
 def replace_opts(ast:UOp, opts:list) -> UOp: return ast.replace(arg=replace(ast.arg, opts_to_apply=tuple(opts)))
+
+def buffer_uops(ast:UOp, bufs:list[Buffer]) -> list[UOp]:
+  params = {p.arg.slot:p.dtype for p in ast.toposort() if p.op is Ops.PARAM and p.addrspace is not AddrSpace.ALU}
+  return [UOp.from_buffer(b, params[i]) for i, b in enumerate(bufs)]
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -144,7 +148,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   g = UOp.param(0, uop.dtype, 1)
   prg = to_program(UOp.store(g.index(UOp.const(0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = dev.runtime(prg.to_elf())
-  out_buf = Buffer("PYTHON", 1, uop.dtype, preallocate=True)
+  out_buf = Buffer("PYTHON", uop.dtype.itemsize, preallocate=True)
   prog(out_buf._buf, *[b.buf for b in bufs], vals=vals)
   return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]
 

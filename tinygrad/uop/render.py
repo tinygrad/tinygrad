@@ -47,7 +47,7 @@ def _render_arg(x:UOp) -> str:
       if a.volatile: opts += " volatile=true"
       name = f'"{a.name}" ' if a.name is not None else ""
       return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
-    case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
+    case Ops.RANGE: return f"{x.arg[0].name} {' '.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK 1 2
     case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
     case Ops.CALL if isinstance(a:=x.arg, CallInfo):
       call_opts = [f"name={a.name!r}"] if a.name is not None else []

@@ -94,14 +94,11 @@ spec_shared = PatternMatcher([
 
   (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
 
-  # GROUP combines void effects, not values.
-  (UPat(Ops.GROUP, dtypes.void, src=UPat(dtype=dtypes.void)), lambda: True),
-
   # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
   # CONST/CAST/NOOP are range bounds: RANGE(AFTER(CONST, other_range)) orders a loop after a sibling
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS,
-                                                     Ops.CONST, Ops.CAST, Ops.NOOP})),),
+                                                     Ops.CONST, Ops.CAST, Ops.NOOP, Ops.STACK})),),
         allow_any_len=True), lambda: True),
   # an AFTER can wrap a scalar ALU (e.g. a computed RANGE bound) to order it after effect ops
   (UPat(Ops.AFTER, src=(UPat(GroupOp.ALU),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == ()),

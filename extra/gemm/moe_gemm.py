@@ -95,17 +95,21 @@ def custom_grouped_mx_gemm_bw(gradient:UOp, kernel:UOp, w_stored:bool=False) -> 
   bq = Tensor(inputs[2], device=inputs[2].device)
   ae8 = Tensor(inputs[5], device=inputs[5].device)
   be8 = Tensor(inputs[6], device=inputs[6].device)
-  E, N = bq.shape[0], bq.shape[1]
-  M, K = aq.shape
-  g = Tensor(gradient, device=aq.device).reshape(M, N).cast(dtypes.bfloat16)
+  expert_off = Tensor(inputs[7], device=inputs[7].device)
+  grad_xq, grad_wq = grouped_mx_gemm_backward(Tensor(gradient), aq, ae8, bq, be8, expert_off, w_stored=w_stored)
+  return (None, grad_xq.uop, grad_wq.uop) + tuple(None for _ in inputs[3:])
+
+def grouped_mx_gemm_backward(g:Tensor, aq:Tensor, ae8:Tensor, bq:Tensor, be8:Tensor, expert_off:Tensor, *,
+                             w_stored:bool=False, quantized_gradient:tuple[Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor]:
+  E, N = bq.shape[:2]
+  g = g.reshape(aq.shape[0], N).cast(dtypes.bfloat16)
   x_phys = (aq.cast(dtypes.bfloat16) * _mx_block_scale(ae8).cast(dtypes.bfloat16))
   w_phys = (bq.cast(dtypes.bfloat16) * _mx_block_scale_3d(be8).cast(dtypes.bfloat16))
-  expert_off = Tensor(inputs[7], device=inputs[7].device)
-  grad_x = grouped_mx_gemm(g, w_phys.transpose(1, 2), expert_off)
+  grad_x = grouped_mx_gemm(g if quantized_gradient is None else quantized_gradient, w_phys.transpose(1, 2), expert_off)
   grad_w = grouped_mx_wgrad(g, x_phys, expert_off, E)
   grad_xq = grad_x * _mx_block_scale(ae8).cast(dtypes.bfloat16)
   grad_wq = grad_w.contiguous() if w_stored else (grad_w * _mx_block_scale_3d(be8).cast(dtypes.bfloat16)).contiguous()
-  return (None, grad_xq.uop, grad_wq.uop) + tuple(None for _ in inputs[3:])
+  return grad_xq, grad_wq
 
 _grouped_bw_stored = functools.partial(custom_grouped_mx_gemm_bw, w_stored=True)
 

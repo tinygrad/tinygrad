@@ -45,7 +45,7 @@ class ParamArg:
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
-      args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.size}, {self.dtype!r}, {self.slot}).buffer")
+      args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.nbytes // self.dtype.itemsize}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u"}
@@ -114,7 +114,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   # here are the dtype production rules, total over all Ops
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
-         Ops.BACKEDGE | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
+         Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
          Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
@@ -320,7 +320,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | Ops.GROUP | \
+      case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
         return None
 
@@ -539,7 +539,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
-    return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
+    return UOp(Ops.STACK).after(*[x for x in srcs if x is not None], **kwargs)
   @property
   def body(self) -> UOp:
     """the body of a CALL: the program, copy or function reference being called (its first src)"""
@@ -830,15 +830,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
+    assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     slot = next(UOp.unique_num) if num is None else num
-    buf = MultiBuffer(device, size, dtype) if isinstance(device, tuple) else Buffer(device, size, dtype)
+    buf = MultiBuffer(device, size * dtype.itemsize) if isinstance(device, tuple) else Buffer(device, size * dtype.itemsize)
     return UOp(Ops.BUFFER, src=(UOp.const(size),)+UOp.device_range_src(device), arg=ParamArg(slot, dtype, device=device, buffer=buf))
   @staticmethod
-  def from_buffer(opaque:Buffer|MultiBuffer, device:str|tuple[str, ...]|None=None):
-    # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
-    return UOp(Ops.BUFFER, src=(UOp.const(opaque.size),)+UOp.device_range_src(device or opaque.device),
-               arg=ParamArg(-id(opaque), opaque.dtype, device=device or opaque.device, buffer=opaque))
+  def from_buffer(opaque:Buffer|MultiBuffer, dtype:DType, device:str|tuple[str, ...]|None=None):
+    if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
+    assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
+    assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
+    # Both storage identity and interpretation are part of the UOp key.
+    return UOp(Ops.BUFFER, src=(UOp.const(opaque.nbytes // dtype.itemsize),)+UOp.device_range_src(device or opaque.device),
+               arg=ParamArg(-id(opaque), dtype, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -894,7 +898,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    if self.op in {Ops.STACK, Ops.WMMA, Ops.GROUP} or self.op in GroupOp.Elementwise:
+    if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
       if not len(ad) or not all_same(ad): return None
       return ad[0]
@@ -962,9 +966,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       src, offset = self._buffer_view
       if isinstance(buf:=src.buffer, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
-        mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset) for x in buf.bufs]
+        mbuf.bufs = [x.view(prod(self.max_shape) * self.dtype.itemsize, offset) for x in buf.bufs]
         return mbuf
-      return buf.view(prod(self.max_shape), self.dtype, offset)
+      return buf.view(prod(self.max_shape) * self.dtype.itemsize, offset)
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
@@ -972,7 +976,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MSTACK:
       ret = MultiBuffer.__new__(MultiBuffer)
       ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
-      assert all_same([(x.size, x.dtype) for x in ret.bufs]), "multibuffers mismatch buffers"
+      assert all_same([x.nbytes for x in ret.bufs]) and all_same([x.dtype for x in self.src]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
     return self.arg.buffer
@@ -1394,6 +1398,7 @@ def safe_exp2(x):
   except OverflowError: return math.inf
 
 def safe_pow(x, y):
+  if isinstance(x, int) and isinstance(y, int) and y < 0: return x**(y%2) if abs(x) == 1 else 0
   try: return math.nan if isinstance(p:=pow(x, y), complex) else p
   except ZeroDivisionError: return math.inf
   except ValueError: return math.inf if x > 0 else -math.inf
@@ -1621,6 +1626,15 @@ tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
 
+# find the unittest frame we're capturing in
+PROCESS_REPLAY_LOC = ContextVar("PROCESS_REPLAY_LOC", "")
+def get_process_replay_loc() -> str:
+  if PROCESS_REPLAY_LOC.value: return PROCESS_REPLAY_LOC.value
+  frm = sys._getframe(1)
+  while (f_back:=frm.f_back) is not None and f_back.f_globals.get("__name__", "").split(".")[0] not in ("unittest", "_pytest"):
+    frm = f_back
+  return f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+
 if CAPTURE_PROCESS_REPLAY:
   replay_capture: list[bytes] = []
   import atexit, uuid
@@ -1669,14 +1683,9 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
           tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
           e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
       if CAPTURE_PROCESS_REPLAY and replay:
-        # find the unittest frame we're capturing in
-        frm = sys._getframe(1)
-        while (f_back:=frm.f_back) is not None and f_back.f_globals.get("__name__", "").split(".")[0] not in ("unittest", "_pytest"):
-          frm = f_back
-        replay_loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
-        inputs = (fn, args, kwargs, ContextVar._cache)
-        replay_capture.append(pickle.dumps(inputs+(replay_loc, ret)))
+        with Context(PROCESS_REPLAY_LOC=get_process_replay_loc()):
+          replay_capture.append(pickle.dumps((fn, args, kwargs, ContextVar._cache, ret)))
       return ret
     return __wrapper
   return _decorator

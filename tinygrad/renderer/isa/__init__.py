@@ -19,6 +19,7 @@ class Register:
 class IselContext:
   def __init__(self, sink:UOp):
     self.reg_n = itertools.count()
+    self.alloc_n = itertools.count(max((u.arg.slot for u in sink.toposort() if u.op is Ops.ALLOC), default=-1)+1)
     def arg_key(u:UOp): return (1, u.arg) if u.op is Ops.SPECIAL else (0, u.arg.slot)
     self.func_args = sorted([u for u in sink.toposort() if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
