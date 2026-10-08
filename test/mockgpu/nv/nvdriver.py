@@ -1,9 +1,15 @@
 import ctypes, mmap, collections, functools, os
 from tinygrad.runtime.autogen import nv_570 as nv_gpu, libc
 from typing import cast, Any
-from tinygrad.helpers import to_mv
+from tinygrad.helpers import to_mv, OSX
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.nv.nvgpu import NVGPU
+
+def alias_pages(src:int, dst:int, size:int): # the pages at src show up at dst too
+  if not OSX: return libc.mremap(src, 0, size, libc.MREMAP_MAYMOVE|libc.MREMAP_FIXED, ctypes.c_void_p(dst))
+  task = ctypes.c_uint.in_dll(libsys:=ctypes.CDLL("/usr/lib/libSystem.B.dylib"), "mach_task_self_") # VM_FLAGS_OVERWRITE, shared, VM_INHERIT_COPY
+  u64, prot = ctypes.c_uint64, ctypes.byref(ctypes.c_int())
+  assert libsys.mach_vm_remap(task, ctypes.byref(u64(dst)), u64(size), u64(0), 0x4000, task, u64(src), 0, prot, prot, 1) == 0
 
 NVSubDevice = collections.namedtuple('NVSubDevice', ['device'])
 NVUserMode = collections.namedtuple('NVUserMode', ['subdevice'])
@@ -266,7 +272,7 @@ class NVDriver(VirtDriver):
         if gpu is None: return -1
         gpu.map_range(st.base, st.length)
       if (cpu:=self.host_mems.get(st.hMemory, st.base)) != st.base: # host memory mapped away from its cpu address: alias its pages there
-        libc.mremap(cpu, 0, st.length, libc.MREMAP_MAYMOVE|libc.MREMAP_FIXED, ctypes.c_void_p(st.base))
+        alias_pages(cpu, st.base, st.length)
     elif nr == nv_gpu.UVM_REGISTER_CHANNEL: pass
     elif nr == nv_gpu.UVM_FREE:
       st = nv_gpu.UVM_FREE_PARAMS.from_address(argp)
