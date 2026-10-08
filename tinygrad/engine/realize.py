@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
-from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, Compiled
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -136,6 +136,24 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
     per_lane = [b.bufs if isinstance(b, MultiBuffer) else (b,)*lanes for b in bufs]
     for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j} if has_dnum else {}
 
+def wait_for_host_buffers(bufs:Sequence[Buffer], timeout:int|None=None) -> None:
+  # ponytail: historical mappings can over-wait; track per-storage targets if this becomes costly.
+  pending:dict[tuple[Compiled, Compiled], int] = {}
+  for b in bufs:
+    owner = b.allocator.dev
+    if b.device.split(":")[0] in HCQ_DEVS:
+      owner.synchronize(timeout=timeout)
+      continue
+    if not owner.pending: continue
+    if b.base.options.external_ptr is not None or getattr(owner, "remote", None) is not None:
+      owner.synchronize(timeout=timeout)
+      continue
+    for producer in b.base.get_storage().maps:
+      if (value:=owner.pending.get(producer)) is not None: pending[(owner, producer)] = value
+  for (owner, producer), value in pending.items():
+    producer._wait_signal(producer.timeline.host.view(fmt="Q"), value, timeout)
+    if owner.pending.get(producer) == value: del owner.pending[producer]
+
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
@@ -155,7 +173,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
   for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
-    if not isinstance(call.arg.aux, HCQInfo) and Device[device].pending: Device[device].synchronize(timeout=ctx.timeout)
+    if not isinstance(call.arg.aux, HCQInfo): wait_for_host_buffers(bufs, ctx.timeout)
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -174,7 +192,9 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+    cpu_bufs = [bufs[i].ensure_allocated() for i in prg.arg.globals]
+    wait_for_host_buffers(cpu_bufs, ctx.timeout)
+    cpu_rt(*[b._buf for b in cpu_bufs], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
     for i in prg.arg.outs:
       dt = _to_np_dtype(resolved[i].dtype)
       assert dt is not None, f"no np dtype for {resolved[i].dtype}"
@@ -260,7 +280,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo, HCQ_DEVS # noqa: E402 # down here, hcq2 imports realize
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE, name="ast"),), name="call", allow_any_len=True), exec_copy),

@@ -107,6 +107,7 @@ class TestHCQ2Fence(unittest.TestCase):
     signal = producer.timeline.host.view(fmt='Q')
     signal[1] += 1
     cpu.pending[producer] = signal[1]
+    src.uop.buffer.get_buf(producer.device)
     self.addCleanup(cpu.pending.pop, producer, None)
     t = threading.Thread(target=run_linear, args=(linked,), kwargs={"jit": True}, daemon=True)
     t.start()
