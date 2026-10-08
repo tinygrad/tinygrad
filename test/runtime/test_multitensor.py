@@ -73,6 +73,12 @@ class TestMultiTensor(unittest.TestCase):
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
+  def test_device_num_stack_arg(self):
+    # out, 4 xs, a, then _device_num as the 7th arg: past the 6 register args of the x86 abi
+    xs, a = [np.random.rand(4, 8).astype(np.float32) for _ in range(4)], np.random.rand(4).astype(np.float32)
+    out = sum(Tensor(x).shard(devices_2, 0) for x in xs) * Tensor(a).to(devices_2).reshape(4, 1)
+    np.testing.assert_allclose(out.numpy(), sum(xs) * a.reshape(4, 1), rtol=1e-6)
+
   def test_empty_axis(self):
     GlobalCounters.reset()
     x = Tensor.empty(4, 6, device=devices_2, axis=1).realize()

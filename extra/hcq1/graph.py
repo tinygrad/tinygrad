@@ -18,7 +18,7 @@ class GraphRunner:
     self.uop_replace: list[list[tuple[int, int]]] = []
     for call in self.linear.src:
       replace = [(p, b.arg.slot) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
-      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
+      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(resolve_params(call, input_uops))):
         self.calls.append((dev_idx, call.body, [b.ensure_allocated() for b in bufs], device_vars))
         self.runtimes.append(get_runtime(bufs[0].device, call.body) if call.body.op is Ops.PROGRAM else None)
         self.uop_replace.append(replace)

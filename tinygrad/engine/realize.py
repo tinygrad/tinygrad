@@ -4,7 +4,7 @@ import decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
-from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
+from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
@@ -67,7 +67,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = [] if isinstance(call.arg.aux, HCQInfo) else resolve_params(call, ctx.input_uops)
-  lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
+  lanes = list(unwrap_multi([args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None
     bufs = lanes[i][0] if i < len(lanes) else [cast(Buffer, ctx.input_uops[s].buffer) for s in (stats[3] if stats else ())]
@@ -125,19 +125,17 @@ def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
 
-def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
+def unwrap_multi(resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in resolved]
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
-    # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
-    has_dnum = any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
-                   for x in call.body.toposort())
+    # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen, set on every lane
     lanes = max(len(b.bufs) for b in bufs if isinstance(b, MultiBuffer)) # a single buffer is shared by every lane
     per_lane = [b.bufs if isinstance(b, MultiBuffer) else (b,)*lanes for b in bufs]
-    for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j} if has_dnum else {}
+    for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j}
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  for bufs, device_vars in unwrap_multi(resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
       dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
@@ -154,7 +152,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi([resolved[i] for i in ast.arg.globals])):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -168,7 +166,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
   resolved = resolve_params(call, ctx.input_uops)
-  for bufs, device_vars in unwrap_multi(call, resolved):
+  for bufs, device_vars in unwrap_multi(resolved):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
