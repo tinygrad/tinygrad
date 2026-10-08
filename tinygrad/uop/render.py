@@ -47,7 +47,7 @@ def _render_arg(x:UOp) -> str:
       if a.volatile: opts += " volatile=true"
       name = f'"{a.name}" ' if a.name is not None else ""
       return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
-    case Ops.RANGE: return f"{x.arg[0].name} r{'_'.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK r1_2
+    case Ops.RANGE: return f"{x.arg[0].name} {' '.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK 1 2
     case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
     case Ops.CALL if isinstance(a:=x.arg, CallInfo):
       call_opts = [f"name={a.name!r}"] if a.name is not None else []
@@ -98,6 +98,8 @@ def render_marg(ctx,x:UOp):
   if x.op in {Ops.PAD, Ops.SHRINK}: pieces = [f"({marg_str(ctx, a[0])}, {marg_str(ctx, a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
+def render_index(srcs) -> str: return ''.join(f"[{strip_parens(src)}]" for src in srcs)
+
 renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
@@ -119,7 +121,7 @@ renderer = PatternMatcher([
   (UPat(Ops.CMOD, name="x"), lambda ctx,x: f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx, x)})"),
   (UPat(set(syms.keys()), name="x"), lambda ctx,x: strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")),
-  (UPat((Ops.INDEX, Ops.STAGE), name="x"), lambda x, ctx: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])),
+  (UPat((Ops.INDEX, Ops.STAGE), name="x"), lambda x, ctx: render_index(ctx[y] for y in x.src[1:])),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx"),)), lambda ctx,idx: f"{ctx[idx.src[0]]}{ctx[idx]}"),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx"), UPat(name="alt"), UPat(name="gate"))),
    lambda ctx,idx,alt,gate: f"({ctx[idx.src[0]]}{ctx[idx]} if {ctx[gate]} else {ctx[alt]})"),

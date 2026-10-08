@@ -22,7 +22,7 @@ class TestOptGemm(unittest.TestCase):
     call = get_single_element(t.schedule_linear().src)
     new_call = call.replace(src=(replace_opts(call.src[0], opts), *call.src[1:]))
     run_linear(UOp(Ops.LINEAR, src=(new_call,)))
-    test = call.src[1].buffer.numpy().reshape(self.res.shape)
+    test = Tensor(call.src[1]).numpy().reshape(self.res.shape)
     np.testing.assert_allclose(self.res, test, atol=1e-4)
 
   def test_gemm_unrolled_permute_l_44(self):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence
-import functools, itertools, weakref, ctypes, struct
+import functools, itertools, weakref, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
@@ -11,7 +11,7 @@ from tinygrad.uop.ops import pm_renumber_slots
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins
-from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
+from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile
 
 # *****************
 # 0. helpers
@@ -87,6 +87,13 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
     next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
 
+@uopfunc
+def do_get_time_ms(ms:UOp) -> UOp:
+  ts = UOp.placeholder((2,), dtypes.uint64, addrspace=AddrSpace.REG)
+  ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.int).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.int), ts.index(0)))
+  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
+def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.uint64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
+
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
@@ -123,7 +130,7 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) << 20, 2
 
 @functools.cache
-def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, dtypes.uint8, preallocate=True)
+def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, preallocate=True)
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
@@ -137,15 +144,16 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   send = call.replace(src=wires[1].store_call(src).src)
   return UOp(Ops.LINEAR, src=(send, call.replace(src=dst.store_call(wires[0]).src)))
 
-def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if any(to_tuple(b.device)[0].startswith("RDMA") for b in (dst, src)): return None # over the nic
+def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
+  devs = [to_tuple(b.device)[0] for b in (dst, src)]
+  if any(d.startswith("RDMA") for d in devs): return None # over the nic
 
   if (device:=get_enqueue_devs(call)) is None: return None
-  try:
-    for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
-  except (RuntimeError, OSError):
-    (staging:=_staging(Device[device].host)).get_buf(device)
-    base, it, copies = UOp.from_buffer(staging), src.dtype.itemsize, []
+  dev, host, usb_memcpys = Device[device], Device[device].host, getattr(Device[device], "is_usb", False)
+  mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else set())
+  if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
+    (staging:=_staging(host)).get_buf(device)
+    base, it, copies = UOp.from_buffer(staging, dtypes.uint8), src.dtype.itemsize, []
     chunk = (STAGING_SIZE // STAGING_SLOTS) // it
     for i, off in enumerate(range(0, src.max_numel(), chunk)):
       stage, part = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it], src[off:off+n]
@@ -408,9 +416,9 @@ def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> 
 def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
   tl = tl.replace(arg=replace(tl.arg, volatile=True)) # make it volatile, since it's polled
 
-  # TODO: timeout?
-  done = tl.after(target:=slots.index(last).load(), loop:=UOp.loop(0)).index(0).load()
-  bumped = tl.after(done.backedge(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
+  loop = UOp.range(UOp(Ops.NOOP).after(start:=get_time_ms(target:=slots.index(last).load())), next(UOp.unique_num), dtype=dtypes.void)
+  done = tl.after(target, loop).index(0).load()
+  bumped = tl.after(done.backedge(loop, (done < target) & (get_time_ms(done) - start < 30000))).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
   return slots.after(bumped).index(last).store(nxt).sink()
 
 def encode_fence(f:UOp) -> UOp:
@@ -531,7 +539,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
     use_rt = len(linear.src) < HCQ_CACHE_THRESH # small schedules use runtime address patches so linked schedules can be cached without input buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
-  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, ctx=tuple(input_uops or ()), name="prep calls")
+  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
@@ -552,10 +560,10 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
 
   # a device owns the placeholders it names, the rest are allocated where they live
   if (r:=cast(Buffer|None, Compiled.pm_bufferize.rewrite(b))) is not None: pass
-  elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1), b.dtype, options=spec, preallocate=True)
-  else: r = dev.rt_buffer(spec).view(b.max_numel(), b.dtype, dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
+  elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
+  else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
 
-  return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
+  return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.value)
 
 def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   if unwrap_lane(buf:=unwrap_view(g.src[0])[0])[0].op is not Ops.BUFFER: return None # input address, resolved per run

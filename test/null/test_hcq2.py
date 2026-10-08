@@ -6,6 +6,7 @@ from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, dtypes
 from tinygrad.device import Buffer, Compiled, ProfileGraphEvent
 from tinygrad.helpers import Context, unwrap, to_tuple
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, get_call_arg_uops, lower_and_compile, run_linear
 import tinygrad.runtime.support.hcq2 as hcq2
@@ -81,14 +82,14 @@ def orders(batch:UOp) -> set[tuple[int, ...]]: return {tuple(x for x in run(batc
 
 class TestHCQ2Deps(unittest.TestCase):
   def test_buffer_views(self):
-    b = Buffer("NULL", 16, dtypes.uint8)
+    b = Buffer("NULL", 16)
     for write in ([], [0]):
       tracker = hcq2.DepsTracker()
       tracker.access_resources([b], write, 0)
-      self.assertEqual(tracker.access_resources([b.view(4, dtypes.uint16, 4)], [0], 1), [0])
-      self.assertEqual(tracker.access_resources([b.view(4, dtypes.uint8, 0)], [0], 2), [0])
-      self.assertEqual(tracker.access_resources([b.view(4, dtypes.uint8, 12)], [0], 3), [0])
-      self.assertEqual(tracker.access_resources([b.view(8, dtypes.uint8, 4)], [], 4), [1])
+      self.assertEqual(tracker.access_resources([b.view(8, 4)], [0], 1), [0])
+      self.assertEqual(tracker.access_resources([b.view(4, 0)], [0], 2), [0])
+      self.assertEqual(tracker.access_resources([b.view(4, 12)], [0], 3), [0])
+      self.assertEqual(tracker.access_resources([b.view(8, 4)], [], 4), [1])
 
   def test_dependencies_through_selected_slices(self):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
@@ -208,7 +209,7 @@ class TestHCQ2Link(unittest.TestCase):
     linear = compile_linear(chain(a, 2).schedule_linear(), input_uops=inputs, cache=True)
     linked = link_linear(linear, input_uops=inputs)
     self.assertIs(link_linear(linear, input_uops=[chain_input(3).uop.base, *inputs[1:]]), linked)
-    bufs = [cast(Buffer, u.buffer) for u in linked.toposort() if u.op is Ops.BUFFER]
+    bufs = [cast(Buffer, u.buffer) for u in linked.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL]
     self.assertNotIn(a.uop.base.buffer, bufs)
     words = [w for b in bufs if b.options.external_ptr and b.nbytes % 8 == 0 for w in b.host.view(fmt='Q')[:]]
     self.assertNotIn(cast(Buffer, a.uop.base.buffer)._buf, words)

@@ -7,28 +7,28 @@ from test.helpers import needs_second_gpu
 @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
   def setUp(self):
-    self.buf = Buffer(Device.DEFAULT, 10, dtypes.uint8, initial_value=bytes(range(10)))
-    self.buf_unalloc = Buffer(Device.DEFAULT, 10, dtypes.uint8)
+    self.buf = Buffer(Device.DEFAULT, 10, initial_value=bytes(range(10)))
+    self.buf_unalloc = Buffer(Device.DEFAULT, 10)
 
   def test_subbuffer(self):
-    vbuf = self.buf.view(2, dtypes.uint8, offset=3).ensure_allocated()
+    vbuf = self.buf.view(2, offset=3).ensure_allocated()
     tst = vbuf.as_memoryview().tolist()
     assert tst == [3, 4]
 
   def test_subbuffer_cast(self):
     # NOTE: bitcast depends on endianness
-    vbuf = self.buf.view(2, dtypes.uint16, offset=3).ensure_allocated()
+    vbuf = self.buf.view(4, offset=3).ensure_allocated()
     tst = vbuf.as_memoryview().cast("H").tolist()
     assert tst == [3|(4<<8), 5|(6<<8)]
 
   def test_subbuffer_double(self):
-    vbuf = self.buf.view(4, dtypes.uint8, offset=3).ensure_allocated()
-    vvbuf = vbuf.view(2, dtypes.uint8, offset=1).ensure_allocated()
+    vbuf = self.buf.view(4, offset=3).ensure_allocated()
+    vvbuf = vbuf.view(2, offset=1).ensure_allocated()
     tst = vvbuf.as_memoryview().tolist()
     assert tst == [4, 5]
 
   def test_subbuffer_len(self):
-    vbuf = self.buf.view(5, dtypes.uint8, 2).ensure_allocated()
+    vbuf = self.buf.view(5, 2).ensure_allocated()
     mv = vbuf.as_memoryview()
     assert len(mv) == 5
     mv = vbuf.as_memoryview(allow_zero_copy=True)
@@ -56,15 +56,15 @@ class TestSubBuffer(unittest.TestCase):
 
   def test_subbuffer_deallocate(self):
     with Context(LRU=0):
-      vbuf = self.buf.view(2, dtypes.uint8, offset=3).ensure_allocated()
+      vbuf = self.buf.view(2, offset=3).ensure_allocated()
       self.buf.deallocate()
       vbuf.deallocate()
 
       # Allocate a fake one on the same place
-      _ = Buffer(Device.DEFAULT, 10, dtypes.uint8).ensure_allocated()
+      _ = Buffer(Device.DEFAULT, 10).ensure_allocated()
 
       self.buf.ensure_allocated()
-      self.buf.copy_from(Buffer("PYTHON", 10, dtypes.uint8, opaque=memoryview(bytearray(range(10, 20)))))
+      self.buf.copy_from(Buffer("PYTHON", 10, initial_value=bytes(range(10, 20))))
 
       vbuf.ensure_allocated()
 
@@ -73,7 +73,7 @@ class TestSubBuffer(unittest.TestCase):
 
   def test_subbuffer_is_allocated(self):
     buf = self.buf_unalloc
-    sub_buf = buf.view(3, dtypes.uint8, offset=4)
+    sub_buf = buf.view(3, offset=4)
     self.assertFalse(buf.is_allocated())
     self.assertFalse(sub_buf.is_allocated())
 
@@ -98,11 +98,11 @@ class TestSubBuffer(unittest.TestCase):
     self.assertTrue(sub_buf.is_allocated())
 
   def test_subbuffer_copy_in_out(self):
-    sub_buf = self.buf.view(3, dtypes.uint8, offset=3).ensure_allocated() # [3:6]
+    sub_buf = self.buf.view(3, offset=3).ensure_allocated() # [3:6]
     data_out_sub = bytearray([0]*3)
     data_out_sub[:] = sub_buf.as_memoryview()
     assert data_out_sub == bytearray(range(3, 6))
-    sub_buf.copy_from(Buffer("PYTHON", 3, dtypes.uint8, opaque=memoryview(bytearray(range(3)))))
+    sub_buf.copy_from(Buffer("PYTHON", 3, initial_value=bytes(range(3))))
     assert sub_buf.as_memoryview().tolist() == list(range(3))
     assert self.buf.as_memoryview().tolist()[3:6] == list(range(3))
     data_out_sub[:] = sub_buf.as_memoryview()
@@ -114,13 +114,13 @@ class TestSubBuffer(unittest.TestCase):
     assert data_out_base[6:10] == bytearray(range(6, 10))
 
   def test_subbuffer_copy_in_out_view_of_view(self):
-    view1 = self.buf.view(7, dtypes.uint8, offset=2).ensure_allocated() # [2:9]
-    view2 = view1.view(3, dtypes.uint8, offset=2).ensure_allocated()   # [4:7]
+    view1 = self.buf.view(7, offset=2).ensure_allocated() # [2:9]
+    view2 = view1.view(3, offset=2).ensure_allocated()   # [4:7]
     self.assertTrue(view1.is_allocated())
     self.assertTrue(view2.is_allocated())
 
     data_in = bytearray([7, 8, 9])
-    view2.copy_from(Buffer("PYTHON", 3, view2.dtype, opaque=memoryview(data_in)))
+    view2.copy_from(Buffer("PYTHON", 3, initial_value=bytes(data_in)))
     data_out_v2 = bytearray([0]*3)
     data_out_v2[:] = view2.as_memoryview()
     assert data_in == data_out_v2
@@ -133,23 +133,23 @@ class TestSubBuffer(unittest.TestCase):
     assert expected_base_data == data_out_base
 
   def test_subbuffer_alloc(self):
-    sub_buf = self.buf.view(4, dtypes.int8, offset=3)
+    sub_buf = self.buf.view(4, offset=3)
     sub_buf.allocate()
-    sub_buf.copy_from(Buffer("PYTHON", 4, dtypes.int8, opaque=memoryview(bytearray(range(10, 14)))))
+    sub_buf.copy_from(Buffer("PYTHON", 4, initial_value=bytes(range(10, 14))))
     assert self.buf.as_memoryview().tolist()[3:7] == sub_buf.as_memoryview().tolist()
 
-    sub_buf = self.buf_unalloc.view(4, dtypes.int8, offset=3)
+    sub_buf = self.buf_unalloc.view(4, offset=3)
     sub_buf.allocate()
-    sub_buf.copy_from(Buffer("PYTHON", 4, dtypes.int8, opaque=memoryview(bytearray(range(10, 14)))))
+    sub_buf.copy_from(Buffer("PYTHON", 4, initial_value=bytes(range(10, 14))))
     assert self.buf_unalloc.as_memoryview().tolist()[3:7] == sub_buf.as_memoryview().tolist()
 
   def test_subbuffer_dealloc(self):
-    sub_buf = self.buf.view(4, dtypes.int8, offset=3).ensure_allocated()
+    sub_buf = self.buf.view(4, offset=3).ensure_allocated()
     sub_buf.deallocate()
     assert self.buf.as_memoryview().tolist() == list(range(10))
 
   def test_subbuffer_double_dealloc(self):
-    sub_buf = self.buf.view(3, dtypes.uint8, offset=4).ensure_allocated()
+    sub_buf = self.buf.view(3, offset=4).ensure_allocated()
     self.buf.deallocate()
     with self.assertRaises(AssertionError):
       self.buf.deallocate()
@@ -158,14 +158,14 @@ class TestSubBuffer(unittest.TestCase):
       sub_buf.deallocate()
 
   def test_subbuffer_uaf(self):
-    sub_buf = self.buf.view(4, dtypes.int8, offset=3).ensure_allocated()
+    sub_buf = self.buf.view(4, offset=3).ensure_allocated()
     assert self.buf.as_memoryview().tolist(), list(range(10))
     sub_buf.deallocate()
     with self.assertRaises(AssertionError):
       sub_buf.as_memoryview().tolist()
     assert self.buf.as_memoryview().tolist(), list(range(10))
 
-    sub_buf = self.buf.view(4, dtypes.int8, offset=3).ensure_allocated()
+    sub_buf = self.buf.view(4, offset=3).ensure_allocated()
     assert sub_buf.as_memoryview().tolist(), list(range(3, 7))
     self.buf.deallocate()
     with self.assertRaises(AssertionError):

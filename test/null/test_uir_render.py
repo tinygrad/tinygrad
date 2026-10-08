@@ -68,8 +68,8 @@ def parse_ssa(text:str) -> UOp:
     arg: Any = None
     if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: arg = _parse_paramarg(argstr, name)
     elif op is Ops.RANGE:
-      t, r = argstr.split()
-      arg = (AxisType[t], *map(int, r[1:].split("_")))
+      t, *ids = argstr.split()
+      arg = (AxisType[t], *map(int, ids))
     elif op is Ops.REDUCE:
       kv = _kv(argstr)
       arg = (Ops[kv["op"].upper()], int(kv["pop"]) if "pop" in kv else 0)

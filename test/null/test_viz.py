@@ -1,5 +1,5 @@
 import unittest
-import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
+import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib, gc
 from dataclasses import dataclass
 from typing import Generator
 
@@ -40,6 +40,7 @@ class VizTrace:
 @contextlib.contextmanager
 def save_viz():
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
+  gc.collect()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -189,6 +190,13 @@ class TestViz(unittest.TestCase):
     a2 = uop_to_json(VizData(), a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"PYLITERAL\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
+  def test_index_label_large_src(self):
+    x = UOp.param(0, dtypes.float, (16, 16))
+    for _ in range(2_000): x = x * x
+    i = UOp.variable("i", 0, 14)
+    u = x[i+1, 2]
+    self.assertIn("\n[i+1][2]", uop_to_json(VizData(), u)[id(u)]["label"])
+
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
@@ -322,8 +330,6 @@ class TestVizTree(unittest.TestCase):
     self.assertStepEqual(steps[4], {"name":"branch_1", "depth":1, "match_count":1})
     self.assertStepEqual(steps[5], {"name":"leaf_left", "depth":2, "match_count":1})
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
-
-import gc
 
 def bufs_allocated() -> int:
   gc.collect()
@@ -545,6 +551,16 @@ class TestVizIntegration(unittest.TestCase):
           if u.op is Ops.INDEX: labels.append(step["graph"][id(u)]["label"])
     for label in labels: self.assertNotIn("UOp(", label)
 
+  def test_estimates(self):
+    with save_viz() as viz:
+      n = Variable("n", 1, 16).bind(7)
+      (Tensor.empty(16, device="NULL")[:n] + 1).realize()
+      (Tensor.empty(16, device="NULL")[:7] + 1).realize()
+    profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
+    for e in profile["layout"]["NULL"]["events"]:
+      for key, count in (("FLOPS", 7), ("B/s mem", 7*4*2), ("B/s lds", 7*4*2)):
+        self.assertEqual(e["fmt"][key], int(count / (e["dur"]*1e-6)))
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
@@ -680,8 +696,8 @@ class TestVizProfiler(unittest.TestCase):
                                     ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
                               deps=[[], [0]], sigs=[St, En, St, En]),
             # memory alloc on both GPUs
-            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"sz":1024, "dtype":dtypes.float}, ts=St),
-            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"sz":512, "dtype":dtypes.float}, ts=St)]
+            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"nbytes":4096}, ts=St),
+            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"nbytes":2048}, ts=St)]
     j = load_profile(prof)
     # graph grouped with its device, memory at the end
     self.assertListEqual(list(j['layout']),

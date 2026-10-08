@@ -28,7 +28,7 @@ class BNXTIface(PCIIfaceBase):
     mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
     return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
   def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
-    return Buffer(self.dev.device, mem.nbytes, dtypes.uint8, opaque=self.storage(mem, paddrs, snooped))
+    return Buffer(self.dev.device, mem.nbytes, opaque=self.storage(mem, paddrs, snooped))
 
   @functools.cached_property
   def doorbell(self) -> Buffer:
@@ -80,13 +80,13 @@ def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
   qps = {nic.device: BNXTQP(nic.iface.dev_impl) for nic in nics}
   for nic, q in zip(nics, qps.values()):
     bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
-    bufs |= {name: Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
-    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=to_name("rdma", *pair, n)), lambda b=b: b) for n, b in bufs.items()])
+    bufs |= {name: Buffer(nic.device, 8, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=to_name(nic.device, *pair, n)), lambda b=b: b) for n, b in bufs.items()])
   for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
   return qps
 
 def rdma_mem(nic:str, pair:tuple[str, str], name:str, size:int, dtype:DType=dtypes.uint8) -> UOp:
-  return UOp.alloc((size,), dtype, 0, device=nic).rtag(to_name("rdma", *pair, name))
+  return UOp.alloc((size,), dtype, 0, device=nic).rtag(to_name(nic, *pair, name))
 def rdma_ring(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp:
   return rdma_mem(nic, pair, "rq" if is_recv else "sq", RING_ENTRIES * (WQE_SIZE if is_recv else WQE_SIZE + 8))
 def rdma_cq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rcq" if is_recv else "scq", CQ_ENTRIES * 32)
@@ -157,12 +157,13 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
 # *****************
 # encode rewrite
 
-def rdma_submit(ctx, submit:UOp, lin:UOp) -> UOp|None:
+def rdma_submit(ctx, submit:UOp, arg:UOp) -> UOp|None:
+  lin = arg.without_after
   if not (queues:={i: queue_of(u) for i, u in enumerate(lin.src) if is_rdma(u)}): return None
 
   ops = [[u] for u in lin.src]
   for q in dict.fromkeys(queues.values()):
     positions = [i for i in queues if queues[i] == q]
     for i, copy_ops in zip(positions, rdma_copies(lin.arg[0], [lin.src[i] for i in positions])): ops[i] = copy_ops
-  return submit.replace(src=(submit.body, lin.replace(src=tuple(flatten(ops)))))
-pm_rdma_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(Ops.LINEAR, name="lin")), name="submit"), rdma_submit)])
+  return submit.replace(src=(submit.body, lin.replace(src=tuple(flatten(ops))).after(*arg.src[1:] if arg.op is Ops.AFTER else ())))
+pm_rdma_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(Ops.LINEAR).or_after("arg")), name="submit"), rdma_submit)])
