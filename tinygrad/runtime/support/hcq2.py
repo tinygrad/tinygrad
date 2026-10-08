@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
-from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
+from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile
@@ -68,6 +68,12 @@ def make_program(prg:UOp, size:int, device:str) -> UOp:
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, deps:tuple[UOp, ...]=()) -> UOp: # the order is on the arg
   lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)).after(*deps)
   return UOp.custom_function(fn or to_name("submit", to_tuple(devs)[0].split(":")[0], queue.split(":")[0])).call(lin)
+
+def ins(name, *src) -> UOp: return UOp(Ops.INS, tuple(UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src), (name, dtypes.void))
+
+def chunks(nbytes:int, chunk_sz:int, dtype:DType=dtypes.int) -> list[tuple[UOp|int, int]]: # (index, bytes): full chunks as one range, then the tail
+  full, tail = divmod(nbytes, chunk_sz) # no one-trip loops
+  return ([(UOp.range(full, next(UOp.unique_num), dtype=dtype) if full > 1 else 0, chunk_sz)] if full else []) + ([(full, tail)] if tail else [])
 
 # C FFI
 
