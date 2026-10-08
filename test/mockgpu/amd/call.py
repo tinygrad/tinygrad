@@ -5,7 +5,9 @@ from tinygrad.codegen import to_program
 from tinygrad.device import Device
 from tinygrad.dtype import Invalid, AddrSpace, dtypes
 from tinygrad.helpers import Context, getenv, TracingKey, dedup
-from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX
+from tinygrad.runtime.autogen import hsa
+from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
+from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
 asm_call_counter = itertools.count(1)
 
@@ -36,15 +38,26 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
   cfg = get_cfg(insts)["data"]
-  # initialize workgroups and waves
+  # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
   wg = UOp.range(gx*gy*gz, 0)
   wave = UOp.range(n_waves, 1)
-  # construct CALL graph
+  # alloc register and LDS buffers
+  sgpr = UOp.alloc((SGPR_COUNT,), dtypes.uint32, 0, AddrSpace.LOCAL)
+  vgpr = UOp.alloc((256*wave_size,), dtypes.uint32, 1, AddrSpace.LOCAL)
+  lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT)*512
+  lds = UOp.alloc((max(lds_size//4, 1),), dtypes.uint32, 3, AddrSpace.LOCAL)
+  scratch = UOp.alloc((max(scratch_size*wave_size*n_waves, 1),), dtypes.uint8, 4, AddrSpace.LOCAL)
+  accvgpr = UOp.alloc((256*wave_size,), dtypes.uint32, 5, AddrSpace.LOCAL) if wave_size == 64 else vgpr
+  args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   lib_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   inst_addr = UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU)
-  afters: dict[UOp, UOp] = {}
+  ctx = _Ctx(4, wave_size)
+  init = UOp(Ops.SINK).call(wg, wave, sgpr, vgpr, lds, *([accvgpr] if wave_size == 64 else []), args_ptr, name="init_wave")
+  afters: dict[UOp, UOp] = {ctx.sgpr:sgpr.after(init), ctx.vgpr:vgpr.after(init), ctx.vmem:ctx.vmem,
+                            ctx.lds:lds.after(init), ctx.scratch:scratch.index(wave*scratch_size*wave_size).after(init)}
+  if wave_size == 64: afters[ctx.accvgpr] = accvgpr.after(init)
   for block_pc, block in cfg["blocks"].items():
     loop_path = cfg["paths"][block_pc].get(block_pc)
     loop = UOp.loop(block_pc) if loop_path is not None else None
