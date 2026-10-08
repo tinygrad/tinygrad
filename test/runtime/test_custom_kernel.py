@@ -1,5 +1,5 @@
-import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+import unittest, itertools
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, TinyJit
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
@@ -28,6 +28,10 @@ def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   assert B.numel() == A.numel()
   i = UOp.range(A.numel(), 0)
   return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.numel()}"))
+
+def custom_scale_kernel(a:UOp, B:UOp, A:UOp) -> UOp:
+  i = UOp.range(A.shape[0], 0)
+  return B[i].store(A[i] * a).end(i).sink(arg=KernelInfo(name=f"scale_{A.shape[0]}"))
 
 def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   # A is unused on purpose: the kernel takes call buffers 0 and 2, not 0, 1, 2
@@ -452,6 +456,29 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
+
+  def test_program_args_any_order(self):
+    from tinygrad.codegen import do_to_program
+    for order in itertools.permutations(("out", "x", "a", "b")):
+      args = {"out": Tensor.empty(4, dtype=dtypes.int).uop, "x": Tensor([1, 2, 3, 4], dtype=dtypes.int).realize().uop,
+              "a": UOp.variable("a", 1, 9, dtype=dtypes.int).bind(3), "b": UOp.variable("b", 1, 9, dtype=dtypes.int).bind(5)}
+      p = {k:UOp.param(j, dtypes.int, addrspace=AddrSpace.ALU) if k in "ab" else UOp.placeholder_like(args[k], slot=j) for j,k in enumerate(order)}
+      i = UOp.range(4, 0)
+      prg = do_to_program(p["out"][i].store(p["x"][i] * p["a"] + p["b"]).end(i).sink(arg=KernelInfo(name="args_"+"_".join(order))),
+                          Device[Device.DEFAULT].renderer)
+      with self.subTest(order=order):
+        self.assertEqual(Tensor(args["out"].after(prg.call(*[args[k] for k in order]))).tolist(), [8, 11, 14, 17])
+
+  def test_program_scalar_arg_jit(self):
+    from tinygrad.codegen import do_to_program
+    @TinyJit
+    def f(x:Tensor, a:UOp) -> Tensor:
+      out = Tensor.empty(4, dtype=dtypes.int)
+      prg = do_to_program(custom_scale_kernel(UOp.param(0, dtypes.int, addrspace=AddrSpace.ALU), UOp.placeholder_like(out.uop, slot=1),
+                                              UOp.placeholder_like(x.uop, slot=2)), Device[Device.DEFAULT].renderer)
+      return Tensor(out.uop.after(prg.call(a, out.uop, x.uop))).realize()
+    x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    for a in (2, 3, 4, 5): self.assertEqual(f(x, UOp.variable("a", 1, 9, dtype=dtypes.int).bind(a)).tolist(), [a, 2*a, 3*a, 4*a])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
   def test_custom_kernel_source_copy(self):

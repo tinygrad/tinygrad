@@ -279,7 +279,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
   # vars used in the schedule
-  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  used_vars = set().union(*[{v.expr for s in si.src for v in s.variables() if v.is_variable} for si in linear.src])
   # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:

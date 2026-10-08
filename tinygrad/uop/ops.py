@@ -1357,8 +1357,8 @@ class ProgramInfo:
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-    # buffers then values, each in slot order. a slot can have an image and a flat param, tie broken like the linearizer
-    params = sorted(params, key=lambda p: (p.addrspace is AddrSpace.ALU, p.arg.slot, p.tuplize if TUPLE_ORDER else ()))
+    # slot order, unnumbered Variables last. a slot can have an image and a flat param, tie broken like the linearizer
+    params = sorted(params, key=lambda p: (p.arg.slot < 0, p.arg.slot, p.tuplize if TUPLE_ORDER else ()))
     # if neither is inferred, default to all buffers
     if not outs and not ins: outs = ins = [p.arg.slot for p in params if p.addrspace is not AddrSpace.ALU]
     return ProgramInfo(tuple(global_size), tuple(local_size), tuple(params), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
