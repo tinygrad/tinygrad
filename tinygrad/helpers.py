@@ -586,7 +586,7 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 class tqdm(Generic[T]):
   def __init__(self, iterable:Iterable[T]|None=None, desc:str='', disable:bool|None=False,
                unit:str='it', unit_scale=False, total:int|None=None, rate:int=100):
-    self.disable = not sys.stderr.isatty() if disable is None else disable
+    self.disable, self.tty = not sys.stderr.isatty() if disable is None else disable, sys.stderr.isatty()
     self.iterable, self.unit, self.unit_scale, self.rate = iterable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
     self.set_description(desc)
@@ -602,7 +602,7 @@ class tqdm(Generic[T]):
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
-    if self.disable or (not close and self.i % self.skip != 0): return
+    if self.disable or (not close and (self.i % self.skip != 0 or not self.tty)): return
     prog, elapsed, ncols = self.n/self.t if self.t else 0, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if elapsed and self.i/elapsed > self.rate and self.i: self.skip = max(int(self.i/elapsed)//self.rate,1)
     def HMS(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
