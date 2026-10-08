@@ -1,6 +1,5 @@
 import functools, struct
 from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program, TinyELF
-from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv
 from tinygrad.runtime.autogen import webgpu
@@ -52,7 +51,7 @@ QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webg
 
 class WebGPUProgram(Program['WebGpuDevice']):
   def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
-    self.dev, self.name, self.signature = dev, to_wgpu_str(obj.name), obj.signature
+    self.dev, self.name = dev, to_wgpu_str(obj.name)
 
     # Creating shader module
     shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(obj.lib.decode()),
@@ -67,18 +66,16 @@ class WebGPUProgram(Program['WebGpuDevice']):
   @suppress_finalizing
   def __del__(self): webgpu.wgpuShaderModuleRelease(self.prg)
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
+  def __call__(self, *bufs:webgpu.WGPUBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
-    args = (*args, *vals)
     wait = wait and webgpu.WGPUFeatureName_TimestampQuery in self.dev.features
 
-    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(self.signature)))()
-    bindings = (webgpu.WGPUBindGroupEntry * (1+len(self.signature)))()
-    for i,(p,a) in enumerate(zip((None, *self.signature), (float('inf'), *args), strict=True)):
-      ty, buf = ('Uniform', self.dev.create_uniform(a)) if p is None or p.arg.addrspace is AddrSpace.ALU else ('Storage', a)
-      bind_entries[i] = webgpu.WGPUBindGroupLayoutEntry(binding=i, visibility=webgpu.WGPUShaderStage_Compute,
-                        buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
-      bindings[i] = webgpu.WGPUBindGroupEntry(binding=i, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
+    # Creating bind group layout
+    def bgl_entry(n:int, ty:str):
+      return webgpu.WGPUBindGroupLayoutEntry(binding=n, visibility=webgpu.WGPUShaderStage_Compute,
+                                             buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
+    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(bufs)+len(vals)))(
+      bgl_entry(0, 'Uniform'), *(bgl_entry(i+1, 'Uniform' if i >= len(bufs) else 'Storage') for i in range(len(bufs)+len(vals))))
 
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     bind_layout = webgpu.wgpuDeviceCreateBindGroupLayout(self.dev.device_res,
@@ -93,10 +90,16 @@ class WebGPUProgram(Program['WebGpuDevice']):
     pipeline_layout = webgpu.wgpuDeviceCreatePipelineLayout(self.dev.device_res, pipeline_layout_desc)
     if err := self.dev.pop_error(): raise RuntimeError(f"Error creating pipeline layout: {err}")
 
+    # Creating bind group
+    def bg_entry(n:int, x:webgpu.WGPUBuffer|int|float):
+      buf = x if isinstance(x, webgpu.WGPUBuffer) else self.dev.create_uniform(x)
+      return webgpu.WGPUBindGroupEntry(binding=n, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
+    bindings = (webgpu.WGPUBindGroupEntry * (1+len(bufs)+len(vals)))(bg_entry(0, float('inf')), *(bg_entry(i+1, x) for i,x in enumerate(bufs+vals)))
+
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_layout, entryCount=len(bindings), entries=bindings)
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     bind_group = webgpu.wgpuDeviceCreateBindGroup(self.dev.device_res, bind_group_desc)
-    for b in (b for e,b in zip(bind_entries, bindings) if e.buffer.type == webgpu.WGPUBufferBindingType_Uniform): webgpu.wgpuBufferRelease(b.buffer)
+    for binding in (bindings[0], *bindings[1+len(bufs):]): webgpu.wgpuBufferRelease(binding.buffer)
     if err := self.dev.pop_error(): raise RuntimeError(f"Error creating bind group: {err}")
 
     # Creating compute pipeline

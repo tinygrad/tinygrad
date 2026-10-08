@@ -128,9 +128,15 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b:
 # 1.1. prep: unwrap multi
 
 def unwrap_call(call:UOp) -> UOp|None:
+  if (prg:=call.body).op is Ops.PROGRAM:
+    bindings = dict(get_call_prg_args(call, prg))
+    dims = {k: tuple(s.substitute(bindings).ssimplify() if isinstance(s, UOp) else s for s in getattr(prg.arg, k))
+            for k in ('global_size', 'local_size')}
+    if (bound:=prg.replace(arg=replace(prg.arg, **dims))) is not prg: return call.replace(src=(bound, *call.src[1:]))
   if get_enqueue_devs(call) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
   dnum = UOp.variable("_device_num", 0, n - 1, dtypes.int)
-  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
+  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body,
+                                   *[a if a.addrspace is AddrSpace.ALU else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
                                    for i in range(n)))
 pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 

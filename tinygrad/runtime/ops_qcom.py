@@ -4,17 +4,16 @@ assert sys.platform != 'win32'
 from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
 from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
-from tinygrad.runtime.support.hcq2 import kernel_args
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod
+from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
-from tinygrad.engine.realize import get_call_prg_args
+from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -94,19 +93,22 @@ class QCOMComputeQueue(HWQueue):
              value.cast(dtypes.uint32), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
   def kernargs(self, call:UOp, prg:UOp, data:QCOMProgramData) -> UOp:
-    uavs = [(p,a) for p,a in get_call_prg_args(call, prg) if p.arg.image is not None]
+    bufs, vals = [get_call_arg_uops(call)[g] for g in prg.arg.globals], get_call_var_uops(call, prg)
+    ubos = [bufs[slot] for _,slot,_,shape in data.signature if slot < len(bufs) and not is_image_shape(shape)]
+    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in data.signature if slot < len(bufs) and is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:data.ibo_cnt], [uavs[data.ibo_cnt + (data.tex_to_image[i] if data.NIR else i)] for i in range(data.tex_cnt)]
 
     args = [(off, UOp.const(val, dtypes.uint32 if sz == 4 else dtypes.uint16)) for val,off,sz in data.consts_info]
     args += layout_args(data.samplers, data.samp_off)
+    vals = [v.ccast(dt) for v,(_,_,dt,_) in zip(vals, data.signature[len(bufs):])]
     if data.NIR:
-      args += layout_args(kernel_args(call, prg, self.devs, images=False), data.buf_off)
+      args += layout_args([b.getaddr(self.devs) for b in ubos] + vals, data.buf_off)
       if data.wgsz != 0xfc: args += layout_args(list(prg.arg.local_size), data.wgsz * 4)
-    else: args += list(zip(data.buf_offs, kernel_args(call, prg, self.devs, images=False)))
+    else: args += list(zip(data.buf_offs, [b.getaddr(self.devs) for b in ubos] + vals))
 
     def _tex(b, ibo=False):
-      imgdt, shape, buf = b[0].arg.dtype, b[0].arg.image, b[1]
+      imgdt, shape, buf = b
       pitch = shape[1] * 4 * imgdt.itemsize
       fmt = mesa.FMT6_32_32_32_32_FLOAT if imgdt.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
       return [qreg.a6xx_tex_const_0(fmt=fmt) if ibo else qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=fmt),

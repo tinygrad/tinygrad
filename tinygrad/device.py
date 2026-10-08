@@ -351,12 +351,13 @@ class TinyELF:
   lib: bytes
   name: str
   target: Target
-  signature: tuple[KernelParam, ...]
+  signature: tuple[tuple[str|None, int, DType, tuple], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(types:Iterable[DType], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+  def iter_sig(types:Iterable[DType|tuple[str|None, int, DType, tuple]], offset:int=0) -> Generator[tuple[int, DType], None, None]:
     for dt in types:
+      if isinstance(dt, tuple): dt = dt[2]
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
 

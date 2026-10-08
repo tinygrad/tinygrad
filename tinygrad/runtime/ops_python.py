@@ -52,14 +52,14 @@ class PythonProgram(Program['PythonDevice']):
     self.tensor_cores = PythonRenderer(obj.target).tensor_cores
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    args = (*args, *vals)
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = dict(env:=kw.get("env", ())) # a function runs with its params bound to the caller's args
-      params = iter(args)
+      pbufs: list[int] = list(bufs)
+      pvals: list[int] = list(vals)
       exec_masks = [[True] * warp_size]
       i = 0
       while i < len(self.uops):
@@ -95,7 +95,7 @@ class PythonProgram(Program['PythonDevice']):
           i += 1
           continue
         if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
-        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [next(params)] * warp_size
+        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
@@ -105,7 +105,7 @@ class PythonProgram(Program['PythonDevice']):
             values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
             size = u.max_numel() * u.dtype.itemsize
-            buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(next(params), size)
+            buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.BINARY: values[u] = [memoryview(u.arg)] * warp_size
         elif u.op is Ops.SPECIAL:
@@ -149,8 +149,8 @@ class PythonProgram(Program['PythonDevice']):
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
           cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))
           values[u] = []
-          for lane_args,gate in zip(zip(*src_values), exec_masks[-1]):
-            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(lane_args, src_dtypes)]
+          for args,gate in zip(zip(*src_values), exec_masks[-1]):
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
             values[u].append(cfunc(*call_args) if gate else None)
         elif u.op is Ops.WMMA: values[u] = wmma(self.tensor_cores, u.arg, src_values, warp_size)
         elif u.op in GroupOp.ALU:
