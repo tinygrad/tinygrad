@@ -311,14 +311,14 @@ class TestProgressBar(unittest.TestCase):
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
-  def test_tqdm_no_tty_one_line(self, mock_terminal_size, mock_stderr):
+  def test_tqdm_no_tty_no_cr(self, mock_terminal_size, mock_stderr):
     # when stderr is not a tty (e.g. CI logs, piped to a file), only the final report should be printed
     ncols = 80
     mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
     for _ in tinytqdm(range(100), desc="Test"):
       pass
     out = mock_stderr.getvalue()
-    self.assertEqual(out.count("\r"), 1)
+    self.assertEqual(out.count("\r"), 0)
     self.assertIn("100/100", out)
 
   def test_tqdm_perf(self):
