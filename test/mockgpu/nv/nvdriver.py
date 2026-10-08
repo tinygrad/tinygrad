@@ -57,7 +57,7 @@ class NVDriver(VirtDriver):
 
     self.gpus = {}
     self.next_fd = (1 << 29)
-    self.next_handle = 1
+    self.next_handle = 0xcaf00000
 
     self.object_by_handle = {}
     self.opened_fds = {}
