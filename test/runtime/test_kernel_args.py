@@ -24,4 +24,3 @@ class TestKernelArgs(unittest.TestCase):
     self.assertEqual(TinyELF.pack((), (), 12), bytearray(12))
     for args in ((-3, 0x1000), (-3, 0x1000, 0x1000, 7)):
       with self.assertRaises(ValueError): TinyELF.pack(signature, args)
-
