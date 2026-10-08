@@ -1,16 +1,17 @@
 import ctypes, itertools
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
 from tinygrad.dtype import Invalid, AddrSpace, dtypes
-from tinygrad.helpers import Context, getenv, TracingKey, dedup
+from tinygrad.helpers import Context, getenv, TracingKey, dedup, unwrap
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
 asm_call_counter = itertools.count(1)
 
+# this is meant to replace the old emulator
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
               lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data:list[int]|None=None, accvgpr:UOp|None=None):
@@ -20,10 +21,10 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:in
   clear_sgpr = sgpr.after(clear_lds).index(si).store(0).end(si)
   vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
   clear_vgpr = UOp.sink(vgpr.after(clear_sgpr).index(vi).store(0),
-                       *([accvgpr.after(clear_sgpr).index(vi).store(0)] if wave_size == 64 else [])).end(vi)
+                        *([unwrap(accvgpr).after(clear_sgpr).index(vi).store(0)] if wave_size == 64 else [])).end(vi)
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
-  initial = [(128+i, i) for i in range(65)] + [(193+i, (-i-1)&0xFFFFFFFF) for i in range(16)] + list(F32_INLINE.items())
+  initial:list[tuple[int, sint]] = [*((128+i, i) for i in range(65)), *((193+i, (-i-1)&0xFFFFFFFF) for i in range(16)), *F32_INLINE.items()]
   initial += [(i,v) for i,v in enumerate(user_data)] if user_data else [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
   if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
   else:
