@@ -1,4 +1,4 @@
-import gc, struct, threading, unittest
+import struct, threading, unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, dtypes
@@ -32,6 +32,35 @@ class TestHostWait(unittest.TestCase):
       r.run_linear(linked, jit=True)
     self.assertEqual(out.uop.buffer.host.view(fmt="f")[0], 1.0)
     self.assertEqual(self.owner.pending[producer], 7)
+
+  def test_cpu_kernel_waits_for_pending_copy(self):
+    src = Tensor([0.0], device="CPU").realize()
+    out = src + 1
+    linked = r.link_linear(r.compile_linear(out.schedule_linear()))
+    r.run_linear(linked, jit=True)  # warm the runtime before checking that execution blocks
+    cpu, producer = self.owner, self.producer
+    signal = producer.timeline.host.view(fmt='Q')
+    signal[1] += 1
+    cpu.pending[producer] = signal[1]
+    src.uop.buffer.get_buf(producer.device)
+    self.addCleanup(cpu.pending.pop, producer, None)
+    entered = threading.Event()
+    original_wait = producer._wait_signal
+    def wait(*args, **kwargs):
+      entered.set()
+      return original_wait(*args, **kwargs)
+    t = threading.Thread(target=r.run_linear, args=(linked,), kwargs={"jit": True}, daemon=True)
+    with patch.object(producer, "_wait_signal", side_effect=wait):
+      t.start()
+      try:
+        self.assertTrue(entered.wait(5), "CPU compute must wait for the producer")
+        self.assertTrue(t.is_alive())
+      finally:
+        src.uop.buffer.host[:] = struct.pack("f", 2.0)
+        signal[0] = signal[1]
+        t.join(5)
+    self.assertFalse(t.is_alive())
+    self.assertEqual(out.tolist(), [3.0])
 
   def test_selected_producer_is_deduplicated(self):
     buf, unrelated = self.mapped(), Device["CPU:8766"]
@@ -114,8 +143,6 @@ class TestHostWait(unittest.TestCase):
       out = f(b)
     self.assertEqual(wait.call_count, 1)
     self.assertEqual(out.uop.buffer.host.view(fmt="f")[0], 3.0)
-    del f
-    gc.collect()
 
   def test_validation_uses_host_wait(self):
     a, b = Buffer("CPU", 4, preallocate=True), self.mapped(4)

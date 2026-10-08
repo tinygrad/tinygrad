@@ -98,30 +98,6 @@ class TestHCQ2Fence(unittest.TestCase):
     self.tl = Device["CPU"].timeline.host.view(fmt='Q')
     self.addCleanup(lambda: self.tl.__setitem__(0, self.tl[1]))
 
-  def test_cpu_kernel_waits_for_pending_copy(self):
-    src = Tensor([0.0], device="CPU").realize()
-    out = src + 1
-    linked = link_linear(compile_linear(out.schedule_linear()))
-    run_linear(linked, jit=True)  # warm the runtime before checking that execution blocks
-    cpu, producer = Device["CPU"], Device["CPU:1"]
-    signal = producer.timeline.host.view(fmt='Q')
-    signal[1] += 1
-    cpu.pending[producer] = signal[1]
-    src.uop.buffer.get_buf(producer.device)
-    self.addCleanup(cpu.pending.pop, producer, None)
-    t = threading.Thread(target=run_linear, args=(linked,), kwargs={"jit": True}, daemon=True)
-    t.start()
-    try:
-      t.join(0.2)
-      blocked = t.is_alive()
-    finally:
-      src.uop.buffer.host[:] = struct.pack("f", 2.0)
-      signal[0] = signal[1]
-      t.join(5)
-    self.assertFalse(t.is_alive())
-    self.assertTrue(blocked, "CPU compute must wait for the producer to finish writing its input")
-    self.assertEqual(out.tolist(), [3.0])
-
   def test_a_schedule_waits_for_its_previous_run(self):
     slots = UOp.alloc((4,), dtypes.uint64, device="CPU").rtag("slots")
     program = lower_and_compile(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])))
