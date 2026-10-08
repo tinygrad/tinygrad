@@ -21,8 +21,8 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:in
   vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
   # zero ALLOCs
   zero_lds = lds.index(li).store(0).end(li)
-  zero_sgpr = sgpr.after(clear_lds).index(si).store(0).end(si)
-  zero_vpgr = vgpr.after(zero_sgpr).index(vi).store(0)
+  zero_sgpr = sgpr.after(zero_lds).index(si).store(0).end(si)
+  zero_vgpr = vgpr.after(zero_sgpr).index(vi).store(0)
   zero_agpr = unwrap(accvgpr).after(zero_sgpr).index(vi).store(0) if wave_size == 64 else UOp(Ops.NOOP)
   clear_vgpr = UOp.group(zero_vgpr, zero_agpr).end(vi)
   # set RANGE registers
