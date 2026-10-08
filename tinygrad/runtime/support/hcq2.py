@@ -153,10 +153,10 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
 def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
   if any(d.startswith("RDMA") for d in devs): return None # over the nic
-
   if (device:=get_enqueue_devs(call)) is None: return None
-  dev, host, usb_memcpys = Device[device], Device[device].host, getattr(Device[device], "is_usb", False)
+
   from tinygrad.runtime.ops_disk import is_disk_read
+  dev, host, usb_memcpys = Device[device], Device[device].host, getattr(Device[device], "is_usb", False)
   mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
   if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
     (staging:=_staging(host)).get_buf(device)

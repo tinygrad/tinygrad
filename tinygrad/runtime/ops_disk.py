@@ -82,32 +82,33 @@ class DiskAllocator(Allocator):
 # UOps implementation
 
 CHUNK_SZ, READ_SZ, SLOTS, RING_ENTRIES = 64 << 20, 1 << 20, 2, 256
-SLOT_SZ, STAGE_SZ = CHUNK_SZ + 4096, SLOTS * (CHUNK_SZ + 4096) + 16 # +4096: reads are page aligned
+SLOT_SZ, STAGE_SZ = CHUNK_SZ + 4096, 4096 + SLOTS * (CHUNK_SZ + 4096) # +4096: reads are page aligned. stage: a page of counts, then the slots
 
 @uopfunc
-def disk_read(file:UOp, srcs:UOp, stage:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # srcs: [address in the file's mmap, bytes] per copy
+def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # srcs: [address in the file's mmap, bytes] per copy
   fd, p = unwrap(uring())[:2]
   file, srcs, counts, rings, sqes = (b.replace(arg=replace(b.arg, volatile=True, device=None)) for b in (file, srcs, counts, rings, sqes))
 
-  # each copy in chunks. the next chunk n waits for the gpu to free its slot
+  # for each copy
   src_va, nbytes = srcs[(copy:=UOp.range(srcs.max_numel() // 2, 0, dtype=dtypes.uint64)) * 2], srcs[copy * 2 + 1]
+
+  # for each chunk: the next chunk n waits for the gpu to free its slot
   n = counts.after(chunk:=UOp.range(ceildiv(nbytes, CHUNK_SZ), 1, dtype=dtypes.uint64))[0]
   free = (copied:=counts.after(n, loop:=UOp.loop(3))[1]).backedge(loop, copied + SLOTS <= n)
-
-  # queues the pages of the chunk as READ_SZ reads. an sqe is 8 words: fd << 32 | flags << 8 | opcode, file offset, address, bytes
   pos = src_va + chunk * CHUNK_SZ - file[1]
   span = (pos % 4096 + (nbytes - chunk * CHUNK_SZ).minimum(CHUNK_SZ) + 4095) // 4096 * 4096
-  read = UOp.range(nreads:=ceildiv(span, READ_SZ), 2, dtype=dtypes.uint64)
-  tail = rings.after(free)[sq_tail:=p.sq_off.tail // 4].cast(dtypes.uint64)
+
+  # for each read: queues READ_SZ of the chunk's pages. an sqe is 8 words: fd << 32 | flags << 8 | opcode, file offset, address, bytes
+  tail, read = rings.after(free)[p.sq_off.tail // 4].cast(dtypes.uint64), UOp.range(nreads:=ceildiv(span, READ_SZ), 2, dtype=dtypes.uint64)
   sqe = [file[0] << 32 | io_uring.IOSQE_ASYNC << 8 | io_uring.IORING_OP_READ, pos - pos % 4096 + read * READ_SZ,
-         stage.getaddr(HCQ_RUNTIME_DEV.value) + n % SLOTS * SLOT_SZ + read * READ_SZ, (span - read * READ_SZ).minimum(READ_SZ)]
+         counts.getaddr(HCQ_RUNTIME_DEV.value) + 4096 + n % SLOTS * SLOT_SZ + read * READ_SZ, (span - read * READ_SZ).minimum(READ_SZ)]
   queued = UOp.group(*[sqes[(tail + read) % RING_ENTRIES * 8 + j].store(v) for j, v in enumerate(sqe)]).end(read)
 
-  # submits, waits for all, marks the chunk read
-  to_submit = nreads.cast(dtypes.int).after(rings.after(queued)[sq_tail].store((tail + nreads).cast(dtypes.uint32)))
+  # submits the reads, waits for all, marks the chunk read
+  to_submit = nreads.cast(dtypes.int).after(rings.after(queued)[p.sq_off.tail // 4].store((tail + nreads).cast(dtypes.uint32)))
   done = ccall(libc.syscall, io_uring.NR_io_uring_enter, fd, to_submit, to_submit, io_uring.IORING_ENTER_GETEVENTS, 0, 0)
   reaped = rings.after(done)[p.cq_off.head // 4].store(rings.after(done)[p.cq_off.tail // 4])
-  return counts.after(reaped)[0].store(n + 1).end(chunk, copy).sink()
+  return counts.after(reaped)[0].store(n + 1).end(chunk).end(copy).sink()
 
 # *****************
 # 2. rewriter
@@ -119,28 +120,33 @@ def is_disk_read(c:UOp) -> bool:
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lins = [submit.without_after.src[1].without_after for submit in s.src]
   if not (copies:=[c for lin in lins for c in lin.src if is_disk_read(c)]): return None
-
-  # the host reads a chunk from disk into a slot, the gpu copies it out. a host loop per gpu and file
-  offs, gpu_ops, done = collections.Counter[str](), collections.defaultdict[UOp, list[UOp]](list), s.src[-1]
   rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.value).rtag("uring_rings")
   sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value).rtag("uring_sqes")
-  for (dev, disk), it in itertools.groupby(copies, lambda c: (to_tuple(c.src[1].device)[0], to_tuple(c.src[2].device)[0])):
-    file, grp = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info"), list(it)
-    # the slots, then [chunks read, chunks copied]
-    counts = (stage:=UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev).rtag("disk_stage"))[STAGE_SZ - 16:].bitcast(dtypes.uint64)
-    # [address in the file's mmap, bytes] per copy, patched at link: an address each would be an argument of the batch
-    rows = [[(16 * k, c.src[2].getaddr(HCQ_RUNTIME_DEV.value)), (16 * k + 8, UOp.const(c.src[2].nbytes(), dtypes.uint64))] for k, c in enumerate(grp)]
-    srcs = patch(UOp.alloc((16 * len(grp),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value), flatten(rows)).bitcast(dtypes.uint64)
-    done = disk_read(file, srcs, stage, counts.after(done), rings, sqes)
 
-    # waits for the chunk, copies it out, frees the slot
-    for k, c in enumerate(grp):
-      n0, slots = counts.index(0).load() + offs[dev], stage.getaddr(dev) + srcs.index(2 * k).load() % 4096 # the mmap is page aligned
-      offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
-      for chunk, nb in chunks(c.src[2].nbytes(), CHUNK_SZ, dtypes.uint64):
-        n, dst = n0 + chunk, c.src[1].getaddr(dev) + chunk * CHUNK_SZ
-        ops = [ins("wait", counts, n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[1:], n + 1)]
-        gpu_ops[c] += [UOp(Ops.LINEAR, src=tuple(ops)).end(chunk)] if isinstance(chunk, UOp) else ops
+  # [mmap address, bytes] per copy in a table: an arg each would hit ctypes' 1024 limit
+  words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.value), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
+  table = UOp.alloc((8 * len(words),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value)
+  srcs = patch(table, [(8 * i, w) for i, w in enumerate(words)]).bitcast(dtypes.uint64)
+
+  # per gpu: [chunks read, chunks copied] at the start of its stage
+  devs = [to_tuple(c.src[1].device)[0] for c in copies]
+  counts = {d: UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=d).rtag("disk_stage")[:16].bitcast(dtypes.uint64) for d in devs}
+
+  # cpu part
+  runs = [(key, list(ks)) for key, ks in itertools.groupby(range(len(copies)), lambda k: (devs[k], to_tuple(copies[k].src[2].device)[0]))]
+  done, offs, gpu_ops = s.src[-1], collections.Counter[str](), collections.defaultdict[UOp, list[UOp]](list)
+  for (dev, disk), ks in runs:
+    file = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info")
+    done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts[dev].after(done), rings, sqes)
+
+  # gpu part
+  for k, (c, dev) in enumerate(zip(copies, devs)):
+    first, slots = counts[dev].index(0).load() + offs[dev], counts[dev].getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
+    offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
+    for chunk, nb in chunks(c.src[2].nbytes(), CHUNK_SZ, dtypes.uint64):
+      n, dst = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ
+      cmds = [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
+      gpu_ops[c] += [UOp(Ops.LINEAR, src=tuple(cmds)).end(chunk)] if isinstance(chunk, UOp) else cmds # full chunks as one loop
   return s.replace(src=(*s.src, done)).substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins})
 Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"), disk_copy_rewriter)])
 
