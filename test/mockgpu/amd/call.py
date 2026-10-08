@@ -20,8 +20,9 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:in
   si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
   clear_sgpr = sgpr.after(clear_lds).index(si).store(0).end(si)
   vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
-  clear_vgpr = UOp.sink(vgpr.after(clear_sgpr).index(vi).store(0),
-                        *([unwrap(accvgpr).after(clear_sgpr).index(vi).store(0)] if wave_size == 64 else [])).end(vi)
+  vgpr_store0 = vgpr.after(clear_sgpr).index(vi).store(0)
+  agpr_store0 = unwrap(accvgpr).after(clear_sgpr).index(vi).store(0) if wave_size == 64 else UOp(Ops.NOOP)
+  clear_vgpr = UOp.group(vgpr_store0, agpr_store0).end(vi)
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   initial:list[tuple[int, sint]] = [*((128+i, i) for i in range(65)), *((193+i, (-i-1)&0xFFFFFFFF) for i in range(16)), *F32_INLINE.items()]
