@@ -10,7 +10,7 @@ extern "C" __global__ __launch_bounds__(256) void gptoss_combine_forward(
   __shared__ float ws[4];
   if (tid < 4) {
     rows[tid] = group * ROWS + dest_row[token * 4 + tid];
-    ws[tid] = (float)(__hip_bfloat16)weights[token * 4 + tid];
+    ws[tid] = weights[token * 4 + tid];
   }
   __syncthreads();
 
@@ -18,8 +18,7 @@ extern "C" __global__ __launch_bounds__(256) void gptoss_combine_forward(
     float acc = 0.0f;
 #pragma unroll
     for (int j = 0; j < 4; j++) {
-      // Preserve the stock BF16 multiply boundary before the FP32 reduction.
-      acc += (float)(__hip_bfloat16)(ws[j] * (float)z[(long long)rows[j] * 2880 + d]);
+      acc = fmaf(ws[j], (float)z[(long long)rows[j] * 2880 + d], acc);
     }
     out[(long long)token * 2880 + d] = (__hip_bfloat16)acc;
   }

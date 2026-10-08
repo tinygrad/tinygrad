@@ -1,10 +1,10 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertools
 assert sys.platform != 'win32'
-from typing import Any, cast
+from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
-from tinygrad.runtime.support.hcq2 import layout_args, make_program, ccall
+from tinygrad.runtime.support.hcq2 import layout_args, make_program, ccall, ins, get_time_ms
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator, AddrSpace
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
@@ -15,12 +15,12 @@ from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, pr
 from tinygrad.helpers import ProfileEvent, unwrap, to_tuple, ceildiv
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
-from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa, libc
+from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa, libc, libusb
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager, NVUSBPCIDevice
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED
-from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_copy_rewriter, usb_ins
-from tinygrad.runtime.support.usb import usb_asm24, usb_cq, usb_link, usb_stage, usb_ctrl, usb_bulk, usb_poke
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_copy_rewriter
+from tinygrad.runtime.support.usb import usb_asm24, usb_cq, usb_link, usb_stage, usb_ctrl, usb_bulk, usb_poke, usb_stack, usb_fail
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -563,15 +563,12 @@ def nv_usb_vram(dev) -> UOp:
 
 @uopfunc
 def nv_usb_wait(dev:str, h:UOp, value:UOp) -> UOp:
-  loop = UOp.range(UOp(Ops.NOOP).after(h), next(UOp.unique_num), dtype=dtypes.void)
-  done = nv_usb_vram(dev).after(h, loop).index(2).load()
-  return done.backedge(loop, done.ne(value.cast(dtypes.uint32)) & h.after(done).index(5).load().eq(0)).sink()
-
-def nv_usb_copy_rewriter(s:UOp) -> UOp|None:
-  iface = cast(NVDevice, Device[s.src[0].without_after.src[1].without_after.arg[0][0]]).iface
-  return usb_copy_rewriter(s, iface.TRANSFER_SIZE, iface.usb_copy_commands, iface.usb_transfer)
-
-pm_nv_usb_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), nv_usb_copy_rewriter)])
+  loop = UOp.range(UOp(Ops.NOOP).after(h, start:=get_time_ms(h)), next(UOp.unique_num), dtype=dtypes.void)
+  slot = usb_stack(dtypes.uint32, 0)
+  read = slot.index(0).store(nv_usb_vram(dev).after(h, loop).index(2).load())
+  def pending(dep:UOp) -> UOp: return slot.after(dep).index(0).load().ne(value)
+  done = read.backedge(loop, h.after(read).index(5).load().eq(0) & pending(read) & (get_time_ms(read) - start < 1000))
+  return usb_fail(h.after(done), pending(done).cast(dtypes.int) * libusb.LIBUSB_ERROR_TIMEOUT).sink()
 
 class USBIface(PCIIface):
   SRAM_PADDR, SLOT_SIZE = 0x200000, 0x4000
@@ -605,9 +602,9 @@ class USBIface(PCIIface):
     sram = usb_asm24(dev)[0x5000:0x5000 + self.TRANSFER_SIZE].getaddr(dev)
     progress = nv_usb_vram(dev)
     seq = (usb_link(dev).index(2).load() + n).cast(dtypes.uint32) + 1
-    ins = [usb_ins("wait_eq", progress[:2].bitcast(dtypes.uint64), seq), usb_ins("copy", addr if upload else sram, sram if upload else addr, nb)]
-    if not upload: ins.append(usb_ins("store", usb_cq(dev), 0))
-    return ins + [usb_ins("store", progress[2:3], seq)]
+    cmds = [ins("wait_eq", progress[:2].bitcast(dtypes.uint64), seq), ins("copy", addr if upload else sram, sram if upload else addr, nb)]
+    if not upload: cmds.append(ins("store", usb_cq(dev), 0))
+    return cmds + [ins("store", progress[2:3], seq)]
 
   def usb_transfer(self, dev:str, h:UOp, runs:list[tuple[bool, int, UOp, int]], n:int) -> UOp:
     stage, progress = usb_stage(dev), nv_usb_vram(dev)
@@ -615,7 +612,7 @@ class USBIface(PCIIface):
     for upload, first, table, count in runs:
       i = UOp.range(count, next(UOp.unique_num), dtype=dtypes.int) if count > 1 else UOp.const(0, dtypes.int)
       addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
-      seq = h.index(2).load() + first + i.cast(dtypes.uint64)
+      seq = (h.index(2).load() + first + i.cast(dtypes.uint64)).cast(dtypes.uint32)
       hi = h.after(i, nv_usb_wait(dev, h.after(i), seq))
       live = UOp.range(hi.index(5).load().eq(0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int)
       hi = hi.after(live)
@@ -624,7 +621,7 @@ class USBIface(PCIIface):
       hi = hi.after(usb_ctrl(hi, 0x40, 0xF2, wire // 512 if upload else (wire // 512) | 0x8000,
                             (self.TRANSFER_START_SLOT if upload else 0) | (ceildiv(wire, self.SLOT_SIZE) << 8), UOp.const(0, dtypes.uint64), 0))
       if upload: hi = hi.after(usb_bulk(hi, 0x02, stage.index(0), wire))
-      hi = hi.after(usb_poke(hi, progress.getaddr("CPU"), (seq + 1).cast(dtypes.uint32)))
+      hi = hi.after(usb_poke(hi, progress.getaddr("CPU"), seq + 1))
       if not upload:
         hi = hi.after(usb_bulk(hi, 0x81, stage.index(0), wire))
         hi = hi.after(ccall(libc.memcpy, addr, stage.after(hi).index(prefix), size.cast(dtypes.uint64)))
@@ -690,7 +687,8 @@ class NVDevice(Compiled):
 
     if self.is_usb:
       setup_usb_rules(self)
-      self.pm_batch = pm_nv_usb_batch
+      self.pm_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), lambda s, iface=self.iface:
+        usb_copy_rewriter(s, iface.TRANSFER_SIZE, iface.usb_copy_commands, iface.usb_transfer))])
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 

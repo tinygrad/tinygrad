@@ -56,10 +56,9 @@ def _router_weight_bwd_kernel(out:UOp, x:UOp, gradient:UOp) -> UOp:
 def router_weight_gradient(x:Tensor, gradient:Tensor) -> Tensor:
   assert x.dtype == dtypes.bfloat16 and gradient.dtype == dtypes.float32
   groups = len(x.device) if isinstance(x.device, tuple) and x.uop.axis is not None else 1
-  # Sum FP32 local contributions before rounding to BF16, matching ordinary matmul backward.
-  partial = alloc_like((groups, 32, x.shape[-1]), dtypes.float32, x.device, x.uop.axis)
+  partial = alloc_like((groups, 32, x.shape[-1]), dtypes.bfloat16, x.device, x.uop.axis)
   partial, *_ = Tensor.custom_kernel(partial, x, gradient, fxn=_router_weight_bwd_kernel)
-  return partial.sum(0).cast(x.dtype)
+  return partial.sum(0, dtype=x.dtype)
 
 def _router_bwd(gradient:UOp, call:UOp) -> tuple:
   x, weight, bias = (Tensor(u) for u in call.src[1:4])
@@ -67,7 +66,7 @@ def _router_bwd(gradient:UOp, call:UOp) -> tuple:
   grad_logits, bias_partials = router_topk_backward(Tensor(gradient), weights, indices)
   grad_x, = (x.float() @ weight.float().T).gradient(x, gradient=grad_logits.reshape(*x.shape[:-1], 32))
   grad_weight = router_weight_gradient(x, grad_logits)
-  return grad_x.uop, grad_weight.uop, bias_partials.sum((0, 1)).cast(bias.dtype).uop
+  return grad_x.uop, grad_weight.uop, bias_partials.sum(1).cast(bias.dtype).sum(0, dtype=bias.dtype).uop
 
 @function(grad_fxn=_router_bwd)
 def fused_router(x:Tensor, weight:Tensor, bias:Tensor) -> tuple[Tensor, Tensor]:
@@ -95,7 +94,7 @@ def _router_quantize_bwd(gradient:UOp, quantized_gradient:UOp, *, call:UOp) -> t
   grad_logits, bias_partials = router_topk_backward(Tensor(gradient), weights, indices)
   grad_x = alloc_like(x.shape, x.dtype, x.device, x.uop.axis)
   grad_x, *_ = Tensor.custom_kernel(grad_x, weight, grad_logits, Tensor(quantized_gradient), scales, fxn=_router_input_bwd_kernel)
-  return grad_x.uop, router_weight_gradient(x, grad_logits).uop, bias_partials.sum((0, 1)).cast(bias.dtype).uop
+  return grad_x.uop, router_weight_gradient(x, grad_logits).uop, bias_partials.sum(1).cast(bias.dtype).sum(0, dtype=bias.dtype).uop
 
 @function(grad_fxn=_router_quantize_bwd)
 def fused_router_quantize(x:Tensor, weight:Tensor, bias:Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
