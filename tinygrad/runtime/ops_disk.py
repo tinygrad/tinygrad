@@ -130,7 +130,7 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
     counts = (stage:=UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev).rtag("disk_stage"))[STAGE_SZ - 16:].bitcast(dtypes.uint64)
     # [address in the file's mmap, bytes] per copy, patched at link: an address each would be an argument of the batch
     rows = [[(16 * k, c.src[2].getaddr(HCQ_RUNTIME_DEV.value)), (16 * k + 8, UOp.const(c.src[2].nbytes(), dtypes.uint64))] for k, c in enumerate(grp)]
-    srcs = patch(UOp.alloc((2 * len(grp),), dtypes.uint64, device=HCQ_RUNTIME_DEV.value), flatten(rows))
+    srcs = patch(UOp.alloc((16 * len(grp),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value), flatten(rows)).bitcast(dtypes.uint64)
     done = disk_read(file, srcs, stage, counts.after(done), rings, sqes)
 
     # waits for the chunk, copies it out, frees the slot
