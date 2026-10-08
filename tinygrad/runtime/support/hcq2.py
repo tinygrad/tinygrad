@@ -73,7 +73,7 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, de
 
 def layout_args(args:Sequence[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
   words = [a if isinstance(a, UOp) else UOp.const(a, dtypes.uint32) for a in args]
-  return [(offset + o, w) for (o, _), w in zip(TinyELF.iter_sig(tuple((None, i, w.dtype, ()) for i, w in enumerate(words))), words)]
+  return [(offset + o, w) for (o, _), w in zip(TinyELF.iter_sig(tuple((None, AddrSpace.ALU, w.dtype, ()) for w in words)), words)]
 
 def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   words, end = [], 0

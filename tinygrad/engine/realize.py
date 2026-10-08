@@ -6,6 +6,7 @@ from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flat
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -13,10 +14,11 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 # **************** Helpers ****************
 
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_bound_var)
-def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
-  # a bound value is a bare CONST: the Variable states the width
+def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
+  # one per kernel param in order: a buffer is its address, a value has the param's width. a bound value is a bare CONST, a free var is slotless
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  return [bound.get(v.expr, v.replace(arg=replace(v.arg, slot=-1))) for v in prg.arg.vars]
+  return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
+          call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -157,12 +159,13 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
   resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
   for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
     var_vals = {**ctx.var_vals, **device_vars}
-    prg_bufs = [b.ensure_allocated() for b in bufs]
+    prg_bufs = {i:b.ensure_allocated() for i,b in zip(ast.arg.globals, bufs)}
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: vals = tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
+    try: args = [(var_vals[p.expr] if p.is_variable else _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU else
+                 prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_sz, local_size=local_sz, vals=vals, wait=ctx.wait, timeout=ctx.timeout))
+    ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -173,7 +176,8 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+    cpu_rt(*[var_vals[p.expr] if p.addrspace is AddrSpace.ALU else bufs[p.arg.slot].ensure_allocated()._buf for p in prg.kernel_params],
+           global_size=global_size, local_size=local_size)
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
   return []
 

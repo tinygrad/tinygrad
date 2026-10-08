@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, mmap, struct
-from typing import cast, Any
+from typing import Any
 from tinygrad.helpers import OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le, cpu_profile
 from tinygrad.device import Compiled, TinyELF, Program, HostAllocator
 from tinygrad.runtime.support.c import DLL
@@ -55,9 +55,8 @@ class CPUProgram(Program['CPUDevice']):
 
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
-  def __call__(self, *bufs:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
-    args = TinyELF.args(self.signature, bufs, cast(tuple[int, ...], vals))
+  def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
+               wait:bool=False, timeout:int|None=None) -> float|None:
     if (remote:=self.dev.remote) is not None:
       data = struct.pack(f'<{len(args)}Q', *(a & 0xffffffffffffffff for a in args))
       ret = (remote._rpc if wait else remote._post)(remote.sock, RemoteCmd.EXEC_PROG, self.fxn, len(args), int(wait), payload=data)
@@ -67,7 +66,7 @@ class CPUProgram(Program['CPUDevice']):
         lvp_args = bytearray(12 + len(args) * 8)
         addr = mv_address(lvp_args)
         struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), len(args)*2)
-        for a,(off,dt) in zip(args, TinyELF.iter_sig(self.signature, 0, len(bufs))): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, a)
+        for a,(off,dt) in zip(args, TinyELF.iter_sig(self.signature)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, a)
         self.fxn(addr)
       else: self.fxn(*[ctypes.c_uint64(x) for x in args])
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None

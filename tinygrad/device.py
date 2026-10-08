@@ -1,13 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
-from tinygrad.dtype import dtypes, DType, _to_np_dtype
+from tinygrad.dtype import dtypes, DType, AddrSpace, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
@@ -354,26 +354,20 @@ class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
-  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
+  signature: tuple[tuple[str|None, AddrSpace|None, DType, tuple], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0, nbufs:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,i,dt,_ in signature:
-      if i < nbufs: dt = dtypes.uint64
+  def iter_sig(signature:tuple[tuple[str|None, AddrSpace|None, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+    for _,a,dt,_ in signature:
+      if a is not AddrSpace.ALU: dt = dtypes.uint64 # a buffer is passed by its address
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
 
-  @staticmethod
-  def args(signature:tuple[tuple[str|None, int, DType, tuple], ...], bufs:Sequence, vals:Sequence) -> list:
-    args = (*bufs, *vals)
-    return [args[i] for _,i,_,_ in signature]
-
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
-               wait=False) -> float|None: pass
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False) -> float|None: pass
 
 class Compiled:
   ifaces:list[Callable] = []

@@ -1293,14 +1293,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 
-  def to_elf(self) -> TinyELF:
-    assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    # the signature is the kernel's params in slot order. an entry indexes (*bufs, *vals): buffers in globals order (raw call-arg positions
-    # skip buffers for kernels using a sparse subset of the call's buffers, CL binds bufs[slot]), then vars
+  @functools.cached_property
+  def kernel_params(self) -> list[UOp]:
+    # the kernel's params in its arg order, which is slot order. the LINEAR keeps two IMAGE params of one slot in order, x86 isel drops stack params
+    assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "kernel_params should only be called on a PROGRAM ast"
     params = [u for u in self.src[1].src if u.op is Ops.PARAM]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
-    idx = {s:j for j, s in enumerate(self.arg.globals)} | {v.arg.slot:len(self.arg.globals)+j for j, v in enumerate(self.arg.vars)}
-    sig = tuple((p.arg.name, idx[p.arg.slot], p.dtype, p._shape) for p in sorted(params, key=lambda p: p.arg.slot))
+    return sorted(params, key=lambda p: p.arg.slot)
+
+  def to_elf(self) -> TinyELF:
+    sig = tuple((p.arg.name, p.addrspace, p.dtype, p._shape) for p in self.kernel_params)
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
   @property
