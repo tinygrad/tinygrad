@@ -29,7 +29,8 @@ pm_asm_call = PatternMatcher([
 ])
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
-def lift(lib: int, lib_sz: int, arch: str = "rdna3", backend: str|None = None) -> UOp:
+def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
+         user_data:list[int]|None=None, backend:str|None=None) -> UOp:
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
