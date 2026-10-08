@@ -34,8 +34,7 @@ class HIPProgram(Program[HIPDevice]):
   def __del__(self):
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    args = (*args, *vals)
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
     c_args = TinyELF.pack(self.signature, args)
     vargs = (ctypes.c_void_p * 5)(1, mv_address(c_args), 2, ctypes.addressof(_arg_size:=ctypes.c_size_t(len(c_args))), 3)

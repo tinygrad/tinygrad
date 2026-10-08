@@ -1296,17 +1296,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # one-line convenience for the single-output case: self is the value
   def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
+    placeholders = [s.param_like(i, s.arg.name) if s.is_variable else UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    params = tuple(u for u in (self.arg.params or self.src[1].src) if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU)
-    gmap = {s:j for j, s in enumerate(self.arg.globals)}
-    sig = tuple(u.kernel_param._replace(arg=replace(u.arg, slot=gmap[u.arg.slot])) for u in params) + \
-          tuple(v.kernel_param._replace(arg=replace(v.arg, slot=len(self.arg.globals)+j)) for j,v in enumerate(self.arg.vars))
+    sig = tuple(u.kernel_param for u in (self.arg.params or self.src[1].src) if u.op is Ops.PARAM)
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
+
   @property
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 

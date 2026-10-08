@@ -18,7 +18,8 @@ def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for _,s in ge
 def get_call_prg_args(call:UOp, prg:UOp) -> Iterator[tuple[UOp, UOp]]:
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}  # a bound value is a bare CONST: the Variable states the width
   for p in (p for p in (prg.arg.params or prg.src[1].src) if p.op is Ops.PARAM):
-    yield p, bound.get(p.expr, p) if p.arg.addrspace is AddrSpace.ALU else call.src[1+p.arg.slot]
+    a = bound.get(p.expr, p) if p.arg.slot < 0 else call.src[1+p.arg.slot]
+    yield p, UOp.const(a.arg.val) if a.is_bound_var else a
 
 def get_call_outs_ins(call:UOp, compact:bool=False) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -160,32 +161,28 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
-  resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  resolved = resolve_params(call, ctx.input_uops, ast.arg.globals)
+  for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
     if devices is None and device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
     var_vals = {**ctx.var_vals, **device_vars}
-    prg_bufs = [b.ensure_allocated() for b in bufs]
+    buffers = dict(zip(ast.arg.globals, bufs))
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: vals = tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
+    try: args = [(var_vals[a.expr] if a.is_variable else _resolve(a, ctx.input_uops).val) if p.arg.addrspace is AddrSpace.ALU else
+                 buffers[p.arg.slot].ensure_allocated().get_buf(device) for p,a in get_call_prg_args(call, ast)]
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_sz, local_size=local_sz, vals=vals, wait=ctx.wait, timeout=ctx.timeout))
+    ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  resolved = resolve_params(call, ctx.input_uops)
-  Device["CPU"].synchronize(ctx.timeout)
-  for bufs, device_vars in unwrap_multi(call, resolved):
-    bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
-    var_vals = {**ctx.var_vals, **device_vars}
-    cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
-    global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer))
+  for args, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    bufs, dev_bufs = dict(zip(slots := [i for i,_ in get_call_args(call)][:len(args)//2], args)), dict(zip(slots, args[len(slots):]))
     for i in prg.arg.outs:
-      dt = _to_np_dtype(resolved[i].dtype)
-      assert dt is not None, f"no np dtype for {resolved[i].dtype}"
+      dt = _to_np_dtype(call.src[1+i].dtype)
+      assert dt is not None, f"no np dtype for {call.src[1+i].dtype}"
       np.testing.assert_allclose(np.frombuffer(dev_bufs[i].ensure_allocated().as_memoryview(), dt),
                                  np.frombuffer(bufs[i].as_memoryview(), dt), rtol=1e-3, atol=1e-3)
   return []
@@ -214,10 +211,9 @@ pm_flatten_linear = PatternMatcher([
 ])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *params)))
+  sh = {i:UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device,tuple) else "CPU", prod(p.max_shape), p.dtype) for i,p in get_call_args(call)}
+  cp = tuple(s.store_call(call.src[1+i]) for i,s in sh.items())
+  return UOp(Ops.LINEAR,src=cp + (call, UOp.custom_function("validate", sink).call(*(sh.get(i,s) for i,s in enumerate(call.src[1:])), *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value

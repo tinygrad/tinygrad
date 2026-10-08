@@ -146,6 +146,7 @@ class _TinyJit(Generic[ReturnType]):
 
       # combine all captured linears into one, memory plan, and compile
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
+      big_linear = big_linear.substitute({v:v.unbound() for v in big_linear.backward_slice if v.is_bound_var and v.expr in var_vals}, walk=True)
       del self._linears
 
       if self.prune:

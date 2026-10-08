@@ -67,9 +67,7 @@ class WebGPUProgram(Program['WebGpuDevice']):
   @suppress_finalizing
   def __del__(self): webgpu.wgpuShaderModuleRelease(self.prg)
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
-    args = (*args, *vals)
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw) -> float|None:
     wait = wait and webgpu.WGPUFeatureName_TimestampQuery in self.dev.features
 
     bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(self.signature)))()

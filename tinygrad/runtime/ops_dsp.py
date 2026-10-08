@@ -58,8 +58,7 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
 class DSPProgram(Program['DSPDevice']):
   def __init__(self, dev:DSPDevice, obj:TinyELF): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    args = (*args, *vals)
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     bufs = [a for p,a in zip(self.signature, args) if p.arg.addrspace == AddrSpace.GLOBAL]
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
@@ -274,8 +273,7 @@ class MockDSPRenderer(DSPRenderer):
 
 class MockDSPProgram(Program[DSPDevice]):
   def __init__(self, dev:DSPDevice, obj:TinyELF): self.lib, self.signature = obj.lib, obj.signature
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    args = (*args, *vals)
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()

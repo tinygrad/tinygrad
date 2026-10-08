@@ -56,8 +56,7 @@ class CPUProgram(Program['CPUDevice']):
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
-    args = (*args, *vals)
+               wait:bool=False, timeout:int|None=None) -> float|None:
     if (remote:=self.dev.remote) is not None:
       data = struct.pack(f'<{len(args)}Q', *(a & 0xffffffffffffffff for a in args))
       ret = (remote._rpc if wait else remote._post)(remote.sock, RemoteCmd.EXEC_PROG, self.fxn, len(args), int(wait), payload=data)

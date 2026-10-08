@@ -4,7 +4,6 @@ import ctypes, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, suppress_finalizing, unwrap, round_up, mv_address
-from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, TinyELF, Program
 
@@ -54,8 +53,7 @@ class CLProgram(Program['CLDevice']):
     except (TypeError, AttributeError): pass
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
-    args = tuple(args[p.arg.slot] if p.arg.addrspace is not AddrSpace.ALU else vals[p.arg.slot-len(args)] for p in self.signature)
+               wait=False, **kw) -> float|None:
     addr = mv_address(_argbuf:=TinyELF.pack(self.signature, args) or bytearray(1))
     for i,(p,(off,dt)) in enumerate(zip(self.signature, TinyELF.iter_sig(p.abi_dtype for p in self.signature))):
       if (shape:=p.arg.image) is not None:
