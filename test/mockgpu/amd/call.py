@@ -15,14 +15,17 @@ asm_call_counter = itertools.count(1)
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
               lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data:list[int]|None=None, accvgpr:UOp|None=None):
+  # define ranges inside a wave
   li = UOp.range((wave.eq(0)).where(max(lds_size//4, 1), 0), 2, dtype=dtypes.int)
-  clear_lds = lds.index(li).store(0).end(li)
   si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
-  clear_sgpr = sgpr.after(clear_lds).index(si).store(0).end(si)
   vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
-  vgpr_store0 = vgpr.after(clear_sgpr).index(vi).store(0)
-  agpr_store0 = unwrap(accvgpr).after(clear_sgpr).index(vi).store(0) if wave_size == 64 else UOp(Ops.NOOP)
-  clear_vgpr = UOp.group(vgpr_store0, agpr_store0).end(vi)
+  # zero ALLOCs
+  zero_lds = lds.index(li).store(0).end(li)
+  zero_sgpr = sgpr.after(clear_lds).index(si).store(0).end(si)
+  zero_vpgr = vgpr.after(zero_sgpr).index(vi).store(0)
+  zero_agpr = unwrap(accvgpr).after(zero_sgpr).index(vi).store(0) if wave_size == 64 else UOp(Ops.NOOP)
+  clear_vgpr = UOp.group(zero_vgpr, zero_agpr).end(vi)
+  # set RANGE registers
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   initial:list[tuple[int, sint]] = [*((128+i, i) for i in range(65)), *((193+i, (-i-1)&0xFFFFFFFF) for i in range(16)), *F32_INLINE.items()]
