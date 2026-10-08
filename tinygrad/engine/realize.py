@@ -181,17 +181,12 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  resolved = resolve_params(call, ctx.input_uops)
-  Device["CPU"].synchronize(ctx.timeout)
-  for bufs, device_vars in unwrap_multi(call, resolved):
-    bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
-    var_vals = {**ctx.var_vals, **device_vars}
-    cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
-    global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer))
+  for args, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    bufs, dev_bufs = dict(zip(slots := [i for i,_ in get_call_args(call)][:len(args)//2], args)), dict(zip(slots, args[len(slots):]))
     for i in prg.arg.outs:
-      dt = _to_np_dtype(resolved[i].dtype)
-      assert dt is not None, f"no np dtype for {resolved[i].dtype}"
+      dt = _to_np_dtype(call.src[1+i].dtype)
+      assert dt is not None, f"no np dtype for {call.src[1+i].dtype}"
       np.testing.assert_allclose(np.frombuffer(dev_bufs[i].ensure_allocated().as_memoryview(), dt),
                                  np.frombuffer(bufs[i].as_memoryview(), dt), rtol=1e-3, atol=1e-3)
   return []
@@ -220,10 +215,9 @@ pm_flatten_linear = PatternMatcher([
 ])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *params)))
+  sh = {i:UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device,tuple) else "CPU", prod(p.max_shape), p.dtype) for i,p in get_call_args(call)}
+  cp = tuple(s.store_call(call.src[1+i]) for i,s in sh.items())
+  return UOp(Ops.LINEAR,src=cp + (call, UOp.custom_function("validate", sink).call(*(sh.get(i,s) for i,s in enumerate(call.src[1:])), *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
