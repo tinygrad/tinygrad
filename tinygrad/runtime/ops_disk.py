@@ -5,7 +5,7 @@ from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
 from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
-from tinygrad.runtime.support.hcq2 import ccall, ins, chunks, patch
+from tinygrad.runtime.support.hcq2 import ccall, ins, patch
 with contextlib.suppress(ImportError):
   import _posixshmem
   from tinygrad.runtime.autogen import io_uring, libc
@@ -143,10 +143,9 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
   for k, (c, dev) in enumerate(zip(copies, devs)):
     first, slots = counts[dev].index(0).load() + offs[dev], counts[dev].getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
     offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
-    for chunk, nb in chunks(c.src[2].nbytes(), CHUNK_SZ, dtypes.uint64):
-      n, dst = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ
-      cmds = [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
-      gpu_ops[c] += [UOp(Ops.LINEAR, src=tuple(cmds)).end(chunk)] if isinstance(chunk, UOp) else cmds # full chunks as one loop
+    for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
+      n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
+      gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
   return s.replace(src=(*s.src, done)).substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins})
 Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"), disk_copy_rewriter)])
 
