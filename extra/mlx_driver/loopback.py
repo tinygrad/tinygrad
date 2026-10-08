@@ -3,7 +3,6 @@
 import struct
 from tinygrad.helpers import getenv, round_up
 from tinygrad.device import Device, BufferSpec, Buffer
-from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.memory import AddrSpace
 from tinygrad.runtime.ops_amd import AMDComputeQueue
@@ -31,8 +30,8 @@ print(f"[init] loopback connect QP 0x{qp.qp_info['qpn']:x}")
 qp.connect(qp.qp_info['qpn'], dev.mac, int.from_bytes(dev.local_gid, 'big'))
 
 # allocate src/dst via AMD GPU allocator
-buf_src = Buffer(gpu.device, BUF_SIZE, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-buf_dst = Buffer(gpu.device, BUF_SIZE, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+buf_src = Buffer(gpu.device, BUF_SIZE, options=BufferSpec(nolru=True), preallocate=True)
+buf_dst = Buffer(gpu.device, BUF_SIZE, options=BufferSpec(nolru=True), preallocate=True)
 
 bar_base = gpu.iface.pci_dev.bar_info(gpu.iface.vram_bar)[0]
 src_paddr = buf_src.meta.mapping.paddrs[0][0] + bar_base
@@ -41,8 +40,8 @@ print(f"src paddr=0x{src_paddr:x} dst paddr=0x{dst_paddr:x}")
 
 # fill src, zero dst
 test_msg = b"Hello from loopback send/recv!"
-buf_src.copy_from(Buffer("PYTHON", BUF_SIZE, dtypes.uint8, opaque=memoryview(bytearray(test_msg.ljust(BUF_SIZE, b'\x00')))))
-buf_dst.copy_from(Buffer("PYTHON", BUF_SIZE, dtypes.uint8, opaque=memoryview(bytearray(BUF_SIZE))))
+buf_src.copy_from(Buffer("PYTHON", BUF_SIZE, initial_value=bytes(test_msg.ljust(BUF_SIZE, b'\x00'))))
+buf_dst.copy_from(Buffer("PYTHON", BUF_SIZE, initial_value=bytes(BUF_SIZE)))
 gpu.synchronize()
 
 # post recv WQE on RQ from CPU (scatter entry: byte_count, lkey, addr)

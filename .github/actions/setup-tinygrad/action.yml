@@ -81,7 +81,7 @@ runs:
     # **** Caching packages ****
 
     - name: Cache Python packages (PR)
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && env.RUNNER_ENVIRONMENT == 'github-hosted'
       id: restore-venv-pr
       uses: actions/cache/restore@v5
       with:
@@ -98,7 +98,7 @@ runs:
     # **** Caching downloads ****
 
     - name: Cache downloads (PR)
-      if: inputs.key != '' && github.event_name == 'pull_request'
+      if: inputs.key != '' && github.event_name == 'pull_request' && env.RUNNER_ENVIRONMENT == 'github-hosted'
       uses: actions/cache/restore@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
@@ -214,7 +214,7 @@ runs:
         echo "installed=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false' && env.RUNNER_ENVIRONMENT == 'github-hosted'
       uses: actions/cache/restore@v5
       with:
         path: /var/cache/apt/archives/

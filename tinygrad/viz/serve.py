@@ -182,10 +182,9 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink),
-           "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":[ansistrip(x) for x in difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())],
-           "upat":(upat_loc, match_repr), "_sink":new_sink}
+    diff = difflib.unified_diff(u0.render_uir().splitlines(), u1.render_uir().splitlines())
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":tokenize_uir(data, new_sink), "upat":(upat_loc, match_repr), "_sink":new_sink,
+           "change":[id(x) for x in u1.toposort() if id(x) in sink_json], "diff":[ansistrip(x) for x in diff if not x.startswith(("---","+++","@@"))]}
     if not ctx.bottom_up: next_sink = new_sink
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
@@ -258,7 +257,7 @@ def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict)
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
   return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
-def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
+def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int],
                  scache:dict[str, int]) -> tuple[str, bytes|None]:
   if k.startswith("LINE:"):
     xy = [(rel_ts(e.ts, start_ts, f"line '{k}' on {e.device}"), e.key) for st,_,_,e in dev_events if isinstance(e, ProfilePointEvent)]
@@ -271,10 +270,9 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      events.append(struct.pack("<BIIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
-      dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
-      temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
+      nbytes = min(1_000_000_000_000, e.arg["nbytes"])
+      events.append(struct.pack("<BIIQ", 1, rel_ts(e.ts, start_ts, f"alloc on {e.device}"), e.key, nbytes))
+      temp[e.key] = nbytes
       mem += nbytes
       if mem > peak: peak = mem
     if e.name == "exec" and e.arg["bufs"]:
@@ -489,15 +487,14 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
-  dtype_size:dict[str, int] = {}
   with soft_err():
     for k,v in dev_events.items():
       v.sort(key=lambda e:e[0])
       layout[k] = timeline_layout(data, v, start_ts, scache)
-      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
+      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size,
+  index = json.dumps({"strings":list(scache),
                       "markers":[{"ts":rel_ts(e.ts, start_ts, f"marker '{e.arg.get('name','?')}'"), **e.arg} for e in markers],
                       **ext_data}).encode()
   return struct.pack("<IQII", rel_ts(unwrap(end_ts), start_ts, "end_ts"), max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)

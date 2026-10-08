@@ -221,7 +221,7 @@ class MetalDevice(Compiled):
   @functools.cached_property
   def handles(self) -> Buffer:
     vals = [self.queue.value, self.event.value, self.fence.value, ctypes.addressof(self.table), len(self.resources)]
-    return Buffer(self.host, len(vals), dtypes.uint64, initial_value=struct.pack(f"{len(vals)}Q", *vals))
+    return Buffer(self.host, len(vals) * 8, initial_value=struct.pack(f"{len(vals)}Q", *vals))
 
   def mark_resident(self, mtl:metal.MTLBuffer, add:bool):
     if self.residency.value is not None:
@@ -235,7 +235,7 @@ class MetalDevice(Compiled):
     if "handles" in self.__dict__: self.handles.host.view(fmt='Q')[3:5] = array.array('Q', [ctypes.addressof(self.table), len(self.resources)])
 
   def new_slots(self, n:int) -> Buffer:
-    self.profile_slots.add(buf:=Buffer(self.host, n, dtypes.uint64, initial_value=bytes(8 * n)))
+    self.profile_slots.add(buf:=Buffer(self.host, n * 8, initial_value=bytes(8 * n)))
     return buf
 
   @functools.cache
@@ -248,7 +248,7 @@ class MetalDevice(Compiled):
 
   def new_icb(self, cmds:tuple[tuple[bytes, str, tuple[int, ...], int], ...], header:int) -> Buffer:
     pipes = dedup(c[:2] for c in cmds)
-    buf = Buffer(self.device, header + 8 * (1 + len(cmds) + len(pipes)), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+    buf = Buffer(self.device, header + 8 * (1 + len(cmds) + len(pipes)), options=BufferSpec(nolru=True), preallocate=True)
     desc = metal.MTLIndirectCommandBufferDescriptor.new()
     desc.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     desc.setMaxKernelBufferBindCount(1)
@@ -273,7 +273,7 @@ class MetalDevice(Compiled):
   def synchronize(self, timeout:int|None=None):
     for buf in list(self.profile_slots): # pending: [command buffer, 0]
       slots = buf.host.view(fmt='Q')
-      for start in range(5, buf.size, 4):
+      for start in range(5, buf.nbytes // 8, 4):
         if slots[start] and not slots[start + 2]:
           (cb:=metal.MTLCommandBuffer(slots[start])).waitUntilCompleted()
           slots[start], slots[start + 2] = int(cb.GPUStartTime() * 1e9), int(cb.GPUEndTime() * 1e9)

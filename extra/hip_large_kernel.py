@@ -12,14 +12,14 @@ extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_si
 }
 """)
 dev.compiler.disassemble(mbin)
-buf0 = Buffer(Device.DEFAULT, 1*65537, dtypes.uint8).ensure_allocated()
+buf0 = Buffer(Device.DEFAULT, 1*65537).ensure_allocated()
 
 prg = dev.runtime("write_ones", mbin)
 prg(buf0._buf, global_size=(1,65537,1), local_size=(1,1,1), wait=True)
 
 import numpy as np
-def to_np(buf): return np.frombuffer(buf.as_memoryview().cast(buf.dtype.fmt), dtype=_to_np_dtype(buf.dtype))
+def to_np(buf, dtype): return np.frombuffer(buf.as_memoryview(), dtype=_to_np_dtype(dtype))
 
-big = to_np(buf0)
+big = to_np(buf0, dtypes.uint8)
 print(big)
 print((big-1).nonzero())
