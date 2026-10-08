@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
-from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile
@@ -90,7 +90,7 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
   ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
-    next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
+    getattr(dtypes, fn.restype.__name__[2:]) # c_int -> dtypes.int
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
 
 @uopfunc
@@ -153,10 +153,11 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
 def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
   if any(d.startswith("RDMA") for d in devs): return None # over the nic
-
   if (device:=get_enqueue_devs(call)) is None: return None
+
+  from tinygrad.runtime.ops_disk import is_disk_read
   dev, host, usb_memcpys = Device[device], Device[device].host, getattr(Device[device], "is_usb", False)
-  mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else set())
+  mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
   if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
     (staging:=_staging(host)).get_buf(device)
     base, it, copies = UOp.from_buffer(staging, dtypes.uint8), src.dtype.itemsize, []
