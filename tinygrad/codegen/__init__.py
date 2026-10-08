@@ -495,10 +495,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       if full_sink.arg.estimates is None:
         full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=(isel:=IselContext(full_sink)), name="instruction selection", bottom_up=True)
+      prog_info = replace(prog_info, params=tuple(u for u in isel.func_args if u.op is Ops.PARAM))
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=replace(ProgramInfo.from_sink(prg.src[0], renderer.target),
+    params=tuple(u for u in IselContext(prg.src[0]).func_args if u.op is Ops.PARAM)))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
