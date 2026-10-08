@@ -70,8 +70,8 @@ def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[
         sig, target = mem[word(c.src[0])], val(c.src[1])
         if sig != target if c.arg[0] == "wait_eq" else sig < target: continue
       elif c.op is Ops.INS and c.arg[0] == "store":
-        mem[w:=word(c.src[0])] = val(c.src[1])
-        if w[0].tag == "timeline": log.append(w[0].device)
+        mem[word(c.src[0])] = val(c.src[1])
+        if word(c.src[0])[0].tag == "timeline": log.append(q[0])
       elif c.op is Ops.CALL: log.append(cs.index(c))
       cmds.pop(0)
       break

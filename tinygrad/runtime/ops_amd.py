@@ -769,7 +769,8 @@ class PCIIface(PCIIfaceBase):
       for q, ip in [(d.compute_queue, d.iface.dev_impl.gfx), *[(q, d.iface.dev_impl.sdma) for q in d.sdma_queues.values()]]:
         for b in (q.put_value, q.read_ptr, q.write_ptr): b.host.view(fmt='Q')[0] = 0
         ip.setup_ring(*q.params)
-      for tl in (x.timeline.host.view(fmt='Q') for x in (d, Device[d.host])): tl[0] = tl[1] # the host waits on this device too
+      tl = d.timeline.host.view(fmt='Q')
+      tl[0] = tl[1]
       d.error_state.host.view(fmt='q')[0] = 0
       if d.is_usb: usb_reset(d)
 
