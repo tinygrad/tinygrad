@@ -53,8 +53,46 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   lib_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   inst_addr = UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU)
+  # initialize buffers
+
+  # initialize one wave; this CALL runs within the dispatch ranges
+  iwg, iwave = (UOp.param(i, dtypes.int, name=n, addrspace=AddrSpace.ALU) for i,n in enumerate(("wg", "wave")))
+  isgpr = UOp.param(2, dtypes.uint32, SGPR_COUNT, name="sgpr")
+  ivgpr = UOp.param(3, dtypes.uint32, 256*wave_size, name="vgpr")
+  ilds = UOp.param(4, dtypes.uint32, max(lds_size//4, 1), name="lds")
+  iaccvgpr = UOp.param(5, dtypes.uint32, 256*wave_size, name="accvgpr") if wave_size == 64 else ivgpr
+  iargs = UOp.param(6 if wave_size == 64 else 5, dtypes.uint64, name="args_ptr", addrspace=AddrSpace.ALU)
+  li = UOp.range((iwave.eq(0)).where(max(lds_size//4, 1), 0), 2, dtype=dtypes.int)
+  clear_lds = ilds.index(li).store(0).end(li)
+  si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
+  clear_sgpr = isgpr.after(clear_lds).index(si).store(0).end(si)
+  vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
+  clear_vgpr = UOp.sink(ivgpr.after(clear_sgpr).index(vi).store(0),
+                       *([iaccvgpr.after(clear_sgpr).index(vi).store(0)] if wave_size == 64 else [])).end(vi)
+  gidx, gidy, gidz = iwg%gx, (iwg//gx)%gy, iwg//(gx*gy)
+  n_lanes = (total_threads-iwave*wave_size).minimum(wave_size)
+  initial = [(128+i, i) for i in range(65)] + [(193+i, (-i-1)&0xFFFFFFFF) for i in range(16)] + list(F32_INLINE.items())
+  initial += [(i,v) for i,v in enumerate(user_data)] if user_data else [(0, iargs.cast(dtypes.uint32)), (1, (iargs>>32).cast(dtypes.uint32))]
+  if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
+  else:
+    sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+    for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+      if rsrc2 & enabled:
+        initial.append((sgpr_id, gid))
+        sgpr_id += 1
+  initial += [(EXEC_LO.offset, ((UOp.const(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32)),
+              (SCRATCH_STRIDE_IDX, scratch_size), (SGPR_COUNT-16+4, (iwave&15)|((iwave&3)<<4))]
+  if wave_size == 64: initial.append((EXEC_LO.offset+1,
+                                     ((UOp.const(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
+  lane = UOp.range(wave_size, 5, dtype=dtypes.int)
+  tid = iwave*wave_size+lane
+  init_vgpr = ivgpr.after(clear_vgpr).index(lane.valid(tid<total_threads)).store(
+    (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
+  init_body = UOp.sink(init_vgpr, *(isgpr.after(clear_vgpr).index(i).store(UOp.const(v, dtypes.uint32)) for i,v in dict(initial).items()))
+  init = init_body.call(wg, wave, sgpr, vgpr, lds, *([accvgpr] if wave_size == 64 else []), args_ptr, name="init_wave")
   ctx = _Ctx(4, wave_size)
-  init = UOp(Ops.SINK).call(wg, wave, sgpr, vgpr, lds, *([accvgpr] if wave_size == 64 else []), args_ptr, name="init_wave")
   afters: dict[UOp, UOp] = {ctx.sgpr:sgpr.after(init), ctx.vgpr:vgpr.after(init), ctx.vmem:ctx.vmem,
                             ctx.lds:lds.after(init), ctx.scratch:scratch.index(wave*scratch_size*wave_size).after(init)}
   if wave_size == 64: afters[ctx.accvgpr] = accvgpr.after(init)
