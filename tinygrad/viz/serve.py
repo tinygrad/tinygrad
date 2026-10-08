@@ -40,7 +40,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.ops import KernelInfo, ParamArg
 from tinygrad.uop.render import render_uir, uops_colors, _inline, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
@@ -121,6 +121,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
+    if u.op in {*GroupOp.Binary, *GroupOp.Ternary} and all(s.op in {Ops.CONST, Ops.PARAM} for s in u.src): excluded.update(u.src)
   for u in toposort:
     argst = codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
     with soft_err():
@@ -135,7 +136,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         # walk through excluded movement ops to find the underlying CONST
         cx = x
         while cx.op in GroupOp.Movement and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
-        arg = f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK else f"{cx.arg}"
+        arg = f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK \
+            else cx.arg.name if isinstance(cx.arg, ParamArg) else f"{cx.arg}"
         label += f"\n{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else "")
     try:
       if len(rngs:=u.ranges):
