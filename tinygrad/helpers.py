@@ -618,7 +618,7 @@ class tqdm(Generic[T]):
     bar = pre + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
     print(bar, flush=True, end='\n'*close, file=sys.stderr)
   @classmethod
-  def write(cls, s:str): print('\r\033[K' * sys.stderr.isatty()+s, flush=True, file=sys.stderr)
+  def write(cls, s:str): print('\r\033[K' * sys.stderr.isatty() + s, flush=True, file=sys.stderr)
 
 def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
