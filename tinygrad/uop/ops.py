@@ -1292,7 +1292,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # one-line convenience for the single-output case: self is the value
   def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
+    placeholders = [s.param_like(i) if s.is_variable else UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 

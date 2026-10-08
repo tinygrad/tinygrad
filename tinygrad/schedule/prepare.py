@@ -1,6 +1,6 @@
 from dataclasses import replace
-from tinygrad.dtype import dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, ParamArg
+from tinygrad.dtype import dtypes, to_dtype, AddrSpace
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, ParamArg, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
@@ -149,6 +149,20 @@ def resolve_function(c:UOp) -> UOp|None:
   dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
   return c.body.substitute(dict_map, walk=True)
 
+def bind_kernel_scalars(c:UOp) -> UOp|None:
+  # scalar args bind into the kernel body and only storage stays a positional arg, like the kernels split_store makes
+  if c.body.op is not Ops.SINK or not isinstance(c.body.arg, KernelInfo): return None
+  args, params = c.src[1:], [p for p in c.body.toposort(enter_calls=False) if p.op is Ops.PARAM and p.arg.slot >= 0]
+  # a scalar param without a scalar arg in its slot belongs to an enclosing scope
+  scalars = {p.arg.slot for p in params if p.addrspace is AddrSpace.ALU and p.arg.slot < len(args)
+             and args[p.arg.slot]._shape == () and args[p.arg.slot].addrspace is AddrSpace.ALU}
+  if not scalars: return None
+  keep = [i for i in range(len(args)) if i not in scalars]
+  sub = {p:args[p.arg.slot] if p.arg.slot in scalars else p.replace(arg=replace(p.arg, slot=keep.index(p.arg.slot)))
+         for p in params if p.arg.slot in scalars or p.addrspace is not AddrSpace.ALU}
+  return c.replace(src=(c.body.substitute(sub, walk=True), *[args[i] for i in keep]))
+pm_bind_kernel_scalars = PatternMatcher([(UPat(Ops.CALL, name="c"), bind_kernel_scalars)])
+
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
   x = bc.src[0]
@@ -273,6 +287,7 @@ def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
   tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
+  tsink = graph_rewrite(tsink, pm_bind_kernel_scalars, walk=True, name="bind kernel scalars")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
