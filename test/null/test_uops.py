@@ -323,7 +323,7 @@ class TestFastIdiv(unittest.TestCase):
 
   def test_max_keeps_bound_for_idiv(self):
     # MAX is lowered to CMPLT+WHERE only after floordiv_to_idiv, so the bound it carries still proves the division same-sign
-    x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).maximum(1)
+    x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).maximum(0) + 1
     ops = [u.op for u in to_uops_list([x // 3], ren=CStyleLanguage(Target()))]
     self.assertNotIn(Ops.MAX, ops, "the renderer has no MAX")
     self.assertNotIn(Ops.CMOD, ops, "a provably positive dividend kept the round toward zero correction")

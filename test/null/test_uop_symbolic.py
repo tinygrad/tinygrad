@@ -450,8 +450,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) + 2 < 3, 0, 1, "(a<1)")
 
   def test_lt_sum_wraps(self):
-    self.helper_test_variable(Variable("a", 0, 127, dtypes.int8) + 1 < 0, 0, 1, "((a+1)<0)")
-    self.helper_test_variable(Variable("a", 0, 126, dtypes.int8) + 1 < 0, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 0, 255, dtypes.uint8) + 1 < 1, 0, 1, "((a+1)<1)")
+    self.helper_test_variable(Variable("a", 0, 254, dtypes.uint8) + 1 < 1, 0, 0, "False")
 
   def test_lt_simple_factor(self):
     self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "(((a*3)+(b*3))<4)")

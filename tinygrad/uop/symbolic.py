@@ -286,7 +286,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** lt **
   # c0+x<c1 -> x < c1-c0
   ((UPat.cvar("c0") + UPat.var("x", dtype=dtypes.ints+(dtypes.weakint,))) < UPat.cvar("c1"),
-   lambda x,c0,c1: x<(c1-c0) if x.dtype is dtypes.weakint or x.dtype.min <= x.vmin+c0.val and x.vmax+c0.val <= x.dtype.max else None),
+   lambda x,c0,c1: x<(c1-c0) if x.dtype not in dtypes.uints or x.dtype.min <= x.vmin+c0.val and x.vmax+c0.val <= x.dtype.max else None),
   # c0*x<c1 -> sign(c0)*x < ceil(c1/abs(c0))
   ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
    lambda x,c0,c1: (x if c0.val > 0 else -x)<-(-c1.val//abs(c0.val)) if abs(c0.val) > 1 else None),
