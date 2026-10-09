@@ -6,16 +6,13 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, ContextVar
-from tinygrad.dtype import dtypes, DType, _to_np_dtype
+from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
+from tinygrad.dtype import dtypes, DType
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
-  from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
-
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
@@ -87,7 +84,6 @@ class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[l
 
 @dataclass(frozen=True, eq=True)
 class BufferSpec:
-  # TODO: move device, size, dtype here?
   uncached: bool = False
   cpu_access: bool = False
   host: bool = False
@@ -95,27 +91,24 @@ class BufferSpec:
   external_ptr: int|None = None
 
 class MultiBuffer:
-  def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
-    self.bufs = [Buffer(d, size, dtype) for d in device]
+  def __init__(self, device:tuple[str, ...], nbytes:int):
+    self.bufs = [Buffer(d, nbytes) for d in device]
   @property
   def device(self): return tuple(x.device for x in self.bufs)
   @property
-  def size(self): return self.bufs[0].size
-  @property
-  def dtype(self): return self.bufs[0].dtype
+  def nbytes(self): return self.bufs[0].nbytes
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
-  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
+  def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} nbytes:{self.nbytes}>"
 
 @dataclass(frozen=True)
 class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[Compiled, BufferStorage]=field(default_factory=dict) # noqa: E702
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
+  def __init__(self, device:str, nbytes:int, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False,
                allocator:Allocator|None=None):
-    assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
+    self.device, self.nbytes, self.offset, self.allocated_views, self._base = Device.canonicalize(device), nbytes, offset, 0, base
     if allocator is not None: self.allocator = allocator
     self.options = options if options is not None else BufferSpec()
     self._storage:BufferStorage|None = None
@@ -125,7 +118,7 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
-        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
+        else: self.copy_from(Buffer("PYTHON", self.nbytes, initial_value=initial_value))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
@@ -136,7 +129,7 @@ class Buffer:
   def __del__(self): self._storage is None or self.deallocate()
 
   def __repr__(self):
-    return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
+    return f"<buf real:{self.is_allocated()} device:{self.device} nbytes:{self.nbytes}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options != BufferSpec() else "") + ">"
 
   @property
@@ -149,8 +142,6 @@ class Buffer:
   def host(self) -> MMIOInterface: return unwrap(self.get_storage().host)
   @property
   def meta(self) -> Any: return self.get_storage().meta
-  @property
-  def nbytes(self): return self.size * self.dtype.itemsize
 
   def get_storage(self, device:str|None=None) -> BufferStorage:
     storage = unwrap(self.ensure_allocated()._storage)
@@ -169,8 +160,9 @@ class Buffer:
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
-    if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and self.options.external_ptr is None:
-      raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
+    # MAX_BUFFER_SIZE limits raw storage bytes (not logical elements).
+    if not self.device.startswith("NULL") and self.nbytes > MAX_BUFFER_SIZE > 0 and self.options.external_ptr is None:
+      raise RuntimeError(f"buffer of size {self.nbytes/1e6:.2f}MB is too large")
     if external_ptr is not None: self.options = replace(self.options, external_ptr=external_ptr)
     if self._base is not None:
       storage = replace(self.base.get_storage(), buf=self.allocator._offset(self.base._buf, self.nbytes, self.offset), maps={})
@@ -188,7 +180,7 @@ class Buffer:
       if not self.device.startswith("DISK") and self.options.external_ptr is None:
         GlobalCounters.mem_used += self.nbytes
         GlobalCounters.mem_used_per_device[self.device] += self.nbytes
-      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"dtype":self.dtype, "sz":self.size}))
+      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"nbytes":self.nbytes}))
     elif self._storage is None: self.base.allocated_views += 1
     self._storage, self._base_storage = storage, self.base._storage if self._base else None
     return self
@@ -208,14 +200,14 @@ class Buffer:
   def __reduce_ex__(self, protocol):
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY":
+      return self.__class__, (self.device, self.nbytes, None, None, None, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY" and self.is_allocated():
       import numpy as np
-      arr = np.frombuffer(self.meta, _to_np_dtype(self.dtype)) # over the storage itself, so an out-of-band pickle buffer keeps it alive
-      return self.__class__, (self.device, self.size, self.dtype, arr, self.options, None)
+      arr = np.frombuffer(self.meta, np.uint8, count=self.nbytes) # an out-of-band pickle buffer keeps the storage alive
+      return self.__class__, (self.device, self.nbytes, arr, self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
+    return self.__class__, (self.device, self.nbytes, None, self.options, buf)
 
   @property
   def trace_num(self) -> int:
@@ -232,26 +224,21 @@ class Buffer:
       self.allocator.dev.synchronize()
       if allow_zero_copy: return mv
       with cpu_profile(f"{self.device} -> TINY", f"{self.device}:COPY"): return memoryview(bytearray(mv))
-    Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
+    Buffer("NPY", self.nbytes, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
-
-  def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
-    import numpy as np
-    assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
-    return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype))
 
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
-    du, su = UOp.from_buffer(self), UOp.from_buffer(src)
+    du, su = UOp.from_buffer(self, dtypes.uint8), UOp.from_buffer(src, dtypes.uint8)
     run_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), update_stats=False)
     return self
 
-  def view(self, size:int, dtype:DType, offset:int) -> Buffer:
+  def view(self, nbytes:int, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
-    return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
+    return Buffer(self.device, nbytes, base=self.base, offset=self.offset+offset)
 
 DeviceType = TypeVar('DeviceType', bound='Compiled')
 
@@ -259,11 +246,11 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 class Allocator(Generic[DeviceType]):
   lru = True
 
-  def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
+  def __init__(self, dev:DeviceType, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
     self.cache:dict[tuple[int, BufferSpec|None], list[BufferStorage]] = defaultdict(list)
-    self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
+    self.supports_transfer = supports_transfer
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -303,7 +290,7 @@ class Allocator(Generic[DeviceType]):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
 class HostAllocator(Allocator):
-  def __init__(self, dev): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
+  def __init__(self, dev): super().__init__(dev, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if options.external_ptr is not None: view, meta = self._view(options.external_ptr, size), None
     elif (remote:=getattr(self.dev, "remote", None)) is not None: view, meta = remote.alloc_sysmem(round_up(size, mmap.PAGESIZE))
@@ -387,28 +374,17 @@ class Compiled:
   pm_batch:Any = None
   pm_encode:Any = None
   pm_lower:Any = None
+  pm_bufferize:Any = None # one for all devices: each adds the rules of the placeholders it owns, its tags start with its name
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
-    from tinygrad.uop.ops import Ops, UPat, PatternMatcher
-    from tinygrad.runtime.support.hcq2 import cfunc_buf
 
     self.device, self.allocator, self.runtime_t, self.renderers = device, allocator, runtime, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
-    self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
-
-    # hcq2
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
-      (UPat(Ops.PARAM, tag="program", name="b"),
-       lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
-      (UPat(Ops.PARAM, name="b"), lambda b, cfunc_buf=cfunc_buf: cfunc_buf(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "cfunc" else None),
-    ])
 
     # profiling
-    self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
   @property
@@ -421,36 +397,37 @@ class Compiled:
   def renderer(self) -> Renderer: return self._select_renderer()
 
   @property
-  def compiler(self) -> Compiler:
-    if (ret:=self.renderer.compiler) is None: raise RuntimeError(f"no compiler for {self.device}")
-    return ret
+  def compiler(self) -> Compiler: return self.renderer.compiler
 
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 
   @functools.cache
-  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
+  def rt_allocator(self, spec:BufferSpec) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
 
   @functools.cache
-  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
-    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
-    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
+  def rt_buffer(self, spec:BufferSpec) -> Buffer:
+    return Buffer(self.device, self.rt_allocator(spec).size, options=spec, preallocate=True)
+
+  def tag(self, *parts:str) -> str: return to_name(self.device, *parts) # of the placeholders it owns
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
-    return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
+    return Buffer(self.device, 16, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
+
+  @functools.cached_property
+  def error_state(self) -> Buffer: return Buffer(self.host, 8, options=BufferSpec(nolru=True), preallocate=True)
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     timeout = timeout if timeout is not None and self.can_recover else None
-    st, done = time.perf_counter(), sig[0]
-    while done < value:
+    st, done, err = time.perf_counter(), sig[0], self.error_state.host.view(fmt='q')
+    while done < value and not err[0]:
       if done != (done:=sig[0]): st = time.perf_counter()
       elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
       elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
+    if err[0]: raise RuntimeError(f"{self.device} failed with {err[0]}")
 
   def synchronize(self, timeout:int|None=None):
-    try:
-      self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
-      for d, v in self.pending.items(): d._wait_signal(d.timeline.host.view(fmt='Q'), v, timeout)
+    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
       raise
@@ -509,7 +486,7 @@ class Compiled:
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
-    if self.pm_encode is None: return
+    if not self.pm_encode.patterns: return
     from tinygrad.tensor import Tensor
     tdiffs = []
     for _ in range(5):

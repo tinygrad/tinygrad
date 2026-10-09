@@ -45,7 +45,7 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[block_id_m, :, block_id_n, :]
 
   # open the main reduction range
-  k_tile_range = UOp.range(K // BLOCK_K, 0, AxisType.REDUCE)
+  k_tile_range = UOp.range(K // BLOCK_K, 0, AxisType.LOOP)
   a = a.reshape(M // BLOCK_M, BLOCK_M, K // BLOCK_K, BLOCK_K)[block_id_m, :, k_tile_range, :]
   b = b.reshape(K // BLOCK_K, BLOCK_K, N // BLOCK_N, BLOCK_N)[k_tile_range, :, block_id_n, :]
 
@@ -70,7 +70,7 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   A_local, B_local = A_local.after(A_local_store, B_local_store), B_local.after(A_local_store, B_local_store)
 
   # open inner k range
-  k = UOp.range(BLOCK_K, 3, AxisType.REDUCE)
+  k = UOp.range(BLOCK_K, 3, AxisType.LOOP)
 
   # ---------------------------
   # LOCAL -> REG (per-wave tiles)

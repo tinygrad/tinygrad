@@ -1,9 +1,9 @@
 import unittest
-import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
+import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib, gc
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -40,6 +40,7 @@ class VizTrace:
 @contextlib.contextmanager
 def save_viz():
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
+  gc.collect()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -189,6 +190,13 @@ class TestViz(unittest.TestCase):
     a2 = uop_to_json(VizData(), a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"PYLITERAL\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
+  def test_index_label_large_src(self):
+    x = UOp.param(0, dtypes.float, (16, 16))
+    for _ in range(2_000): x = x * x
+    i = UOp.variable("i", 0, 14)
+    u = x[i+1, 2]
+    self.assertIn("\n[i+1][2]", uop_to_json(VizData(), u)[id(u)]["label"])
+
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
@@ -244,7 +252,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides exclude=True nodes by default
-    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertEqual(list(graphs[0]), [id(a.src[0]), id(a), id(z), id(alu), id(y), id(sink)])
     self.assertTrue(graphs[0][id(z)]["exclude"])
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
@@ -323,8 +331,6 @@ class TestVizTree(unittest.TestCase):
     self.assertStepEqual(steps[5], {"name":"leaf_left", "depth":2, "match_count":1})
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
 
-import gc
-
 def bufs_allocated() -> int:
   gc.collect()
   return sum([type(x).__name__ == "Buffer" and type(x).__module__ == "tinygrad.device" for x in gc.get_objects()])
@@ -370,7 +376,8 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     # schedule graph CALL nodes have a link to jump to codegen
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
-    viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
+    # steps is the presentation list; use the trace index from the step's query (extra presentation steps break 1:1 alignment)
+    viz_kernel = next(int(s["query"].rsplit("=", 1)[1]) for s in lst[sched_idx]["steps"] if s["name"] == "View Kernel Graph")
     graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
@@ -488,9 +495,9 @@ class TestVizIntegration(unittest.TestCase):
     bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
     assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
     # Ops.LINEAR renders
-    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
-    self.assertIn("Ops.SINK", lin_render)
-    self.assertIn("Ops.CUSTOMI", lin_render)
+    lin_render = ansistrip(get_render(viz.data, steps[lin_idx]["query"])["src"])
+    self.assertIn("sink", lin_render)
+    self.assertIn("customi", lin_render)
     # Ops.SOURCE renders
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertIn("undeclared_name", src_render)
@@ -499,7 +506,7 @@ class TestVizIntegration(unittest.TestCase):
     self.assertIn(type(e.exception).__name__, bin_render)
 
   def test_view_source_alt(self):
-    src = "void E_3(float* data0_3) {}"
+    src = "void E_3(float* data0_3) {"+"\n //" + ("."*200)+"\n}"
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)))
@@ -543,6 +550,16 @@ class TestVizIntegration(unittest.TestCase):
         for u in (step:=next(viz.get_details(i, j)))["_sink"].toposort():
           if u.op is Ops.INDEX: labels.append(step["graph"][id(u)]["label"])
     for label in labels: self.assertNotIn("UOp(", label)
+
+  def test_estimates(self):
+    with save_viz() as viz:
+      n = Variable("n", 1, 16).bind(7)
+      (Tensor.empty(16, device="NULL")[:n] + 1).realize()
+      (Tensor.empty(16, device="NULL")[:7] + 1).realize()
+    profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
+    for e in profile["layout"]["NULL"]["events"]:
+      for key, count in (("FLOPS", 7), ("B/s mem", 7*4*2), ("B/s lds", 7*4*2)):
+        self.assertEqual(e["fmt"][key], int(count / (e["dur"]*1e-6)))
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -679,8 +696,8 @@ class TestVizProfiler(unittest.TestCase):
                                     ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
                               deps=[[], [0]], sigs=[St, En, St, En]),
             # memory alloc on both GPUs
-            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"sz":1024, "dtype":dtypes.float}, ts=St),
-            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"sz":512, "dtype":dtypes.float}, ts=St)]
+            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"nbytes":4096}, ts=St),
+            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"nbytes":2048}, ts=St)]
     j = load_profile(prof)
     # graph grouped with its device, memory at the end
     self.assertListEqual(list(j['layout']),
@@ -871,6 +888,15 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
+
+  def test_repeat(self):
+    k = Kernel()
+    for _ in range(3): k.emit(s_add_u32(s[1], s[1], 1))
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("repeat", k)["data"]
+    block = next(iter(cfg["blocks"].values()))
+    self.assertEqual(sum(cfg["pc_tokens"][pc][0]["st"] == "s_add_u32" for pc in block), 3)
 
   def test_operands(self):
     k = Kernel()
@@ -1151,10 +1177,10 @@ class TestCLI(unittest.TestCase):
       with Context(DEBUG=5):
         out = run_cli(*files, "-s", "TINY")
     i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
-    # next print is the CALL graph, CLI outputs exactly as web in TestVizIntegration.test_link_sched_codegen
-    call_nodes = [n for n in out[i+1].values() if n["label"].startswith("CALL")]
-    for i,n in enumerate(call_nodes):
-      assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
+    # next print is the CALL graph, with codegen names annotated on the UIR calls
+    calls = [line for line in out[i+1]["value"].splitlines() if " = call " in line]
+    self.assertTrue(calls)
+    self.assertEqual([line.rsplit(" # ", 1)[-1] for line in calls], prgs[:len(calls)])
 
   def test_interval(self):
     def emit_kernel(name:str): Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(name=name)))[0].realize()
@@ -1174,6 +1200,56 @@ class TestCLI(unittest.TestCase):
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
     assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
+
+  @needs_tracked_pm
+  def test_nested_calls_codegen_ls(self):
+    @uopfunc
+    def inner(out:UOp): return out[0].store(1).sink()
+    @uopfunc
+    def outer(out:UOp):
+      # call inner twice, it should not codegen inner twice
+      call = inner(out)
+      return inner(out.after(call)).sink()
+    def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
+    with save_viz() as viz, Context(SCACHE=0):
+      Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
+    with write_files(viz) as files:
+      rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+      with Context(NO_COLOR=1):
+        uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
+    codegen_count = [s for s in rewrites if "View Output AST" in s]
+    self.assertEqual(len(codegen_count), 4)
+    self.assertIn(" = linear ", uops)
+    self.assertIn(" = call ", uops)
+
+  @needs_tracked_pm
+  def test_nested_calls_schedule_ls(self):
+    from tinygrad.schedule import schedule_cache
+    @function(precompile=True)
+    def inner(x:Tensor): return (x+x).contiguous()
+    @function(precompile=True)
+    def outer(x:Tensor):
+      # call inner twice, SCACHE should not schedule inner twice
+      return inner(inner(x))
+    schedule_cache.clear()
+    with save_viz() as viz:
+      outer(Tensor.empty(4, device="NULL")).realize()
+    with write_files(viz) as files:
+      schedule = [s["name"] for s in run_cli(*files, "-s", "TINY") if s["name"].startswith("Schedule")][-1]
+      rewrites = run_cli(*files, "-s", "TINY", schedule, "--ls", json_fmt=False)[0]["out"].split("\n")
+    sched_count = [s for s in rewrites if "View Kernel Graph" in s]
+    self.assertEqual(len(sched_count), 3)
+
+  @needs_tracked_pm
+  def test_deep_input_ast(self):
+    with save_viz() as viz:
+      x = Tensor.empty(1, device="NULL")
+      for _ in range(4_000): x = x.sin()
+      x.realize()
+    with write_files(viz) as files, Context(DEBUG=5, NO_COLOR=1):
+      out = run_cli(*files, "-s", "TINY")
+    i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
+    self.assertIn(" # E", next(line for line in out[i+1]["value"].splitlines() if " = call " in line))
 
 if __name__ == "__main__":
   unittest.main()

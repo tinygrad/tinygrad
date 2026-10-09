@@ -111,7 +111,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
       return Asl.after(barrier), Bsl.after(barrier)
 
   def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]=()) -> UOp:
-    K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.REDUCE)
+    K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.LOOP)
 
     # load from locals into registers
     Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half, slot=1, addrspace=AddrSpace.REG)
@@ -150,7 +150,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   if not getenv("PIPELINE"):
     As, Bs = make_locals(slot=0)
 
-    K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
+    K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.LOOP)
     As, Bs = load_to_locals(K_outer_loop, As, Bs, 1000, barrier=True)
     acc_store = compute_on_locals(acc, As, Bs, 1500, afters=(K_outer_loop,))
     acc = acc.after(acc_store.barrier().end(K_outer_loop))
@@ -160,7 +160,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     As1, Bs1 = make_locals(slot=2)
     As0, Bs0 = load_to_locals(0, As0, Bs0, 1000)
 
-    K_outer_loop = UOp.range((K//BLOCK_K-2)//2, 0, AxisType.REDUCE)
+    K_outer_loop = UOp.range((K//BLOCK_K-2)//2, 0, AxisType.LOOP)
     As1, Bs1 = load_to_locals(K_outer_loop+1, As1, Bs1, 2000, barrier=False)
     acc_store = compute_on_locals(acc, As0, Bs0, 1500, afters=(K_outer_loop,))
     As0, Bs0 = load_to_locals(K_outer_loop+2, As0, Bs0, 3000, barrier=False)

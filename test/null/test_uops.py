@@ -93,7 +93,7 @@ class TestLowerIndexDtype(unittest.TestCase):
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
-    self.assertEqual(reg.arg.size, 4)
+    self.assertIs(reg.src[0], UOp.const(4))
     lowered = graph_rewrite(reg.sink(), pm_lower_weak)
     self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
                     "lowering must resolve every weak width, except a typed literal's value half")
@@ -191,6 +191,17 @@ class TestExecALU(unittest.TestCase):
     np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, ((32+521+3),)), 1/(32+521+3))
     np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, ((34**2),)), 1/(34**2))
     np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (10,)), 1/10)
+
+  def test_int_pow(self):
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (11, 7)), 11**7)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (3, 40)), 689956897)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.uint8, (3, 5)), 243)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.weakint, (2, 64)), 2**64)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (2, -2)), 0)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (0, -1)), 0)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (1, -5)), 1)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (-1, -3)), -1)
+    self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (-1, -4)), 1)
 
   def test_bool_cmplt(self):
     self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (False, False)), False)
@@ -507,7 +518,7 @@ class TestUOpRender(unittest.TestCase):
     shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, 32), offset, UOp.const(2, dtypes.int)))
     self.assertIsNot(shrink.src[1], shrink.marg[0][0])
     self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
-    self.assertEqual(UOp.range(1, 0, src=(shrink,), dtype=dtypes.int).render(simplify=False), "r0")
+    self.assertEqual(UOp.range(UOp.const(1, dtypes.int).after(shrink), 0, dtype=dtypes.int).render(simplify=False), "r0")
 
   def test_render_vectorize_empty(self):
     u = UOp(Ops.STACK, src=())
@@ -535,7 +546,9 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_shrink(self): self._check(UOp.empty(10)[1:8], 1)
   def test_2d(self): self._check(UOp.empty(2,5)[1, 2:4], 7)
   def test_shrink_to_one(self): self._check(UOp.empty(10)[1], 1)
+  def test_bitcast_shrink_to_one(self): self._check(UOp.empty(2, dtype=dtypes.uint32).bitcast(dtypes.uint8)[4:8], 1)
   def test_expand_is_none(self): self._check(UOp.empty(1).expand(2), None)
+  def test_expand_const_is_none(self): self._check(UOp.const(5.0).reshape((1,)).expand((4,)), None)
   def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
 
@@ -590,7 +603,7 @@ class TestAssembly(unittest.TestCase):
     b = Tensor.empty(1024)
     c = (a*b).sum()
     ast = c.schedule_linear().src[-1].src[0]
-    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UNROLL))]
+    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = to_program(ast, self.renderer)
     uops = tuple(program.src[1].src)

@@ -87,7 +87,7 @@ def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
 def init_c_var(ty, creat_cb): return (creat_cb(v:=ty()), v)[1]
 
 class DLL(ctypes.CDLL):
-  _loaded_: set[str] = set()
+  _loaded_: dict[str, ctypes.CDLL] = {}
 
   @staticmethod
   def findlib(nm:str, paths:list[str], extra_paths=[]):
@@ -118,7 +118,7 @@ class DLL(ctypes.CDLL):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
       try:
         super().__init__(path, **kwargs)
-        self._loaded_.add(self.nm)
+        self._loaded_[self.nm] = self
       except OSError as e:
         self.emsg = str(e)
         if DEBUG >= 3: print(f"loading {nm} failed: {e}")

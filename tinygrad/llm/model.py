@@ -1,11 +1,11 @@
 from __future__ import annotations
-import enum, functools, itertools, math, pathlib
+import enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.helpers import prod
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, \
   FMA_QUANT_TYPES, HALFWORD_QUANTS, Q8_0, amd_fma_gemv_supported, quant_gemv_fma
-from tinygrad.llm.gguf import gguf_load, ggml_data_to_tensor
+from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 
 class ExpertGating(enum.IntEnum):
@@ -333,7 +333,8 @@ class TransformerBlock(FFNBlock):
     if not hasattr(self, "cache_kv"):
       # zeroed so the flash kernels can safely read whole tiles past the valid region (masked lanes multiply by 0)
       self.cache_kv = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
-                                   dtype=dtypes.half, device=x.device)
+                                   dtype=dtypes.half, device=x.device if isinstance(x.device, str) else None)
+      if isinstance(x.device, tuple): self.cache_kv = self.cache_kv.shard(x.device, 2).realize()
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
 
@@ -572,12 +573,12 @@ class Transformer:
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    x = self.token_embd(tokens).float()                   # (B, T, D)
+    x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if self.config.hc is not None: x = x.unsqueeze(2).expand(*x.shape[:2], self.config.hc.count, x.shape[2]).contiguous()
     for block in self.blk: x = block(x, start_pos)
     if self.config.hc is not None: x = x.mean(2)          # collapse the hyper-connection streams
     # only run the output projection on the last token
-    logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :]
+    logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
@@ -586,9 +587,25 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
+                realize=bool(getenv("REALIZE", 0)), shard:int=1) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
-    kv, state_dict, packed = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf, return_packed=True)
+    kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+    arch = kv['general.architecture']
+    n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
+    assert shard >= 1, f"shard must be at least 1, got {shard}"
+    shard_map:dict[str, int] = {}
+    if shard > 1:
+      heads = n_heads if kv.get(f'{arch}.attention.kv_lora_rank') else n_kv_heads
+      assert heads % shard == 0, f"tensor parallel needs the attention heads to split over {shard} devices"
+      # shard MLA heads and routed experts while replicating latent projections, KV cache and shared experts
+      rules = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'ffn_gate.weight',
+        'ffn_up.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
+        **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')}, 'ffn_down_exps.weight':2}
+      shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
+    devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
+    state_dict = gguf_shard(entries, devices, shard_map)
+    # packed DISK-backed byte views of the quantized expert banks, kept for ExpertWeights.keep_packed (single-device only)
+    packed = {name: (data, shape, typ) for name, (data, shape, typ) in entries.items() if shard == 1 and typ in _GGML_QUANT}
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -596,10 +613,7 @@ class Transformer:
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
-    arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
-    n_heads = kv[f'{arch}.attention.head_count']
-    n_kv_heads = kv.get(f'{arch}.attention.head_count_kv', n_heads)
 
     ssm = None
     ssm_layers: tuple[bool, ...] = ()
@@ -682,6 +696,7 @@ class Transformer:
                             kv[f'{arch}.attention.indexer.top_k'], kv[f'{arch}.attention.indexer.kpool'],
                             kv.get(f'{arch}.attention.layer_norm_epsilon', 1e-6)) if f'{arch}.attention.indexer.kpool' in kv else None)
     model = Transformer(config)
+    for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # keep quantized expert weights packed: the expert selection gathers packed rows before unpacking
     for i in range(config.leading_dense_blocks, config.num_blocks):

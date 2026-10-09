@@ -2,18 +2,19 @@
 import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype
-from tinygrad.dtype import PyConst, dtypes, can_lossless_cast, Invalid, bitcast, truncate
+from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.weak import pm_uncast_const
 
 # TODO: symbolic shouldn't be importing from codegen
-from tinygrad.codegen.decomp.transcendental import xpow
+from tinygrad.codegen.decomp.transcendental import xpow, xpow_int
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
+  if c.val < 0 and dtypes.is_int(x.dtype): return None
   if c.val < 0: return x.reciprocal().pow(-c.val)
   if c.val == 0: return x.const_like(1)
   if (h := c.val-0.5) < c.val and int(h)+0.5 == c.val: return x.pow(h) * x.sqrt()
@@ -67,7 +68,8 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 bare_const = UPat.any(UPat(Ops.CONST), UPat(Ops.STACK, src=UPat(Ops.CONST)))
 casted_const = UPat.any(p:=UPat(Ops.CAST, src=(UPat(Ops.CONST),)), UPat(Ops.STACK, src=UPat.any(p, UPat(Ops.CONST, arg=Invalid))))
 def const_arg(u:UOp):
-  return tuple(const_arg(s) for s in u.src) if u.op is Ops.STACK else u.val
+  if u.op is Ops.STACK: return tuple(const_arg(s) for s in u.src)
+  return float(u.val) if isinstance(u.val, ConstFloat) else u.val
 
 def lift_reduce_gate(red:UOp, cond:UOp, x:UOp, i:UOp) -> UOp|None:
   # a REDUCE moves inside the gate clauses without its ranges: they invalidate every lane at once, so that gate lifts out
@@ -187,7 +189,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
   # positive const ** x
-  (UPat.cvar("c").alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 else None),
+  (UPat.cvar("c").alu(Ops.POW, UPat.var("x")),
+   lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 and dtypes.is_float(x.dtype) else None),
   # unpack a uint64 packed from two uint32 (threefry)
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y', dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x', dtypes.uint32).cast(dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
@@ -251,7 +254,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
    lambda cond, t, f: cond.where(f,t) if not f.is_invalid else None),
   # in cond.where(t, f), uses of cond fold to True within t and False within f
-  (UPat.var("cond", dtype=dtypes.bool).where(UPat.var("t"), UPat.var("f")), fold_where_closure),
+  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   (UPat.var("gate").where(UPat.var("x"), 0) != 0, lambda gate,x: gate & (x != 0)),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
@@ -267,7 +270,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
   # ALU/variable min==max -> CONST
   (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.AFTER, Ops.SPECIAL}, name="x"),
-   lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+   lambda x: x.const_like(x.vmin) if x.dtype is not dtypes.void and x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat.cvar().or_casted(),), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
@@ -438,18 +441,17 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK_LIKE = {Ops.NOOP, Ops.STACK, Ops.SINK, Ops.GROUP}
+REMOVE_FROM_SINK_LIKE = {Ops.NOOP, Ops.STACK, Ops.SINK, Ops.AFTER}
 pm_clean_up_group_sink = PatternMatcher([
-  # clean up GROUP/SINK
-  (UPat(Ops.GROUP, src=(UPat.var("x"),)), lambda x: x),
-  (UPat((Ops.SINK, Ops.GROUP), name="root"),
+  # clean up SINK
+  (UPat(Ops.SINK, name="root"),
     lambda root: UOp(root.op, src=tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), arg=root.arg)
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** pow **
-  ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
+  ((UPat(Ops.POW, name="p"), lambda p: xpow_int(p.src[0], p.src[1], p.dtype) if dtypes.is_int(p.dtype) else xpow(*p.src))),
   # ** load/store folding **
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),

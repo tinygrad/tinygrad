@@ -51,7 +51,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
 
   a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
   b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)
-  k_tile = UOp.range(K // BLOCK_K, 100, AxisType.REDUCE)
+  k_tile = UOp.range(K // BLOCK_K, 100, AxisType.LOOP)
 
   # copy with transpose for wmma (input is k×spatial, LDS is spatial×k)
   A_copy = A_local.permute((1,0)) if use_wmma else A_local
@@ -69,7 +69,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   acc = acc.after(acc.store(acc.zeros_like(buffer=False)))
 
   if use_wmma:
-    k = UOp.range(BLOCK_K // WMMA_K, 101, AxisType.REDUCE)
+    k = UOp.range(BLOCK_K // WMMA_K, 101, AxisType.LOOP)
     tile_m = UOp.range(TM // WMMA_ACC, 200)
     tile_n = UOp.range(TN, 201)
 
@@ -87,7 +87,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     a_frag = UOp.placeholder((TM//UNROLL_M, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)
     b_frag = UOp.placeholder((TN//UNROLL_N, UNROLL_N), dtypes.float, slot=1, addrspace=AddrSpace.REG)
 
-    k = UOp.range(BLOCK_K, 101, AxisType.REDUCE)
+    k = UOp.range(BLOCK_K, 101, AxisType.LOOP)
     a_frag = a_frag.after(a_frag.store(A_local[k].reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M)[wave_m, :, lane_m, :]))
     b_frag = b_frag.after(b_frag.store(B_local[k].reshape(WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)[wave_n, :, lane_n, :]))
 

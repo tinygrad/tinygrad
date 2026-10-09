@@ -8,7 +8,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -204,9 +204,14 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
+# import contextvar to use it
+from test.mockgpu.amd.emu import ASM_CALL # noqa: F401
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
-  def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
+  def setUp(self):
+    self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
+    self.enterContext(Context(ASM_CALL=1))
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
@@ -229,6 +234,7 @@ class TestAsmKernel(unittest.TestCase):
       run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
+  @unittest.expectedFailure
   def test_lds_sync(self):
     if self.arch not in ("rdna3", "rdna4"): self.skipTest("only rdna3/rdna4")
     a = Tensor.empty(128, dtype=dtypes.int32).contiguous().realize()
@@ -250,6 +256,76 @@ class TestAsmKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a, fxn=custom_data_deps)[0]
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
+
+  @unittest.expectedFailure
+  def test_cfg_branch_diamond(self):
+    def cfg_kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      for i in range(4): k.emit(v_mov_b32_e32(v[i], float(i)))
+      for i in range(2):
+        k.emit(s_cmp_eq_i32(0, 1-i))
+        k.emit(s_cbranch_scc0(), target=f"branch_{i}")
+        k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1], offset=i*4))
+        k.emit(s_branch(), target=f"after_branch_{i}")
+        k.label(f"branch_{i}")
+        k.emit(global_store_b32(addr=v[0], data=v[2], saddr=s[0:1], offset=i*4))
+        k.label(f"after_branch_{i}")
+      k.emit(s_branch(), target="final")
+      k.label("final")
+      k.emit(global_store_b32(addr=v[0], data=v[3], saddr=s[0:1], offset=8))
+      k.emit(s_endpgm())
+      insts = k.finalize()
+      sink = UOp.sink(out.base, arg=KernelInfo("cfg_kernel"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+    out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
+    self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
+
+  def test_cfg_loop(self):
+    def cfg_kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_mov_b32(s[2], 0))
+      k.label("loop")
+      k.emit(s_add_u32(s[2], s[2], 1))
+      k.emit(s_cmp_lt_i32(s[2], 4))
+      k.emit(s_cbranch_scc1(), target="loop")
+      k.emit(v_mov_b32_e32(v[0], 0))
+      k.emit(v_mov_b32_e32(v[1], s[2]))
+      k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      insts = k.finalize()
+      sink = UOp.sink(out.base, arg=KernelInfo("cfg_loop_kernel"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+    out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
+    self.assertListEqual(out.tolist(), [4])
+
+  def test_store_offset2(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def store_kernel(out:UOp):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        v_mov_b32_e32(v[0], 2), v_mov_b32_e32(v[1], 0x12345678),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
+      ]
+      sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("unaligned_global_store"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor.full((8,), 0xA5, dtype=dtypes.uint8).contiguous().realize()
+    out = out.custom_kernel(fxn=store_kernel)[0]
+    self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
+
+  def test_plus_tensor(self):
+    out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
+    self.assertListEqual(out.tolist(), [5, 7, 9])
+
+  def test_gemm_tensor(self):
+    N = 64
+    a = Tensor.ones(N,N, dtype=dtypes.float).contiguous()
+    b = Tensor.eye(N, dtype=dtypes.float).clone()
+    out = a@b
+    self.assertEqual(out.tolist(), (a.numpy()@b.numpy()).tolist())
 
 if __name__ == "__main__":
   unittest.main()

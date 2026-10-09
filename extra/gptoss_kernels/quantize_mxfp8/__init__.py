@@ -15,14 +15,14 @@ def _custom_quantize_mxfp8_qe8(fp8_out:UOp, e8_out:UOp, x:UOp) -> UOp:
   x, fp8_out, e8_out = x.reshape(n_elems), fp8_out.reshape(n_elems), e8_out.reshape(n_blocks)
   wg = UOp.range(n_blocks // THREADS_PER_WG, 0, AxisType.GLOBAL)
   tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  lane = UOp.range(BLK, 3, AxisType.UNROLL)
+  lane = UOp.range(BLK, 3, AxisType.UPCAST)
   block = wg * THREADS_PER_WG + tid
   idx = block * BLK + lane
   x_f = x[idx].cast(dtypes.float)
   abs_x = (x_f < 0.0).where(-x_f, x_f)
   blk_max = abs_x.reduce(lane, arg=Ops.MAX)
-  e8f = (blk_max.maximum(1e-38).log2().floor() + 127.0).maximum(0.0).minimum(254.0)
-  qscale = (127.0 - e8f).exp2()
+  e8f = ((blk_max.bitcast(dtypes.uint32) >> 23) & 0xFF).minimum(254)
+  qscale = ((e8f.const_like(254) - e8f) << 23).bitcast(dtypes.float32)
   scaled = (x_f * qscale).maximum(-FP8_MAX).minimum(FP8_MAX)
   fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype)).end(lane)
   e8_store = e8_out.after(fp8_store)[block].store(e8f.cast(dtypes.uint8))

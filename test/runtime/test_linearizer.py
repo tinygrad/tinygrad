@@ -67,8 +67,8 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     # slice at the last loop end
     uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
-    # only valid test if outermost range is the reduce
-    if uops[uslice].src[-1].arg[-1] == AxisType.REDUCE:
+    # only valid if the outermost loop ends an accumulator update, rather than an output store
+    if (update:=uops[uslice].src[0]).op is Ops.STORE and update.addrspace is AddrSpace.REG:
       load_idxs = [u.src[0] for u in uops[uslice+1:] if u.op == Ops.LOAD]
       # assert that there is a global load after the reduce ends
       assert any(u.addrspace == AddrSpace.GLOBAL for u in load_idxs)
@@ -124,7 +124,7 @@ class TestLinearizer(unittest.TestCase):
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
-    opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
+    opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
     # the uops graph is reg BUFFER -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -229,7 +229,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
     opt = [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 3, (8, AxisType.LOCAL, True)),
-            Opt(OptOps.SPLIT, 3, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
+            Opt(OptOps.SPLIT, 3, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
             Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
@@ -287,7 +287,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   last_bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
   # now all input buffers in last_call should be realized
   # create fresh buffers for the outputs
-  bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
+  bufs = [Buffer(x.device, x.nbytes).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
   # ensure buffers are allocated
   for b in bufs: b.ensure_allocated()
   return ast, bufs
@@ -297,17 +297,19 @@ def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
   return realized_ast
 
-def copyout_outputs(outbufs:list[Buffer]) -> list[np.ndarray]:
-  return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
+def copyout_outputs(outbufs:list[UOp]) -> list[np.ndarray]:
+  return [np.frombuffer(x.buffer.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def reset_bufs(bufs:list[Buffer]):
-  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
+  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.nbytes, initial_value=bytes(buf.nbytes)))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
   outbufs = real_bufs[:len(realized_ast.src)]
   wanna_output = [np.array(x).flatten() for x in wanna_output]
-  buf_uops = [UOp.from_buffer(b) for b in real_bufs]
+  from test.helpers import buffer_uops
+  buf_uops = buffer_uops(realized_ast, real_bufs)
+  out_uops = buf_uops[:len(outbufs)]
 
   def run_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
@@ -316,13 +318,13 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   def check_opt(opts):
     reset_bufs(outbufs)
     run_prg(opts)
-    for x,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
+    for x,want in zip(copyout_outputs(out_uops), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
   run_prg(opts=())
-  if len(wanna_output) == 0: wanna_output = copyout_outputs(outbufs)
+  if len(wanna_output) == 0: wanna_output = copyout_outputs(out_uops)
   else:
-    for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
+    for buf,want in zip(copyout_outputs(out_uops), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
   if check_default_opt: check_opt(None)

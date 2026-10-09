@@ -9,7 +9,7 @@ from tinygrad.device import Compiler
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
 def with_storage(x:UOp, dt:DType) -> UOp:
-  if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: return x.replace(arg=replace(x.arg, dtype=dt))
+  if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ class Estimates:
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
-        while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
+        while len(buf.src) and buf.op not in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
           accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults

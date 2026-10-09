@@ -22,10 +22,11 @@ concurrency:
 jobs:
   docs:
     name: Docs
-    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'turin' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
+      DEV: CPU
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -75,9 +76,9 @@ jobs:
         llvm: 'true'
         ninja: 'true'
     - name: Test ResNet-18
-      run: DEBUG=2 python3 extra/torch_backend/example.py
+      run: DEV=CPU DEBUG=2 python3 extra/torch_backend/example.py
     - name: Test one op in torch tests
-      run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
+      run: DEV=CPU DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND
       run: DEV=CPU:LLVM LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/runtime/test_ops.py --durations=20
     - name: Custom tests
@@ -253,12 +254,14 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }}
+      run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
     runs-on: *linux
     timeout-minutes: 10
+    env:
+      DEV: CPU
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -393,6 +396,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECK_OOB: 0
+      DEV: CPU
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -406,10 +410,10 @@ jobs:
         run: |
           parallel --link --tagstring '[{1}]' '{2}' \
             ::: llama 'llama q4' qwen3.5 qwen \
-            ::: $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model llama3.2:1b | tee /dev/stderr | grep -i rooster' \
-                $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model llama3.2:1b-q4 | tee /dev/stderr | grep -i rooster' \
-                $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model qwen3.5:0.8b | tee /dev/stderr | grep -i rooster' \
-                $'echo "What\'s a female chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model qwen3:0.6b | tee /dev/stderr | grep -i hen'
+            ::: $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model llama3.2:1b | tee -a /dev/stderr | grep -i rooster' \
+                $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model llama3.2:1b-q4 | tee -a /dev/stderr | grep -i rooster' \
+                $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model qwen3.5:0.8b | tee -a /dev/stderr | grep -i rooster' \
+                $'echo "What\'s a female chicken called? Answer with only one word." | python3 -m tinygrad.llm --no_chat_template --model qwen3:0.6b | tee -a /dev/stderr | grep -i hen'
                 # NOTE: qwen is dumb and only knows about female chickens
 
 # ****** Models Tests ******
@@ -494,7 +498,6 @@ jobs:
     timeout-minutes: 20
     env:
       DEV: MOCKKFD+AMD
-      HCQ_RUNTIME_DEV: PYTHON
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -541,8 +544,6 @@ jobs:
     timeout-minutes: 15
     env:
       DEV: MOCKPCI+AMD
-      HCQ2: 1
-      HCQ_RUNTIME_DEV: PYTHON
       PYTHONPATH: .
     steps:
       - name: Checkout Code
@@ -556,7 +557,7 @@ jobs:
       - name: Run tests on MOCKAM
         run: python -m pytest test/test_tiny.py test/runtime/test_jit.py
       - name: Run test_tiny on MOCKUSB
-        run: CHECK_OOB=0 HCQ_RUNTIME_DEV=CPU GMMU=0 DEV=MOCKUSB+AMD python -m pytest test/test_tiny.py test/runtime/test_hcq2.py
+        run: CHECK_OOB=0 GMMU=0 DEV=MOCKUSB+AMD python -m pytest test/test_tiny.py test/runtime/test_hcq2.py
       - name: Run test_hcq2 on MOCKPCI
         run: python -m pytest test/null/test_hcq2.py test/runtime/test_hcq2.py
       - name: Run disk copy tests on MOCKPCI
@@ -575,8 +576,6 @@ jobs:
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
-      HCQ2: 1
-      HCQ_RUNTIME_DEV: PYTHON
       PYTHONPATH: .
     steps:
       - name: Checkout Code
@@ -626,7 +625,7 @@ jobs:
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
-        run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCK+NV\nSKIP_SLOW_TEST=1\nHCQ_RUNTIME_DEV=PYTHON' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCK+NV\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"

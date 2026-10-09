@@ -45,7 +45,7 @@ class TestLinearizer(unittest.TestCase):
 
     uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0],
       [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
-       Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UNROLL))]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+       Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UPCAST))]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     accs = [u for u in uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now

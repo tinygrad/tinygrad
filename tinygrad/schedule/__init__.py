@@ -2,10 +2,9 @@ import time, inspect
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import GroupOp, remove_all_tags
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import GroupOp, remove_all_tags, UOp, Ops, UOpMetaClass, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # **** schedule linearizer
@@ -141,7 +140,6 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
-      if frm.filename.startswith(str(BASEDIR / "apps")): break
       if not frm.filename.startswith(str(BASEDIR)) and not frm.filename.endswith("/contextlib.py"): break
     else:
       frm = None
@@ -159,12 +157,12 @@ def assert_all_same_devices(ast:UOp):
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
 def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
-  if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  if dst.device == src.device and not dst.on_disk(): return None
   return call.replace(src=(dst.store(src),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
-  if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  if dst.device == src.device and not dst.on_disk(): return None
   from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym
@@ -259,7 +257,7 @@ pm_replace_buf = PatternMatcher([
 ])
 
 def transform_to_call(big_sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.
@@ -269,7 +267,6 @@ def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
-@rewrite_group(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   big_sink = transform_to_call(big_sink)
   # big_sink srcs are all the Tensors
@@ -294,7 +291,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
-    capturing[0].add_linear(linear, var_vals)
+    capturing[0].add_linear(linear)
     return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}

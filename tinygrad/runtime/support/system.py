@@ -343,16 +343,16 @@ class PCIIfaceBase:
       if self.remote is None: System.lock_memory(lo, size)
       paddrs = [(x, 0x1000) for x in (b.meta if self.remote is not None else System.system_paddrs(lo, size))]
       aspace, snooped, uncached = AddrSpace.SYS, True, True
-    elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase):
+      if b.options.cpu_access: lo = self.dev_impl.mm.alloc_vaddr(size) # nv semaphores only reach 40 bits
+    elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase) and ifa.peer_group == self.peer_group:
       if ifa.is_bar_small(): raise RuntimeError(f"P2P mapping not supported for small bar devices: {b.device} -> {self.dev.device}")
-      if ifa.peer_group != self.peer_group: raise RuntimeError(f"P2P mapping across peer groups: {b.device} -> {self.dev.device}")
       lo, size, snooped, uncached = b._buf, b.meta.mapping.size, True, b.meta.mapping.uncached
       if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
       else: paddrs, aspace = ifa.p2p_paddrs(b.meta.mapping.paddrs)
     else: raise RuntimeError(f"map failed: {b.device} -> {self.dev.device}")
 
     self.dev_impl.mm.map_range(lo, size, paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
-    return BufferStorage(b._buf, (lo, size))
+    return BufferStorage(lo, (lo, size))
 
 # *** Remote PCI: memory and program execution on extra/remote/serve.py
 

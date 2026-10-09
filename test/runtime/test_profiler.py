@@ -31,7 +31,7 @@ def helper_collect_profile(*devs):
 def filter_ranges(p): return flatten([e.ents for e in p if isinstance(e, ProfileGraphEvent)])+[e for e in p if isinstance(e, ProfileRangeEvent)]
 
 def helper_host_buffer(dev:Compiled, **kwargs) -> Buffer:
-  return Buffer(getattr(dev, "host", "PYTHON"), 2, dtypes.float, **kwargs)
+  return Buffer(getattr(dev, "host", "PYTHON"), 8, **kwargs)
 
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
@@ -81,7 +81,7 @@ class TestProfiler(unittest.TestCase):
     self.test_profile_kernel_run(wait=True)
 
   def test_profile_copyin(self):
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 8, options=BufferSpec(nolru=True)).ensure_allocated()
     src = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1))
 
     with helper_collect_profile(TestProfiler.d0) as profile:
@@ -93,12 +93,12 @@ class TestProfiler(unittest.TestCase):
 
   def test_profile_multiops(self):
     runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 8, options=BufferSpec(nolru=True)).ensure_allocated()
     src, dst = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1)), helper_host_buffer(TestProfiler.d0, preallocate=True)
 
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copy_from(src)
-      run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(UOp.from_buffer(buf1), TestProfiler.a.uop),)))
+      run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(UOp.from_buffer(buf1, dtypes.float32), TestProfiler.a.uop),)))
       dst.copy_from(buf1)
 
     profile = filter_ranges(profile)
@@ -116,12 +116,12 @@ class TestProfiler(unittest.TestCase):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
 
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 8, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(f"{Device.DEFAULT}:1", 8, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
-      buf2.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf1.copy_from(Buffer("PYTHON", 8, initial_value=bytes(struct.pack("ff", 0, 1))))
+      buf2.copy_from(Buffer("PYTHON", 8, initial_value=bytes(struct.pack("ff", 0, 1))))
 
     profile = filter_ranges(profile)
     for dev in [TestProfiler.d0.device, d1.device]:

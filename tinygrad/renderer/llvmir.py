@@ -16,6 +16,8 @@ def ldt(dt:DType, count=1, ptr=False):
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", **{d: "i8" for d in dtypes.fp8s},
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
+def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.op is Ops.INDEX) # an external function's arg, an index is its address
+
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
@@ -37,7 +39,8 @@ def lcast(input_type:DType, output_type:DType):
 
 def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
-            **{d: (".fp8.fp8", ".bf8.bf8")[fp8_index(d)] for d in dtypes.fp8s}, dtypes.int8: "iu8", dtypes.int32: "i32"}
+            **{d: ("." if cdna else "") + ("fp8.fp8", "bf8.bf8")[fp8_index(d)] for d in dtypes.fp8s},
+            dtypes.int8: "iu8", dtypes.int32: "i32", dtypes.uint32: "i32"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
   N,M,K = wmma.arg[0]
   if cdna:
@@ -60,7 +63,7 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
   if wmma.arg[1] == dtypes.int8: args = ["i1 true", args[0], "i1 true", args[1], args[2]]  # iu8 flags A/B signed
   if wmma.dtype != dtypes.float: args.append("i1 false") # opsel
-  suffix = f".v{wmma.max_numel()}{dt_map[wmma.dtype]}.v{wmma.src[0].max_numel()}{dt_map[wmma.arg[1]]}" if rdna4 else ""
+  suffix = f".v{wmma.max_numel()}{dt_map[wmma.dtype]}.v{wmma.src[0].max_numel()}{dt_map[wmma.src[0].dtype]}" if rdna4 else ""
   return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
     f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
@@ -140,7 +143,13 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 
-  (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst")
+  (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
+
+  # calls
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
+   f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
+   ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
 
 class LLVMRenderer(Renderer):
@@ -155,20 +164,20 @@ class LLVMRenderer(Renderer):
   ])
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.
-    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
+    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU)}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
       name for name,u in args])
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
-  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
-    r: dict[UOp, str] = {}
+  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", fns:dict[UOp, str]|None=None) -> tuple[tuple[str, ...], str]:
+    r: dict[UOp, str] = dict(fns or {}) # the functions the kernel calls, by name
     args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
     vc = -1
 
     local_args: list[str] = []
-    name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST}: continue
+      if u.op in {Ops.NOOP, Ops.CONST} or (u.op is Ops.STACK and not u.src): continue
       if u.op is Ops.AFTER:
+        if u.dtype is dtypes.void: continue
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.SINK:
@@ -206,8 +215,14 @@ class CPULLVMRenderer(LLVMRenderer):
   global_max = (1, 0, 0)
   abi = 'win64cc' if sys.platform == 'win32' else None
   string_rewrite = base_rewrite
-  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
-  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
+    fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in UOp.sink(*uops).toposort() if b.op is Ops.LINEAR)}
+    defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
+    return "\n".join((k:=self._render_kernel(uops, fns=fns))[0] + (k[1], *defs, self._render_footer(uops)))
+  def _render_footer(self, uops: list[UOp]) -> str:
+    decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
+             for x in UOp.sink(*uops).toposort() if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+    return "\n".join([*decls.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler

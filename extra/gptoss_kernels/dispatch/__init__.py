@@ -1,6 +1,6 @@
 import functools, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from extra.llama_kernels import alloc_like, compile_hip
 
 @functools.cache
@@ -20,15 +20,22 @@ def inverse_rows(dest_row:Tensor, counts:Tensor, off:Tensor, rows:int) -> Tensor
 
 @functools.cache
 def _dispatch_gather(out:UOp, x:UOp, dest_row:UOp, src_row:UOp) -> UOp:
+  from extra.gemm.moe_routing import _blk_for
   groups, tokens, hidden = x.shape
   rows = src_row.shape[1]
   assert out.shape == (groups*rows, hidden) and dest_row.shape == (groups, tokens*4)
   assert x.dtype == out.dtype and x.dtype.itemsize == 1
-  sink = UOp.sink(out.base, x.base, dest_row.base, src_row.base, UOp.special(64, "lidx0"), UOp.special(groups*rows, "gidx0"),
-                  arg=KernelInfo(f"dispatch_gather_{groups}_{rows}_{tokens}_{hidden}"))
-  src = (pathlib.Path(__file__).parent/"gather.cpp").read_text()
-  lib = compile_hip(src, [f"-DROWS={rows}", f"-DTOKENS={tokens}", f"-DHIDDEN={hidden}"])
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+  block = _blk_for(hidden)
+  g, row = UOp.range(groups, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL)
+  outer, inner = UOp.range(hidden//block, 2), UOp.range(block, 3, AxisType.LOCAL)
+  col = outer*block + inner
+  source = src_row.index(g, row).load().cast(dtypes.weakint)
+  anchor = dest_row.index(g, 0).load() >= 0
+  valid = (source >= 0) & anchor
+  token = valid.where(source, source.const_like(0)) // 4
+  value = valid.where(x.index(g, token, col).load(), UOp.const(0, x.dtype))
+  return out.reshape(groups, rows, hidden).index(g, row, col).store(value).end(g, row, outer, inner).sink(
+    arg=KernelInfo(f"dispatch_gather_{groups}_{rows}_{tokens}_{hidden}", opts_to_apply=()))
 
 def _dispatch_gather_bwd(gradient:UOp, kernel:UOp) -> tuple:
   from extra.gemm.moe_routing import _gscatter_bwd

@@ -18,7 +18,8 @@ def decode_profile(data:bytes) -> dict:
     off += struct.calcsize(fmt)
     return vals
   total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values()
+  index = json.loads(ret[off:off+index_len])
+  strings, markers = index["strings"], index["markers"]
   off += index_len
   layout:dict[str, dict] = {}
   # 0 means None, otherwise it's an enum value
@@ -42,7 +43,7 @@ def decode_profile(data:bytes) -> dict:
           v["events"].append({"event":"freq", "ts":ts, "value":value})
         else:
           alloc, ts, key = u("<BII")
-          if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+          if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"nbytes":u("<Q")[0]}})
           else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[(k, strings[rep], num, mode) \
               for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
@@ -81,16 +82,11 @@ def main(args) -> None:
 
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
+  def print_step(step:dict, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"], update_sink=False)
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if print_graph and "graph" in m and not args.json:
-          for k,v in m["graph"].items():
-            print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
-            if v["src"]:
-              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
-        elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
+        if "uop" in m: print(emit(''.join(t["st"] for t in m["uop"])))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
@@ -214,7 +210,7 @@ def main(args) -> None:
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
           if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src):
-            print_step(s, print_graph=True, reconstruct_matches=s["name"] in args.src)
+            print_step(s, reconstruct_matches=s["name"] in args.src)
           if DEBUG >= 7: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)

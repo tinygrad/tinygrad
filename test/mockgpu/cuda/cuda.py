@@ -78,3 +78,4 @@ def cuStreamWaitValue64_v2(stream, address, value, flags): return enqueue(stream
 
 for name, fn in list(globals().items()):
   if name.startswith("cu") and callable(fn): setattr(cuda.dll, name, ctypes.CFUNCTYPE(getattr(cuda, name).restype, *getattr(cuda, name).argtypes)(fn))
+cuda.dll._loaded_[cuda.dll.nm] = cuda.dll

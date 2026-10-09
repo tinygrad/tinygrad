@@ -14,7 +14,7 @@ if __name__ == "__main__":
   C = A.matmul(B)
   if getenv("GEMV"):
     opts = [
-      Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.UNROLL)),
+      Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.UPCAST)),
       Opt(op=OptOps.SPLIT, axis=1, arg=(32, AxisType.LOCAL)),
     ]
   else:

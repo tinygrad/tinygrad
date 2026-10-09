@@ -224,6 +224,7 @@ def _control(h, rtype, req, val, idx, data, n, timeout):
 def _bulk(h, ep, data, n, actual, timeout):
   if ep & 0x80: ctypes.memmove(data, bytes(MockUSB3.inst.bulk_read(n)), n)
   else: MockUSB3.inst.bulk_write(ctypes.string_at(data, n))
+  if actual: actual[0] = n
   return 0
 def _submit(t):
   MockUSB3.inst.bulk_write(ctypes.string_at(t.contents.buffer, t.contents.length))
@@ -237,3 +238,4 @@ _mocked:list[tuple[Any, Callable]] = [(libusb.libusb_control_transfer, _control)
   (libusb.libusb_submit_transfer, _submit), (libusb.libusb_handle_events_timeout, lambda ctx, tv: 0), (libusb.libusb_alloc_transfer, _alloc)]
 for _fn, _impl in _mocked:
   setattr(libusb.dll, _fn.__name__, ctypes.CFUNCTYPE(ctypes.c_void_p if _fn is libusb.libusb_alloc_transfer else _fn.restype, *_fn.argtypes)(_impl))
+libusb.dll._loaded_[libusb.dll.nm] = libusb.dll
