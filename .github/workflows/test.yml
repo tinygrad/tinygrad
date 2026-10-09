@@ -624,6 +624,7 @@ jobs:
         with:
           key: qcom-minimal-${{ matrix.renderer }}
           deps: "testing_unit mesa"
+          pydeps: "onnxruntime==1.24.1"
           qemu: ${{ matrix.renderer == 'CL' }}
       - name: Compile in one process (CL compiles in qemu)
         if: matrix.renderer == 'CL'
@@ -645,9 +646,14 @@ jobs:
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/runtime/test_ops.py::TestOps::test_sin test/runtime/test_ops.py::TestOps::test_cos test/runtime/test_ops.py::TestOps::test_tan test/runtime/test_ops.py::TestOps::test_exp test/runtime/test_ops.py::TestOps::test_log --durations=20
       - name: Test openpilot models
+        env:
+          BEAM_MAX_TASKS_PER_CHILD: 1024
         run: |
+          unset PARALLEL
           for model in dmonitoring_model driving_supercombo; do
-            IMAGE=1 FLOAT16=1 python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/$model.onnx" /tmp/openpilot.pkl --benchmark-runs 1
+            onnx="https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/$model.onnx"
+            IMAGE=1 FLOAT16=1 python examples/openpilot/compile_onnx.py "$onnx" /tmp/openpilot.pkl --benchmark-runs 1
+            IMAGE=1 FLOAT16=1 MODEL_ONNX="$onnx" MODEL_PKL=/tmp/openpilot.pkl python -m pytest test/external/external_test_compile.py -k test_onnx
           done
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
