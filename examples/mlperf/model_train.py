@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8, MXFP4
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, MXFP4
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW, clip_grads
@@ -1418,8 +1418,7 @@ def train_llama3():
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   for p in optim.params:
-    grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
+    p.grad = p.zeros_like().contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1433,41 +1432,19 @@ def train_llama3():
     print(f"loading optim checkpoint from {fn}")
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
-  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
-  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts]
-  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
-  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts]
-  fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
-
-  from tinygrad.nn.state import get_state_dict
-  model_state = get_state_dict(model)
-  for wname in model._fp8_inv_scale:
-    w = model_state[wname]
-    w._inv_scale = model._fp8_inv_scale[wname]
-    w._next_inv_scale = model._fp8_next_inv_scale[wname]
-    if optim.master_params:
-      idx = next(j for j, p in enumerate(optim.params) if p is w)
-      master = optim.master_params[idx]
-      inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
-      if MXFP8:
-        from extra.gemm.cdna_asm_gemm import _mx_block_scale
-        bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
-        master.assign((master * bs).contiguous())
-      else:
-        master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
-
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
-  Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+  Tensor.realize(loss_acc, *optim.params)
+  mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
+  if mxfp4_weights is not None: Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
   @TinyJit
   def minibatch(tokens:Tensor):
-    model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL))
+    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL), mxfp4_weights=mxfp4_weights)
     if getenv("FAST_CE", 0):
       from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
@@ -1478,7 +1455,7 @@ def train_llama3():
       apply_grad(g, new_g.uop)
 
     loss_acc.assign(loss_acc + loss.flatten().float())
-    return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+    return loss_acc.realize(*grads)
 
   @TinyJit
   def optim_step():
@@ -1487,12 +1464,12 @@ def train_llama3():
     scheduler.step()
 
     for g in grads: g.assign(0)
-    model.update_amax()
+    new_mxfp4_w = model.update_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     loss_cpu = loss_acc.to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *new_mxfp4_w)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
 
@@ -1502,7 +1479,7 @@ def train_llama3():
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1])
+    logits:Tensor = model(tokens[:, :-1], mxfp4_weights=mxfp4_weights)
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
@@ -1667,15 +1644,14 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, fclip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
   config = {}
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4-8b/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
-  grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
-  GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
+  GBS                = config["GLOBAL_BATCH_SIZE"]      = BS
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   DATA_SEED          = config["DATA_SEED"]              = getenv("DATA_SEED", SEED)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
@@ -1737,13 +1713,13 @@ def train_gptoss():
   params_wd = [p for p in params if p.ndim >= 3]
   params_no_wd = [p for p in params if p.ndim < 3]
   optim = GradAccClipAdamWGroup(
-    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device),
-    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=grad_acc, device=optim_device),
+    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=1, device=optim_device),
+    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=1, device=optim_device),
   )
 
   for p in optim.params:
-    grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
+    p.grad = p.zeros_like(dtype=dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype).contiguous()
+    if getattr(p, "_zero2", False): p.grad = optim.optimizers[0]._zero_shard(p.grad)
   grads = [p.grad for p in optim.params]
 
   from extra.gemm.cdna_asm_gemm import _mx_block_scale
@@ -1751,7 +1727,7 @@ def train_gptoss():
   def _scale_key(n):
     if "." in n and (c:=f"{(b:=n.rsplit('.',1))[0]}_scale.{b[1]}") in model_state: return c
     return f"{n}_scale"
-  fp8_scale_names = {n: _scale_key(n) for n, t in model_state.items() if t.dtype == FP8_DTYPE}
+  fp8_scale_names = {n: _scale_key(n) for n, t in model_state.items() if t.dtype == FP8_DTYPE and not getattr(t, '_prestore_wT', False)}
   fp8_inv_scales = [model_state[sname] for sname in fp8_scale_names.values()]
   for wname, sname in fp8_scale_names.items():
     w, scale = model_state[wname], model_state[sname]
@@ -1762,39 +1738,52 @@ def train_gptoss():
       bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
       master.assign((master * bs).contiguous())
 
+  fp8_wT_tensors = []
+  if getenv("PRESTORE_WT", 0):
+    def _wt_key(n, suffix):
+      if "." in n and (c:=f"{(b:=n.rsplit('.',1))[0]}_{suffix}.{b[1]}") in model_state: return c
+      return f"{n}_{suffix}"
+    for wname in fp8_scale_names:
+      wtq_name, wte_name = _wt_key(wname, "wT"), _wt_key(wname, "wT_scale")
+      if wtq_name in model_state and wte_name in model_state:
+        w = model_state[wname]
+        w._wT_q, w._wT_e8 = model_state[wtq_name], model_state[wte_name]
+        fp8_wT_tensors += [w._wT_q, w._wT_e8]
+
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
   if optim.master_params:
     for m in optim.master_params: m.realize()
-  Tensor.realize(*optim.params, *fp8_inv_scales)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_wT_tensors)
 
   @TinyJit
   @Context(TRAINING=1)
-  def minibatch(tokens:Tensor):
+  def step(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)
+
     logits:Tensor = model(tokens[:, :-1], save=True)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    if getenv("FUSED_CE", 0):
+      from extra.llama_kernels.fused_ce import fused_ce_loss
+      loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
+    else:
+      loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
       apply_grad(g, new_g.uop)
 
-    loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads)
+    Tensor.realize(loss, *grads)
 
-  @TinyJit
-  def optim_step():
-    grad_norm = clip_grads(grads, grad_acc, 1.0)
-    optim.fstep(grads, grad_norm)
+    clipped_grads, grad_norm = fclip_grads(grads, 1.0)
+    optim.fstep(clipped_grads, grad_norm)
     scheduler.step()
 
-    for g in grads: g.assign(0)
-
+    loss_cpu = loss.flatten().float().to("CPU")
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
+    Tensor.realize(loss_cpu, lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
 
-    return lr_cpu, grad_norm_cpu
+    return loss_cpu, lr_cpu, grad_norm_cpu
 
   @TinyJit
   @Context(TRAINING=0)
@@ -1843,30 +1832,20 @@ def train_gptoss():
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
-      stopped = False
-      losses, data_time, dev_time = [], 0, 0
-      for _ in range(grad_acc if i >= 2 else 1):
-        ist = time.perf_counter()
-        try: tokens = next(train_iter)
-        except StopIteration:
-          stopped = True
-          break
-        mst = time.perf_counter()
-        data_time += mst - ist
-        losses.append(minibatch(tokens).item())
-        dev_time += time.perf_counter() - mst
-      if stopped: break
+      ist = time.perf_counter()
 
-      gt = time.perf_counter()
-      ret = optim_step()
-      lr, grad_norm = ret[0].item(), ret[1].item()
+      try: tokens = next(train_iter)
+      except StopIteration: break
+      mst = time.perf_counter()
+      data_time = mst - ist
+
+      ret = step(tokens)
+      dev_time = time.perf_counter() - mst
+
+      loss, lr, grad_norm = ret[0].item(), ret[1].item(), ret[2].item()
       et = time.perf_counter()
 
-      loss = sum(losses) / len(losses)
-      optim_time = et - gt
-      dev_time += optim_time
       step_time = et - st
-      gbs_time = gt - st
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
@@ -1876,7 +1855,7 @@ def train_gptoss():
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
       mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 4.6e15)) * 100
       tqdm.write(
-          f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+          f"{i:5} {step_time:.3f} s step, {dev_time:.3f} s dev, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
       if DEBUG >= 1: tqdm.write("  mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
 
@@ -1886,8 +1865,6 @@ def train_gptoss():
           "train/lr": lr,
           "train/grad_norm": grad_norm,
           "train/step_time": step_time,
-          "train/gbs_time": gbs_time,
-          "train/optim_time": optim_time,
           "train/dev_time": dev_time,
           "train/data_time": data_time,
           "train/mem": mem_gb,

@@ -140,7 +140,7 @@ Documentation along with a quick start guide can be found on the [docs website](
 ```python
 from tinygrad import Tensor
 
-x = Tensor.eye(3)
+x = Tensor.eye(3).clone()  # clone to make it a buffer
 y = Tensor([[2.0,0,-2.0]])
 z = y.matmul(x).sum()
 z.backward()
@@ -194,7 +194,7 @@ For more examples on how to run the full test suite please refer to the [CI work
 Some examples of running tests locally:
 ```sh
 python3 -m pip install -e '.[testing]'  # install extra deps for testing
-python3 test/backend/test_ops.py        # just the ops tests
+python3 test/runtime/test_ops.py        # just the ops tests
 python3 -m pytest test/                 # whole test suite
 ```
 

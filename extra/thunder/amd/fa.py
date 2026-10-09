@@ -19,16 +19,33 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
 @functools.cache
 def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
                                   device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
-  code = (pathlib.Path(__file__).parent / "fused_qkv_rope.cpp").read_text()
-  threads = 256
-  thread_idx = UOp.special(threads, "lidx0")
-  block_idx_x, block_idx_y = UOp.special(B, "gidx0"), UOp.special(N, "gidx1")
-  sink = UOp.sink(q.base, k.base, v.base, xqkv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y,
-                  arg=KernelInfo(name="fused_qkv_rope_forward"))
-  compile_args = ["-std=c++20", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
-                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
-  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+  group_size = H // H_KV
+  q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
+  xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
+  b, n = UOp.range(B, 0), UOp.range(N, 1)
+  pair = UOp.range(D // 2, 2)
+  even = pair * 2
+  c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
+  s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
+  ordered:UOp|None = None
+  for kvh in range(H_KV):
+    q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
+    x_in = xqkv.after(ordered) if ordered is not None else xqkv
+    stores:list[UOp] = []
+    for rep in range(group_size):
+      a = x_in[b, n, kvh, rep, even].cast(dtypes.float)
+      bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
+      h = kvh * group_size + rep
+      stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)), q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
+    a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
+    bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
+    stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
+               k_out[b, n, kvh, even + 1].store((a * s + bb * c).cast(k.dtype)),
+               v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
+               v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1])]
+    ordered = UOp.group(*stores)
+  assert ordered is not None
+  return ordered.end(pair, n, b).sink(arg=KernelInfo(name="fused_qkv_rope_forward"))
 
 @functools.cache
 def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
@@ -109,49 +126,6 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
-@functools.cache
-def _windowed_lse(xq:Tensor, xk:Tensor, sinks, W:int) -> Tensor:
-  B, N, H, hd = xq.shape
-  H_KV = xk.shape[2]; R = H // H_KV; nb = N // W; sm = hd ** -0.5
-  q = xq.reshape(B, N, H_KV, R, hd).permute(0, 2, 3, 1, 4).reshape(B, H_KV, R, nb, W, hd).float()
-  k = xk.permute(0, 2, 1, 3).reshape(B, H_KV, 1, nb, W, hd).float()
-  k_prev = k.pad((None, None, None, (1, 0), None, None))[:, :, :, :nb]
-  sc_d = (q @ k.transpose(-1, -2)) * sm
-  sc_p = (q @ k_prev.transpose(-1, -2)) * sm
-  li, lj = Tensor.arange(W).reshape(W, 1), Tensor.arange(W).reshape(1, W)
-  pv = (Tensor.arange(nb).reshape(nb, 1, 1) >= 1)
-  sc_d = (lj <= li).where(sc_d, -float("inf"))
-  sc_p = ((li < lj) & pv).where(sc_p, -float("inf"))
-  m = sc_d.max(-1, keepdim=True).maximum(sc_p.max(-1, keepdim=True))
-  if sinks is not None: m = m.maximum(sinks.reshape(1, H_KV, R, 1, 1, 1).float())
-  denom = (sc_d - m).exp().sum(-1, keepdim=True) + (sc_p - m).exp().sum(-1, keepdim=True)
-  if sinks is not None: denom = denom + (sinks.reshape(1, H_KV, R, 1, 1, 1).float() - m).exp()
-  return (m + denom.log()).reshape(B, H, N).unsqueeze(2)  # (B, H, 1, N), matches saved l_vec
-
-def _windowed_delta(xq:Tensor, xk:Tensor, xv:Tensor, do:Tensor, sinks, W:int) -> Tensor:
-  B, N, H, hd = xq.shape
-  H_KV = xk.shape[2]; R = H // H_KV; nb = N // W; sm = hd ** -0.5
-  q = xq.reshape(B, N, H_KV, R, hd).permute(0, 2, 3, 1, 4).reshape(B, H_KV, R, nb, W, hd).float()
-  k = xk.permute(0, 2, 1, 3).reshape(B, H_KV, 1, nb, W, hd).float()
-  v = xv.permute(0, 2, 1, 3).reshape(B, H_KV, 1, nb, W, hd).float()
-  dob = do.reshape(B, N, H_KV, R, hd).permute(0, 2, 3, 1, 4).reshape(B, H_KV, R, nb, W, hd).float()
-  k_prev = k.pad((None, None, None, (1, 0), None, None))[:, :, :, :nb]
-  v_prev = v.pad((None, None, None, (1, 0), None, None))[:, :, :, :nb]
-  sc_d = (q @ k.transpose(-1, -2)) * sm
-  sc_p = (q @ k_prev.transpose(-1, -2)) * sm
-  li, lj = Tensor.arange(W).reshape(W, 1), Tensor.arange(W).reshape(1, W)
-  pv = (Tensor.arange(nb).reshape(nb, 1, 1) >= 1)
-  sc_d = (lj <= li).where(sc_d, -float("inf"))
-  sc_p = ((li < lj) & pv).where(sc_p, -float("inf"))
-  m = sc_d.max(-1, keepdim=True).maximum(sc_p.max(-1, keepdim=True))
-  if sinks is not None: m = m.maximum(sinks.reshape(1, H_KV, R, 1, 1, 1).float())
-  e_d, e_p = (sc_d - m).exp(), (sc_p - m).exp()
-  denom = e_d.sum(-1, keepdim=True) + e_p.sum(-1, keepdim=True)
-  if sinks is not None: denom = denom + (sinks.reshape(1, H_KV, R, 1, 1, 1).float() - m).exp()
-  o = ((e_d / denom) @ v) + ((e_p / denom) @ v_prev)
-  delta = (dob * o).sum(-1)
-  return delta.reshape(B, H, N).unsqueeze(2)
-
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
@@ -160,8 +134,6 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     xq = Tensor(ker.src[3], device=ker.src[3].device)
     xk = Tensor(ker.src[4], device=ker.src[4].device)
     xv = Tensor(ker.src[5], device=ker.src[5].device)
-    if window:
-      l_vec = _windowed_lse(xq, xk, Tensor(ker.src[6], device=ker.src[6].device) if has_sink else None, window)
 
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
@@ -172,8 +144,6 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
     delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
-    if window:
-      delta_vec = _windowed_delta(xq, xk, xv, do, Tensor(ker.src[6], device=ker.src[6].device) if has_sink else None, window)
 
     dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, window=window))[:3]
 

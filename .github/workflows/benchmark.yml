@@ -48,8 +48,6 @@ jobs:
       run: |
         source /tmp/tinygrad_pytest_ci/bin/activate
         pytest -nauto --durations=20
-    - name: openpilot compile3 0.10.1 driving_vision
-      run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
   # TODO: reenable when not flaky
   #testframeworkpytest:
@@ -82,19 +80,21 @@ jobs:
   #      pytest -nauto --durations=20
 
   llmbenchmark:
-    name: LLM (DEV=${{ matrix.dev }})
+    name: Benchmark ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
     strategy:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+        model: ['llama3.2:3b-f16', 'qwen3.8:27b', 'olmoe']
+        # qwen3.8:27b doesn't fit on mac
+        exclude: [{ dev: 'METAL', model: 'qwen3.8:27b' }, { dev: 'AMD', model: 'olmoe' }, { dev: 'NV', model: 'olmoe' }]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -102,16 +102,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
-    - name: Symlink models and datasets
-      run: |
-        mkdir -p weights
-        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -119,20 +114,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: python3 test/external/process_replay/reset.py
-    - name: Run llama3.2
-      run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
-    - name: Run qwen3.6
-      # qwen3.6:35b-a3b doesn't fit on mac
-      if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=qwen36_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.6:35b-a3b --benchmark --warmup
-    - name: Run olmoe
-      # just metal for now
-      if: ${{ matrix.dev == 'METAL' }}
-      run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
-    - name: Run LLaMA-3 8B on 4 GPUs with BEAM
-      # only run on machines with multiple gpus
-      if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
+    - name: Run ${{ matrix.model }}
+      run: |
+        MODEL=${{ matrix.model }}
+        BENCHMARK_LOG=${MODEL//./} JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m $MODEL --benchmark --warmup
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -143,13 +128,12 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -157,12 +141,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -182,10 +165,6 @@ jobs:
       # slow on metal
       if: ${{ matrix.dev != 'METAL' }}
       run: time BENCHMARK_LOG=cifar DEFAULT_FLOAT=HALF STEPS=1000 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
-    - name: Run full CIFAR training steps w 6 GPUS
-      # only run on machines with multiple gpus
-      if: ${{ matrix.dev != 'METAL' }}
-      run: time BENCHMARK_LOG=cifar_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -196,13 +175,12 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -210,12 +188,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -227,15 +204,8 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: Run MLPerf resnet eval on training data
-      run: time BENCHMARK_LOG=resnet_eval MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: BENCHMARK_LOG=resnet_10steps DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
-    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: BENCHMARK_LOG=resnet_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py
-    - name: Run 10 MLPerf Bert training steps (6 gpu)
-      # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -246,13 +216,12 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -260,12 +229,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -285,14 +253,14 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
-  tests:
-    name: Tests (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+  multigpubenchmark:
+    name: Multi-GPU Benchmarks (DEV=${{ matrix.dev }})
+    runs-on: [self-hosted, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
     strategy:
       fail-fast: false
       matrix:
-        dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+        dev: ['AMD', 'NV']
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -305,12 +273,63 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
+        mkdir -p extra/datasets
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: python3 test/external/process_replay/reset.py
+    - name: Run LLaMA-3 8B on 4 GPUs with BEAM
+      run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
+    - name: Run full CIFAR training steps w 6 GPUS
+      run: time BENCHMARK_LOG=cifar_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
+    - name: Run MLPerf resnet eval on training data
+      run: time BENCHMARK_LOG=resnet_eval MODEL=resnet python3 examples/mlperf/model_eval.py
+    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
+      run: BENCHMARK_LOG=resnet_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py
+    - name: Run 10 MLPerf Bert training steps (6 gpu)
+      # TODO: remove BERT_LAYERS once scheduler is fast
+      run: BENCHMARK_LOG=bert_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  tests:
+    name: Tests (DEV=${{ matrix.dev }})
+    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    strategy:
+      fail-fast: false
+      matrix:
+        dev: ['METAL', 'AMD', 'NV']
+    timeout-minutes: 11
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    env:
+      DEV: ${{ matrix.dev }}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: |
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -327,14 +346,14 @@ jobs:
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "METAL" ]]; then
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           DEBUG=2 SHOULD_USE_TC=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 HALF=1 python3 extra/gemm/simple_matmul.py
           DEBUG=2 SHOULD_USE_TC=1 BFLOAT16=1 python3 extra/gemm/simple_matmul.py
           M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
         elif [[ "${{ matrix.dev }}" == "NV" ]]; then
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-          DEV=NV:PTX ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+          DEV=NV:PTX ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
           DEV=CUDA SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           DEV=CUDA SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
@@ -345,9 +364,9 @@ jobs:
           # M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
           # DEV=NV:PTX M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
         else
-          python3 test/opt/test_tensor_cores.py
+          python3 test/runtime/test_tensor_cores.py
           # TODO: this is flaky
-          # DEV=AMD:LLVM python3 test/opt/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/runtime/test_tensor_cores.py
           SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
           # TODO: AMD compiler bug causes this to fail
@@ -372,9 +391,10 @@ jobs:
     - name: Test benchmark allreduce
       if: ${{ matrix.dev == 'NV' }}
       run: python test/external/external_benchmark_multitensor_allreduce.py
-    - name: HEVC Decode Benchmark
-      if: ${{ matrix.dev == 'NV' }}
-      run: VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 PYTHONPATH=. python3 extra/hevc/decode.py
+    # TODO: HEVC decode timing test
+    # - name: HEVC Decode Benchmark
+    #   if: ${{ matrix.dev == 'NV' }}
+    #   run: IGNORE_BEAM_CACHE=1 VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - uses: actions/upload-artifact@v7
       if: ${{ matrix.dev != 'AMD' }}
       with:
@@ -387,7 +407,7 @@ jobs:
   testusbgpu:
     name: UsbGPU Benchmark
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 10
+    timeout-minutes: 3
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -402,32 +422,41 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: Kill stale pids
       run: |
-        PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
-        PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
-    # since sudo is required for usbgpu on macos, do not write bytecode, as some of the files are owned by root
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
+        ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+    - name: reset chestnut
+      run: python3 extra/usbgpu/debug.py -rnw
     - name: UsbGPU boot time
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
+      run: GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
-    #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-    - name: UsbGPU (USB4/TB) install script
-      run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
-    - name: UsbGPU (USB4/TB) boot time
-      run: PYTHONPATH=. DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
-    - name: UsbGPU (USB4/TB) tiny tests
-      run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
+      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py
 
-  testcommalatest:
-    name: comma Benchmark (0.11.2)
-    runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 12
+  testcomma:
+    strategy:
+      matrix:
+        dev: ['QCOM', 'QCOM:IR3']
+        model: [driving_supercombo, dmonitoring_model]
+        include:
+          - model: driving_supercombo
+            timing: 20
+          - model: dmonitoring_model
+            timing: 12
+      fail-fast: false
+    name: openpilot ${{ matrix.model }} (DEV=${{ matrix.dev }})
+    runs-on: [self-hosted, Linux, comma4]
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
+    env:
+      DEV: ${{ matrix.dev }}
+      # sha for https://huggingface.co/commaai/openpilot-lfs
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
+      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.model }}
+      ASSERT_MIN_STEP_TIME: ${{ matrix.timing }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -438,45 +467,19 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: openpilot compile3 0.11.2 supercombo
-      run: BENCHMARK_LOG=openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
-    - name: openpilot compile3 0.11.2 supercombo (from pickle)
-      run: BENCHMARK_LOG=openpilot_0_11_2_supercombo_run_pickle RUN_PICKLE=1 PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM taskset -c 4-7 python3 examples/openpilot/compile3.py
-    - name: IR3 openpilot compile3 0.11.2 supercombo
-      run: BENCHMARK_LOG=ir3_openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=41 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
-    - name: openpilot compile3 0.11.2 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
-
-  testcommaold:
-    name: comma Benchmark (0.11.0)
-    runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 12
-    defaults:
-      run:
-        shell: bash -e -o pipefail {0}
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup staging db
-      if: github.ref == 'refs/heads/update_benchmark_staging'
+    - name: compile
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl
+    - name: run pickle
+      run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
+    - name: Compile driving warp
       run: |
-        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
-    - name: openpilot compile3 0.11.0 driving_vision
-      run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.11.0 driving_vision (from pickle)
-      run: BENCHMARK_LOG=openpilot_0_11_0_vision_run_pickle RUN_PICKLE=1 PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM taskset -c 4-7 python3 examples/openpilot/compile3.py
-    - name: IR3 openpilot compile3 0.11.0 driving_vision
-      run: BENCHMARK_LOG=ir3_openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=18 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.11.0 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3.2 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
-    - name: openpilot compile3 0.11.0 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_11_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
+        taskset -c 4-7 python examples/openpilot/compile_warp.py --output warp.pkl --benchmark-runs 1 \
+          --frame "1928,1208,2048,1216,608,${{ matrix.model == 'driving_supercombo' && '3735552' || '4804608' }}" \
+          --warp-to ${{ matrix.model == 'driving_supercombo' && '512x256' || '1440x960' }} \
+          --layout ${{ matrix.model == 'driving_supercombo' && 'yuv420' || 'luma' }} \
+          ${{ matrix.model == 'driving_supercombo' && '--frames 2' || '--border-fill 16 --transform-device NPY' }}
+    - name: run warp pickle
+      run: ASSERT_MIN_STEP_TIME=0 BENCHMARK_LOG="${BENCHMARK_LOG}_warp" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -498,20 +501,11 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup staging db
-      if: github.ref == 'refs/heads/update_benchmark_staging'
-      run: |
-        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
-        ln -s /data/home/tiny/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
-        ln -s /data/home/tiny/tinygrad/testsig-*.so .
+        ln -s ~/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
+        ln -s ~/tinygrad/testsig-*.so .
         PYTHONPATH=. DEV=CPU QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
@@ -520,8 +514,10 @@ jobs:
 
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
+    env:
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
     runs-on: [self-hosted, Linux, comma4]
-    timeout-minutes: 20
+    timeout-minutes: 14
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -534,14 +530,18 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: openpilot compile3 big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo PICKLE_OOB=1 PYTHONPATH="." TC_OPT=2 GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/10926f2c0911821ca0e72439c1c3bf3ec11f0a08789aa14b7ee8f25379b2afa4 openpilot.pkl
+    - name: openpilot compile big_driving_supercombo
+      run: |
+        GMMU=0 DEV=USB+AMD:LLVM taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band --retargetable
+        BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=25 taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band --retarget
     - name: openpilot load_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
-    - name: openpilot run_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle RUN_PICKLE=1 PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py - openpilot.pkl
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 taskset -c 4-7 python3 examples/openpilot/load_pickle.py openpilot.pkl --out-of-band
+    - name: compile driving warp
+      run: GMMU=0 DEV=USB+AMD:LLVM taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl --retargetable
+    - name: run warp pickle
+      run: BENCHMARK_LOG=usbgpu_openpilot_driving_warp GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl --retarget
     - name: Test copy speeds
-      run: SIZE=64e6 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+      run: SIZE=64000000 GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 test/external/external_test_usb_asm24.py
 
   driverbenchmarks:
     name: PCI Driver Benchmark (DEV=${{ matrix.dev }})
@@ -549,8 +549,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD', 'NV']
-    timeout-minutes: 20
+        dev: ['AMD::gfx1201', 'NV']
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -562,9 +562,8 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev == 'AMD' && 'amd' || 'nv' }} rmmod
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev == 'AMD' && 'amd' || 'nv' }} kill_pids
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} rmmod --expect
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
@@ -577,21 +576,21 @@ jobs:
     - name: Test driver cold start time
       run: time DEBUG=3 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       run: time DEBUG=3 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test GPU crash recovery
-      if: ${{ matrix.dev == 'AMD' }}
+      if: ${{ matrix.dev != 'NV' }}
       run: python3 -m pytest -rA test/external/external_test_gpu_crash.py
     - name: Test tensor cores
       run: |
-        if [[ "${{ matrix.dev }}" == "AMD" ]]; then
+        if [[ "${{ matrix.dev }}" == "NV" ]]; then
+          ALLOW_TF32=1 python3 test/runtime/test_tensor_cores.py
+        else
           # Fails on 9070
-          # python3 test/test_linearizer.py test/opt/test_tensor_cores.py
-          # DEV=AMD:LLVM python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+          # python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
+          # DEV=AMD:LLVM python3 test/test_linearizer.py test/runtime/test_tensor_cores.py
           # SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
-        else
-          ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
         fi
     - name: Test DISK copy time
       run: TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
@@ -599,6 +598,10 @@ jobs:
       run: |
         GRAPH_ONE_KERNEL=1 NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyDefaulttoCPUJit
         GRAPH_ONE_KERNEL=1 NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyCPUtoDefaultJit
+    # TODO: HEVC decode timing test
+    # - name: HEVC Decode Benchmark
+    #   if: ${{ matrix.dev == 'NV' }}
+    #   run: IGNORE_BEAM_CACHE=1 VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       if: ${{ matrix.dev == 'NV' }}
       run: BENCHMARK_LOG=resnet_10steps MNISTMOCK=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
@@ -606,27 +609,30 @@ jobs:
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Remote
+      if: ${{ matrix.dev != 'NV' }}
+      env:
+        DEV: PCI+AMD::gfx1201
       run: |
-        pkill -f 'extra/remote/serve.py' || true
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
+        server_pid=$!
+        trap 'kill "$server_pid" 2>/dev/null || true' EXIT
         sleep 1
         DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 python3 test/test_tiny.py
-        if [[ "${{ matrix.dev }}" == "AMD" ]]; then
-          DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD_AQL=1 python3 test/test_tiny.py
-        fi
-        pkill -f 'extra/remote/serve.py' || true
+        kill "$server_pid"
+        wait "$server_pid"
+        trap - EXIT
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
   llvmspeed:
     name: LLVM Speed
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 20
+    timeout-minutes: 10
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
     - name: Speed Test
-      run: DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: IGNORE_BEAM_CACHE=1 BEAM=2 DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py

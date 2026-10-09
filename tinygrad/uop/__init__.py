@@ -13,35 +13,28 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # BIND pairs a symbolic PARAM with a concrete value
-  BIND = auto()
-
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
-  # BUFFER allocates global/local/register storage depending on its addrspace
-  BUFFER = auto()
+  # BUFFER references bound storage; ALLOC declares unbound global storage
+  BUFFER = auto(); ALLOC = auto()
 
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
-  # FUNCTION has a TUPLE body and is gradient-able; CALL is an opaque kernel invocation
-  PARAM = auto(); FUNCTION = auto(); CALL = auto()
+  # CALL is a kernel invocation; value-producing calls write to ALLOC arguments
+  PARAM = auto(); CALL = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
   PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
-  # GROUP is a NOOP that just merges things together
-  SINK = auto(); AFTER = auto(); GROUP = auto()
+  SINK = auto(); AFTER = auto()
 
   # vector creation / item selection
   STACK = auto()
-
-  # tuple/gettuple for function with multiple returns
-  TUPLE = auto(); GETTUPLE = auto()
 
   # hcq specific
   GETADDR = auto()
@@ -76,7 +69,8 @@ class Ops(FastEnum):
   # ** 5 -- control flow / consts / custom **
 
   # control flow ops
-  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto(); WAIT = auto()
+  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto()
+  BACKEDGE = auto()  # (body, unbounded RANGE, condition): repeat while condition is true
 
   # const.
   CONST = auto()
@@ -90,7 +84,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # ops that adjust the behavior of the scheduler
-  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
+  CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
   STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
@@ -117,7 +111,7 @@ class GroupOp:
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
-  Defines = {Ops.PARAM, Ops.BUFFER}
+  Defines = {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}

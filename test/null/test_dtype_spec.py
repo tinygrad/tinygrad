@@ -1,8 +1,8 @@
-import unittest, math, struct, operator
+import unittest, math, struct, operator, subprocess
 from tinygrad import Tensor, Device
 from tinygrad.dtype import DTYPES_DICT, dtypes, Invalid, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
-
 from tinygrad.helpers import getenv, Context
+
 from hypothesis import given, settings, strategies as strat
 import numpy as np
 import torch
@@ -51,10 +51,6 @@ class TestHelpers(unittest.TestCase):
     assert dtypes.is_float(dtypes.fp8e4m3)
     assert dtypes.is_float(dtypes.fp8e5m2)
 
-  @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]))
-  def test_scalar(self, dtype):
-    assert dtype.scalar() == dtype
-
   def test_from_py(self):
     assert dtypes.from_py(True) == dtypes.bool
     assert dtypes.from_py(Invalid) == dtypes.bool
@@ -75,10 +71,10 @@ class TestHelpers(unittest.TestCase):
   def test_dtype_range(self):
     for dt in core_dtypes:
       if dtypes.is_float(dt):
-        np.testing.assert_equal(dt.min, -math.inf)
-        np.testing.assert_equal(dt.max, math.inf)
-        np.testing.assert_equal(dt.min, -math.inf)
-        np.testing.assert_equal(dt.max, math.inf)
+        # e4m3 and the fnuz fp8s have no inf: their range ends at the largest normal
+        finite = {dtypes.fp8e4m3: FP8E4M3_MAX, dtypes.fp8e4m3fnuz: 240.0, dtypes.fp8e5m2fnuz: FP8E5M2_MAX}
+        self.assertEqual(dt.min, -finite.get(dt, math.inf))
+        self.assertEqual(dt.max, finite.get(dt, math.inf))
       elif dtypes.is_int(dt):
         info = np.iinfo(_to_np_dtype(dt))
         np.testing.assert_equal(dt.min, info.min)
@@ -110,7 +106,8 @@ class TestHelpers(unittest.TestCase):
 
   def test_float_to_bf16(self):
     max_bf16 = torch.finfo(torch.bfloat16).max
-    for a in [1, 1.1, 1234, 23456, -777.777, max_bf16, max_bf16 * 1.00001, -max_bf16, -max_bf16 * 1.00001, math.inf, -math.inf]:
+    for a in [1, 1.1, 1234, 23456, -777.777, max_bf16, max_bf16 * 1.00001, -max_bf16, -max_bf16 * 1.00001,
+              max_bf16 * 2, -max_bf16 * 2, math.inf, -math.inf]:
       self.assertEqual(float_to_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
     self.assertTrue(math.isnan(float_to_bf16(math.nan)))
 
@@ -422,7 +419,7 @@ class TestAutoCastType(unittest.TestCase):
     self.check_where_alternate_input_other(3, True, dtypes.weakint)
 
   def test_where_non_bool_cond_raises(self):
-    with self.assertRaises(RuntimeError): Tensor([1, 0, 2]).where(1, 0)
+    with self.assertRaises(RuntimeError): Tensor([1, 0, 2]).where(1, 0).dtype
     self.check_where_alternate_input_other(False, True, dtypes.bool)
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
@@ -446,6 +443,32 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.weakfloat
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
+
+class TestUnitTypeSpec(unittest.TestCase):
+  def test_default_dtype_context(self):
+    default_float, default_int = dtypes.default_float, dtypes.default_int
+    with Context(DEFAULT_FLOAT=dtypes.half, DEFAULT_INT=dtypes.int16):
+      assert dtypes.default_float is dtypes.half
+      assert dtypes.default_int is dtypes.int16
+    assert dtypes.default_float is default_float
+    assert dtypes.default_int is default_int
+
+  @unittest.skip("this test is slow and spawning whole pythons")
+  def test_env_set_default_float(self):
+    # check default
+    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
+                    shell=True, check=True)
+    # check change
+    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
+                    shell=True, check=True)
+    # check invalid
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
+
+    with self.assertRaises(subprocess.CalledProcessError):
+      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
+                      shell=True, check=True)
 
 if __name__ == '__main__':
   unittest.main()

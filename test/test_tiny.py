@@ -1,6 +1,6 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
-from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
+from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn, function
 from tinygrad.helpers import getenv, OSX
 
 class TestTiny(unittest.TestCase):
@@ -62,6 +62,13 @@ class TestTiny(unittest.TestCase):
     for x in range(N):
       self.assertEqual(lst[0][x], 1.0, msg=f"mismatch at {x}")
     self.assertEqual(out.dtype, out_dtype)
+
+  def test_call(self):
+    a, b = Tensor([1.,2,3]), Tensor([4.,5,6])
+    Tensor.realize(a,b)
+    @function
+    def plus_fxn(a:Tensor, b:Tensor) -> Tensor: return (a+b)
+    self.assertEqual(plus_fxn(a,b).tolist(), (a+b).tolist())
 
   # *** randomness ***
 

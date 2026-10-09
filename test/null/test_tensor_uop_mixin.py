@@ -1,10 +1,12 @@
 import math, unittest
 from dataclasses import replace
 from tinygrad import Tensor, dtypes, Context
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import ParamArg, UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 _strip_unique_pm = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), lambda b: b.replace(arg=replace(b.arg, slot=0)) if isinstance(b.arg, ParamArg) and b.arg.slot != 0 else None),
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="b"), lambda b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=0, buffer=None))
+   if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL and (b.arg.slot != 0 or b.arg.buffer is not None) else None),
 ])
 def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
@@ -245,8 +247,10 @@ class TestTensorUOpRand(unittest.TestCase):
     self.assertIs(Tensor._threefry_random_bits(Tensor(key), Tensor(c0), Tensor(c1)).uop, UOp._threefry_random_bits(key, c0, c1))
   def test_rand(self):
     k, c = UOp.empty((2,), dtype=dtypes.uint32), UOp.zeros(2, dtype=dtypes.uint32)
-    self.assertIs(Tensor._rand(Tensor(k), Tensor(c), (2, 2), dtypes.float32).uop, UOp._rand(k, c, (2, 2), dtypes.float32))
-    self.assertIs(Tensor._rand(Tensor(k), Tensor(c), (0, 3), dtypes.float32).uop, UOp._rand(k, c, (0, 3), dtypes.float32))
+    self.assertIs(_strip_unique(Tensor._rand(Tensor(k), Tensor(c), (2, 2), dtypes.float32).uop),
+                  _strip_unique(UOp._rand(k, c, (2, 2), dtypes.float32)))
+    self.assertIs(_strip_unique(Tensor._rand(Tensor(k), Tensor(c), (0, 3), dtypes.float32).uop),
+                  _strip_unique(UOp._rand(k, c, (0, 3), dtypes.float32)))
 
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):

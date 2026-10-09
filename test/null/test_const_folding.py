@@ -1,38 +1,17 @@
-import unittest, itertools, math
-from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType, truncate
-from tinygrad.uop.ops import Ops, UOp
+import unittest, math, itertools
+from tinygrad import Tensor, Device, Context, dtypes
+from tinygrad.dtype import DTYPES_DICT, DType, ConstType
+from tinygrad.uop.ops import Ops, UOp, GroupOp
+from tinygrad.codegen.decomp.op import threefry2x32
 from test.helpers import full_rewrite
-import numpy as np
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  linear = t.schedule_linear()
-  asts = [s for s in linear.src if s.src[0].op is Ops.SINK]
+  schedule = t.schedule_linear()
+  asts = [s for s in schedule.src if s.src[0].op is Ops.SINK]
   len(asts)
   # NOT SUPPORTED ANYMORE
   #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
-
-class TestUnaryOpsConstFolding(unittest.TestCase):
-  def test_all_consts_ops(self):
-    _check_ast_count(0, Tensor.ones(4).exp())
-    _check_ast_count(0, Tensor.ones(4).sqrt())
-    _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
-    _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
-
-  def test_cast(self):
-    _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
-    _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
-
-  def test_neg_folding(self):
-    _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())
-    _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
-    _check_ast_count(0, Tensor([1, 2, 3]).neg().neg())
-
-  def test_neg_realized_no_fold(self):
-    x = Tensor.randn(32, 32)
-    x = x.clip(0, 1).realize()
-    _check_ast_count(1, x.neg())
 
 class TestWeakConstFolding(unittest.TestCase):
   def test_weakint_math(self):
@@ -48,93 +27,26 @@ class TestWeakConstFolding(unittest.TestCase):
     out = (UOp.const(1.25) + UOp.const(2.5)).simplify()
     self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.weakfloat, 3.75))
 
+  def test_nan_compare(self):
+    nan = UOp.const(math.nan)
+    self.assertTrue(nan.ne(nan).simplify().val)
+
   def test_invalid_poison(self):
     self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
 
-  def test_cast_commits_to_dtype_grid(self):
-    # committing a weak const to a stated width puts the value on that width's grid, same as storage packing and native compilers
-    v = 1/123008  # not representable in float16
-    out = UOp.const(v).cast(dtypes.half).simplify()
-    self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.half, truncate[dtypes.half](v)))
-    self.assertNotEqual(out.val, v)
-    # the grid commit preserves the sign of zero
-    self.assertEqual(math.copysign(1, UOp.const(-0.0).cast(dtypes.half).simplify().val), -1)
-    # observable at tensor level: the const-folded comparison agrees with the committed value
-    self.assertTrue((Tensor(-3.2).cast(dtypes.float32) <= truncate[dtypes.float32](-3.2)).item())
-
-class TestBinaryOpsConstFolding(unittest.TestCase):
-  def test_add_literal_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
-  def test_add_tensor_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(4))
-  def test_literal_zero_add(self):
-    _check_ast_count(0, 0 + Tensor([1.0, 2, 3, 4]))
-  def test_tensor_zero_add(self):
-    _check_ast_count(0, Tensor.zeros(4) + Tensor([1.0, 2, 3, 4]))
-
-  def test_sub_literal_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) - 0)
-  def test_sub_tensor_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) - Tensor.zeros(4))
-
-  def test_mul_literal_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * 0)
-  def test_mul_tensor_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.zeros(4))
-  def test_literal_zero_mul(self):
-    _check_ast_count(0, 0 * Tensor([1.0, 2, 3, 4]) * 0)
-  def test_tensor_zero_mul(self):
-    _check_ast_count(0, Tensor.zeros(4) * Tensor([1.0, 2, 3, 4]))
-
-  def test_mul_literal_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * 1)
-  def test_mul_tensor_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(4))
-  def test_literal_one_mul(self):
-    _check_ast_count(0, 1 * Tensor([1.0, 2, 3, 4]))
-  def test_tensor_one_mul(self):
-    _check_ast_count(0, Tensor.ones(4) * Tensor([1.0, 2, 3, 4]))
-
-  def test_bool_tensor_mul_bool(self):
-    _check_ast_count(0, Tensor([True, False]) * True)
-    _check_ast_count(0, Tensor([True, False]) * False)
-  def test_bool_mul_bool_tensor(self):
-    _check_ast_count(0, True * Tensor([True, False]))
-    _check_ast_count(0, False * Tensor([True, False]))
-
-  def test_div_literal_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / 1)
-  def test_div_tensor_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / Tensor.ones(4))
-
-  def test_floordiv_literal_one(self):
-    _check_ast_count(0, Tensor([1, 2, 3, 4]) // 1)
-  def test_floordiv_tensor_one(self):
-    _check_ast_count(0, Tensor([1, 2, 3, 4]) // Tensor.ones(4, dtype=dtypes.int32))
-
-  def test_pow_literal_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 0)
-  def test_pow_tensor_zero(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.zeros(4))
-
-  def test_pow_literal_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** 1)
-  def test_pow_tensor_one(self):
-    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
-  def test_literal_one_pow(self):
-    _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
-  def test_tensor_one_pow(self):
-    _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
-
 class TestBitcastConstFolding(unittest.TestCase):
+  def test_out_of_range_source_value(self):
+    for val, src_dt, dst_dt, bits in ((3000000000, dtypes.int32, dtypes.uint32, 3000000000),
+                                      (70000, dtypes.int16, dtypes.uint16, 4464),
+                                      (-5, dtypes.uint32, dtypes.int32, -5)):
+      self.assertIs(UOp.const(val, src_dt).bitcast(dst_dt).simplify(), UOp.const(bits, dst_dt))
+
   def test_scalar_bitcast(self):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_rewrite(UOp.const(from_v, from_dt).bitcast(to_dt).sink()).src[0]
-          self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
-          self.assertEqual(r.dtype, to_dt, msg)
-          np.testing.assert_equal(r.val, to_v, msg)
+          r = UOp.const(from_v, from_dt).bitcast(to_dt).simplify()
+          self.assertIs(r, UOp.const(to_v, to_dt), f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
 
     t({dtypes.int8: 0, dtypes.uint8: 0, dtypes.bool: False})
     t({dtypes.int8: 1, dtypes.uint8: 1, dtypes.bool: True})
@@ -155,24 +67,41 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      srcs = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink()).src
-    self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
-    self.assertEqual(tuple(x.val for x in srcs), (2**32-1, 2**31, 75))
+      result = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink())
+      expected = full_rewrite(UOp.const((2**32-1, 2**31, 75), dtypes.uint32).sink())
+    self.assertEqual(result.src, expected.src)
 
-# folds advance indexing into basic indexing
-class TestIndexingConstFolding(unittest.TestCase):
-  def test_scalar_index(self):
-    t = Tensor.arange(16).float().reshape(1,1,4,4).clone().realize()
-    _check_ast_count(1, t[:,:,Tensor(1),:])
-    _check_ast_count(1, t[:,:,Tensor(1)+2,:])
-    _check_ast_count(1, t[:,:,Tensor(1),Tensor(0)])
+class TestMovedConstFolding(unittest.TestCase):
+  def test_contiguous_deviceless_const(self):
+    t = Tensor(UOp.const(2.0, dtypes.float)).contiguous()
+    self.assertIs(t.uop, UOp.const(2.0, dtypes.float))
+    self.assertIsNone(t.uop.device)
 
-  def test_const_tensor_index(self):
-    # TODO: these can be 0, implement const tensor folded indexing
-    t = Tensor.arange(16).float().reshape(1,1,4,4).clone().realize()
-    _check_ast_count(1, t[:,:,Tensor.ones(2,1,dtype=dtypes.int),:])
-    _check_ast_count(1, t[:,:,Tensor.ones(1,2,dtype=dtypes.int)+2,:])
-    _check_ast_count(1, t[:,:,Tensor.ones(1,1,dtype=dtypes.int),Tensor.zeros(2,1,2,dtype=dtypes.int)])
+  def test_add_shrunk_zero(self):
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
+
+  def test_add_padded_zero(self):
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
+
+  def test_mul_shrunk_one(self):
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(6).shrink(((1, 5),)))
+
+  def test_add_padded_one(self):
+    _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
+
+class TestReduceOpsConstFolding(unittest.TestCase):
+  def test_sum_output_dtype(self):
+    # sum output dtype can be different from input
+    for dt in DTYPES_DICT.values():
+      if dt in Device[Device.DEFAULT].renderer.supported_dtypes():
+        t = Tensor.ones(16, dtype=dt).reshape(4, 4)
+        assert t.sum().dtype == t.contiguous().sum().dtype
+
+class TestThreefryConstFolding(unittest.TestCase):
+  def test_threefry(self):
+    # THREEFRY(const,const) folds to a const once decomposed
+    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64)).simplify()
+    self.assertEqual([u.op for u in x.toposort() if u.op in GroupOp.ALU], [])
 
 if __name__ == '__main__':
   unittest.main()

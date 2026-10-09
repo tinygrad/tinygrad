@@ -1,10 +1,12 @@
 from tinygrad import Tensor
+import os
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.nn.onnx import OnnxRunner, OnnxValue
 import numpy as np
 import onnxruntime as ort
 ort_options = ort.SessionOptions()
 ort_options.log_severity_level = 3
+ort_options.intra_op_num_threads = os.cpu_count() or 1
 
 def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
   """

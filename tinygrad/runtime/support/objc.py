@@ -16,6 +16,9 @@ else:
     def retained(self):
       setattr(self, 'retain', True)
       return self
+    def own(self):
+      msg("retain")(self)
+      return self.retained()
 
 def returns_retained(f): return functools.wraps(f)(lambda *args, **kwargs: f(*args, **kwargs).retained())
 
@@ -23,6 +26,7 @@ lib = ctypes.CDLL(ctypes.util.find_library('objc'))
 lib.sel_registerName.restype = id_
 getsel = functools.cache(lib.sel_registerName)
 lib.objc_getClass.restype = id_
+lib.objc_autoreleasePoolPush.restype, lib.objc_autoreleasePoolPop.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
 dispatch_data_create = ctypes.CDLL("/usr/lib/libSystem.dylib").dispatch_data_create
 dispatch_data_create.restype = id_
 dispatch_data_create = returns_retained(dispatch_data_create)

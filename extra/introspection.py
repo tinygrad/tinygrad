@@ -9,7 +9,7 @@ def print_objects():
   tensors = [x for x in gc.get_objects() if isinstance(x, Tensor)]
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, UOp)]
-  gpubuffers = [x for x in gc.get_objects() if isinstance(x, Buffer) and x.is_initialized()]
+  gpubuffers = [x for x in gc.get_objects() if isinstance(x, Buffer) and x.is_allocated()]
   realized_buffers = [x.realized for x in lazybuffers if x.base == x and x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
@@ -31,8 +31,7 @@ def print_objects():
     cnt += 1
 
   for x in gpubuffers_orphaned:
-    if getattr(x, '_buf', None): del x._buf
-    if getattr(x, '_image', None): del x._image
+    if x.base.is_allocated(): x.base.deallocate()
 
   return len(gpubuffers_orphaned)
 

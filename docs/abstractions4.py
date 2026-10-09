@@ -81,7 +81,7 @@ def example_3_custom_uop(a:Tensor, correct):
     lane = UOp.range(LCLS, 1, AxisType.LOCAL)
 
     # accumulate the globals into a per lane accumulator
-    reduce_loop = UOp.range(buf.shape[1], 2, AxisType.REDUCE)
+    reduce_loop = UOp.range(buf.shape[1], 2, AxisType.LOOP)
     acc = UOp.placeholder((1,), dtypes.float, slot=6, addrspace=AddrSpace.REG)
     acc = acc.after(acc.store(0))
     acc = acc.after(acc[0].store(acc.after(reduce_loop)[0] + buf[glbl, reduce_loop, lane]).end(reduce_loop))
@@ -91,7 +91,7 @@ def example_3_custom_uop(a:Tensor, correct):
     local_accs = local_accs.after(local_accs[lane].store(acc[0]))
 
     # accumulate LOCALs into a single per CU accumulator
-    late_reduce_loop = UOp.range(LCLS, 3, AxisType.REDUCE)
+    late_reduce_loop = UOp.range(LCLS, 3, AxisType.LOOP)
     acc2 = UOp.placeholder((1,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
     acc2 = acc2.after(acc2.store(0))
     acc2 = acc2.after(acc2[0].store(acc2.after(late_reduce_loop)[0] + local_accs[late_reduce_loop]).end(late_reduce_loop))[0]
@@ -122,7 +122,7 @@ def example_5_custom_assembly(a:Tensor, correct):
         offset_dwords = (self.labels[inst._target] - inst._pos - inst.size()) // 4
         if not -32768 <= offset_dwords <= 32767: raise ValueError(f"branch to '{inst._target}' offset {offset_dwords} exceeds simm16 range")
         inst.simm16 = offset_dwords
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in self.instructions]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in self.instructions]))))
 
   CU_COUNT = 32
   LANES = 64

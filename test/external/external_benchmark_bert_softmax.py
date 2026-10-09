@@ -1,7 +1,7 @@
 from tinygrad import Tensor, dtypes, GlobalCounters
 from tinygrad.dtype import to_dtype
 from tinygrad.helpers import getenv, Context
-from test.backend.test_softmax_fusion import single_kernel_softmax
+from test.runtime.test_softmax_fusion import single_kernel_softmax
 
 Context(DEFAULT_FLOAT=dtypes.float16).__enter__()
 

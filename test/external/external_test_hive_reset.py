@@ -20,7 +20,7 @@ extern "C" __attribute__((global)) void broken(int* dummy) {
 '''
 broken_lib = compile_hip(broken_src, dev.arch)
 broken_prg = AMDProgram(dev, "broken", broken_lib)
-buf = dev.allocator.alloc(64)
+buf = dev.allocator.alloc(64).buf
 try:
   broken_prg(buf, global_size=(1,1,1), local_size=(1,1,1), wait=True)
   print("  ERROR: Kernel did not fault!")

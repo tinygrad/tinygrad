@@ -64,16 +64,17 @@ class DType(metaclass=DTypeMetaClass):
   @staticmethod
   def new(priority:int, bitsize:int, name:str, fmt:FmtStr|None): return DType(priority, bitsize, name, fmt)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.name]}"
+  def __repr__(self): return f"dtypes.{self.name}"
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt) < (o.priority, o.bitsize, o.name, o.fmt)
-  def scalar(self) -> DType: return self
   @functools.cached_property
   def min(self):
     if dtypes.is_int(self): return 0 if dtypes.is_unsigned(self) else -2**(self.bitsize-1)
-    return -float("inf") if dtypes.is_float(self) else False
+    return -self.max if dtypes.is_float(self) else False
   @functools.cached_property
   def max(self):
     if dtypes.is_int(self): return 2**(self.bitsize)-1+self.min
+    # e4m3 and the fnuz fp8s have no inf: their largest value is the largest normal
+    if self in dtypes.fp8s and self is not dtypes.fp8e5m2: return fp8_to_float(_fp8_cfg[self][5], self)
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
@@ -102,7 +103,11 @@ class DTypes:
     if isinstance(x, float): return dtypes.weakfloat
     if isinstance(x, int): return dtypes.weakint
     # put this in the last is faster because there are more items than lists/tuples to check
-    if isinstance(x, (list, tuple)): return strong_dtype(max(dtypes.from_py(xi) for xi in x)) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)):
+      dt = max(dtypes.from_py(xi) for xi in x) if x else dtypes.weakfloat
+      if dt is not dtypes.weakint: return strong_dtype(dt)
+      ints = [xi for xi in x if isinstance(xi, int)]  # a vconst also holds Invalid
+      return commit_int(min(ints), max(ints))
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -113,30 +118,28 @@ class DTypes:
   void: Final[DType] = DType.new(-1, 0, "void", None)
   weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # the weak int position in the promo lattice
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
-  int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
-  uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
-  int16: Final[DType] = DType.new(3, 16, "short", 'h')
-  uint16: Final[DType] = DType.new(4, 16, "unsigned short", 'H')
-  int32: Final[DType] = DType.new(5, 32, "int", 'i')
-  uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
-  int64: Final[DType] = DType.new(7, 64, "long", 'q')
-  uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
-  _uint128: Final[DType] = DType.new(8, 128, "uint128", None)
-  _uint256: Final[DType] = DType.new(8, 256, "uint256", None)
+  i8: Final[DType] = DType.new(1, 8, "i8", 'b')
+  u8: Final[DType] = DType.new(2, 8, "u8", 'B')
+  i16: Final[DType] = DType.new(3, 16, "i16", 'h')
+  u16: Final[DType] = DType.new(4, 16, "u16", 'H')
+  i32: Final[DType] = DType.new(5, 32, "i32", 'i')
+  u32: Final[DType] = DType.new(6, 32, "u32", 'I')
+  i64: Final[DType] = DType.new(7, 64, "i64", 'q')
+  u64: Final[DType] = DType.new(8, 64, "u64", 'Q')
   weakfloat: Final[DType] = DType.new(9, 800, "weakfloat", None)
-  fp8e4m3: Final[DType] = DType.new(10, 8, "float8_e4m3", None)
-  fp8e5m2: Final[DType] = DType.new(11, 8, "float8_e5m2", None)
-  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "float8_e4m3fnuz", None)
-  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "float8_e5m2fnuz", None)
-  float16: Final[DType] = DType.new(12, 16, "half", 'e')
-  bfloat16: Final[DType] = DType.new(13, 16, "__bf16", None)
-  float32: Final[DType] = DType.new(14, 32, "float", 'f')
-  float64: Final[DType] = DType.new(15, 64, "double", 'd')
+  fp8e4m3: Final[DType] = DType.new(10, 8, "fp8e4m3", None)
+  fp8e5m2: Final[DType] = DType.new(11, 8, "fp8e5m2", None)
+  fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "fp8e4m3fnuz", None)
+  fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "fp8e5m2fnuz", None)
+  f16: Final[DType] = DType.new(12, 16, "f16", 'e')
+  bf16: Final[DType] = DType.new(13, 16, "bf16", None)
+  f32: Final[DType] = DType.new(14, 32, "f32", 'f')
+  f64: Final[DType] = DType.new(15, 64, "f64", 'd')
 
-  # dtype aliases
-  half = float16; float = float32; double = float64 # noqa: E702
-  uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
-  char = int8; short = int16; int = int32; long = int64 # noqa: E702
+  # legacy dtype aliases
+  float16 = half = f16; bfloat16 = bf16; float32 = float = f32; float64 = double = f64 # noqa: E702
+  uint8 = uchar = u8; uint16 = ushort = u16; uint32 = uint = u32; uint64 = ulong = u64 # noqa: E702
+  int8 = char = i8; int16 = short = i16; int32 = int = i32; int64 = long = i64 # noqa: E702
 
   @property
   def default_float(self) -> DType: return to_dtype(DEFAULT_FLOAT.value)
@@ -165,6 +168,10 @@ assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a f
 assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
   return {dtypes.weakint: dtypes.default_int, dtypes.weakfloat: dtypes.default_float}.get(dtype, dtype)
+def commit_int(lo:int|float, hi:int|float, default_int:DType|None=None) -> DType:
+  if lo == hi and not dtypes.long.min <= lo <= dtypes.ulong.max: raise OverflowError(f"{lo} does not fit any int")
+  ladder = (dtypes.default_int if default_int is None else default_int, dtypes.int, dtypes.long, dtypes.ulong)
+  return next((dt for dt in ladder if dt.min <= lo and hi <= dt.max), dtypes.long)
 def weak_dtype(dtype:DType) -> DType:
   return dtypes.weakfloat if dtypes.is_float(dtype) else dtypes.weakint if dtypes.is_int(dtype) else dtype
 
@@ -188,8 +195,7 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
+DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("void", "weak", "_"))}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
@@ -222,7 +228,7 @@ def float_to_fp16(x):
 
 def float_to_bf16(x):
   if not math.isfinite(x): return x
-  u = struct.unpack('I', struct.pack('f', x))[0]
+  u = struct.unpack('I', struct.pack('f', truncate[dtypes.float](x)))[0]
   u = (u + 0x7FFF + ((u >> 16) & 1)) & 0xFFFF0000
   return struct.unpack('f', struct.pack('I', u))[0]
 
@@ -238,7 +244,6 @@ _fp8_cfg = {
 def float_to_fp8(x: float, dtype: DType) -> int:
   assert dtype in dtypes.fp8s, "Only for fp8s"
   if dtype in dtypes.fp8_fnuz and not math.isfinite(x): return 0x80
-  if dtype in dtypes.fp8_fnuz and x == 0.0: return 0x00
   # e4m3 don't support inf, return 0x7f(+NaN) and 0xff(-NaN) to match jax
   # NaN is unordered, can't compare with zero, use math.copysign to get sign
   if dtype == dtypes.fp8e4m3 and not math.isfinite(x): return 0x7f if math.copysign(1, x) > 0 else 0xff
@@ -258,7 +263,7 @@ def float_to_fp8(x: float, dtype: DType) -> int:
     res, half = mantissa >> shift, half_ulp << shift
     round_bits = (xbits | (1 << 52)) & ((half << 1) - 1)
     if round_bits > half or (round_bits == half and res & 1): res += 1
-  return 0 if dtype in dtypes.fp8_fnuz and res == 0 else int(res | sign)  # fnuz has no negative zero
+  return 0 if dtype in dtypes.fp8_fnuz and res == 0 else res | sign  # fnuz has no negative zero
 
 def fp8_to_float(x: int, dtype: DType) -> float:
   assert dtype in dtypes.fp8s, "Only for fp8s"

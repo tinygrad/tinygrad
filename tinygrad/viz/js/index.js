@@ -16,11 +16,18 @@ const darkenHex = (h, p = 0) =>
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
-const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
-  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
+const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[38;2;(\d+);(\d+);(\d+)m([\s\S]*?)\u001b\[0m)|(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
+  ([_, r, g, b, rgb_st, code, colored_st, st]) => ({ st: rgb_st ?? colored_st ?? st, color: r != null ? `rgb(${r},${g},${b})`
+    : code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
-const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof n === "string" ? parseColors(n) : n).join("span")
-                       .style("color", d => d.color).text(d => d.st)).node();
+const highlightUir = id => d3.selectAll(".uir-ref").classed("highlight", d => d.id === id);
+const colored = n => d3.create("span").call(s => s.selectAll("span")
+  .data((typeof n === "string" ? [{st:n}] : n).flatMap(t => parseColors(t.st, t.color).map(p => ({...t, ...p})))).join("span")
+  .style("color", d => d.id == null ? d.color : null).text(d => d.st).classed("uir-ref", d => d.id != null).on("click", (e,d) => {
+    if (d.id == null) return;
+    highlightUir(d.id);
+    d3.select("#nodes").selectAll("g.node").filter(n => n.id === d.id).dispatch("click");
+  })).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
@@ -82,12 +89,13 @@ const drawGraph = (data) => {
       const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
       d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
       d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
+      highlightUir(d.id);
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
-  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  const labels = nodes.selectAll("g.label").data(d => d.source == null ? [d] : []).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
@@ -114,6 +122,9 @@ const drawGraph = (data) => {
   tokens.on("click", (e, { keys }) => {
     tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
   });
+  nodes.selectAll("foreignObject.source-node").data(d => d.source != null ? [d] : []).join("foreignObject").attr("class", "source-node")
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("width", d => d.width).attr("height", d => d.height)
+    .each((d, i, nodes) => nodes[i].replaceChildren(codeBlock(d.source, d.lang)));
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
@@ -228,9 +239,9 @@ const waveColor = (op) => {
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
-const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["precompile","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["do_to_program","#1d2e62"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
     ["PIPE_BUSY","#7a4a00"],["MEMORY_THROTTLE","#5c0000"],["CONSTANT_MEMORY","#1a3d7a"],["NOT_SELECTED","#2e2e3a"],["OTHER","#4a4a55"],
     ["SLEEPING","#1a1a2a"],["DEFAULT","#3a3a45"]]), WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
@@ -271,6 +282,8 @@ const canvasDims = () => {
   const sideRect = rect("#device-list");
   return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
 }
+
+new ResizeObserver(([e]) => e.contentRect.width > 0 && e.target.dispatchEvent(new Event("resize"))).observe(document.getElementById("profiler"));
 
 function selectShape(key) {
   if (key == null) return {};
@@ -336,7 +349,7 @@ function setFocus(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
-    if (data.instSt != null) {
+    if (data.tracks.get("Shader Clock") != null) {
       const p = d3.create("p");
       p.append("span").text(timeAtCycle(e.x));
       p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
@@ -362,8 +375,8 @@ function setFocus(key) {
     if (e.arg.trace != null) html.append(() => traceBlock(e.arg.trace.slice(1).reverse()));
   }
   if (eventType === EventTypes.BUF) {
-    const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
-    const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
+    const [nbytes, dur] = e.arg.tooltipText.split("\n");
+    const rows = [["Size", nbytes], ["Lifetime", dur]];
     if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
     html.append(() => tabulate(rows));
     const kernels = html.append("div").classed("args", true);
@@ -419,11 +432,11 @@ async function renderProfiler(path, opts) {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
+  const secondaryTick = data.tracks.get("Shader Clock") != null ? timeAtCycle : null;
   const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -452,8 +465,8 @@ async function renderProfiler(path, opts) {
     if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
-      const levels = [];
-      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor });
+      const levels = [], ends = [];
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor, ends });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), fmt:JSON.parse(strings[u32()])};
@@ -487,13 +500,6 @@ async function renderProfiler(path, opts) {
           for (let si=start; si<steps.length; si++) {
             if (steps[si].name == e.name) { ref.step = si; shapeRef = ref; break; }
           }
-        } else {
-          const steps = ctxs[state.currentCtx].steps;
-          for (let i=state.currentStep+1; i<steps.length; i++) {
-            const loc = steps[i].loc;
-            if (loc == null) break;
-            if (loc === e.name) { shapeRef = {ctx:state.currentCtx-1, step:i}; break; }
-          }
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
@@ -503,6 +509,7 @@ async function renderProfiler(path, opts) {
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
+        if (e.name.includes("WAVEEND")) ends.push(e.st+e.dur);
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
@@ -517,9 +524,9 @@ async function renderProfiler(path, opts) {
         if (linear) { const ts = u32(), value = u64(); timestamps.push(ts); valueMap.set(ts, value); continue; }
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
-          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
+          const nbytes = u64();
           allocs.set(key, {nbytes, shapeKey:`${k}-${shapeIdx++}`});
-          memEvents.push({alloc, key, dtype, sz, nbytes});
+          memEvents.push({alloc, key, nbytes});
           timestamps.push(ts);
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
@@ -550,7 +557,7 @@ async function renderProfiler(path, opts) {
         let x = 0, y = 0;
         for (const e of memEvents) {
           if (e.alloc) {
-            const shape = {x:[x], y:[y], dtype:e.dtype, sz:e.sz, nbytes:e.nbytes, key:e.key};
+            const shape = {x:[x], y:[y], nbytes:e.nbytes, key:e.key};
             buf_shapes.set(e.key, shape); temp.set(e.key, shape);
             x += 1; y += e.nbytes;
           } else {
@@ -566,10 +573,10 @@ async function renderProfiler(path, opts) {
             }
           }
         }
-        for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
+        for (const [num, {nbytes, y, x:steps, users}] of buf_shapes) {
           const x = steps.map(s => timestamps[s]);
           const dur = x.at(-1)-x[0];
-          const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${bufShapes.length}` };
+          const arg = { tooltipText:`${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${bufShapes.length}` };
           bufShapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, bufShapes.length) });
         }
         return bufShapes;
@@ -597,7 +604,7 @@ async function renderProfiler(path, opts) {
   if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
-  for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("sqtt")) {
+  for (const [k, { shapes }] of data.tracks) if (k !== "Shader Clock" && path.includes("sqtt")) {
     const first = shapes[0].x, last = shapes.at(-1).x+shapes.at(-1).width;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
@@ -631,7 +638,7 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor, ends }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
@@ -669,6 +676,11 @@ async function renderProfiler(path, opts) {
             const key = e.arg.key; if (key === focusedShape || key === link0 || key === link1) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); continue; }
           }
           if (splitRects && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
+        }
+        for (let i=0; i<ends.length; i++) {
+          const end = ends[i]; if (end<st || end>et) continue;
+          const x = xscale(end)+0.5;
+          drawLine(ctx, [x, x], [offsetY-padding/2-0.5, offsetY+trackHeight-padding/2-0.5], { color:"#22232a" });
         }
       }
       // draw row line
@@ -738,9 +750,10 @@ async function renderProfiler(path, opts) {
   let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
-    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
-    canvas.width = width*dpr;
-    canvas.height = height*dpr;
+    const pixelWidth = Math.trunc(width*dpr), pixelHeight = Math.trunc(height*dpr);
+    if (canvas.width === pixelWidth && canvas.height === pixelHeight) return;
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
@@ -755,9 +768,9 @@ async function renderProfiler(path, opts) {
   zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
-  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+  profiler.on("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
+  profiler.on("resize", (e) => resize()); resize();
   profiler.on("scroll", () => render(zoomLevel));
 
   function findRectAtPosition(x, y) {
@@ -886,7 +899,7 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), expandedNodes:new Set()};
 function setState(ns) {
-  saveToHistory(state);
+  if (["currentCtx", "currentStep", "currentRewrite"].some(k => k in ns && state[k] !== ns[k])) saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
@@ -932,7 +945,7 @@ const createToggle = (id, text) => {
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
-const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)"); showCallSrc.toggle.checked = false;
+const showCallSrc = createToggle("show-call-body", "Show CALL bodies (c)"); showCallSrc.toggle.checked = false;
 const showSink = createToggle("show-sink", "Show SINK (s)");
 showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");
@@ -999,20 +1012,8 @@ async function main() {
   }
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret.steps?.length > 0) {
-      const el = select(state.currentCtx, state.currentStep);
-      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
-      // re render the list with new items
-      ctx.steps.push(...ret.steps);
-      while (el.ctx.children.length > 1) el.ctx.children[1].remove();
-      appendSteps(el.ctx, state.currentCtx, ctx.steps);
-      return setState({ currentStep:state.currentStep+1, expandSteps:true });
-    }
     // timeline with cycles on the x axis
-    if (ret instanceof ArrayBuffer) {
-      const pkts = step.query.includes("sqtt");
-      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
-    }
+    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, {heightScale:0.5, hideLabels:true, colorByName:true});
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
     })));
@@ -1050,10 +1051,6 @@ async function main() {
       }
       return table;
     }
-    if (ret.ref != null) {
-      const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
-      metadata.appendChild(d3.create("a").text("View Disassembly").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
-    }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     return document.querySelector("#custom").replaceChildren(root.node());
@@ -1087,11 +1084,16 @@ async function main() {
   showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
   showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
-  metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
-  if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
-  if (step.trace) metadata.appendChild(traceBlock(step.trace));
-  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  let uop = data.uop != null ? metadata.querySelector("#uop") : null;
+  for (const child of [...metadata.children]) if (child !== uop) child.remove();
+  if (ckey.includes("rewrites")) for (const label of [showIndexing.label, showCallSrc.label, showSink.label]) metadata.insertBefore(label, uop);
+  if (step.code_line != null) metadata.insertBefore(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), uop);
+  if (step.trace) metadata.insertBefore(traceBlock(step.trace), uop);
+  if (data.uop != null) {
+    if (uop == null) { uop = metadata.appendChild(codeBlock(data.uop, "txt", { wrap:false })); uop.id = "uop"; }
+    else { uop.querySelector("code").replaceChildren(colored(data.uop)); }
+    uop.classList.toggle("full-height", step.match_count === 0);
+  }
   // ** multi graph in one page
   if (!step.match_count) return;
   const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -1118,13 +1120,9 @@ async function main() {
 
 // **** collapse/expand
 
-let isCollapsed = false;
 document.querySelector(".collapse-btn").addEventListener("click", (e) => {
-  isCollapsed = !isCollapsed;
-  document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
+  document.querySelector(".main-container").classList.toggle("collapsed");
   e.currentTarget.blur();
-  e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer
@@ -1217,6 +1215,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
+  // cmd shift \ toggles sidebars
+  if (event.code === "Backslash" && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    return document.querySelector(".collapse-btn").click();
+  }
 });
 
 main()

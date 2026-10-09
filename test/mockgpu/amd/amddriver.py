@@ -1,20 +1,15 @@
-import pathlib, re, ctypes, mmap, collections, functools, copy, os
+import ctypes, mmap, collections, functools, copy, os
 from tinygrad.runtime.autogen import kfd, amdgpu_drm, libc
 import tinygrad.runtime.autogen.am.am as am
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, GFX_TARGET_VERSION, MOCKGPU_ARCH
 
-def ioctls_from_header():
-  # hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
-  # pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
-  # matches = re.findall(pattern, hdrpy, re.MULTILINE)
-  hdr = (pathlib.Path(__file__).parent.parent.parent.parent / "extra" / "hip_gpu_driver" / "kfd_ioctl.h").read_text().replace("\\\n", "")
-  pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
-  matches = re.findall(pattern, hdr, re.MULTILINE)
-  return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
-         {int(nr, 0x10): getattr(kfd, "struct_"+sname, None) for name, idir, nr, sname in matches}
-kfd_ioctls, kfd_headers = ioctls_from_header()
+def _ioctl_nr(ioctl: functools.partial) -> int: return ioctl.args[2]
+
+kfd_ioctl_info = {
+  _ioctl_nr(ioctl): (name, ioctl.args[3]) for name, ioctl in vars(kfd).items()
+  if name.startswith("AMDKFD_IOC_") and isinstance(ioctl, functools.partial)}
 
 class KFDFileDesc(VirtFileDesc):
   def __init__(self, fd, driver):
@@ -116,42 +111,44 @@ class AMDDriver(VirtDriver):
 
   def kfd_ioctl(self, req, argp):
     nr = req & 0xFF
-    struct = kfd_headers[nr].from_address(argp)
+    if nr not in kfd_ioctl_info: raise RuntimeError(f"unknown kfd ioctl, {nr} unknown")
+    name, struct_type = kfd_ioctl_info[nr]
+    struct = struct_type.from_address(argp)
 
-    if nr == kfd_ioctls.AMDKFD_IOC_ACQUIRE_VM: pass
-    elif nr == kfd_ioctls.AMDKFD_IOC_RUNTIME_ENABLE: pass
-    elif nr == kfd_ioctls.AMDKFD_IOC_GET_VERSION:
+    if nr == _ioctl_nr(kfd.AMDKFD_IOC_ACQUIRE_VM): pass
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_RUNTIME_ENABLE): pass
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_GET_VERSION):
       struct.major_version = 1
       struct.minor_version = 14
-    elif nr == kfd_ioctls.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU):
       if struct.gpu_id not in self.gpus: return -1
       struct.handle = self._alloc_handle()
       self.object_by_handle[struct.handle] = copy.deepcopy(struct) # save memory struct to know what mem it is
       # Track signal memory (uncached + coherent) - progress queues when written to
       if struct.flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED:
         self.track_address(struct.va_addr, struct.va_addr + struct.size, lambda mv,off: None, lambda mv, off: self._emulate_execute())
-    elif nr == kfd_ioctls.AMDKFD_IOC_FREE_MEMORY_OF_GPU:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU):
       self.object_by_handle.pop(struct.handle)
-    elif nr == kfd_ioctls.AMDKFD_IOC_MAP_MEMORY_TO_GPU:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU):
       dev_ids = (ctypes.c_int32 * struct.n_devices).from_address(struct.device_ids_array_ptr)
       for i in range(struct.n_devices):
         gpu = self.gpus[dev_ids[i]]
         mem_obj = self.object_by_handle[struct.handle]
         gpu.map_range(mem_obj.va_addr, mem_obj.size)
         struct.n_success = i + 1
-    elif nr == kfd_ioctls.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU):
       dev_ids = (ctypes.c_int32 * struct.n_devices).from_address(struct.device_ids_array_ptr)
       for i in range(struct.n_devices):
         gpu = self.gpus[dev_ids[i]]
         mem_obj = self.object_by_handle[struct.handle]
         gpu.unmap_range(mem_obj.va_addr, mem_obj.size)
         struct.n_success = i + 1
-    elif nr == kfd_ioctls.AMDKFD_IOC_CREATE_EVENT:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_CREATE_EVENT):
       struct.event_slot_index = self._alloc_next_event_slot()
       struct.event_id = struct.event_slot_index
 
       if struct.event_type == kfd.KFD_IOC_EVENT_MEMORY: self.mmu_event_ids.append(struct.event_id)
-    elif nr == kfd_ioctls.AMDKFD_IOC_CREATE_QUEUE:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_CREATE_QUEUE):
       gpu = self.gpus[struct.gpu_id]
       if struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
         gpu.add_sdma_queue(struct.ring_base_address, struct.ring_size, struct.read_pointer_address, struct.write_pointer_address)
@@ -162,7 +159,7 @@ class AMDDriver(VirtDriver):
       # Track writes to doorbell, calling callback
       struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
       self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._emulate_execute())
-    elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
+    elif nr == _ioctl_nr(kfd.AMDKFD_IOC_WAIT_EVENTS):
       evs = (kfd.struct_kfd_event_data * struct.num_events).from_address(struct.events_ptr)
       for ev in evs:
         if ev.event_id in self.mmu_event_ids and "MOCKGPU_EMU_FAULTADDR" in os.environ:
@@ -170,11 +167,7 @@ class AMDDriver(VirtDriver):
           ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
           ev.memory_exception_data.failure.NotPresent = 1
     else:
-      name = "unknown"
-      for k,v in kfd_ioctls.__dict__.items():
-        if nr == v: name = k
-      assert False, f"unknown kfd ioctl, {nr} {name}"
-      exit(1)
+      raise RuntimeError(f"unsupported kfd ioctl, {nr} {name}")
     return 0
 
   def _emulate_execute(self):

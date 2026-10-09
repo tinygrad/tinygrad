@@ -5,7 +5,7 @@ from multiprocessing import Queue, Process, shared_memory, connection, Lock
 
 import numpy as np
 from tinygrad import dtypes, Tensor
-from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX, NUM_CPU_THREADS
+from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX, CPU_COUNT
 from tinygrad.nn.state import TensorIO
 
 ### ResNet
@@ -131,7 +131,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None, pad_fir
     else: X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name}")
     Y = [None] * (batch_size*BATCH_COUNT)
 
-    for _ in range(NUM_CPU_THREADS.value):
+    for _ in range(CPU_COUNT):
       p = Process(target=loader_process, args=(q_in, q_out, X, seed))
       p.daemon = True
       p.start()
@@ -212,7 +212,7 @@ def batch_load_train_bert(BS:int, seed:int|None=None):
     rng.shuffle(fs)
     train_files.append(fs.pop(0))
 
-  cycle_length = min(NUM_CPU_THREADS.value, len(train_files))
+  cycle_length = min(CPU_COUNT, len(train_files))
   assert cycle_length > 0, "cycle_length must be greater than 0"
 
   dataset = InterleavedDataset(train_files, cycle_length)
@@ -301,7 +301,7 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
     X = Tensor.empty(*sz, dtype=dtypes.float32, device=f"disk:/dev/shm/{shm_name_x}")
     Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name_y}")
 
-    for _ in range(NUM_CPU_THREADS.value):
+    for _ in range(CPU_COUNT):
       proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, seed, queue_in, queue_out, X, Y))
       proc.daemon = True
       proc.start()
@@ -437,7 +437,7 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
   dataset_iter = iter(image_ids)
 
   try:
-    for _ in range(NUM_CPU_THREADS.value):
+    for _ in range(CPU_COUNT):
       proc = Process(
         target=load_retinanet_data,
         args=(base_dir, val, queue_in, queue_out, imgs, boxes, labels),

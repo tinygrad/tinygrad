@@ -44,7 +44,7 @@ def realized_matmul():
   z = y.matmul(x)
   Tensor.realize(z)
 def realized_gradient():
-  x = Tensor.eye(3)
+  x = Tensor.eye(3).clone()
   y = Tensor([[2.0,0,-2.0]])
   z = y.matmul(x).sum()
   z.backward()

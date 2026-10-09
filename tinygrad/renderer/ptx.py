@@ -1,10 +1,10 @@
 from typing import cast, Callable
 import struct
 from collections import defaultdict
-from tinygrad.codegen.opt import tc
+from tinygrad.renderer import tc
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, with_storage
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.helpers import flatten, prod, unwrap, Target
 
@@ -16,7 +16,7 @@ def render_val(x, dtype):
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
 asm_for_op: dict[Ops, Callable] = {
-  Ops.RECIPROCAL: lambda d,a,dt,name: f"rcp{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a};",
+  Ops.RECIPROCAL: lambda d,a,dt,name: f"rcp.approx.{name} {d}, {a};",
   Ops.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", Ops.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
   Ops.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", Ops.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
   Ops.TRUNC: lambda d,a,dt,name: f"cvt.rzi.{name}.{name} {d}, {a};",
@@ -45,15 +45,15 @@ ptx_matcher = PatternMatcher([
   # upcast to float32 all the ops that don't support half
   (UPat(doesnt_support_half, dtype=dtypes.half, name="x"),
     lambda x: (UOp(x.op, src=tuple(vv.cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))),
-  # load/store bool -> uint8 (only for memory, not registers)
+  # a bool is a predicate register in PTX but a byte in memory, so a bool buffer is accessed through a uint8 view of it
   (UPat(Ops.LOAD, dtypes.bool, src=(UPat(name="idx"),), name="x", allow_any_len=True),
-   lambda x,idx: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ()) + x.src[2:]).cast(dtypes.bool) \
-     if idx.addrspace != AddrSpace.REG else None),
+   lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8),) + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ())
+     + x.src[2:]).cast(dtypes.bool) if idx.addrspace != AddrSpace.REG else None),
   (UPat(Ops.STORE, src=(UPat(name="idx"), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
-   lambda x,idx: UOp(x.op, src=(x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:]) if idx.addrspace != AddrSpace.REG else None),
+   lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8), x.src[1].cast(dtypes.uint8))+x.src[2:]) if idx.addrspace != AddrSpace.REG else None),
   # ptx shr and shl instructions require y to be uint
-  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.SHL, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.SHL, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
 ])
 
 def mem_type(x:UOp) -> str: return 'shared' if x.addrspace == AddrSpace.LOCAL else 'global'
@@ -64,7 +64,7 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
 
   for src, regs in zip(wmma.src, ctx.wmma_r):
     for i, reg in enumerate(regs): # pack input and acc registers
-      if (elems_per_reg := 4 // src.dtype.scalar().itemsize) == 1: yield f"mov.b32 {reg}, {ctx.r[src][i]};"
+      if (elems_per_reg := 4 // src.dtype.itemsize) == 1: yield f"mov.b32 {reg}, {ctx.r[src][i]};"
       else: yield f"mov.b32 {reg}, {{{', '.join(ctx.r[src][i * elems_per_reg : (i+1) * elems_per_reg])}}};"
 
   dt_map_in, dt_map_out = {dtypes.float: "tf32", dtypes.half: "f16"}, {dtypes.float: "f32", dtypes.half: "f16"}
@@ -79,8 +79,8 @@ def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.i
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
 
 string_rewrite = PatternMatcher([
-  (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.val, x.dtype)}, 0;"),
-  (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.val, x.dtype)};"),
+  (UPat.cvar("c").cast(dtypes.bool, name="x"), lambda ctx, x, c: f"setp.ne.s16 {ctx.r[x]}, {render_val(c.val, x.dtype)}, 0;"),
+  (UPat.cvar("c").cast(name="x"), lambda ctx, x, c: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(c.val, x.dtype)};"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
    f"ld.param.{ctx.types[dtypes.ulong] if x.addrspace is AddrSpace.GLOBAL else ctx.mem_types[x.dtype]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
@@ -101,23 +101,23 @@ string_rewrite = PatternMatcher([
      if loc.addrspace == AddrSpace.REG else None),
   (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("var"))),
    lambda ctx, loc, var: f"st.{mem_type(loc)}" + \
-    f"{f'.v{cnt}' if ((cnt:=var.max_numel())>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " + \
+    f"{f'.v{cnt}' if ((cnt:=var.max_numel())>1) else ''}.{ctx.mem_types[var.dtype]} " + \
     f"[{ctx.r[loc]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.max_numel() > 1 else ctx.r[var]};"),
   (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("alt"), UPat.var("gate"))),
     lambda ctx, x, loc, alt, gate: flatten([
-    [f"mov.{ctx.mem_types[x.dtype.scalar()]} {v}, {render_val(0, x.dtype.scalar())};" for v in ctx.r[x]],
-    [f"@{ctx.r[gate]} ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];"]
+    [f"mov.{ctx.mem_types[x.dtype]} {v}, {render_val(0, x.dtype)};" for v in ctx.r[x]],
+    [f"@{ctx.r[gate]} ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];"]
   ]) if alt.max_numel() > 1 else [
-    f"@{ctx.r[gate]} ld.{mem_type(loc)}.{ctx.mem_types[x.dtype.scalar()]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
-    f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype.scalar()][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
+    f"@{ctx.r[gate]} ld.{mem_type(loc)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
+    f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
   (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"),)),
-    lambda ctx, x, loc: f"ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
+    lambda ctx, x, loc: f"ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
      if x.max_numel() > 1 else f"ld.{mem_type(loc)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   # simple
-  (UPat(Ops.BUFFER, name="x"), lambda ctx, x: [] if x.addrspace == AddrSpace.REG else [
+  (UPat(Ops.BUFFER, name="x"), lambda ctx, x: [
     f".shared .align 16 .b8 local{x.arg.slot}[{x.max_numel()*x.dtype.itemsize}];", f"mov.u64 {ctx.r[x]}, local{x.arg.slot}[0];"]),
   (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx, l: f"WAITLOOP_{ctx.uops.index(l)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
     f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"),
   (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
     f"mov.u32 {ctx.r[r]}, -1;",
@@ -137,15 +137,14 @@ string_rewrite = PatternMatcher([
 class PTXRenderer(Renderer):
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
-  tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
     self.compiler = (PTXCompiler if target.interface.startswith("MOCK") or target.device == "CUDA" else NVPTXCompiler)(target.arch)
-    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(target.arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
-    if ver < 80: self.extra_matcher += PatternMatcher([(UPat((Ops.MAX, Ops.EXP2), dtype=dtypes.half, name="x"),
+    self.tensor_cores = [x for x in tc.get_cuda(target.arch) if x.dtype_in in (dtypes.half, dtypes.float)]
+    if int(target.arch[3:]) < 80: self.extra_matcher += PatternMatcher([(UPat((Ops.MAX, Ops.EXP2), dtype=dtypes.half, name="x"),
       lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))])
 
   # language options
@@ -162,12 +161,12 @@ class PTXRenderer(Renderer):
   cast_types: dict[DType, str] = {**types, dtypes.int8: "s8", dtypes.uint8: "u8"}
 
   def render_kernel(self, kernel, function_name, bufs, regs, uops) -> str:
-    def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
+    def fmt(line): return "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
     kernel = '\n'.join(map(fmt, [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"]))
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     params = ',\n\t'.join([f".param .{'u64' if u.addrspace is AddrSpace.GLOBAL else self.types[u.dtype]} {name}" for name,u in bufs])
-    return f"{self.kernel_prefix.format(launch_bounds=launch_bounds)} {function_name} (\n\t{params}\n)\n.maxntid {launch_bounds}\n{{\n{kernel}\n}}"
+    return f"{self.kernel_prefix} {function_name} (\n\t{params}\n)\n.maxntid {launch_bounds}\n{{\n{kernel}\n}}"
 
   def render(self, uops:list[UOp]) -> str:
     kernel:list[str] = []
@@ -179,15 +178,15 @@ class PTXRenderer(Renderer):
     self.uops = uops
 
     def ssa(prefix:str, u:UOp|None=None, dtype:str|None=None) -> str:
-      nonlocal c
       prefix += f"_{dtype if dtype is not None else self.types[unwrap(u).dtype]}_"
       c[prefix] += 1
       return f"%{prefix}{c[prefix]-1}"
 
     name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP}: continue
+      if u.op in {Ops.NOOP, Ops.CONST}: continue
       if u.op is Ops.AFTER:
+        if u.dtype is dtypes.void: continue
         self.r[u] = self.r[u.src[0]]
         continue
       if u.op is Ops.SINK:
@@ -197,26 +196,26 @@ class PTXRenderer(Renderer):
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.BUFFER and u.addrspace == AddrSpace.REG:
-        r[u] = [ssa("reg", u, self.types[u.dtype.scalar()]) for _ in range(u.max_numel())]
+        r[u] = [ssa("reg", u, self.types[u.dtype]) for _ in range(u.max_numel())]
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
-        if u.op is not Ops.LOAD and u.src[1].op is not Ops.CONST:
+        if u.op is not Ops.LOAD and not (u.src[1].op is Ops.CAST and u.src[1].src[0].op is Ops.CONST):
           raise RuntimeError(f"PTX does not support dynamic register indexing: {u}")
-        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].val]
+        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].src[0].val]
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:
-        r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.max_numel())] if u.max_numel() > 1 else ssa('val', u)
+        r[u] = [ssa('val', dtype=self.types[u.dtype]) for _ in range(u.max_numel())] if u.max_numel() > 1 else ssa('val', u)
       elif u.op is Ops.PARAM: bufs.append((f"data{u.arg.slot}", u))
       elif u.op is Ops.WMMA:
         # registers for packing/unpacking input and acc
-        self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.src[0].dtype.scalar().itemsize)],
-                       [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.src[0].dtype.scalar().itemsize)],
-                       [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.dtype.scalar().itemsize)]]
-        r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.max_numel())]
+        self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.src[0].dtype.itemsize)],
+                       [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.src[0].dtype.itemsize)],
+                       [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.dtype.itemsize)]]
+        r[u] = [ssa("wmma", dtype=self.types[u.dtype]) for _ in range(u.max_numel())]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
-        Ops.CONST: ("const", None), Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
+        Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if u.op is Ops.RANGE and u.dtype == dtypes.void: prefix = None  # loop headers don't have a register
       if prefix: r[u] = ssa(prefix, u, dtype)

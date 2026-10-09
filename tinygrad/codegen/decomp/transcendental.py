@@ -90,8 +90,8 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
     if count+offset < len(two_over_pi_f) - 1:
       an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
-  def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
-  def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) << y.cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) >> y.cast(dtypes.uint64)).cast(dtypes.uint32)
 
   a = [_take(UOp.const(0, dtypes.uint32), i) for i in range(4)]
   #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
@@ -263,6 +263,23 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
   neg_base = non_int.where(base.ne(-math.inf).where(ret.const_like(math.nan), ret), is_odd.where(-ret, ret))
   # x ** 0 = 1, including 0 ** 0 and inf ** 0
   return exponent.eq(0).where(ret.const_like(1), (base < 0).where(neg_base, ret))
+
+def xpow_int(base:UOp, exponent:UOp, dt:DType) -> UOp|None:
+  if dt not in dtypes.ints: return None
+  # square and multiply over the exponent bits in unsigned, masking so products wrap instead of growing
+  udt = dt if dtypes.is_unsigned(dt) else dtypes.uints[dtypes.sints.index(dt)]
+  ret, sq = (b:=base.cast(dt).bitcast(udt)).const_like(1), b
+  edt = exponent.dtype
+  lo, hi = (edt.min, edt.max) if edt in dtypes.ints and exponent.overflows(edt) else (exponent.vmin, exponent.vmax)
+  for i in range(nbits:=int(max(hi, 0)).bit_length()):
+    ret = ((exponent >> i) & 1).ne(0).where((ret*sq) & udt.max, ret)
+    if i < nbits-1: sq = (sq*sq) & udt.max
+  ret = ret.bitcast(dt)
+  if lo >= 0: return ret
+  # negative exponent truncates to 0, except for 1 and -1
+  one = ret.const_like(1)
+  neg = (sb:=b.bitcast(dt)).eq(-1).where((exponent & 1).ne(0).where(-one, one), sb.eq(1).where(one, 0))
+  return (exponent < 0).where(neg, ret)
 
 @functools.cache
 def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) -> PatternMatcher:

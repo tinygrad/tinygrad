@@ -1629,5 +1629,66 @@ class TestSwap(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0x55555555)
 
 
+class TestCvtFrexpRegressions(unittest.TestCase):
+  """Regression tests for float<->int conversion and FREXP corner cases (found by random difftest vs hardware)."""
+
+  def test_cvt_i32_f32_nan_is_zero(self):
+    """v_cvt_i32_f32 of NaN is 0, not INT_MIN (x86 cvttss2si returns INT_MIN)."""
+    for nan in (0x7FC00000, 0xFFC00000, 0x7F800001):
+      st = run_program([v_mov_b32_e32(v[0], nan), v_cvt_i32_f32_e32(v[1], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1], 0, f"nan=0x{nan:08x}")
+
+  def test_cvt_i32_f32_positive_overflow(self):
+    """v_cvt_i32_f32 saturates positive overflow/inf to INT_MAX, not INT_MIN."""
+    for bits in (0x7F800000, 0x4F000000, 0x4F800000):  # +inf, 2^31, ~2^32
+      st = run_program([v_mov_b32_e32(v[0], bits), v_cvt_i32_f32_e32(v[1], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1], 0x7FFFFFFF, f"bits=0x{bits:08x}")
+
+  def test_cvt_i32_f32_negative_overflow(self):
+    """v_cvt_i32_f32 saturates negative overflow/-inf to INT_MIN."""
+    for bits in (0xFF800000, 0xCF000001):  # -inf, below -2^31
+      st = run_program([v_mov_b32_e32(v[0], bits), v_cvt_i32_f32_e32(v[1], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1], 0x80000000, f"bits=0x{bits:08x}")
+
+  def test_cvt_u32_f32_nan_is_zero(self):
+    """v_cvt_u32_f32 of NaN is 0, not UINT_MAX."""
+    for nan in (0x7FC00000, 0xFFC00000, 0x7F800001):
+      st = run_program([v_mov_b32_e32(v[0], nan), v_cvt_u32_f32_e32(v[1], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1], 0, f"nan=0x{nan:08x}")
+
+  def test_cvt_i32_f64_nan_and_overflow(self):
+    """v_cvt_i32_f64: NaN -> 0, positive overflow/+inf -> INT_MAX."""
+    st = run_program([v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0x7FF80000), v_cvt_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)
+    st = run_program([v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0x41F00000), v_cvt_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x7FFFFFFF)  # 2^32 -> INT_MAX
+
+  def test_frexp_f32_denormal(self):
+    """v_frexp_exp/mant_f32 of denormal/zero inputs is (0, signed zero) on hardware."""
+    for bits in (0x00000001, 0x007FFFFF, 0x00000000):
+      st = run_program([v_mov_b32_e32(v[0], bits), v_frexp_exp_i32_f32_e32(v[1], v[0]), v_frexp_mant_f32_e32(v[2], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1] & 0xFFFFFFFF, 0, f"exp bits=0x{bits:08x}")
+      self.assertEqual(st.vgpr[0][2], bits & 0x80000000, f"mant bits=0x{bits:08x}")
+    # negative denormal: mant is -0.0
+    st = run_program([v_mov_b32_e32(v[0], 0x80000001), v_frexp_mant_f32_e32(v[2], v[0])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000)
+
+  def test_frexp_f64_denormal(self):
+    """v_frexp_exp_f64 of a denormal returns the normalized exponent (-1073 for min-denormal); zero -> 0."""
+    st = run_program([v_mov_b32_e32(v[0], 1), v_mov_b32_e32(v[1], 0), v_frexp_exp_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFFFFFF, 0xFFFFFBCF)  # -1073
+    st = run_program([v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0), v_frexp_exp_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)
+
+  def test_frexp_exp_inf_nan(self):
+    """v_frexp_exp of +/-inf and NaN is 0 on hardware (host frexp gives 129/1024), for both f32 and f64."""
+    for bits in (0x7F800000, 0xFF800000, 0x7FC00000):
+      st = run_program([v_mov_b32_e32(v[0], bits), v_frexp_exp_i32_f32_e32(v[1], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1] & 0xFFFFFFFF, 0, f"f32 bits=0x{bits:08x}")
+    for lo, hi in ((0, 0x7FF00000), (0, 0xFFF00000), (0, 0x7FF80000), (1, 0x7FF00000)):
+      st = run_program([v_mov_b32_e32(v[0], lo), v_mov_b32_e32(v[1], hi), v_frexp_exp_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][2] & 0xFFFFFFFF, 0, f"f64 bits=0x{hi:08x}{lo:08x}")
+
+
 if __name__ == '__main__':
   unittest.main()

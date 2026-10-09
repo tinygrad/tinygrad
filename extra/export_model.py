@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.helpers import Context, to_mv, prod
+from tinygrad.helpers import Context, prod
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import to_program
 import json
@@ -15,7 +15,7 @@ EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 _KERNEL_ASTS = {Ops.SINK, Ops.PROGRAM}
 def iter_kernel_calls(linear:UOp):
   """Yield kernel CALLs from a LINEAR UOp. Toposort descends naturally into CUSTOM_FUNCTION graph batches; gate stops at kernel ASTs."""
-  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.src[0].op in _KERNEL_ASTS)
+  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.body.op in _KERNEL_ASTS)
 
 def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], List, Dict[str,Tuple[int,DType,int]], Dict[str,Buffer]]:
   output_name = {id(b): f"output{i}" for i, b in enumerate(output_bufs)}
@@ -26,7 +26,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     if bu.op is Ops.PARAM: key, name, size = ("in", bu.arg.slot), f"input{bu.arg.slot}", prod(bu.shape)*bu.dtype.itemsize
     else:
       b = bu.buffer
-      key, size = (id(b.base), b.offset, b.size, b.dtype), b.size*b.dtype.itemsize
+      key, size = (id(b.base), b.offset, b.nbytes, bu.dtype), b.nbytes
       if key in bufs: return bufs[key][0]
       if (name:=output_name.get(id(b))) is None:
         name, n = f"buf_{n}", n+1
@@ -35,12 +35,12 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     return name
 
   for call in iter_kernel_calls(linear):
-    arg_uops = [b for b in call.src[1:] if b.op is not Ops.BIND]
+    arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
-    functions[info.function_name] = prg.src[2].arg
+    functions[prg.src[0].arg.function_name] = prg.src[2].arg
     cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + list(info.vars)
-    statements.append((info.function_name, cargs, info.global_size, info.local_size))
+    statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 
@@ -69,7 +69,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
   if not wasm:
     for name,cl in bufs_to_save.items():
-      weight = ''.join(["\\x%02X"%x for x in bytes(to_mv(cl._buf.va_addr, cl._buf.size))])
+      weight = ''.join(["\\x%02X"%x for x in cl.as_memoryview()])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog += [f"{dtype_map[dtype]} {name}[{len}];" if name not in bufs_to_save else f"{dtype_map[dtype]} *{name} = ({dtype_map[dtype]} *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in input_names+output_names]
     cprog += [f"void net({forward_args}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
@@ -241,11 +241,10 @@ export default {model_name};
 def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", stream_weights=False):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"only {', '.join(EXPORT_SUPPORTED_DEVICE)} are supported"
 
-  # NOTE: NUM_CPU_THREADS=1, since export does not support threading
-  with Context(JIT=2, NUM_CPU_THREADS=1): linear, output_bufs = jit_model(model, *inputs)
+  with Context(JIT=2): linear, output_bufs = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(linear, output_bufs)
   state = get_state_dict(model)
-  weight_names = {(id(b), b.offset, b.size, b.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
+  weight_names = {(id(b), b.offset, b.nbytes, x.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
   input_names = [f"input{i}" for i in range(len(inputs))]
   output_names = [f"output{i}" for i in range(len(output_bufs))]
 

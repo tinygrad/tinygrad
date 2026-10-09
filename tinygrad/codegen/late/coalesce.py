@@ -1,7 +1,8 @@
 import itertools, functools
 from collections import defaultdict
+from dataclasses import replace
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, graph_rewrite
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
@@ -51,8 +52,8 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   idx_y, idx_x = idx.index(1), idx.index(0)
-  if new_valid is not None: return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), dtype=dtypes.float)
-  return buf.index(idx_y, idx_x, dtype=dtypes.float)
+  if new_valid is not None: return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid))
+  return buf.index(idx_y, idx_x)
 
 indexing_simplify = PatternMatcher([
   # image load valid idx simplification
@@ -85,58 +86,61 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
-  buf = buf.replace(src=(shape_to_shape_arg((h, w, 4)),))
+  # the image dims are stored in the param's arg, the size stays the flat buffer len
+  buf = buf.replace(arg=replace(buf.arg, image=(h, w)))
   shapes[buf.arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.val is not True:
-    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid), dtype=dtypes.float)
+    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
   else:
-    return buf.index(cidx.src[1], cidx.src[0], dtype=dtypes.float)
+    return buf.index(cidx.src[1], cidx.src[0])
+
+def store_image(x:UOp, d:UOp) -> UOp:
+  # image load/store is always float, a half image converts on store
+  def as_float(s:UOp):
+    return s.src[0] if x.src[0].dtype is dtypes.half and s.op is Ops.CAST and s.src[0].dtype is dtypes.float else s.cast(dtypes.float)
+  lanes = d.src if d.op is Ops.STACK else tuple(d.index(i) for i in range(d.shape[0]))
+  return x.store(UOp.stack(*[as_float(s) for s in lanes]))
 
 pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
-  # image load/store is always float
-  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").load(dtype=dtypes.half), lambda x: x.load().cast(dtypes.half)),
-  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
-  (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
+  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), store_image),
 ])
 
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
-  for u in sink.toposort():
+  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
+  for u in sink.toposort(enter_calls=False):
     # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
+      if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
+      if idx.is_invalid: continue
       root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
       elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].val
-      elif idx.op is Ops.CONST and idx.val is Invalid: root_src, arg = "INVALID", 0
       elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.val
       else: root_src, arg = idx, 0
-      memory[(u.op, buf, root_src, valid)].setdefault(arg, []).append(u)
+      # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
+      memory[(u.op, buf, root_src, valid, u.arg)].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,base,valid),offsets in memory.items():
+  for (op,buf,base,valid,ld_arg),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
-    if ctx is not None and ctx.target.device == "DSP":
+    if ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
-      pass
-    elif buf.addrspace == AddrSpace.REG:
-      pass
     elif is_image_shape(buf._shape):
       lengths = [4]
-    elif ctx is not None and ctx.supports_float4:
+    elif buf.dtype in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and ctx.supports_float4:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
@@ -146,23 +150,19 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       while len(full_grp):
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
-        grp = full_grp[:length]
+        grp, full_grp = full_grp[:length], full_grp[length:]
         # NOTE: we apply the valid again after we determine the length
-        offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset)
+        offset = offset.valid(valid)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length))) if length > 1 else buf.index(offset)
         if op == Ops.STORE:
-          datas = []
-          for i,g in enumerate(grp):
-            assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
-            datas.append(offsets[g][0].src[1])
-          store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
-          for i,g in enumerate(grp): replacements[offsets[g][0]] = store
+          assert all(len(offsets[g]) == 1 for g in grp), "attempting multiple stores"
+          datas = [offsets[g][0].src[1] for g in grp]
+          store = idx.store(UOp.stack(*datas) if length > 1 else datas[0])
+          for g in grp: replacements[offsets[g][0]] = store
         else:
-          ld = idx.load()
+          ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
-            for oo in offsets[g]:
-              replacements[oo] = ld.index(i) if len(grp) > 1 else ld
-        full_grp = full_grp[length:]
+            for oo in offsets[g]: replacements[oo] = ld.index(i) if length > 1 else ld
 
   # apply
   return sink.substitute(replacements, name="memory coalescing")

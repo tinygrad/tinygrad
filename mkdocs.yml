@@ -29,7 +29,6 @@ nav:
     - UOp: developer/uop.md
     - Runtime:
       - developer/runtime.md
-      - HCQ: developer/hcq.md
       - AM Driver: developer/am.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
@@ -121,8 +120,6 @@ plugins:
 - mkdocstrings:
     handlers:
       python:
-        inventories:
-        - https://docs.python.org/3/objects.inv
         paths: [tinygrad]
         options:
           docstring_options:

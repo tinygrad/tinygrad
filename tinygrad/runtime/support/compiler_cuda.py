@@ -1,10 +1,12 @@
 import hashlib, tempfile, ctypes, re, pathlib
-from tinygrad.helpers import to_char_p_p, colored, getenv, system
+from tinygrad.helpers import to_char_p_p, colored, getenv, system, OSX
 from tinygrad.runtime.support.c import init_c_var
 from tinygrad.runtime.autogen import nvrtc, nvjitlink as jitlink
 from tinygrad.device import Compiler, CompileError
 
 CUDA_PATH = getenv("CUDA_PATH", "")
+root = pathlib.Path(__file__).parents[3]
+osx_docker_cmd = f"docker run --rm -i -v {root}:{root} -e PYTHONPATH={root} ghcr.io/tinygrad/cuda-arm64:v2.3"
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   x = ctypes.create_string_buffer(init_c_var(ctypes.c_size_t, lambda x: check(get_sz(arg, ctypes.byref(x)))).value)
@@ -44,11 +46,14 @@ def cuda_disassemble(lib:bytes, arch:str, ptx=False):
 class NVRTCCompiler(Compiler):
   def __init__(self, arch:str, ptx=True, cache_key:str="cuda"):
     self.ptx, self.arch, self.compile_options = ptx, arch, [f'--gpu-architecture={arch}']
-    self.compile_options += [f"-I{CUDA_PATH}/include"] if CUDA_PATH else ["-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include"]
-    nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
+    if OSX: self.compiler_process = self.server(osx_docker_cmd, arch, ptx)
+    else:
+      self.compile_options += [f"-I{CUDA_PATH}/include"] if CUDA_PATH else ["-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include"]
+      nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
+      if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_{cache_key}_{self.arch}")
   def compile(self, src:str) -> bytes:
+    if OSX: return self.compile_server(src, self.compiler_process)
     nvrtc_check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     nvrtc_check(nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options])), prog)
     data = _get_bytes(prog, nvrtc.nvrtcGetPTX if self.ptx else nvrtc.nvrtcGetCUBIN,
@@ -80,9 +85,11 @@ class PTXCompiler(Compiler):
 
 class NVPTXCompiler(PTXCompiler):
   def __init__(self, arch:str):
-    jitlink_check(jitlink.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
+    if OSX: self.compiler_process = self.server(osx_docker_cmd, arch)
+    else: jitlink_check(jitlink.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
     super().__init__(arch, cache_key="nv_ptx")
   def compile(self, src:str) -> bytes:
+    if OSX: return self.compile_server(src, self.compiler_process)
     jitlink_check(jitlink.nvJitLinkCreate(handle := jitlink.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
     jitlink_check(jitlink.nvJitLinkAddData(handle, jitlink.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
     jitlink_check(jitlink.nvJitLinkComplete(handle), handle)
