@@ -387,7 +387,7 @@ class MLATransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
 
 class DSAMLABlock(MLATransformerBlock):
-  """NoPE MLA with a DSA indexer (glm5next): sparse attention over the latent cache, selected by pooled indexer scores."""
+  """NoPE MLA with a DSA indexer (glm5-next): sparse attention over the latent cache, selected by pooled indexer scores."""
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     assert config.rope_dim == 0 and config.q_lora_rank > 0 and config.indexer is not None
@@ -620,17 +620,17 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(kv[f'{arch}.block_count']))
-    elif arch in ('kimi-linear', 'glm5next'):
+    elif arch in ('kimi-linear', 'glm5-next'):
       if arch == 'kimi-linear':
         ssm_layers = tuple(x == 0 for x in n_kv_heads)
         n_kv_heads = max(n_kv_heads)
-      else:  # glm5next: KDA on all trunk layers except every 4th (DSA MLA), the nextn block is dropped
+      else:  # glm5-next: KDA on all trunk layers except every 4th (DSA MLA), the nextn block is dropped
         ssm_layers = tuple((i+1) % 4 != 0 for i in range(kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)))
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'],
-                      kda=True, gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), split_qkv=arch == 'glm5next')
+                      kda=True, gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), split_qkv=arch == 'glm5-next')
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
-        if arch != 'glm5next':  # glm5next keeps separate q/k/v projections (split_qkv)
+        if arch != 'glm5-next':  # glm5-next keeps separate q/k/v projections (split_qkv)
           state_dict[f"blk.{i}.attn_qkv.weight"] = state_dict.pop(f"blk.{i}.attn_q.weight").cat(
             state_dict.pop(f"blk.{i}.attn_k.weight"), state_dict.pop(f"blk.{i}.attn_v.weight"), dim=0).contiguous()
         state_dict[f"blk.{i}.ssm_conv1d.weight"] = state_dict.pop(f"blk.{i}.ssm_conv1d_q.weight").cat(
@@ -650,7 +650,7 @@ class Transformer:
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
-      if arch in ('kimi-linear', 'glm5next'): continue
+      if arch in ('kimi-linear', 'glm5-next'): continue
       if ('attn_q.weight' in name or 'attn_q_b.weight' in name) and (arch == 'llama' or kv_lora_rank):
         w = state_dict[name].reshape(n_heads, state_dict[name].shape[0]//n_heads, -1)
         prefix = head_dim-rope_dim
