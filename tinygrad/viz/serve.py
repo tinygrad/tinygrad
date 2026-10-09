@@ -74,7 +74,7 @@ def load_rewrites(data:VizData) -> None:
     for j,s in enumerate(rewrites:=data.trace.rewrites[i]):
       steps.append(create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                                trace=k.tb if j==0 else None, depth=s.depth))
-      if s.name == "View Base AST": data.ref_map[canonicalize_ast(_reconstruct(data, s.sink))] = i
+      #if s.name == "View Base AST": data.ref_map[canonicalize_ast(_reconstruct(data, s.sink))] = i
       # get source and binary from Ops.PROGRAM
       if s.name == "linearize/render": lin_idx = j
       if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= rewrites[lin_idx].depth):
