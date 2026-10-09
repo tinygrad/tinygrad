@@ -251,9 +251,7 @@ class Allocator(Generic[DeviceType]):
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
-    if len(c:=self.cache[(size, options)]):
-      if options is not None and options.cpu_access: self.dev.synchronize()
-      return c.pop()
+    if len(c:=self.cache[(size, options)]): return c.pop()
     spec = options if options is not None else self.default_buffer_spec
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError): self.free_cache()

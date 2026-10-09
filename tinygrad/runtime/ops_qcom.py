@@ -292,6 +292,11 @@ def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[Q
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
 class QCOMAllocator(Allocator['QCOMDevice']):
+  def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
+    # wait for previous GPU use before the CPU overwrites cached storage
+    if options is not None and options.cpu_access and self.cache.get((size, options)): self.dev.synchronize()
+    return super().alloc(size, options)
+
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     return self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
