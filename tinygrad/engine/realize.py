@@ -6,6 +6,7 @@ from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCount
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -13,10 +14,15 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 # **************** Helpers ****************
 
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_bound_var)
-def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
+def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]|None=None) -> list[UOp]:
   # a bound value is a bare CONST: the Variable states the width
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  return [bound.get(v.expr, v) for v in prg.arg.vars]
+  def arg(p:UOp) -> UOp:
+    if p.is_variable: return bound.get(p.expr, p).ccast(p.dtype)
+    a = call.src[1+p.arg.slot]
+    if p.addrspace is not AddrSpace.ALU: return a if devs is None else a.getaddr(devs)
+    return (a.unbound() if a.is_variable else a).ccast(p.dtype) # a Variable arg is patched at launch, a jit changes it
+  return [arg(p) for p in prg.arg.params]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -67,7 +73,8 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = [] if isinstance(call.arg.aux, HCQInfo) else resolve_params(call, ctx.input_uops)
-  lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
+  if call.body.op is Ops.PROGRAM and args: args = [_resolve(call.src[1+g], ctx.input_uops) for g in call.body.arg.globals]
+  lanes = list(unwrap_multi(call, args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None
     bufs = lanes[i][0] if i < len(lanes) else [cast(Buffer, ctx.input_uops[s].buffer) for s in (stats[3] if stats else ())]
@@ -122,7 +129,9 @@ class ExecContext:
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op in (Ops.MSELECT, Ops.SHRINK, Ops.BITCAST, Ops.GETADDR): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
-  return inputs[b.arg.slot] if b.op is Ops.PARAM else b
+  return inputs[b.arg.slot] if b.op is Ops.PARAM and b.arg.slot >= 0 else b
+def _resolve_val(b:UOp, inputs:tuple[UOp, ...], var_vals:dict[str, int]) -> int:
+  return var_vals[b.expr] if (b:=_resolve(b, inputs)).is_variable else b.val
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
 
 def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
@@ -148,16 +157,17 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
-  resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
+  for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
     if devices is None and device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
     var_vals = {**ctx.var_vals, **device_vars}
-    prg_bufs = [b.ensure_allocated() for b in bufs]
+    prg_bufs = {i:b.ensure_allocated().get_buf(device) for i,b in zip(ast.arg.globals, bufs)}
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: vals = tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
+    try: args = [prg_bufs[p.arg.slot] if p.addrspace is not AddrSpace.ALU else var_vals[p.expr] if p.is_variable else
+                 _resolve_val(call.src[1+p.arg.slot], ctx.input_uops, var_vals) for p in ast.arg.params]
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_sz, local_size=local_sz, vals=vals, wait=ctx.wait, timeout=ctx.timeout))
+    ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -170,7 +180,9 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+    try: args = [var_vals[p.expr] if p.addrspace is AddrSpace.ALU else bufs[p.arg.slot].ensure_allocated()._buf for p in prg.arg.params]
+    except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
+    cpu_rt(*args, global_size=global_size, local_size=local_size)
     for i in prg.arg.outs:
       dt = _to_np_dtype(resolved[i].dtype)
       assert dt is not None, f"no np dtype for {resolved[i].dtype}"
