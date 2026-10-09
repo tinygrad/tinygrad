@@ -216,12 +216,12 @@ class CPULLVMRenderer(LLVMRenderer):
   abi = 'win64cc' if sys.platform == 'win32' else None
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
-    fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in UOp.sink(*uops).toposort() if b.op is Ops.LINEAR)}
+    fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in UOp.sink(*uops).toposort(enter_calls=True) if b.op is Ops.LINEAR)}
     defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
     return "\n".join((k:=self._render_kernel(uops, fns=fns))[0] + (k[1], *defs, self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
-             for x in UOp.sink(*uops).toposort() if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+             for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
     return "\n".join([*decls.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
