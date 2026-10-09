@@ -386,7 +386,7 @@ class Compiled:
   def has_copy_queue(self) -> bool: return True
 
   @property
-  def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.value
+  def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()
@@ -454,10 +454,10 @@ class Compiled:
   def _renderer_name(self, r:type[Renderer]) -> str:
     return r.__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
 
-  def _select_renderer(self) -> Renderer:
+  def _select_renderer(self, cv=DEV) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} instead"
-    t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
+    t = cv.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, t)
 

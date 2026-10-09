@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
-from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
@@ -226,7 +226,7 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   # a PROGRAM with a ProgramInfo and a BINARY is already compiled
   if (ast.op is Ops.SINK and isinstance(ast.arg, KernelInfo)) or \
      (ast.op is Ops.PROGRAM and not (isinstance(ast.arg, ProgramInfo) and ast.src[-1].op is Ops.BINARY)):
-    return ast, Device[c.device if isinstance(c.device, str) else c.device[0]].renderer
+    return ast, Device[to_tuple(c.device)[0]]._select_renderer(HCQ_RUNTIME_DEV if isinstance(c.arg.aux, HCQInfo) else DEV)
   return None
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
