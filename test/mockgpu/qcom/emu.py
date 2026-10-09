@@ -476,8 +476,8 @@ def cpu_kernel(body:UOp, name:str) -> Callable[..., None]:
     prg = to_program(UOp.sink(body, arg=KernelInfo(name=name)), Device['CPU'].renderer)
   runtime, globals_, var_names = get_runtime('CPU', prg), prg.arg.globals, [v.expr for v in prg.arg.vars]
   # called directly like the amd emulator, the runtime wrapper costs more than a small kernel
-  fxn = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(globals_) + len(var_names)))(runtime.addr)
-  return lambda *bufs, **vals: fxn(*[bufs[g] for g in globals_], *[vals[v] for v in var_names])
+  runtime.fxn.argtypes = [ctypes.c_uint64] * (len(globals_) + len(var_names))
+  return lambda *bufs, **vals: runtime.fxn(*[bufs[g] for g in globals_], *[vals[v] for v in var_names])
 
 def blend(active:UOp, new:UOp, old:UOp) -> UOp: # bitwise, since a where becomes a masked store, which is microcoded on x86
   keep = active.cast(new.dtype) * new.dtype.max

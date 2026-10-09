@@ -267,8 +267,9 @@ class CStyleLanguage(Renderer):
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
     prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
-    prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in UOp.sink(*uops).toposort() if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
-    for body in (u for u in UOp.sink(*uops).toposort() if u.op is Ops.LINEAR):
+    topo = UOp.sink(*uops).toposort(enter_calls=True)
+    prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in topo if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
+    for body in (u for u in topo if u.op is Ops.LINEAR):
       self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)
       params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
@@ -380,7 +381,7 @@ class MetalRenderer(CStyleLanguage):
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
     # NOTE: this is copied from PTX
-    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.bfloat16, name="x"),
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.TRUNC), dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, src=tuple(vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(dtypes.bfloat16))),
   ]) + pm_manual_bf16_cast
 

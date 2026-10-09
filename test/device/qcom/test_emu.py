@@ -139,7 +139,7 @@ class TestQCOMEmu(unittest.TestCase):
     from tinygrad.engine.realize import lower_and_compile, run_linear
     from test.mockgpu.qcom.qcomdriver import EmulatorError
     linear = lower_and_compile((Tensor.empty(4) + 1).schedule_linear())
-    binary = next(u for u in linear.toposort() if u.op is Ops.BINARY)
+    binary = next(u for u in linear.toposort(enter_calls=True) if u.op is Ops.BINARY)
     lib = binary.arg.replace((mesa.OPC_END << 55).to_bytes(8, "little"), (mesa.OPC_KILL << 55).to_bytes(8, "little"), 1)
     with self.assertRaisesRegex(EmulatorError, "OPC_KILL is not emulated"):
       run_linear(linear.substitute({binary: binary.replace(arg=lib)}, enter_calls=True))

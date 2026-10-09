@@ -7,7 +7,7 @@ from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
-from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
+from tinygrad.runtime.support.hcq2 import unwrap_view, to_name, ins
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.runtime.support.system import filter_visible_devices
@@ -103,9 +103,6 @@ def queue_of(call:UOp) -> tuple[tuple[str, str], bool]:
   (dst, src), wire = get_call_arg_uops(call), unwrap(rdma_wire(call))
   gpu = to_tuple((dst if wire is src else src).device)[0]
   return (min(gpu, wire.tag), max(gpu, wire.tag)), wire is src
-
-def ins(name:str, *src:UOp|int) -> UOp:
-  return UOp(Ops.INS, arg=(name, dtypes.void), src=tuple(UOp.const(s, dtypes.uint32) if isinstance(s, int) else s for s in src))
 
 def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the ops of each copy of a submit on one queue
   (pair, is_recv), nic = queue_of(calls[0]), cast(RDMADevice, Device[unwrap(rdma_wire(calls[0])).device])
