@@ -490,7 +490,7 @@ jobs:
     - name: Run runtime tests
       run: |
         (while sleep 5; do echo "MEM $(free -m | awk '/Mem:/{print $3"/"$2" MB"}') load $(cut -d' ' -f1 /proc/loadavg)"; done) &
-        python -m pytest -n=auto -v test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+        python -m pytest -n=${{ matrix.dev == 'WEBGPU' && '3' || 'auto' }} -v test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
