@@ -246,11 +246,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 class Allocator(Generic[DeviceType]):
   lru = True
 
-  def __init__(self, dev:DeviceType, supports_transfer:bool=True):
+  def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
     self.cache:dict[tuple[int, BufferSpec|None], list[BufferStorage]] = defaultdict(list)
-    self.supports_transfer = supports_transfer
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -287,10 +286,8 @@ class Allocator(Generic[DeviceType]):
   def _map(self, buf) -> BufferStorage: raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
-  # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
 class HostAllocator(Allocator):
-  def __init__(self, dev): super().__init__(dev, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if options.external_ptr is not None: view, meta = self._view(options.external_ptr, size), None
     elif (remote:=getattr(self.dev, "remote", None)) is not None: view, meta = remote.alloc_sysmem(round_up(size, mmap.PAGESIZE))
