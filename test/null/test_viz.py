@@ -1240,5 +1240,16 @@ class TestCLI(unittest.TestCase):
     sched_count = [s for s in rewrites if "View Kernel Graph" in s]
     self.assertEqual(len(sched_count), 3)
 
+  @needs_tracked_pm
+  def test_deep_input_ast(self):
+    with save_viz() as viz:
+      x = Tensor.empty(1, device="NULL")
+      for _ in range(4_000): x = x.sin()
+      x.realize()
+    with write_files(viz) as files, Context(DEBUG=5, NO_COLOR=1):
+      out = run_cli(*files, "-s", "TINY")
+    i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
+    self.assertIn(" # E", next(line for line in out[i+1]["value"].splitlines() if " = call " in line))
+
 if __name__ == "__main__":
   unittest.main()
