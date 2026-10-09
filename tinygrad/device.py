@@ -1,16 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING, NamedTuple, Iterable
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics, ctypes
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
+  from tinygrad.uop.ops import ParamArg
 
 # **************** Device ****************
 
@@ -334,20 +335,34 @@ class Compiler:
     raise CompileError("Compilation Error")
 
 
+class KernelParam(NamedTuple): # runtime caches must not own UOps
+  arg: ParamArg
+  numel: int
+  @property
+  def abi_dtype(self) -> DType: return self.arg.dtype if self.arg.addrspace is AddrSpace.ALU else dtypes.uint64
+
 @dataclass
 class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
   signature: tuple[tuple[str|None, int, DType, tuple], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
+  def iter_sig(types:Iterable[DType|tuple[str|None, int, DType, tuple]], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+    for dt in types:
+      if isinstance(dt, tuple): dt = dt[2]
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
+
+  @staticmethod
+  def pack(signature:tuple[KernelParam, ...], args:tuple[Any, ...], offset:int=0) -> bytearray:
+    data = bytearray(offset + len(signature)*8)
+    for p,a,(off,dt) in zip(signature, args, TinyELF.iter_sig(p.abi_dtype for p in signature), strict=True):
+      value = a if p.arg.addrspace is AddrSpace.ALU or isinstance(a, int) else ctypes.cast(a, ctypes.c_void_p).value
+      struct.pack_into(f'<{dt.fmt}', data, offset+off, value)
+    return data[:offset+off+dt.itemsize] if signature else data
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
