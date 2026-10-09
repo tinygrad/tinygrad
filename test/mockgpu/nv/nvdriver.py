@@ -1,9 +1,15 @@
 import ctypes, mmap, collections, functools, os
 from tinygrad.runtime.autogen import nv_570 as nv_gpu, libc
 from typing import cast, Any
-from tinygrad.helpers import to_mv
+from tinygrad.helpers import to_mv, OSX
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.nv.nvgpu import NVGPU
+
+def alias_pages(src:int, dst:int, size:int): # the pages at src show up at dst too
+  if not OSX: return libc.mremap(src, 0, size, libc.MREMAP_MAYMOVE|libc.MREMAP_FIXED, ctypes.c_void_p(dst))
+  task = ctypes.c_uint.in_dll(libsys:=ctypes.CDLL("/usr/lib/libSystem.B.dylib"), "mach_task_self_") # VM_FLAGS_OVERWRITE, shared, VM_INHERIT_COPY
+  u64, prot = ctypes.c_uint64, ctypes.byref(ctypes.c_int())
+  assert libsys.mach_vm_remap(task, ctypes.byref(u64(dst)), u64(size), u64(0), 0x4000, task, u64(src), 0, prot, prot, 1) == 0
 
 NVSubDevice = collections.namedtuple('NVSubDevice', ['device'])
 NVUserMode = collections.namedtuple('NVUserMode', ['subdevice'])
@@ -53,11 +59,11 @@ class NVDriver(VirtDriver):
                            VirtFile('/dev/nvidia-uvm', functools.partial(NVUVMFileDesc, driver=self))]
 
     self.root_handle = None
-    self.host_ranges: set[int] = set()
+    self.host_mems: dict[int, int] = {} # os descriptor handle -> its cpu address
 
     self.gpus = {}
     self.next_fd = (1 << 29)
-    self.next_handle = 1
+    self.next_handle = 0xcaf00000
 
     self.object_by_handle = {}
     self.opened_fds = {}
@@ -253,7 +259,7 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE:
       st = nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS.from_address(argp)
       # Registered host memory already has a CPU mapping; MAP_FIXED would discard its contents.
-      if st.base not in self.host_ranges:
+      if st.base not in self.host_mems.values():
         libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, libc.MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
     elif nr == nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION:
       st = nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS.from_address(argp)
@@ -265,11 +271,12 @@ class NVDriver(VirtDriver):
             break
         if gpu is None: return -1
         gpu.map_range(st.base, st.length)
+      if (cpu:=self.host_mems.get(st.hMemory, st.base)) != st.base: # host memory mapped away from its cpu address: alias its pages there
+        alias_pages(cpu, st.base, st.length)
     elif nr == nv_gpu.UVM_REGISTER_CHANNEL: pass
     elif nr == nv_gpu.UVM_FREE:
       st = nv_gpu.UVM_FREE_PARAMS.from_address(argp)
-      if st.base not in self.host_ranges: libc.munmap(st.base, st.length) # registered host memory belongs to its allocator
-      self.host_ranges.discard(st.base)
+      if st.base not in self.host_mems.values(): libc.munmap(st.base, st.length) # registered host memory belongs to its allocator
     else: raise RuntimeError(f"Unknown {nr} to nvidia-uvm")
     return 0
 
@@ -280,7 +287,7 @@ class NVDriver(VirtDriver):
       st:Any = nv_gpu.nv_ioctl_nvos02_parameters_with_fd.from_address(argp)
       # Track host memory (signal memory) - progress queues when written to
       if st.params.hClass == nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR:
-        self.host_ranges.add(st.params.pMemory)
+        self.host_mems[st.params.hObjectNew] = st.params.pMemory
         self.track_address(st.params.pMemory, st.params.pMemory + st.params.limit + 1,
                            lambda mv,off: None, lambda mv, off: self._gpu_mmio_write(mv, off, None))
     return 0

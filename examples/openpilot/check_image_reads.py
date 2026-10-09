@@ -1,16 +1,16 @@
 import pickle, sys
 from tinygrad.helpers import getenv, is_image_shape, temp
 from tinygrad.uop.ops import Ops
-from tinygrad.viz.serve import VizData, _reconstruct
+from tinygrad.viz.serve import VizData, _reconstruct, canonicalize_ast
 
 with open(sys.argv[1] if len(sys.argv) > 1 else temp("rewrites.pkl", append_user=True), "rb") as f: data = VizData(pickle.load(f))
 steps = [s for key, ctx in zip(data.trace.keys, data.trace.rewrites) if key.display_name.startswith("JIT ")
          for s in ctx if s.name == "View captured linear"]
 assert len(steps) == 1, f"expected one JIT compilation, found {len(steps)}"
 asts = [call.without_after.src[0] for call in _reconstruct(data, steps[0].sink).src]
-by_ast = {key.keys[1]: _reconstruct(data, s.sink) for key, ctx in zip(data.trace.keys, data.trace.rewrites)
-          for s in ctx if s.name == "View Program" and key.keys[1] in asts}
-programs = [by_ast[ast] if ast.op is Ops.SINK else ast for ast in asts if ast.op in {Ops.SINK, Ops.PROGRAM}]
+by_ast = {canonicalize_ast(_reconstruct(data, b.sink)): _reconstruct(data, p.sink) for ctx in data.trace.rewrites
+          for b in ctx if b.name == "View Base AST" for p in ctx if p.name == "View Program"}
+programs = [by_ast[canonicalize_ast(ast)] if ast.op is Ops.SINK else ast for ast in asts if ast.op in {Ops.SINK, Ops.PROGRAM}]
 read_image, gated_read_image = 0, 0
 for prg in programs:
   uops = prg.src[1].src

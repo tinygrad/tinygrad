@@ -2,7 +2,7 @@ import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple
 from tinygrad.device import Compiled
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
-from tinygrad.runtime.support.system import FileIOInterface
+from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -123,3 +123,5 @@ class MockFileIOInterface(FileIOInterface):
   def readlink(path): raise NotImplementedError()
   @staticmethod
   def eventfd(initval, flags=None): NotImplementedError()
+
+System.lock_memory = lambda addr, size: None # type: ignore[method-assign,has-type] # nothing dmas from host memory, like MAP_LOCKED in anon_mmap

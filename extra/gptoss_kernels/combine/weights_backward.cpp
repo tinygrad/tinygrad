@@ -15,7 +15,7 @@ extern "C" __global__ __launch_bounds__(256) void gptoss_combine_weights_backwar
     const float dy = (float)dout[(long long)token * 2880 + d];
 #pragma unroll
     for (int j = 0; j < 4; j++)
-      sums[j] += (float)(__hip_bfloat16)(dy * (float)z[(long long)rows[j] * 2880 + d]);
+      sums[j] = fmaf(dy, (float)z[(long long)rows[j] * 2880 + d], sums[j]);
   }
 
   // Reduce each slot across the four wavefronts.
@@ -37,9 +37,8 @@ extern "C" __global__ __launch_bounds__(256) void gptoss_combine_weights_backwar
     for (int offset = 32; offset > 0; offset >>= 1)
 #pragma unroll
       for (int j = 0; j < 4; j++) sums[j] += __shfl_down(sums[j], offset, 64);
-    // Autograd reduces into the BF16 broadcast operand, then casts back to FP32 weights.
     if (lane == 0)
 #pragma unroll
-      for (int j = 0; j < 4; j++) dw[token * 4 + j] = (float)(__hip_bfloat16)sums[j];
+      for (int j = 0; j < 4; j++) dw[token * 4 + j] = sums[j];
   }
 }
