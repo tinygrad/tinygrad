@@ -30,13 +30,6 @@ from tinygrad.helpers import all_same, all_int, argsort, partition, to_function_
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
-def do_number_param(ctx:tuple[int, dict[str, int]], x:UOp): # after the params, one slot per name
-  if x.is_variable: return x.replace(arg=replace(x.arg, slot=ctx[0] + ctx[1].setdefault(x.arg.name, len(ctx[1]))))
-
-pm_number_params = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), do_number_param),
-])
-
 def build_range_map(sink:UOp) -> dict[tuple, int]:
   ctx: dict[tuple, int] = {}
   for x in sink.toposort():
@@ -374,10 +367,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
-  # put the variables in slots
-  num_params = max([x.arg.slot + 1 for x in sink.toposort() if x.op is Ops.PARAM and not x.is_variable], default=0)
-  sink = graph_rewrite(sink, pm_number_params, ctx=(num_params, {}), name="number variables", walk=True)
-
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC:
     import os
@@ -495,10 +484,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       if full_sink.arg.estimates is None:
         full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=(isel:=IselContext(full_sink)), name="instruction selection", bottom_up=True)
+      prog_info = replace(prog_info, params=tuple(u for u in isel.func_args if u.op is Ops.PARAM))
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=replace(ProgramInfo.from_sink(prg.src[0], renderer.target),
+    params=tuple(u for u in IselContext(prg.src[0]).func_args if u.op is Ops.PARAM)))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg

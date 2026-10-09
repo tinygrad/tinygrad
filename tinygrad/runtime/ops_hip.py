@@ -3,7 +3,7 @@ from tinygrad.helpers import mv_address, getenv, suppress_finalizing
 from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program, TinyELF
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
-from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
+from tinygrad.runtime.support.c import init_c_var
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 def check(status):
@@ -34,21 +34,14 @@ class HIPProgram(Program[HIPDevice]):
   def __del__(self):
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
-    if not hasattr(self, "vargs"):
-      fields = ([(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] +
-        [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), o) for i,(o,dt) in enumerate(TinyELF.iter_sig(self.signature[len(args):], len(args)*8))])
-      self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
-      self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
-                                         ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
-
-    for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
-    for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
+    c_args = TinyELF.pack(self.signature, args)
+    vargs = (ctypes.c_void_p * 5)(1, mv_address(c_args), 2, ctypes.addressof(_arg_size:=ctypes.c_size_t(len(c_args))), 3)
 
     if wait: check(hip.hipEventRecord(self.dev.time_event_st, None))
 
-    check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs))
+    check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, vargs))
 
     if wait:
       check(hip.hipEventRecord(self.dev.time_event_en, None))

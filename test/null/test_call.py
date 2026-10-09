@@ -116,15 +116,15 @@ class TestArgOrder(unittest.TestCase):
       UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
 
 class TestCallCodegen(unittest.TestCase):
-  def test_compiled_scalar_slots_are_not_call_slots(self):
+  def test_compiled_free_variables_remain_slotless(self):
     out = UOp.placeholder((1,), dtypes.int)
     p = out.param_like(0)
     v = UOp.variable("external", 1, 8, dtype=dtypes.int)
     prg = to_program(p.index(0).store(v).sink(arg=KernelInfo("scalar")),
                      ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
-    self.assertEqual(prg.arg.vars[0].arg.slot, 1)
+    self.assertEqual(prg.arg.vars[0].arg.slot, -1)
     linear = UOp(Ops.LINEAR, src=(prg.call(p, v.bind(2)),))
-    # Slot 1 in the enclosing call must not rewrite the already-compiled program's ABI slot 1.
+    # Slot 1 in the enclosing call must not rewrite the compiled program's free Variable.
     resolved = resolve_linear_call(linear.call(out, UOp.variable("other", 1, 8, dtype=dtypes.int).bind(3)))
     self.assertIs(resolved.src[0].body, prg)
 
