@@ -163,7 +163,7 @@ def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None:
   return fd, p, shared(fd, io_uring.IORING_OFF_SQ_RING, p.cq_off.cqes + 16 * p.cq_entries), shared(fd, io_uring.IORING_OFF_SQES, 64 * RING_ENTRIES)
 
 @functools.cache
-def _stage(dev) -> Buffer: return Buffer(dev, STAGE_SZ, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(STAGE_SZ))
+def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, initial_value=bytes(STAGE_SZ))
 
 Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="disk_info", name="b"), lambda b: cast(DiskDevice, Device[b.device]).info),
   (UPat(Ops.ALLOC, tag="disk_stage", name="b"), lambda b: _stage(b.device)),
