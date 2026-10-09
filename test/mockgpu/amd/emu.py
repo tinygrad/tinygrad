@@ -1686,6 +1686,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       _wdata = lambda r, v, l, e: write_gpr(r, l, v, e)  # noqa: E731  (arg order: reg, val, lane, exec)
       if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
         bit_width, dword_idx = int(m.group(1)) - int(m.group(2)) + 1, int(m.group(2)) // 32
+        if bit_width < 32:
+          # D16 loads update one half of the destination VGPR and preserve the other half.
+          shift = int(m.group(2)) % 32
+          mask = ((1 << bit_width) - 1) << shift
+          old = (ctx.raccvgpr_dyn if use_acc else ctx.rvgpr_dyn)(vdst_reg + _c(dword_idx), lane)
+          val = (old & _c(0xFFFFFFFF ^ mask)) | ((val.cast(dtypes.uint32) << _c(shift)) & _c(mask))
         return _write_val(bit_width, val, _wdata, vdst_reg + _c(dword_idx), lane, exec_mask)
       return _write_val(data_bits, val, _wdata, vdst_reg, lane, exec_mask)
     return []
