@@ -7,7 +7,7 @@ extern "C" __global__ __launch_bounds__(256) void moe_router_topk(
   float topv[4];
   int topi[4];
   #pragma unroll
-  for (int i = 0; i < 4; i++) { topv[i] = 0.0f; topi[i] = -1; }
+  for (int i = 0; i < 4; i++) { topv[i] = -3.402823466e+38f; topi[i] = -1; }
 
   const long long base = (long long)token * 32;
   #pragma unroll
@@ -15,7 +15,7 @@ extern "C" __global__ __launch_bounds__(256) void moe_router_topk(
     float v = logits[base + e];
     int pos = 4;
     #pragma unroll
-    for (int i = 0; i < 4; i++) if (pos == 4 && (topi[i] == -1 || v > topv[i])) pos = i;
+    for (int i = 0; i < 4; i++) if (pos == 4 && v > topv[i]) pos = i;
     if (pos < 4) {
       #pragma unroll
       for (int i = 3; i > 0; i--) if (i > pos) { topv[i] = topv[i-1]; topi[i] = topi[i-1]; }
