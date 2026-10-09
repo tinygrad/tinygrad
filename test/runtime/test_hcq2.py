@@ -118,7 +118,7 @@ class TestHCQ2Fence(unittest.TestCase):
     self.assertFalse(t.is_alive())
     self.assertEqual(self.tl[1], base + 2)
 
-@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, LLVMRenderer)), "CALL is rendered in C style and LLVM only")
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
   def _run(body:UOp) -> list[UOp]:
@@ -169,7 +169,7 @@ class TestHCQ2FFI(unittest.TestCase):
 def addr_of(o:UOp, b:UOp): return o.index(0).store(b.getaddr("CPU")).sink() # o[0] = &b
 
 # host functions in a batch
-@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, LLVMRenderer)), "CALL is rendered in C style and LLVM only")
 class TestHostCalls(unittest.TestCase):
   def setUp(self): self.enterContext(Context(HCQ_RUNTIME_DEV="CPU"))
 
