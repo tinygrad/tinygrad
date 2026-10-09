@@ -34,7 +34,7 @@ def synchronous(status_enum:dict[int, str], has_emsg:bool=False):
         status, (*payload, emsg) = s, [from_wgpu_str(a) if type(a) is webgpu.WGPUStringView else a for a in args[:-2]] + ([] if has_emsg else [None])
 
       future = fn(*args, fn.argtypes[-1](mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb)) # type: ignore
-      if (future_status:=webgpu.wgpuInstanceWaitAny(instance, 1, webgpu.WGPUFutureWaitInfo(future), 2**64-1)) != webgpu.WGPUWaitStatus_Success:
+      if (future_status:=webgpu.wgpuInstanceWaitAny(instance, 1, webgpu.WGPUFutureWaitInfo(future), 60*10**9)) != webgpu.WGPUWaitStatus_Success:
         raise RuntimeError(f"error while waiting for future ({fn.__name__}): {webgpu.enum_WGPUWaitStatus.get(future_status)}")
 
       if status != 1: raise RuntimeError(f"[{status_enum.get(status)}]{emsg or ''}")
