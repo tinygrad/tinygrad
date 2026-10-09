@@ -330,7 +330,9 @@ class QCOMDevice(Compiled):
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
     self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
     dev_id = mesa.struct_fd_dev_id(self.gpu_id[0] * 100 + self.gpu_id[1] * 10 + self.gpu_id[2], info.chip_id)
-    self.fibers_per_sp = mesa.fd_dev_info(dev_id).fibers_per_sp or 128 * 16
+    self.fibers_per_sp = 128 * 16
+    try: self.fibers_per_sp = mesa.fd_dev_info(dev_id).fibers_per_sp or self.fibers_per_sp
+    except AttributeError: pass
 
     # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
     if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
