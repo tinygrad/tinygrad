@@ -1240,5 +1240,14 @@ class TestCLI(unittest.TestCase):
     sched_count = [s for s in rewrites if "View Kernel Graph" in s]
     self.assertEqual(len(sched_count), 3)
 
+  @needs_tracked_pm
+  def test_deep_input_ast(self):
+    with save_viz() as viz:
+      x = Tensor.empty(1, device="NULL")
+      for _ in range(4_000): x = x.sin()
+      x.realize()
+    with write_files(viz) as files:
+      run_cli(*files, "-s", "NULL")
+
 if __name__ == "__main__":
   unittest.main()
