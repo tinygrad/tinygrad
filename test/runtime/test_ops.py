@@ -2278,6 +2278,7 @@ class TestOps(TensorTestCase):
       lambda x,w: Tensor.conv_transpose2d(x,w,groups=2), grad_rtol=1e-5)
 
   @slow_test
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "TODO: hangs in DeviceCreateComputePipeline on CI")
   def test_padded_conv_transpose2d(self):
     for padding in [(1,2), (2,1), 2, 1, 0]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
