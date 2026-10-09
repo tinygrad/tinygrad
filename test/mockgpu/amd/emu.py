@@ -1642,6 +1642,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
                 'DATA2': _u64(_rvdata(data1_reg, lane), _rvdata(data1_reg + _c(1), lane)) if has_data1 else UOp.const(0, dtypes.uint64)}
       else:  # 96/128-bit: one register per dword
         data = {'DATA': _rvdata(vdata_reg, lane), **{f'DATA{i}': _rvdata(vdata_reg + _c(i), lane) for i in range(1, data_bits_mem // 32)}}
+      if 'D16' in op_name: data['RETURN_DATA'] = _rvdata(vdst_reg, lane)
       # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
               'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data}
@@ -1724,6 +1725,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
   pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane))
+  if is_lds and 'D16' in op_name and writes_return_data: assigns = [('RETURN_DATA.b32', pcode_vars['RETURN_DATA'])]
   stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data)]
 
   # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
@@ -1966,11 +1968,13 @@ ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  lifted = None
   if ASM_CALL:
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, arch, ASM_CALL_BACKEND)
-    lifted = (prg, get_runtime(ASM_CALL_BACKEND, prg))
+    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, user_data, ASM_CALL_BACKEND)
+    with _MXCSRContext():
+      get_runtime(ASM_CALL_BACKEND, prg)(*[0]*len(prg.arg.globals),
+        vals=tuple({"lib":lib, "args_ptr":args_ptr}[v.arg.name] for v in prg.arg.vars))
+    return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
@@ -2010,10 +2014,6 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf), ctypes.c_uint64(st.vgpr_buf._buf),
                          ctypes.c_uint64(vmem_buf._buf), ctypes.c_uint64(lds_buf._buf),
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
-    if lifted is not None:
-      prg, runtime = lifted
-      for st, c_bufs in waves: runtime(*[c_bufs[g].value for g in prg.arg.globals], vals=(lib,))
-      return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):
       if all(done): return
