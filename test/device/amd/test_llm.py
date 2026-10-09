@@ -5,7 +5,6 @@ from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
                                       QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.helpers import DEV, OSX
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
@@ -303,7 +302,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
-  @unittest.skipIf(OSX and DEV.interface.startswith("MOCK"), "TODO: incorrect results in the macOS AMD emulator")
   def test_flash_attention_decode_symbolic_gqa(self):
     with patch.object(Tensor, "scaled_dot_product_attention", side_effect=AssertionError("expected custom decode")):
       self._test_flash_decode(8, 2, 256, 128, 37, symbolic=True)
@@ -311,7 +309,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
 
   def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
-  @unittest.skipIf(OSX and DEV.interface.startswith("MOCK"), "TODO: incorrect results in the macOS AMD emulator")
   def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
   def _test_flash_decode(self, heads, kv_heads, dim, n, valid, symbolic=False):

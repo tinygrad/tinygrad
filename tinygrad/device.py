@@ -108,7 +108,7 @@ class Buffer:
   def __init__(self, device:str, nbytes:int, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False,
                allocator:Allocator|None=None):
-    self.device, self.nbytes, self.offset, self.allocated_views, self._base = Device.canonicalize(device), nbytes, offset, 0, base
+    self.device, self.nbytes, self.offset, self._base = Device.canonicalize(device), nbytes, offset, base
     if allocator is not None: self.allocator = allocator
     self.options = options if options is not None else BufferSpec()
     self._storage:BufferStorage|None = None
@@ -181,7 +181,6 @@ class Buffer:
         GlobalCounters.mem_used += self.nbytes
         GlobalCounters.mem_used_per_device[self.device] += self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"nbytes":self.nbytes}))
-    elif self._storage is None: self.base.allocated_views += 1
     self._storage, self._base_storage = storage, self.base._storage if self._base else None
     return self
 
@@ -194,7 +193,6 @@ class Buffer:
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
       self.allocator.free(self._storage, self.nbytes, self.options)
-    else: self.base.allocated_views -= 1
     self._storage, self._base_storage = None, None
 
   def __reduce_ex__(self, protocol):
@@ -246,11 +244,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 class Allocator(Generic[DeviceType]):
   lru = True
 
-  def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
+  def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
     self.cache:dict[tuple[int, BufferSpec|None], list[BufferStorage]] = defaultdict(list)
-    self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -287,10 +284,8 @@ class Allocator(Generic[DeviceType]):
   def _map(self, buf) -> BufferStorage: raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
-  # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
 class HostAllocator(Allocator):
-  def __init__(self, dev): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if options.external_ptr is not None: view, meta = self._view(options.external_ptr, size), None
     elif (remote:=getattr(self.dev, "remote", None)) is not None: view, meta = remote.alloc_sysmem(round_up(size, mmap.PAGESIZE))
@@ -383,7 +378,6 @@ class Compiled:
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
-    self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
 
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
@@ -428,7 +422,6 @@ class Compiled:
     if err[0]: raise RuntimeError(f"{self.device} failed with {err[0]}")
 
   def synchronize(self, timeout:int|None=None):
-    for d in [*self.pending]: d._wait_signal(d.timeline.host.view(fmt='Q'), self.pending.pop(d), timeout) # a failed peer raises its own error, once
     try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()

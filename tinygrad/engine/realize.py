@@ -148,12 +148,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
-    if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
-      dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
-    elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
-         and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
-      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif dest.get_storage().host is not None and src.get_storage().host is not None:
+    if dest.get_storage().host is not None and src.get_storage().host is not None:
       for b in (dest, src): b.allocator.dev.synchronize()
       with cpu_profile(f"{src.device} -> {dest.device}", f"{src.device}:COPY"): dest.host[:] = src.host[:]
     elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(allow_zero_copy=True), src._buf)
@@ -164,6 +159,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
   ets:list[float|None] = []
   resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
   for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
+    if devices is None and device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = {i:b.ensure_allocated().get_buf(device) for i,b in zip(ast.arg.globals, bufs)}
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -178,6 +174,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
   resolved = resolve_params(call, ctx.input_uops)
+  Device["CPU"].synchronize(ctx.timeout)
   for bufs, device_vars in unwrap_multi(call, resolved):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
     var_vals = {**ctx.var_vals, **device_vars}
@@ -198,7 +195,6 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
-  for host, dev in info.host_deps: Device[host].pending[Device[dev]] = Device[dev].timeline.host.view(fmt='Q')[1]
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
@@ -271,7 +267,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo, HOST_DEVS # noqa: E402 # down here, hcq2 imports realize
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE, name="ast"),), name="call", allow_any_len=True), exec_copy),
