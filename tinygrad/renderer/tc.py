@@ -78,7 +78,7 @@ amd_rdna3 = [TensorCore(dtype_in=di, dtype_out=do, frag_a=(("m0", "m1", "m2", "m
 amd_rdna4 = [TensorCore(dtype_in=di, dtype_out=do, frag_a=(("m0", "m1", "m2", "m3", "k2"), ("k0", "k1", "k3")),
   frag_b=(("n0", "n1", "n2", "n3", "k2"), ("k0", "k1", "k3")), frag_c=(("n0", "n1", "n2", "n3", "m3"), ("m0", "m1", "m2")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16),
-                (dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
+                (dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float),(dtypes.int8,dtypes.int32)]]
 
 # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf
 def mfma(K:int, di:DType, do:DType) -> TensorCore:
@@ -112,11 +112,11 @@ pm_validate_wmma_rdna3 = PatternMatcher([
     if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
 ])
 
-def pm_wmma_fp8(dtype:DType) -> PatternMatcher:
+def pm_wmma_pack(dtype:DType) -> PatternMatcher:
   return PatternMatcher([
-    (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+    (UPat(Ops.WMMA, name="x", dtype=(dtypes.float, dtypes.int32)),
       lambda x, dtype=dtype: x.replace(src=(x.src[0].bitcast(dtype), x.src[1].bitcast(dtype), x.src[2]))
-      if x.src[0].dtype in dtypes.fp8s and x.src[0].max_numel() == 8 else None),
+      if x.src[0].dtype in (*dtypes.fp8s, dtypes.int8) and x.src[0].max_numel() == 8 else None),
   ])
 
 pm_validate_wmma_rdna4 = PatternMatcher([
@@ -126,7 +126,7 @@ pm_validate_wmma_rdna4 = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
-]) + pm_wmma_fp8(dtypes.uint32)
+]) + pm_wmma_pack(dtypes.uint32)
 
 pm_validate_wmma_cdna = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
@@ -135,7 +135,7 @@ pm_validate_wmma_cdna = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
-]) + pm_wmma_fp8(dtypes.uint64)
+]) + pm_wmma_pack(dtypes.uint64)
 
 # ***** Apple Metal *****
 
