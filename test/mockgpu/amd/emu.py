@@ -1966,11 +1966,13 @@ ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  lifted = None
   if ASM_CALL:
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, arch, ASM_CALL_BACKEND)
-    lifted = (prg, get_runtime(ASM_CALL_BACKEND, prg))
+    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, user_data, ASM_CALL_BACKEND)
+    with _MXCSRContext():
+      get_runtime(ASM_CALL_BACKEND, prg)(*[{"lib":lib, "args_ptr":args_ptr}[p.arg.name] if p.addrspace is AddrSpace.ALU else 0
+                                           for p in prg.kernel_params])
+    return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
@@ -2010,10 +2012,6 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf), ctypes.c_uint64(st.vgpr_buf._buf),
                          ctypes.c_uint64(vmem_buf._buf), ctypes.c_uint64(lds_buf._buf),
                          ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
-    if lifted is not None:
-      prg, runtime = lifted
-      for st, c_bufs in waves: runtime(*[lib if p.addrspace is AddrSpace.ALU else c_bufs[p.arg.slot].value for p in prg.kernel_params])
-      return 0
     done = [False] * len(waves)
     for _ in range(10_000_000):
       if all(done): return
