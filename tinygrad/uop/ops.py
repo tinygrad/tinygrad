@@ -212,7 +212,7 @@ class recursive_property:
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
+    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
 class _UOpTuple(tuple):
@@ -283,7 +283,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
 
-  def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
+  def toposort(self, gate:Callable|None=None, enter_calls=False) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:

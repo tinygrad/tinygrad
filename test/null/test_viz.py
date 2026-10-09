@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM, CAPTURE_PROCESS_REPLAY
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -1241,6 +1241,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len(sched_count), 3)
 
   @needs_tracked_pm
+  @unittest.skipIf(CAPTURE_PROCESS_REPLAY, "TODO: fix by not pickling UOps in process replay")
   def test_deep_input_ast(self):
     with save_viz() as viz:
       x = Tensor.empty(1, device="NULL")

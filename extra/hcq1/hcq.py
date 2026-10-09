@@ -476,8 +476,9 @@ class HCQAllocatorBase(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
   This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
-  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, **kwargs):
-    super().__init__(dev, **kwargs)
+  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, supports_transfer:bool=True):
+    super().__init__(dev)
+    self.supports_transfer = supports_transfer
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)).buf for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
 

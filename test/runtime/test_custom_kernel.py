@@ -648,6 +648,22 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [1, 1, 8, 1])
 
+  def test_call_body_range_is_not_ours(self):
+    @uopfunc
+    def mul(out:UOp, A:UOp):
+      k = UOp.range(4, 0)
+      return out[k].store(A[k]*3).end(k).sink()
+
+    def kernel(C:UOp, A:UOp):
+      m, i, call = UOp.range(3, 1), UOp.range(4, 0), mul(C, A)
+      self.assertIn(i, call.body.toposort())
+      end_m = C.after(call)[m].store(A[m]).end(m)
+      return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
   @unittest.expectedFailure
   def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)
 
