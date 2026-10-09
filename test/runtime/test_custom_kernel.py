@@ -1,5 +1,5 @@
-import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+import unittest, itertools
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, TinyJit, function
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
@@ -28,6 +28,10 @@ def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   assert B.numel() == A.numel()
   i = UOp.range(A.numel(), 0)
   return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.numel()}"))
+
+def custom_scale_kernel(a:UOp, B:UOp, A:UOp) -> UOp:
+  i = UOp.range(A.shape[0], 0)
+  return B[i].store(A[i] * a).end(i).sink(arg=KernelInfo(name=f"scale_{A.shape[0]}"))
 
 def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   # A is unused on purpose: the kernel takes call buffers 0 and 2, not 0, 1, 2
@@ -179,6 +183,30 @@ class TestCustomKernel(unittest.TestCase):
     a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
     out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
     self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
+  def test_scalar_args_any_order(self):
+    for order in itertools.permutations(("out", "x", "a", "b")):
+      def kernel(*params):
+        p, i = dict(zip(order, params)), UOp.range(4, 0)
+        return p["out"][i].store(p["x"][i] * p["a"] + p["b"]).end(i).sink(arg=KernelInfo(name="scalar_args_"+"_".join(order)))
+      args = {"out": Tensor.empty(4, dtype=dtypes.int), "x": Tensor([1, 2, 3, 4], dtype=dtypes.int),
+              "a": Tensor(UOp.variable("a", 1, 9, dtype=dtypes.int).bind(3)), "b": Tensor(UOp.variable("b", 1, 9, dtype=dtypes.int).bind(5))}
+      with self.subTest(order=order):
+        out = Tensor.custom_kernel(*[args[k] for k in order], fxn=kernel)[order.index("out")]
+        self.assertEqual(out.tolist(), [8, 11, 14, 17])
+
+  def test_scalar_arg_first_jit(self):
+    @TinyJit
+    def f(x:Tensor, a:UOp) -> Tensor:
+      return Tensor.custom_kernel(Tensor(a), Tensor.empty(4, dtype=dtypes.int), x, fxn=custom_scale_kernel)[1].realize()
+    x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    for a in (2, 3, 4, 5): self.assertEqual(f(x, UOp.variable("a", 1, 9, dtype=dtypes.int).bind(a)).tolist(), [a, 2*a, 3*a, 4*a])
+
+  def test_scalar_arg_from_function(self):
+    @function(precompile=True)
+    def f(a:UOp, x:Tensor) -> Tensor: return Tensor.custom_kernel(Tensor(a), Tensor.empty(4, dtype=dtypes.int), x, fxn=custom_scale_kernel)[1]
+    x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    for a in (2, 7): self.assertEqual(f(UOp.variable("a", 1, 9, dtype=dtypes.int).bind(a), x).tolist(), [a, 2*a, 3*a, 4*a])
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
