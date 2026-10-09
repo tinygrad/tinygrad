@@ -340,11 +340,11 @@ class TinyELF:
   name: str
   target: Target
   # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
-  signature: tuple[tuple[str|None, AddrSpace|None, DType, tuple], ...]
+  signature: tuple[tuple[str|None, AddrSpace, DType, tuple], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, AddrSpace|None, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+  def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
     for _,a,dt,_ in signature:
       if a is not AddrSpace.ALU: dt = dtypes.uint64 # a buffer is passed by its address
       yield (offset:=round_up(offset, dt.itemsize)), dt

@@ -28,7 +28,7 @@ class ParamArg:
   vmin_vmax: tuple[PyConst, PyConst]|None = None
   multiple_of: int|None = None
   name: str|None = None
-  addrspace: AddrSpace|None = AddrSpace.GLOBAL
+  addrspace: AddrSpace = AddrSpace.GLOBAL
   device: str|tuple[str, ...]|None = None
   volatile: bool = False
   # (h, w) if this is an image2d buffer, then the size CONST is h*w*4
@@ -1298,14 +1298,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return [s.after(kernel) for s in srcs]
 
   @functools.cached_property
-  def kernel_params(self) -> list[UOp]:
+  def kernel_params(self) -> tuple[UOp, ...]:
     # the kernel's params in its arg order, which is slot order. the LINEAR keeps two IMAGE params of one slot in order, x86 isel drops stack params
     params = [u for u in self.src[1].src if u.op is Ops.PARAM]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
-    return sorted(params, key=lambda p: p.arg.slot)
+    return tuple(sorted(params, key=lambda p: p.arg.slot))
 
   def to_elf(self) -> TinyELF:
-    sig = tuple((p.arg.name, p.addrspace, p.dtype, p._shape) for p in self.kernel_params)
+    sig = tuple((p.arg.name, p.arg.addrspace, p.dtype, p._shape) for p in self.kernel_params)
     return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
   @property
