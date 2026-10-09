@@ -169,15 +169,11 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  pos = [k for k, s in enumerate(call.src[1:]) if not s.is_bound_var]
   Device["CPU"].synchronize(ctx.timeout)
-  for lane, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
+  pos = [k for k, s in enumerate(call.src[1:]) if not s.is_bound_var]
+  for lane, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = dict(zip(pos, lane[:len(lane)//2])), dict(zip(pos, lane[len(lane)//2:]))
-    var_vals = {**ctx.var_vals, **device_vars}
-    cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
-    global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[var_vals[p.expr] if p.addrspace is AddrSpace.ALU else bufs[p.arg.slot].ensure_allocated()._buf for p in prg.kernel_params],
-           global_size=global_size, local_size=local_size)
     for i in prg.arg.outs:
       dt = _to_np_dtype(call.src[1+i].dtype)
       assert dt is not None, f"no np dtype for {call.src[1+i].dtype}"
@@ -209,12 +205,10 @@ pm_flatten_linear = PatternMatcher([
 ])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, params))
-  it = iter(shadows)
-  cpu_args = tuple(s if s.is_bound_var else next(it) for s in call.src[1:])
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*cpu_args, *call.src[1:])))
+  shadows = tuple(p if p.is_bound_var else
+                  UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
+  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if not p.is_bound_var)
+  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value

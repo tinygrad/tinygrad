@@ -99,8 +99,7 @@ class WebGPUProgram(Program['WebGpuDevice']):
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_layout, entryCount=len(bindings), entries=bindings)
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     bind_group = webgpu.wgpuDeviceCreateBindGroup(self.dev.device_res, bind_group_desc)
-    for binding in (bindings[0], *(b for b,(_,a,_,_) in zip(bindings[1:], self.signature) if a is AddrSpace.ALU)):
-      webgpu.wgpuBufferRelease(binding.buffer)
+    for b in bindings[:1] + [b for b,(_,a,_,_) in zip(bindings[1:], self.signature) if a is AddrSpace.ALU]: webgpu.wgpuBufferRelease(b.buffer)
     if err := self.dev.pop_error(): raise RuntimeError(f"Error creating bind group: {err}")
 
     # Creating compute pipeline
