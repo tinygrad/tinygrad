@@ -16,7 +16,7 @@ def ldt(dt:DType, count=1, ptr=False):
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", **{d: "i8" for d in dtypes.fp8s},
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
-def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.op is Ops.INDEX) # an external function's arg, an index is its address
+def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, AddrSpace.ALU)) # an external function's arg, an index is its address
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
@@ -79,7 +79,7 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 
 base_rewrite = PatternMatcher([
   # memory load/store
-  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
+  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: None if x.src[0].addrspace in (None, AddrSpace.ALU) else
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda ctx,buf,c,x:
@@ -196,8 +196,9 @@ class LLVMRenderer(Renderer):
           kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
+      elif u.op is Ops.BINARY: r[u] = f"@bin_{u.key.hex()}"
       elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
-      elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
+      elif (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype)) or (u.op is Ops.BITCAST and u.addrspace not in (None, AddrSpace.ALU)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
         vc += 1
@@ -222,7 +223,9 @@ class CPULLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
-    return "\n".join([*decls.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
+    blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
+             for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.BINARY}
+    return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
