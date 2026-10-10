@@ -503,9 +503,9 @@ class HIPRenderer(CStyleLanguage):
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
 
   @staticmethod
-  def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
+  def is_cdna(arch): return arch in {"gfx942", "gfx950"}
   @staticmethod
-  def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
+  def is_cdna4(arch): return arch == "gfx950"
   def __init__(self, target:Target, use_hipcc=False): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler
