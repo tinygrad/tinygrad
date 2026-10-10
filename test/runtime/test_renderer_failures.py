@@ -55,6 +55,7 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int.min+1).cast(dtypes.int))
     self.assertEqual(ret[0], 1)
 
+  @unittest.skipUnless(dtypes.int64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "require native int64 rendering")
   def test_int64_const_floordiv(self):
     x = Tensor([-1], dtype=dtypes.int64).realize()
     m = -(1 << 63)
