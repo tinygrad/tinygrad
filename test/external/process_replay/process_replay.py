@@ -110,8 +110,8 @@ def _pmap(fxns:dict[str, Callable]) -> None:
     cur.close()
 
   with ProcessPoolExecutor(multiprocessing.cpu_count(), mp_context=multiprocessing.get_context("spawn")) as pool:
-    bar = tqdm(total=row_count)
-    for _ in pool.map(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(s)
+    with tqdm(total=row_count) as bar:
+      for _ in pool.map(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(min(s, row_count-bar.n))
 
 # *** main loop
 
