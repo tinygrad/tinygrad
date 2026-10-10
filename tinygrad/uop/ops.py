@@ -1115,6 +1115,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (c:=s1_vmin) == s1_vmax < 0: return (s0_vmin%c, s0_vmax%c) if s0_vmin//c == s0_vmax//c else (c+1, 0)
         if s1_vmin > 0: return (0, s1_vmax-1)
         if s1_vmax < 0: return (s1_vmin+1, 0)
+        # Nonnegative modulo cannot exceed its dividend, even when the divisor's interval includes zero.
+        if s0_vmin >= 0 and s1_vmin >= 0: return (0, s0_vmax)
       if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int):
         return ~int(s0_vmax), ~int(s0_vmin)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)

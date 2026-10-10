@@ -70,6 +70,18 @@ class TestFlipDecomposition(unittest.TestCase):
         out = (x[:, :n].flip(1).contiguous() * w[:, :n]).sum().item()
         self.assertEqual(out, int((data[:, :size][:, ::-1] * weights[:, :size]).sum()))
 
+  def test_symbolic_gradient_index_folding(self):
+    x, dy = Tensor.empty(2, 8).realize(), Tensor.empty(2, 8).realize()
+    n = Variable('flip_fold_size', 0, 8).bind(0)
+    grad = x[:, :n].flip(1).gradient(x, gradient=dy[:, :n])[0]
+    linear, _ = grad.contiguous().linear_with_vars()
+    divisors = [u.src[1] for call in linear.src if call.body.op is Ops.SINK for u in call.body.toposort()
+                if u.op in {Ops.FLOORDIV, Ops.FLOORMOD}]
+    self.assertTrue(divisors)
+    # Redundant modulo by n and n*(width+1) must fold away, not acquire runtime guards.
+    self.assertTrue(all(d.vmin > 0 for d in divisors))
+    self.assertEqual({d for d in divisors if d.op is not Ops.CONST}, {(n.unbind()[0]-1).maximum(1).simplify()})
+
   def test_symbolic_gradient(self):
     weights = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
     x, dy = Tensor.zeros(2, 8).contiguous().realize(), Tensor(weights).realize()
