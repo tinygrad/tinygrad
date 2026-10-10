@@ -3,7 +3,7 @@ import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
-from tinygrad.uop.ops import gate_kernel_sink
+from tinygrad.uop.ops import gate_kernel_sink, smax
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
 
@@ -160,6 +160,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   combined_axes = UOp.const(0).usum(axes_in)
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
+    s = smax(s, 1)  # Zero-sized dimensions have no valid indices, but masked index arithmetic may still execute.
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
