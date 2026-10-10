@@ -113,7 +113,7 @@ class Tensor(RandMixin):
     return ret
 
   # alu, _uop, _wrap_uop and const are used by the mixins
-  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src) # pyright: ignore[reportIncompatibleMethodOverride]
+  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   @property
   def _uop(self) -> UOp: return self.uop
   @classmethod
