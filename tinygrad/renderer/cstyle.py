@@ -1,5 +1,5 @@
 from typing import Literal, Callable
-import math, sys
+import math, sys, string
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
@@ -11,7 +11,8 @@ from tinygrad.renderer import Renderer
 base_rewrite = PatternMatcher([
   # local/reg buffers
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: ctx.render_buffer(x)),
-  (UPat(Ops.BINARY, name="x"), lambda ctx,x: f'const unsigned char {ctx[x]}[] = "' + ''.join(f'\\x{b:02x}' for b in x.arg) + '";'),
+  (UPat(Ops.BINARY, name="x"), lambda ctx,x: f'unsigned char {ctx[x]}[] = "' + ''.join(chr(b) if 32 <= b < 127 and chr(b) not in '"\\?' else
+   f'\\x{b:02x}' + '""' * (chr(n) in string.hexdigits) for b, n in zip(x.arg, x.arg[1:] + b"\0")) + '";'), # a hex escape stops before a hex digit
 
   # range/loop/if/endif
   (UPat(Ops.RANGE, dtypes.void), lambda ctx: "for (;;) {"),
@@ -240,7 +241,7 @@ class CStyleLanguage(Renderer):
       elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.axis_type]}idx"+range_str(u)
       else:
         prefix = {Ops.WMMA: "wmma", Ops.BUFFER: "buf", Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.STACK: "cast",
-                  Ops.INDEX: "bidx", Ops.LOAD: "val"}.get(u.op, "alu")
+                  Ops.INDEX: "bidx", Ops.LOAD: "val", Ops.BINARY: "bin"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
 
       l: str|None = self.string_rewrite.rewrite(u, ctx=self)
