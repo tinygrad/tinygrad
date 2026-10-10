@@ -93,7 +93,8 @@ nload = nir_instr(nc=lambda u:u.max_numel(), bs=lambda u:u.dtype.bitsize, num_co
 ngid = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_workgroup_id))
 nlid = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_local_invocation_id))
 
-nbarrier = nir_instr(has_def=False, intrins={"EXECUTION_SCOPE":mesa.SCOPE_WORKGROUP})(
+nbarrier = nir_instr(has_def=False, intrins={"EXECUTION_SCOPE":mesa.SCOPE_WORKGROUP, "MEMORY_SCOPE":mesa.SCOPE_WORKGROUP,
+                                             "MEMORY_SEMANTICS":mesa.NIR_MEMORY_ACQ_REL, "MEMORY_MODES":mesa.nir_var_mem_shared})(
   lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_barrier))
 
 @nir_instr(has_def=False, target=lambda tgt:tgt and ctypes.pointer(tgt), condition=lambda cond:cond and nsrc(cond),
@@ -283,6 +284,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
       lambda b,img,idx_y,idx_x,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
 class IR3Renderer(NIRRenderer):
+  code_for_op = {k:v for k,v in NIRRenderer.code_for_op.items() if k != Ops.SIN}
   def nload_img(ctx,img,idx_y,idx_x):
     ctx.texs.add(img)
     return _nload_img(ctx.b, ctx.r[img], ctx.r[idx_y], ctx.r[idx_x], img.dtype)
@@ -317,5 +319,6 @@ class IR3Renderer(NIRRenderer):
 
     self.b.shader.contents.info.num_ubos = len([u for u in bufs if not is_image_shape(u._shape)])
     self.b.shader.contents.info.num_images = texs() + imgs()
+    self.b.shader.contents.info.float_controls_execution_mode = (1 << 15) | (1 << 16) # FLOAT_CONTROLS_ROUNDING_MODE_RTE_FP16 | _FP32
 
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}
