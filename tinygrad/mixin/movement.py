@@ -587,6 +587,7 @@ class MovementMixin:
     ```
     """
     repeats = argfix(repeats, *args)
+    if any(resolve(r < 0, False) for r in repeats): raise RuntimeError(f"repeats should be non negative, got {repeats} instead")
     base_shape = _align_left(self.shape, repeats)[0]
     unsqueezed_shape = flatten([[s] if r == 1 else [1, s] for r, s in zip(repeats, base_shape)])
     expanded_shape = flatten([[s] if r == 1 else [r, s] for r, s in zip(repeats, base_shape)])

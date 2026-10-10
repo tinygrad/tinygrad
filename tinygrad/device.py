@@ -108,7 +108,7 @@ class Buffer:
   def __init__(self, device:str, nbytes:int, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False,
                allocator:Allocator|None=None):
-    self.device, self.nbytes, self.offset, self.allocated_views, self._base = Device.canonicalize(device), nbytes, offset, 0, base
+    self.device, self.nbytes, self.offset, self._base = Device.canonicalize(device), nbytes, offset, base
     if allocator is not None: self.allocator = allocator
     self.options = options if options is not None else BufferSpec()
     self._storage:BufferStorage|None = None
@@ -181,7 +181,6 @@ class Buffer:
         GlobalCounters.mem_used += self.nbytes
         GlobalCounters.mem_used_per_device[self.device] += self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"nbytes":self.nbytes}))
-    elif self._storage is None: self.base.allocated_views += 1
     self._storage, self._base_storage = storage, self.base._storage if self._base else None
     return self
 
@@ -194,7 +193,6 @@ class Buffer:
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
       self.allocator.free(self._storage, self.nbytes, self.options)
-    else: self.base.allocated_views -= 1
     self._storage, self._base_storage = None, None
 
   def __reduce_ex__(self, protocol):
@@ -246,11 +244,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 class Allocator(Generic[DeviceType]):
   lru = True
 
-  def __init__(self, dev:DeviceType, supports_transfer:bool=True):
+  def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
     self.cache:dict[tuple[int, BufferSpec|None], list[BufferStorage]] = defaultdict(list)
-    self.supports_transfer = supports_transfer
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -287,10 +284,8 @@ class Allocator(Generic[DeviceType]):
   def _map(self, buf) -> BufferStorage: raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
-  # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
 class HostAllocator(Allocator):
-  def __init__(self, dev): super().__init__(dev, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if options.external_ptr is not None: view, meta = self._view(options.external_ptr, size), None
     elif (remote:=getattr(self.dev, "remote", None)) is not None: view, meta = remote.alloc_sysmem(round_up(size, mmap.PAGESIZE))
@@ -391,7 +386,7 @@ class Compiled:
   def has_copy_queue(self) -> bool: return True
 
   @property
-  def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.value
+  def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()
@@ -459,10 +454,10 @@ class Compiled:
   def _renderer_name(self, r:type[Renderer]) -> str:
     return r.__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
 
-  def _select_renderer(self) -> Renderer:
+  def _select_renderer(self, cv=DEV) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} instead"
-    t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
+    t = cv.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, t)
 
