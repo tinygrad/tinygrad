@@ -1,22 +1,22 @@
-import os, sys, mmap, io, ctypes, contextlib, pathlib
-from typing import Generator, Callable
-from tinygrad.helpers import OSX, round_up, mv_address
-from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator
+import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools
+from dataclasses import replace
+from typing import cast
+from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
+from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
+from tinygrad.runtime.support.hcq2 import ccall, ins, patch
 with contextlib.suppress(ImportError):
   import _posixshmem
   from tinygrad.runtime.autogen import io_uring, libc
 
 class DiskDevice(Compiled):
-  _tried_io_uring_init = False
-
   def synchronize(self, timeout:int|None=None): pass
 
   def __init__(self, device:str):
-    if not DiskDevice._tried_io_uring_init: self._iouring_setup()
-
     self.size: int|None = None
     self.fd: int|None = None
-    self.refcount = 0
+    self.refcount, self.info = 0, Buffer(HCQ_RUNTIME_DEV.device, 16, options=BufferSpec(nolru=True)) # info: [fd, mmap address] for batch reads
     super().__init__(device, DiskAllocator(self), [], None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
@@ -34,6 +34,7 @@ class DiskDevice(Compiled):
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < size: os.ftruncate(self.fd, size)
       self.mem = mmap.mmap(self.fd, size)
+      self.info.host.view()[:16] = struct.pack("2Q", self.fd, mv_address(memoryview(self.mem)))
     self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
       with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
@@ -41,34 +42,11 @@ class DiskDevice(Compiled):
   def _might_close(self):
     self.refcount -= 1
     if self.refcount == 0:
-      if self.fd is not None:
-        os.close(self.fd)
+      if self.fd is not None: os.close(self.fd)
       if hasattr(self, "mem"):
         try: self.mem.close()
         except BufferError: pass
       self.size = None
-  def _iouring_setup(self):
-    DiskDevice._tried_io_uring_init = True
-
-    if sys.platform == 'linux' and not hasattr(sys, "getandroidapilevel"):
-      fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
-      if fd < 0: return
-
-      sq_ptr = libc.mmap(0, p.sq_off.array + p.sq_entries * 4, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, 0)
-      cq_ptr = libc.mmap(0, p.cq_off.cqes + p.cq_entries * ctypes.sizeof(io_uring.struct_io_uring_cqe),
-                        mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, io_uring.IORING_OFF_CQ_RING)
-      sqes = libc.mmap(0, p.sq_entries * ctypes.sizeof(io_uring.struct_io_uring_sqe),
-                      mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, io_uring.IORING_OFF_SQES)
-
-      def u32ptr(val): return ctypes.cast(val, ctypes.POINTER(ctypes.c_uint32))
-      sqdesc = io_uring.struct_io_uring_sq(khead=u32ptr(sq_ptr+p.sq_off.head), ktail=u32ptr(sq_ptr+p.sq_off.tail),
-                                           array=u32ptr(sq_ptr+p.sq_off.array),
-        kring_mask=u32ptr(sq_ptr+p.sq_off.ring_mask), sqes=ctypes.cast(sqes, ctypes.POINTER(io_uring.struct_io_uring_sqe)))
-
-      cqdesc = io_uring.struct_io_uring_cq(khead=u32ptr(cq_ptr+p.cq_off.head), ktail=u32ptr(cq_ptr+p.cq_off.tail),
-        kring_mask=u32ptr(sq_ptr+p.cq_off.ring_mask), cqes=ctypes.cast(cq_ptr+p.cq_off.cqes, ctypes.POINTER(io_uring.struct_io_uring_cqe)))
-
-      DiskDevice.io_uring = io_uring.struct_io_uring(ring_fd=fd, sq=sqdesc, cq=cqdesc) # type: ignore
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
@@ -98,47 +76,95 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int,
-                       use_ioring:bool=True) -> Generator[tuple[int, int, int, int], None, None]:
-    fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
-    processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
-
-    if not hasattr(DiskDevice, 'io_uring') or not use_ioring:
-      local_buf = memoryview(bytearray(seg_len))
-      for off in range(0, total_copy_size, seg_len):
-        while (copy_batch := _get_free_buf()) is None: pass
-        read_size = min(seg_len, total_copy_size - off, src.device.size - fd_offset - off)
-        self._copyout(local_buf[:read_size], DiskBuffer(src.device, read_size, fd_offset + off))
-        copy_batch[0].view(size=read_size)[:] = local_buf[:read_size]
-        real_copy_size = min(read_size - minor_offset, size - copied_in)
-        yield (copy_batch, copied_in, minor_offset, real_copy_size)
-        copied_in, minor_offset = copied_in + real_copy_size, 0
-      return
-
-    reqs: list[tuple[int, int, int, int]] = []
-    while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
-      if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
-        # Prepare sqe
-        sqe_index = (tail:=DiskDevice.io_uring.sq.ktail[0]) & DiskDevice.io_uring.sq.kring_mask[0]
-        sqe = DiskDevice.io_uring.sq.sqes[sqe_index]
-        sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.dev.fd, fd_offset + next_read_offset
-        sqe.addr, sqe.len, sqe.user_data = copy_batch[0].addr, min(seg_len, total_copy_size - next_read_offset), len(reqs)
-
-        # Send sqe
-        DiskDevice.io_uring.sq.array[sqe_index] = sqe_index
-        DiskDevice.io_uring.sq.ktail[0] = tail + 1
-        libc.syscall(io_uring.NR_io_uring_enter, DiskDevice.io_uring.ring_fd, 1, 1, io_uring.IORING_ENTER_GETEVENTS)
-
-        reqs.append((copy_batch, copied_in, minor_offset, real_copy_size:=min(sqe.len - minor_offset, size - copied_in)))
-        next_read_offset += sqe.len
-        copied_in += real_copy_size
-        minor_offset = 0
-
-      if (head:=DiskDevice.io_uring.cq.khead[0]) != DiskDevice.io_uring.cq.ktail[0]:
-        cqe = DiskDevice.io_uring.cq.cqes[head & DiskDevice.io_uring.cq.kring_mask[0]]
-        assert cqe.res >= 0, f"read from disk failed, err: {cqe.res}"
-        yield reqs[cqe.user_data]
-        DiskDevice.io_uring.cq.khead[0] = head + 1 # advance
-        processed_reqs_cnt += 1
-
   def _offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
+
+# *****************
+# UOps implementation
+
+CHUNK_SZ, READ_SZ, SLOTS, RING_ENTRIES = 64 << 20, 1 << 20, 2, 256
+SLOT_SZ, STAGE_SZ = CHUNK_SZ + 4096, 4096 + SLOTS * (CHUNK_SZ + 4096) # +4096: reads are page aligned. stage: a page of counts, then the slots
+
+@uopfunc
+def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # srcs: [address in the file's mmap, bytes] per copy
+  fd, p = unwrap(uring())[:2]
+  file, srcs, counts, rings, sqes = (b.replace(arg=replace(b.arg, volatile=True, device=None)) for b in (file, srcs, counts, rings, sqes))
+
+  # for each copy
+  src_va, nbytes = srcs[(copy:=UOp.range(srcs.max_numel() // 2, 0, dtype=dtypes.uint64)) * 2], srcs[copy * 2 + 1]
+
+  # for each chunk: the next chunk n waits for the gpu to free its slot
+  n = counts.after(chunk:=UOp.range(ceildiv(nbytes, CHUNK_SZ), 1, dtype=dtypes.uint64))[0]
+  free = (copied:=counts.after(n, loop:=UOp.loop(3))[1]).backedge(loop, copied + SLOTS <= n)
+  pos = src_va + chunk * CHUNK_SZ - file[1]
+  span = (pos % 4096 + (nbytes - chunk * CHUNK_SZ).minimum(CHUNK_SZ) + 4095) // 4096 * 4096
+
+  # for each read: queues READ_SZ of the chunk's pages. an sqe is 8 words: fd << 32 | flags << 8 | opcode, file offset, address, bytes
+  tail, read = rings.after(free)[p.sq_off.tail // 4].cast(dtypes.uint64), UOp.range(nreads:=ceildiv(span, READ_SZ), 2, dtype=dtypes.uint64)
+  sqe = [file[0] << 32 | io_uring.IOSQE_ASYNC << 8 | io_uring.IORING_OP_READ, pos - pos % 4096 + read * READ_SZ,
+         counts.getaddr(HCQ_RUNTIME_DEV.device) + 4096 + n % SLOTS * SLOT_SZ + read * READ_SZ, (span - read * READ_SZ).minimum(READ_SZ)]
+  queued = UOp.group(*[sqes[(tail + read) % RING_ENTRIES * 8 + j].store(v) for j, v in enumerate(sqe)]).end(read)
+
+  # submits the reads, waits for all, marks the chunk read
+  to_submit = nreads.cast(dtypes.int).after(rings.after(queued)[p.sq_off.tail // 4].store((tail + nreads).cast(dtypes.uint32)))
+  done = ccall(libc.syscall, io_uring.NR_io_uring_enter, fd, to_submit, to_submit, io_uring.IORING_ENTER_GETEVENTS, 0, 0)
+  reaped = rings.after(done)[p.cq_off.head // 4].store(rings.after(done)[p.cq_off.tail // 4])
+  return counts.after(reaped)[0].store(n + 1).end(chunk).end(copy).sink()
+
+# *****************
+# 2. rewriter
+
+def is_disk_read(c:UOp) -> bool:
+  dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
+  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring())
+
+def disk_copy_rewriter(s:UOp) -> UOp|None:
+  lins = [submit.without_after.src[1].without_after for submit in s.src]
+  if not (copies:=[c for lin in lins for c in lin.src if is_disk_read(c)]): return None
+  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
+  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
+
+  # [mmap address, bytes] per copy in a table: an arg each would hit ctypes' 1024 limit
+  words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.device), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
+  table = UOp.alloc((8 * len(words),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device)
+  srcs = patch(table, [(8 * i, w) for i, w in enumerate(words)]).bitcast(dtypes.uint64)
+
+  # per gpu: [chunks read, chunks copied] at the start of its stage
+  devs = [to_tuple(c.src[1].device)[0] for c in copies]
+  counts = {d: UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=d).rtag("disk_stage")[:16].bitcast(dtypes.uint64) for d in devs}
+
+  # cpu part
+  runs = [(key, list(ks)) for key, ks in itertools.groupby(range(len(copies)), lambda k: (devs[k], to_tuple(copies[k].src[2].device)[0]))]
+  done, offs, gpu_ops = s.src[-1], collections.Counter[str](), collections.defaultdict[UOp, list[UOp]](list)
+  for (dev, disk), ks in runs:
+    file = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info")
+    done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts[dev].after(done), rings, sqes)
+
+  # gpu part
+  for k, (c, dev) in enumerate(zip(copies, devs)):
+    first, slots = counts[dev].index(0).load() + offs[dev], counts[dev].getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
+    offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
+    for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
+      n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
+      gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
+  return s.replace(src=(*s.src, done)).substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins})
+Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"), disk_copy_rewriter)])
+
+# *****************
+# 3. bufferize
+
+def shared(fd:int, at:int, n:int) -> Buffer: # n bytes of memory the kernel shares at offset at
+  return Buffer(HCQ_RUNTIME_DEV.device, n, options=BufferSpec(external_ptr=libc.mmap(0, n, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, fd, at)))
+
+@functools.cache
+def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None: # fd, offsets, the rings (heads, tails, cqes), the sqes
+  if sys.platform != "linux" or hasattr(sys, "getandroidapilevel"): return None
+  p = io_uring.struct_io_uring_params(flags=io_uring.IORING_SETUP_NO_SQARRAY)
+  if (fd:=libc.syscall(io_uring.NR_io_uring_setup, RING_ENTRIES, ctypes.byref(p))) < 0: return None
+  return fd, p, shared(fd, io_uring.IORING_OFF_SQ_RING, p.cq_off.cqes + 16 * p.cq_entries), shared(fd, io_uring.IORING_OFF_SQES, 64 * RING_ENTRIES)
+
+@functools.cache
+def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, options=BufferSpec(cpu_access=True), initial_value=bytes(STAGE_SZ))
+
+Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="disk_info", name="b"), lambda b: cast(DiskDevice, Device[b.device]).info),
+  (UPat(Ops.ALLOC, tag="disk_stage", name="b"), lambda b: _stage(b.device)),
+  (UPat(Ops.ALLOC, tag="uring_rings"), lambda: unwrap(uring())[2]), (UPat(Ops.ALLOC, tag="uring_sqes"), lambda: unwrap(uring())[3])])

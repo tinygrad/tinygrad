@@ -251,6 +251,16 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_stage_in_thread_range(self):
+    # the STAGE is inside the thread range i, so every thread stages its own row
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j, jj = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP), UOp.range(8, 2, AxisType.LOOP)
+      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
   def test_reg_stage_then_reduce(self):
     # the REG buffer of the STAGE and the accumulator of the reduce are different buffers
@@ -577,6 +587,22 @@ class TestCallInKernel(unittest.TestCase):
     a = Tensor([2], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [1, 1, 8, 1])
+
+  def test_call_body_range_is_not_ours(self):
+    @uopfunc
+    def mul(out:UOp, A:UOp):
+      k = UOp.range(4, 0)
+      return out[k].store(A[k]*3).end(k).sink()
+
+    def kernel(C:UOp, A:UOp):
+      m, i, call = UOp.range(3, 1), UOp.range(4, 0), mul(C, A)
+      self.assertIn(i, call.body.toposort())
+      end_m = C.after(call)[m].store(A[m]).end(m)
+      return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
 
   @unittest.expectedFailure
   def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)

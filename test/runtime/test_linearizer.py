@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, KernelInfo
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear
@@ -275,6 +275,16 @@ class TestLinearizer(unittest.TestCase):
     uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
 
+  def test_sibling_loops_shared_value(self):
+    flag, out = Tensor([0], dtype=dtypes.int).realize(), Tensor.empty(4, dtype=dtypes.int).realize()
+    f, o, i = flag.uop.placeholder_like(0), out.uop.placeholder_like(1), UOp.range(2, 0, dtype=dtypes.int)
+    v, g = (x:=f.after(i).index(0).load())+i, x.eq(0).cast(dtypes.int)
+    r1 = UOp.range(g, 1, dtype=dtypes.int)
+    r2 = UOp.range(g.after(o.index(i*2+r1).store(v).end(r1)), 2, dtype=dtypes.int)
+    prog = o.index(i*2+1+r2).store(v).end(r2).end(i).sink(arg=KernelInfo())
+    run_linear(UOp(Ops.LINEAR, src=(prog.call(flag.uop.buf_uop, out.uop.buf_uop),)), update_stats=False)
+    self.assertEqual(out.tolist(), [0, 0, 1, 1])
+
 # *** helpers ***
 
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
@@ -287,7 +297,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   last_bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
   # now all input buffers in last_call should be realized
   # create fresh buffers for the outputs
-  bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
+  bufs = [Buffer(x.device, x.nbytes).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
   # ensure buffers are allocated
   for b in bufs: b.ensure_allocated()
   return ast, bufs
@@ -297,17 +307,19 @@ def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
   return realized_ast
 
-def copyout_outputs(outbufs:list[Buffer]) -> list[np.ndarray]:
-  return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
+def copyout_outputs(outbufs:list[UOp]) -> list[np.ndarray]:
+  return [np.frombuffer(x.buffer.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def reset_bufs(bufs:list[Buffer]):
-  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
+  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.nbytes, initial_value=bytes(buf.nbytes)))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
   outbufs = real_bufs[:len(realized_ast.src)]
   wanna_output = [np.array(x).flatten() for x in wanna_output]
-  buf_uops = [UOp.from_buffer(b) for b in real_bufs]
+  from test.helpers import buffer_uops
+  buf_uops = buffer_uops(realized_ast, real_bufs)
+  out_uops = buf_uops[:len(outbufs)]
 
   def run_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
@@ -316,13 +328,13 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   def check_opt(opts):
     reset_bufs(outbufs)
     run_prg(opts)
-    for x,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
+    for x,want in zip(copyout_outputs(out_uops), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
   run_prg(opts=())
-  if len(wanna_output) == 0: wanna_output = copyout_outputs(outbufs)
+  if len(wanna_output) == 0: wanna_output = copyout_outputs(out_uops)
   else:
-    for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
+    for buf,want in zip(copyout_outputs(out_uops), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
   if check_default_opt: check_opt(None)
