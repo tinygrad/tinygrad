@@ -16,7 +16,7 @@ class DiskDevice(Compiled):
   def __init__(self, device:str):
     self.size: int|None = None
     self.fd: int|None = None
-    self.refcount, self.info = 0, Buffer(HCQ_RUNTIME_DEV.value, 16, options=BufferSpec(nolru=True)) # info: [fd, mmap address] for batch reads
+    self.refcount, self.info = 0, Buffer(HCQ_RUNTIME_DEV.device, 16, options=BufferSpec(nolru=True)) # info: [fd, mmap address] for batch reads
     super().__init__(device, DiskAllocator(self), [], None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
@@ -101,7 +101,7 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
   # for each read: queues READ_SZ of the chunk's pages. an sqe is 8 words: fd << 32 | flags << 8 | opcode, file offset, address, bytes
   tail, read = rings.after(free)[p.sq_off.tail // 4].cast(dtypes.uint64), UOp.range(nreads:=ceildiv(span, READ_SZ), 2, dtype=dtypes.uint64)
   sqe = [file[0] << 32 | io_uring.IOSQE_ASYNC << 8 | io_uring.IORING_OP_READ, pos - pos % 4096 + read * READ_SZ,
-         counts.getaddr(HCQ_RUNTIME_DEV.value) + 4096 + n % SLOTS * SLOT_SZ + read * READ_SZ, (span - read * READ_SZ).minimum(READ_SZ)]
+         counts.getaddr(HCQ_RUNTIME_DEV.device) + 4096 + n % SLOTS * SLOT_SZ + read * READ_SZ, (span - read * READ_SZ).minimum(READ_SZ)]
   queued = UOp.group(*[sqes[(tail + read) % RING_ENTRIES * 8 + j].store(v) for j, v in enumerate(sqe)]).end(read)
 
   # submits the reads, waits for all, marks the chunk read
@@ -120,12 +120,12 @@ def is_disk_read(c:UOp) -> bool:
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lins = [submit.without_after.src[1].without_after for submit in s.src]
   if not (copies:=[c for lin in lins for c in lin.src if is_disk_read(c)]): return None
-  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.value).rtag("uring_rings")
-  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value).rtag("uring_sqes")
+  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
+  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
 
   # [mmap address, bytes] per copy in a table: an arg each would hit ctypes' 1024 limit
-  words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.value), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
-  table = UOp.alloc((8 * len(words),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value)
+  words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.device), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
+  table = UOp.alloc((8 * len(words),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device)
   srcs = patch(table, [(8 * i, w) for i, w in enumerate(words)]).bitcast(dtypes.uint64)
 
   # per gpu: [chunks read, chunks copied] at the start of its stage
@@ -153,7 +153,7 @@ Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"
 # 3. bufferize
 
 def shared(fd:int, at:int, n:int) -> Buffer: # n bytes of memory the kernel shares at offset at
-  return Buffer(HCQ_RUNTIME_DEV.value, n, options=BufferSpec(external_ptr=libc.mmap(0, n, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, fd, at)))
+  return Buffer(HCQ_RUNTIME_DEV.device, n, options=BufferSpec(external_ptr=libc.mmap(0, n, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, fd, at)))
 
 @functools.cache
 def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None: # fd, offsets, the rings (heads, tails, cqes), the sqes
@@ -163,7 +163,7 @@ def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None:
   return fd, p, shared(fd, io_uring.IORING_OFF_SQ_RING, p.cq_off.cqes + 16 * p.cq_entries), shared(fd, io_uring.IORING_OFF_SQES, 64 * RING_ENTRIES)
 
 @functools.cache
-def _stage(dev) -> Buffer: return Buffer(dev, STAGE_SZ, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(STAGE_SZ))
+def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, options=BufferSpec(cpu_access=True), initial_value=bytes(STAGE_SZ))
 
 Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="disk_info", name="b"), lambda b: cast(DiskDevice, Device[b.device]).info),
   (UPat(Ops.ALLOC, tag="disk_stage", name="b"), lambda b: _stage(b.device)),

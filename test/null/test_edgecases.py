@@ -34,7 +34,6 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
 class TestInputValidation(unittest.TestCase):
   # we don't need more of these, input validation bugs are not very interesting, many are WONTFIX
 
-  @unittest.expectedFailure
   def test_repeat_negative(self):
     # repeating with a negative value should error like PyTorch
     with self.assertRaises(RuntimeError):

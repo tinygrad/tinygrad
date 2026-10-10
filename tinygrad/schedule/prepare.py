@@ -25,7 +25,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
     key = base if base.op is Ops.ALLOC else src
     if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
-       target.storage_base not in st.src[1].toposort(enter_calls=False):
+       target.storage_base not in st.src[1].toposort():
       if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
         placed[key] = target.storage_base
       elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
@@ -92,7 +92,7 @@ def store_hazard_boundary(s:UOp):
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(enter_calls=False): return None
+  if (base:=target.base) not in src.toposort(): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
@@ -126,7 +126,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 def resolve_function(c:UOp) -> UOp|None:
   if not c.is_inline_call: return None
-  nodes = c.body.toposort(enter_calls=False)
+  nodes = c.body.toposort()
   # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
   args = c.src[1:]
 
