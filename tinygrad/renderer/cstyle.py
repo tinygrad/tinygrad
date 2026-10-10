@@ -517,7 +517,7 @@ class HIPRenderer(CStyleLanguage):
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
       ]) + self.string_rewrite
     if amd_fp8s(target.arch):
-      self.extra_matcher += tc.pm_wmma_pack(dtypes.uint64 if self.is_cdna(target.arch) else dtypes.uint32)
+      self.extra_matcher += tc.pm_wmma_fp8(dtypes.uint64 if self.is_cdna(target.arch) else dtypes.uint32)
       self.string_rewrite = PatternMatcher([
         (UPat.cvar("c").cast(dtypes.fp8s, name="x"), lambda ctx,x,c:
           f"f32_to_fp8({ctx.nan if math.isnan(v:=c.val) else ctx.infinity if v == math.inf else f'-{ctx.infinity}' if v == -math.inf else f'{v}f'},"
@@ -592,12 +592,12 @@ class HIPRenderer(CStyleLanguage):
       elif self.tensor_cores == tc.amd_rdna4 and dtype_out != dtypes.int32:
         prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
       elif dtype_out == dtypes.int32:
-        # RDNA4 packs 8 int8/lane into 2 VGPRs (the operands are already bitcast), RDNA3 packs 16 into 4
-        carrier, n, gfx12 = ("unsigned_int2", 2, "_gfx12") if self.tensor_cores == tc.amd_rdna4 else ("signed_char16", 4, "")
-        prefix.append(f"typedef int wmma_int{n} __attribute__((ext_vector_type({n})));\n"+
-          f"static inline __attribute__((device)) int8 __{name}"+f"""({carrier} a, {carrier} b, int8 c) {{
-  return __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32{gfx12}(true, __builtin_bit_cast(wmma_int{n}, a),
-    true, __builtin_bit_cast(wmma_int{n}, b), c, false);\n}}""")
+        # RDNA4 uses 8 int8 values per lane in 2 VGPRs, RDNA3 uses 16 in 4 VGPRs
+        num_regs = 2 if (is_rdna4:=self.tensor_cores == tc.amd_rdna4) else 4
+        prefix.append(f"typedef int wmma_int{num_regs} __attribute__((ext_vector_type({num_regs})));\n"+
+          f"static inline __attribute__((device)) int8 __{name}"+f"""(signed_char{num_regs*4} a, signed_char{num_regs*4} b, int8 c) {{
+  return __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32{'_gfx12' if is_rdna4 else ''}(true, __builtin_bit_cast(wmma_int{num_regs}, a),
+    true, __builtin_bit_cast(wmma_int{num_regs}, b), c, false);\n}}""")
       elif dtype_out == dtypes.float:
         prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_in == dtypes.half else 'bf16'}_w32")
       else: prefix.append(f"static inline __attribute__((device)) half8 __{name}"+"""(half16 a, half16 b, half8 c) {
