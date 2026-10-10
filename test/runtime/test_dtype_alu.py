@@ -77,7 +77,8 @@ def universal_test(a, b, dtype, op):
     numpy_value = truncate[dtype](op[1](ta.numpy(), tb.numpy()).item())
   else: tensor_value, numpy_value = (op[0](ta, tb)).numpy(), op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.floats:
-    if dtype not in supported_dtypes or dtype in EMULATED_DTYPES.tolist(dtypes): # denormals are zero
+    if dtype not in supported_dtypes or dtype in EMULATED_DTYPES.tolist(dtypes) or \
+       (Device.DEFAULT == "QCOM" and dtype == dtypes.half): # denormals are zero
       fe, fm = dtypes.finfo(dtype)
       atol, rtol = 2 ** (2 - (1 << (fe - 1))), 2 ** (-fm)
     else: atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1),
@@ -196,6 +197,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
+  @unittest.skipIf(Device.DEFAULT == "QCOM" and DEV.renderer == "IR3", "IR3 rounds half toward zero")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
@@ -363,6 +365,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bool, ht.bool, strat.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
 
+  @unittest.skipIf(Device.DEFAULT == "QCOM" and DEV.renderer == "IR3", "IR3 rounds int to float toward zero")
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 

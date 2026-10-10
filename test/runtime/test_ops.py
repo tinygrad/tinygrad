@@ -1,7 +1,7 @@
 import time, math, unittest, functools, platform, warnings, sys
 import numpy as np
 import torch
-from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context, to_tuple
+from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, TRANSCENDENTAL, Context, to_tuple
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.renderer.nir import NIRRenderer
 from test.helpers import TensorTestCase, prepare_test_op
@@ -16,6 +16,7 @@ warnings.filterwarnings("ignore", message="Non-empty compiler output encountered
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 COMPILE_ONLY = Device.DEFAULT == "NULL"
+QCOM_SIN = Device.DEFAULT == "QCOM" and DEV.renderer == "IR3" and TRANSCENDENTAL < 2 # its sin reduces the range in f32, too coarse at 1e6
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
@@ -882,7 +883,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
     # works on real CUDA but not CI
-    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
+    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or QCOM_SIN):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -892,7 +893,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([], lambda: torch.tensor(2.0).cos(), lambda: Tensor(2).cos(), forward_only=True)
     helper_test_op([()], lambda x: x.cos())
-    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
+    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or QCOM_SIN):
       helper_test_op(None, lambda x: x.cos(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -903,7 +904,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5)
     helper_test_op([()], lambda x: x.tan())
-    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
+    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or QCOM_SIN):
       helper_test_op(None, lambda x: x.tan(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.tan(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -1448,6 +1449,7 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "not precise enough when emulating")
   @unittest.skipIf(IMAGE>0, "image does math in float32")
+  @unittest.skipIf(Device.DEFAULT == "QCOM" and DEV.renderer == "IR3", "IR3 rounds f32 to f16 toward zero")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3, grad_atol=5e-3, grad_rtol=5e-3)
   def test_gemm(self):

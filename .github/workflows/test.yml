@@ -603,6 +603,57 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testqcom:
+    strategy:
+      fail-fast: false
+      matrix:
+        renderer: [IR3, CL]
+    name: Linux (qcom a630 ${{ matrix.renderer }})
+    runs-on: *linux
+    timeout-minutes: 20
+    env:
+      DEV: MOCK+QCOM:${{ matrix.renderer }}
+      SKIP_SLOW_TEST: 1
+      PYTHONPATH: .
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: qcom-minimal-${{ matrix.renderer }}
+          deps: "testing_unit mesa"
+          pydeps: "onnxruntime==1.24.1"
+          qemu: ${{ matrix.renderer == 'CL' }}
+      - name: Compile in one process (CL compiles in qemu)
+        if: matrix.renderer == 'CL'
+        run: echo "PARALLEL=0" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['QCOM'], Device.DEFAULT"
+          DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run pytest
+        run: python -m pytest -n=auto test/test_tiny.py test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/runtime/test_search.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/device/qcom --durations=20
+      - name: Run pytest (qcom IMAGE=1)
+        run: |
+          IMAGE=1 DEBUG=7 python3 test/runtime/test_ops.py TestOps.test_gemm | grep isam
+          IMAGE=1 python -m pytest -n=auto test/runtime/test_ops.py --durations=20
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/runtime/test_ops.py::TestOps::test_sin test/runtime/test_ops.py::TestOps::test_cos test/runtime/test_ops.py::TestOps::test_tan test/runtime/test_ops.py::TestOps::test_exp test/runtime/test_ops.py::TestOps::test_log --durations=20
+      - name: Test openpilot models
+        env:
+          BEAM_MAX_TASKS_PER_CHILD: 1024
+        run: |
+          unset PARALLEL
+          for model in dmonitoring_model driving_supercombo; do
+            onnx="https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/$model.onnx"
+            IMAGE=1 FLOAT16=1 python examples/openpilot/compile_onnx.py "$onnx" /tmp/openpilot.pkl --benchmark-runs 1
+            IMAGE=1 FLOAT16=1 MODEL_ONNX="$onnx" MODEL_PKL=/tmp/openpilot.pkl python -m pytest test/external/external_test_compile.py -k test_onnx
+          done
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
   testnvidia:
     strategy:
       fail-fast: false
@@ -649,16 +700,13 @@ jobs:
       fail-fast: false
       matrix:
         dev:
-          - 'NULL:IR3:a630'
-          - 'NULL:QCOMCL:a630'
           - 'NULL:NAK:sm_120'
     name: Compile-only (DEV=${{ matrix.dev }})
     runs-on: *linux
     timeout-minutes: 15
     env:
       NULL_ALLOW_COPYOUT: 1
-      DEV: ${{ matrix.dev }}${{ contains(matrix.dev, 'a630') && ',IMAGE_PITCH_ALIGNMENT=64' || '' }}
-      IMAGE: ${{ contains(matrix.dev, 'a630') && '1' || '0' }}
+      DEV: ${{ matrix.dev }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -667,15 +715,9 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: "testing_unit mesa"
-          qemu: ${{ contains(matrix.dev, 'QCOMCL') }}
-      - name: Test IMAGE
-        shell: bash
-        if: contains(matrix.dev, 'a630')
-        run: DEBUG=7 python3 test/runtime/test_ops.py TestOps.test_gemm | grep isam
       - name: Run test_ops
         shell: bash
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/runtime/test_ops.py TestOps.test_add
-          # QCOMCL compiles in qemu, too slow for parallel workers
-          ${{ contains(matrix.dev, 'QCOMCL') && 'PARALLEL=0' || '' }} python -m pytest -n=auto test/runtime/test_ops.py --durations=20
+          python -m pytest -n=auto test/runtime/test_ops.py --durations=20

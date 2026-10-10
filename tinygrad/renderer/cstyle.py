@@ -623,6 +623,14 @@ class QCOMCLRenderer(OpenCLRenderer):
     return {d for d in Renderer.supported_dtypes(self)
             if (d != dtypes.float16 or (bool(IMAGE) and bool(FLOAT16))) and d not in dtypes.fp8s+(dtypes.bfloat16,dtypes.double)}
 
+  # QCOM's i64 emulation asserts on vectorized i64<->float casts ("Unsupported FtoI/ItoF instructions!"), use convert_*
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.CAST, dtypes.floats, (UPat.var("x", (dtypes.int64, dtypes.uint64)),), name="y"),
+     lambda ctx,x,y: f"convert_{ctx.render_dtype(y.dtype)}_rte({ctx[x]})"),
+    (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("x", dtypes.floats),), name="y"),
+     lambda ctx,x,y: f"convert_{ctx.render_dtype(y.dtype)}_rtz({ctx[x]})"),
+  ]) + OpenCLRenderer.string_rewrite
+
   # QCOM's load vectorizer emits invalid IR for vectorized bool loads ("Range types must match load type"), type bool buffers as uchar
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):
     if dtype == dtypes.bool and addrspace == AddrSpace.GLOBAL: dtype = dtypes.uint8
