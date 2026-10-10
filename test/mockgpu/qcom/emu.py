@@ -10,7 +10,7 @@ from tinygrad.device import Device
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
-NREGS = 64 * 4 # regid = gpr*4 + component
+NREGS = 64 * 4
 A0, P0 = 61 * 4, 62 * 4
 TYPES = [np.dtype(t) for t in ("f2", "f4", "u2", "u4", "i2", "i4", "u1", "i1")] # last is u8_32
 HALF_TYPES = (0, 2, 4, 6, 7)
@@ -257,10 +257,9 @@ def bits(v): return np.unpackbits(v.astype(f"<u{v.dtype.itemsize}").view(np.uint
 def first_set(b, v): return np.where(b.any(axis=1), b.argmax(axis=1), -1).astype(v.dtype)
 def clz(v): return first_set(bits(v)[:, ::-1], v)
 def ctz(v): return first_set(bits(v), v)
-def fmin(a, b): # -0 below +0, numpy's fmin only does that on some cpus
-  return np.where((a == 0) & (b == 0), np.where(np.signbit(a) | np.signbit(b), -np.abs(a), np.abs(a)), np.fmin(a, b))
-def fmax(a, b):
+def fmax(a, b): # +0 above -0, numpy's fmax only does that on some cpus
   return np.where((a == 0) & (b == 0), np.where(np.signbit(a) & np.signbit(b), -np.abs(a), np.abs(a)), np.fmax(a, b))
+def fmin(a, b): return -fmax(-a, -b)
 def sign(v): # a zero keeps its sign, NaN gives +0
   one = v.dtype.type(1)
   return np.where(np.isnan(v), v.dtype.type(0), np.where(v > 0, one, np.where(v < 0, -one, v)))
@@ -272,8 +271,9 @@ COND = [np.less, np.less_equal, np.greater, np.greater_equal, np.equal, np.not_e
 CMPS = {mesa.OPC_CMPS_F: "f", mesa.OPC_CMPS_U: "u", mesa.OPC_CMPS_S: "i", mesa.OPC_CMPV_F: "f", mesa.OPC_CMPV_U: "u", mesa.OPC_CMPV_S: "i"}
 CMPV = {mesa.OPC_CMPV_F, mesa.OPC_CMPV_U, mesa.OPC_CMPV_S}
 CAT2_1SRC = {mesa.OPC_SIGN_F, mesa.OPC_ABSNEG_F, mesa.OPC_FLOOR_F, mesa.OPC_TRUNC_F, mesa.OPC_ABSNEG_S, mesa.OPC_NOT_B, mesa.OPC_CLZ_B,
-             mesa.OPC_SETRM}
+             mesa.OPC_CLZ_S, mesa.OPC_SETRM}
 BITWISE = {mesa.OPC_AND_B, mesa.OPC_OR_B, mesa.OPC_XOR_B, mesa.OPC_NOT_B}
+SAT_INT = {mesa.OPC_ADD_U, mesa.OPC_ADD_S, mesa.OPC_SUB_U, mesa.OPC_SUB_S}
 CAT0 = {mesa.OPC_NOP, mesa.OPC_END, mesa.OPC_JUMP, mesa.OPC_CALL, mesa.OPC_RET, mesa.OPC_BR, mesa.OPC_BRAO, mesa.OPC_BRAA,
         mesa.OPC_PREDT, mesa.OPC_PREDF, mesa.OPC_PREDE}
 CAT2:dict[int, tuple[str, Callable]] = {
@@ -286,6 +286,7 @@ CAT2:dict[int, tuple[str, Callable]] = {
   mesa.OPC_XOR_B: ("u", np.bitwise_xor), mesa.OPC_MUL_S24: ("u", lambda a, b: s24(a) * s24(b)),
   mesa.OPC_MUL_U24: ("u", lambda a, b: lo(a.astype(np.uint32), 24) * lo(b.astype(np.uint32), 24)),
   mesa.OPC_MULL_U: ("u", lambda a, b: lo(a, 16) * lo(b, 16)), mesa.OPC_CLZ_B: ("u", clz), mesa.OPC_SETRM: ("u", ctz),
+  mesa.OPC_CLZ_S: ("i", lambda a: clz(np.where(a < 0, ~a, a))),
   mesa.OPC_SHL_B: ("u", lambda a, b: a << shamt(a, b)), mesa.OPC_SHR_B: ("u", lambda a, b: a >> shamt(a, b)),
   mesa.OPC_ASHR_B: ("i", lambda a, b: a >> shamt(a, b)), mesa.OPC_GETBIT_B: ("u", lambda a, b: (a >> shamt(a, b)) & a.dtype.type(1))}
 CAT3_HALF = {mesa.OPC_MAD_F16, mesa.OPC_SEL_B16, mesa.OPC_SEL_S16}
@@ -308,7 +309,7 @@ CAT4:dict[int, Callable] = {mesa.OPC_RCP: np.reciprocal, mesa.OPC_RSQ: lambda x:
 def cov_to_float(v, dt, even=False):
   with np.errstate(over="ignore"): r = v.astype(dt)
   if not even: r = np.where(np.abs(r.astype(np.float64)) > np.abs(v.astype(np.float64)), np.nextafter(r, dt.type(0)), r).astype(dt)
-  return np.where(np.abs(r) < np.finfo(dt).tiny, np.copysign(dt.type(0), r), r) if dt == np.float16 else r
+  return ftz(r) if dt == np.float16 else r
 
 def exec_mov(t:Threads, i:Cat1, k:int):
   if i.op != mesa.OPC_MOV:
@@ -317,17 +318,14 @@ def exec_mov(t:Threads, i:Cat1, k:int):
     return
   src_dt, dst_dt = TYPES[i.src_type], TYPES[i.dst_type]
   v = t.read(i.repeat_srcs[k][0], src_dt)
-  if i.src_type in (6, 7): v = v.view(np.int8) # cov from u8 sign-extends
+  if src_dt.itemsize == 1: v = v.view(np.int8) # cov from u8 sign-extends
   if v.dtype.kind == "f" and dst_dt.kind != "f":
     v = np.clip(np.trunc(np.nan_to_num(v.astype(np.float64))), np.iinfo(dst_dt).min, np.iinfo(dst_dt).max)
   elif dst_dt.kind == "f" and v.dtype != dst_dt: v = cov_to_float(v, dst_dt, even=i.round == 1)
   t.write(i.dst + k, i.dst_type in HALF_TYPES, v.astype(dst_dt, copy=False))
 
-@functools.cache
-def float_tiny(dt:np.dtype): return np.finfo(dt).tiny
-
 def ftz(v): # float alu flushes denormal sources and results, cov doesn't
-  if v.dtype.kind != "f" or not (mask := np.abs(v) < float_tiny(v.dtype)).any(): return v
+  if v.dtype.kind != "f" or not (mask := np.abs(v) < np.finfo(v.dtype).tiny).any(): return v
   return np.where(mask, np.copysign(v.dtype.type(0), v), v)
 
 def canonical_nan(v):
@@ -340,19 +338,23 @@ def exec_alu(t:Threads, i:Cat2|Cat3|Cat4, k:int):
     out = COND[i.cond](*[ftz(t.read(s, view(CMPS[i.op], s.half))) for s in srcs]).astype(view("u", srcs[0].half))
     if i.sat: out = out ^ out.dtype.type(1)
     if i.op in CMPV: out = -out
-  elif isinstance(i, Cat4): # computed in f64 since numpy's f32 results vary by cpu, half results are truncated
+  elif isinstance(i, Cat4): # f64 since numpy's f32 results vary by cpu
     x = ftz(t.read(srcs[0], view("f", srcs[0].half)))
     out = CAT4[i.op](x.astype(np.float64)).astype(np.float32)
     if x.dtype == np.float16: out = cov_to_float(out, np.dtype(np.float16))
   elif i.op in BITWISE: # (neg) is a bitwise not here
     out = CAT2[i.op][1](*[~t.read(replace(s, absneg=0), view("u", s.half)) if s.absneg & 1 else t.read(s, view("u", s.half)) for s in srcs])
+  elif isinstance(i, Cat2) and i.ei:
+    out = ((t.read(srcs[0], np.dtype(np.uint32)).astype(np.uint64) + t.read(srcs[1], np.dtype(np.uint32))) >> np.uint64(1)).astype(np.uint32)
+  elif isinstance(i, Cat2) and i.sat and i.op in SAT_INT:
+    kind, fn = CAT2[i.op]
+    vals = [t.read(s, view(kind, s.half)) for s in srcs]
+    out = np.clip(fn(*[v.astype(np.int64) for v in vals]), np.iinfo(vals[0].dtype).min, np.iinfo(vals[0].dtype).max).astype(vals[0].dtype)
   else:
     kind, fn = (CAT2 if isinstance(i, Cat2) else CAT3)[i.op]
     out = fn(*[ftz(t.read(s, view(kind, s.half))) for s in srcs])
-    if isinstance(i, Cat2) and i.ei:
-      out = ((t.read(srcs[0], np.dtype(np.uint32)).astype(np.uint64) + t.read(srcs[1], np.dtype(np.uint32))) >> np.uint64(1)).astype(np.uint32)
   out = ftz(out) if i.op == mesa.OPC_SEL_F32 else canonical_nan(ftz(out))
-  sat = i.sat and not (isinstance(i, Cat2) and i.op in CMPS)
+  sat = i.sat and not (isinstance(i, Cat2) and i.op in CMPS) and i.op not in SAT_INT
   if sat and out.dtype.kind != "f": raise i.error()
   t.write(i.dst + k, i.dst_half, np.clip(out, 0, 1) if sat else out)
 
@@ -360,7 +362,7 @@ def global_lanes(t:Threads, i:Ldg|Stg, nbytes:int) -> list[tuple[np.ndarray, np.
   addrs = (t.r[i.addr].astype(np.uint64) | (t.r[i.addr + 1].astype(np.uint64) << np.uint64(32))) + np.uint64(i.offset & (2**64 - 1))
   if i.reg_off is not None:
     src2, shift, off = i.reg_off
-    addrs += ((t.r[src2].astype(np.uint64) << np.uint64(shift)) + np.uint64(off)) << np.uint64(0 if i.type >= 6 else 1 if i.type in HALF_TYPES else 2)
+    addrs += ((t.r[src2].astype(np.uint64) << np.uint64(shift)) + np.uint64(off)) * np.uint64(TYPES[i.type].itemsize)
   which = np.searchsorted(t.starts, addrs, side="right").astype(np.int64) - 1
   if (bad := t.mask & ((which < 0) | (addrs + np.uint64(nbytes) > t.ends[np.maximum(which, 0)]))).any():
     raise RuntimeError(f"pc {i.pc}: out of bounds global access at {int(addrs[np.argmax(bad)]):#x}")
@@ -395,11 +397,11 @@ def exec_mem(t:Threads, i:Load|Store, k:int):
         mem[idx] = (row.astype(np.uint8) if dt.itemsize == 1 else row).view(np.uint8).reshape(-1, dt.itemsize)
 
 def texels(img:Image, x:np.ndarray, y:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-  x, y = x.view(np.int32).astype(np.int64), y.view(np.int32).astype(np.int64)
-  ok = (x >= 0) & (x < img.width) & (y >= 0) & (y < img.height)
-  return np.frombuffer(to_mv(img.addr, img.pitch * img.height), np.uint8), ok, np.where(ok, y * img.pitch + x * 4 * img.dtype.itemsize, 0)
+  ok = (x < img.width) & (y < img.height)
+  return np.frombuffer(to_mv(img.addr, img.pitch * img.height), img.dtype), ok, \
+         np.where(ok, y.astype(np.int64) * (img.pitch // img.dtype.itemsize) + x.astype(np.int64) * 4, 0)
 
-def exec_isams(t:Threads, insts:tuple[Cat5, ...]): # out of bounds reads the zero border color
+def exec_isams(t:Threads, insts:tuple[Cat5, ...]):
   i, tex = insts[0], insts[0].tex
   if i.s2en:
     if len(idx := np.unique(t.h[i.src3][t.mask])) != 1: raise i.error()
@@ -416,19 +418,19 @@ def exec_isams(t:Threads, insts:tuple[Cat5, ...]): # out of bounds reads the zer
     return
   for j in insts:
     mem, ok, off = texels(img, t.r[j.src1], t.r[j.src1 + 1])
-    values = mem.view(img.dtype)[off[:, None] // img.dtype.itemsize + channels]
+    values = mem[off[:, None] + channels]
     values[~ok] = 0
     values = values.astype(dt, copy=False)
     for n in range(len(channels)): t.write(j.dst + n, dt == np.float16, values[:, n])
 
 def exec_isam(t:Threads, i:Cat5, k:int): exec_isams(t, (i,))
 
-def exec_ibo(t:Threads, i:Ibo, k:int): # out of bounds stores are dropped
+def exec_ibo(t:Threads, i:Ibo, k:int):
   if i.ssbo >= len(t.d.ibos): raise RuntimeError(f"pc {i.pc}: IBO {i.ssbo} is not bound")
   img, dt = t.d.ibos[i.ssbo], TYPES[i.type]
   mem, ok, off = texels(img, t.r[i.coord], t.r[i.coord + 1])
-  lanes, elems, regs = t.mask & ok, mem.view(img.dtype), t.h if dt == np.float16 else t.r
-  for c in range(i.ncomp): elems[off[lanes] // img.dtype.itemsize + c] = regs[i.val + c].view(dt)[lanes].astype(img.dtype)
+  lanes, regs = t.mask & ok, t.h if dt == np.float16 else t.r
+  for c in range(i.ncomp): mem[off[lanes] + c] = regs[i.val + c].view(dt)[lanes].astype(img.dtype)
 
 BRANCHES = {mesa.OPC_JUMP, mesa.OPC_PREDT, mesa.OPC_PREDF, mesa.OPC_BR, mesa.OPC_BRAO, mesa.OPC_BRAA}
 JUMPS = BRANCHES | {mesa.OPC_CALL}
@@ -462,7 +464,7 @@ def straight_runs(prog:list, starts:set[int], key:Callable) -> list[tuple[int, i
 
 MAX_BLOCK_LANES = 2**23 # reg * n + lane stays in int32
 MAX_RECORDS, RECORD_LEN = 2**16, 11
-U32, LO16 = 2**32 - 1, 2**16 - 1
+U32 = 2**32 - 1
 def f32_bits(x:float) -> int: return int(np.float32(x).view(np.uint32))
 SIGN, INF, TINY, NAN = f32_bits(-0.0), f32_bits(np.inf), f32_bits(float(np.finfo(np.float32).tiny)), f32_bits(np.nan)
 
@@ -475,7 +477,6 @@ def cpu_kernel(body:UOp, name:str) -> Callable[..., None]:
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(UOp.sink(body, arg=KernelInfo(name=name)), Device['CPU'].renderer)
   runtime, globals_, var_names = get_runtime('CPU', prg), prg.arg.globals, [v.expr for v in prg.arg.vars]
-  # called directly like the amd emulator, the runtime wrapper costs more than a small kernel
   runtime.fxn.argtypes = [ctypes.c_uint64] * (len(globals_) + len(var_names))
   return lambda *bufs, **vals: runtime.fxn(*[bufs[g] for g in globals_], *[vals[v] for v in var_names])
 
@@ -495,8 +496,7 @@ FMAD, IMAD, SHL, SHR, ASHR, AND, OR, XOR, SEL = range(9)
 FLOAT_OPS, INT_OPS = (FMAD,), (IMAD, SHL, SHR, ASHR, AND, OR, XOR, SEL)
 ONE_F, NEG_ZERO, ONE, ZERO = (Src("i", v) for v in (f32_bits(1.0), SIGN, 1, 0))
 NEG_ONE = ALL_ONES = Src("i", U32)
-LO, HI = LO16, U32 ^ LO16
-# opcode -> (kernel op, kind, sources)
+LO, HI = 2**16 - 1, U32 ^ (2**16 - 1)
 # add, mul and mov become a * b + c with a constant operand: x * 1, x + -0.0 and x * -1 + y keep the exact bits
 # kind says how a source's abs/neg modifiers apply: f flips float sign bits, b is a bitwise not, u and i have none
 BLOCK_OPS:dict[int, tuple[int, str, tuple]] = {
@@ -507,7 +507,7 @@ BLOCK_OPS:dict[int, tuple[int, str, tuple]] = {
   mesa.OPC_ASHR_B: (ASHR, "i", (0, 1, ZERO)), mesa.OPC_AND_B: (AND, "b", (0, 1, ZERO)), mesa.OPC_OR_B: (OR, "b", (0, 1, ZERO)),
   mesa.OPC_XOR_B: (XOR, "b", (0, 1, ZERO)), mesa.OPC_NOT_B: (XOR, "b", (0, ALL_ONES, ZERO)), mesa.OPC_SEL_B32: (SEL, "u", (0, 1, 2))}
 
-def block_source(spec:int|Src|tuple, srcs:list[Src], kind:str) -> tuple[int, int, int]|None: # (row, and, xor) applied as (r[row] & and) ^ xor
+def block_source(spec:int|Src|tuple, srcs:list[Src], kind:str) -> tuple[int, int, int]|None:
   idx, mask = spec if isinstance(spec, tuple) else (spec, U32)
   s = srcs[idx] if isinstance(idx, int) else idx
   if s.half or s.kind not in ("r", "i") or (s.kind == "r" and s.val >= A0): return None
@@ -640,7 +640,7 @@ def run(d:Dispatch):
     if reg != 0xfc: t.r[reg], t.r[reg + 1], t.r[reg + 2] = v % dims[0], (v // dims[0]) % dims[1], v // (dims[0] * dims[1])
   pc, done, blocked = np.zeros(len(tid), np.int64), np.zeros(len(tid), bool), np.zeros(len(tid), bool)
   calls, depth = np.zeros((16, len(tid)), np.int64), np.zeros(len(tid), np.int64)
-  together:int|None = d.entry # pc while nothing has diverged
+  together:int|None = d.entry
   with np.errstate(all="ignore"):
     while not done.all():
       if together is not None: cur, t.mask = together, t.everyone

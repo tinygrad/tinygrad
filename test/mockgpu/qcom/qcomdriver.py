@@ -3,8 +3,6 @@ from tinygrad.runtime.autogen import kgsl, libc
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.qcom.qcomgpu import QCOMGPU
 
-A630_CHIP_ID = 0x06030000
-
 def _ioctl_nr(ioctl:functools.partial) -> int: return ioctl.args[2]
 WAIT_IOCTLS = {_ioctl_nr(kgsl.IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID), _ioctl_nr(kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID)}
 
@@ -43,7 +41,7 @@ class QCOMDriver(VirtDriver):
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY):
       prop = kgsl.struct_kgsl_device_getproperty.from_address(argp)
       if prop.type != kgsl.KGSL_PROP_DEVICE_INFO: raise RuntimeError(f"unsupported kgsl property {prop.type}")
-      ctypes.cast(prop.value, ctypes.POINTER(kgsl.struct_kgsl_devinfo)).contents.chip_id = A630_CHIP_ID
+      ctypes.cast(prop.value, ctypes.POINTER(kgsl.struct_kgsl_devinfo)).contents.chip_id = 0x06030000
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_GPUOBJ_ALLOC):
       alloc = kgsl.struct_kgsl_gpuobj_alloc.from_address(argp)
       alloc.id, self.next_id = self.next_id, self.next_id + 1

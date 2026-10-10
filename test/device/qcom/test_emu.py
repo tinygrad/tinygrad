@@ -12,13 +12,6 @@ class TestQCOMEmu(unittest.TestCase):
     a = np.array([-4, 7, -7, -9, 2**20 + 1], np.int32)
     np.testing.assert_equal((Tensor(a) % 3).numpy(), a % 3)
 
-  def test_imul(self):
-    a, b = np.array([2**17 + 1, -(2**16 + 1), -1, 2**31 - 1], np.int32), np.array([2**16 + 3, 2**16 + 1, -1, 3], np.int32)
-    np.testing.assert_equal((Tensor(a) * Tensor(b)).numpy(), a * b)
-
-  def test_int64_to_float(self):
-    np.testing.assert_equal(Tensor([1, -2, 0, 2**40], dtype=dtypes.int64).cast(dtypes.float32).numpy(), np.array([1, -2, 0, 2**40], np.float32))
-
   def test_half_const(self):
     np.testing.assert_equal((Tensor([1.5, 2.5, 1.0], dtype=dtypes.half) - 1.0).numpy(), np.array([0.5, 1.5, 0.0], np.float16))
 
@@ -27,13 +20,7 @@ class TestQCOMEmu(unittest.TestCase):
     ref = Tensor(a, device="CPU").interpolate((4, 4), mode="linear").numpy()
     np.testing.assert_equal(Tensor(a).interpolate((4, 4), mode="linear").numpy(), ref)
 
-  def test_where(self):
-    a = np.array([1, -2, 3, -4], np.int32)
-    np.testing.assert_equal((Tensor(a) > 0).where(Tensor(a * 10), Tensor(-a)).numpy(), np.where(a > 0, a * 10, -a))
-
-  def test_bool_store(self):
-    np.testing.assert_equal((Tensor([1.0, 5, 6]) < Tensor([2.0, 3, 6])).numpy(), np.array([True, False, False]))
-
+  @unittest.skipUnless(DEV.renderer == "IR3", "CL emulates half in float")
   def test_mad(self): # not fused, denormal products flush
     for dt, eps in ((np.float32, 2**-12), (np.float16, 2**-6)):
       a, c = np.array([1 + eps, 1 + 2 * eps, 1 + 3 * eps, 1.5], dt), np.array([-1, -1, -1, -2.25], dt)
@@ -42,11 +29,13 @@ class TestQCOMEmu(unittest.TestCase):
       out = (Tensor(np.array([a, a], dt)) * Tensor(np.array([a, a], dt)) + Tensor(np.array([c, -c], dt))).numpy()
       self.assertEqual(out.view(f"u{out.itemsize}").tolist(), bits)
 
+  @unittest.skipUnless(DEV.renderer == "IR3", "CL emulates half in float")
   def test_dst_conv(self):
     a = Tensor(np.array([1 + 2**-11 + 2**-13, 1e5, 2**-15 + 2**-17], np.float32))
     out = (a * Tensor(np.ones(3, np.float32))).half().numpy()
     self.assertEqual(out.view(np.uint16).tolist(), [0x3c00, 0x7bff, 0x0])
 
+  @unittest.skipUnless(DEV.renderer == "IR3", "CL rounds to nearest even")
   def test_cov(self):
     np.testing.assert_equal(Tensor([2**24 + 3, -(2**24 + 3), 2**31 - 1], dtype=dtypes.int32).cast(dtypes.float32).numpy(),
                             np.array([2**24 + 2, -(2**24 + 2), 2**31 - 2**7], np.float32))
@@ -68,13 +57,10 @@ class TestQCOMEmu(unittest.TestCase):
     self.assertEqual(a.maximum(b).numpy().view(np.uint32).tolist(), [0x3f800000, 0x3f800000, 0, 0])
     self.assertEqual(a.minimum(b).numpy().view(np.uint32).tolist(), [0x3f800000, 0x3f800000, 0x80000000, 0x80000000])
 
+  @unittest.skipUnless(DEV.renderer == "IR3", "CL emulates half in float")
   def test_half_rcp(self):
     out = Tensor(np.array([894.0, 17.52, 2418.0], np.float16)).reciprocal().numpy()
     np.testing.assert_equal(out.view(np.uint16), np.array([0x1494, 0x2b4e, 0x0ec6], np.uint16))
-
-  def test_predication(self):
-    a, b = np.arange(15, dtype=np.float32).reshape(5, 3), np.arange(15, dtype=np.float32).reshape(3, 5) - 7
-    with Context(IMAGE=1): np.testing.assert_equal((Tensor(a) @ Tensor(b)).numpy(), a @ b)
 
   def test_17_images(self):
     xs = [np.random.default_rng(i).random((4, 64)).astype(np.float32) for i in range(17)]

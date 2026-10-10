@@ -633,11 +633,7 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['QCOM'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run pytest (qcom CL)
-        if: matrix.renderer == 'CL'
-        run: python -m pytest -n=auto test/test_tiny.py test/runtime/test_ops.py test/runtime/test_dtype_alu.py --durations=20
-      - name: Run pytest (qcom IR3)
-        if: matrix.renderer == 'IR3'
+      - name: Run pytest
         run: python -m pytest -n=auto test/test_tiny.py test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/runtime/test_search.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/device/qcom --durations=20
       - name: Run pytest (qcom IMAGE=1)
         run: |
