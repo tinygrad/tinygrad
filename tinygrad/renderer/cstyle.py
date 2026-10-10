@@ -25,7 +25,7 @@ base_rewrite = PatternMatcher([
   (UPat.cvar("c").cast(dtypes.floats, name="x"), lambda ctx,x,c: None if math.isfinite(v:=c.val) else \
     f"({ctx.render_cast(x, ctx.nan if math.isnan(v) else ctx.infinity if v > 0 else f'-{ctx.infinity}')})"),
   (UPat.cvar("c").cast(dtypes.float), lambda ctx,c: f"{c.val}f"),
-  (UPat.cvar("c").cast(dtypes.int64), lambda ctx,c: f"{c.val}l"),
+  (UPat.cvar("c").cast(dtypes.int64), lambda ctx,c: f"(~{~c.val}l)" if c.val < 0 else f"{c.val}l"),
   (UPat.cvar("c").cast(dtypes.uint64, name="x"), lambda ctx,x,c: f"{truncate[x.dtype](c.val)}ul"),
   (UPat.cvar("c").cast(dtypes.uint32, name="x"), lambda ctx,x,c: f"{truncate[x.dtype](c.val)}u"),
   (UPat.cvar("c").cast(dtypes.bool), lambda ctx,c: "1" if c.val else "0"),
