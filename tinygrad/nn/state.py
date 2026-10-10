@@ -15,6 +15,7 @@ class TensorIO(io.RawIOBase, BinaryIO):
     if (buf:=super().read(size)) is None: raise ValueError("io.RawIOBase.read returned None") # only happens if readinto returns None (never)
     return buf
   def readinto(self, buffer: Any) -> int:
+    buffer = memoryview(buffer).cast('B')
     data = self._tensor[self._position:self._position+len(buffer)].data()
     buffer[:len(data)] = data
     self._position += len(data)
