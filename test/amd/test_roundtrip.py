@@ -69,7 +69,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
 
   for call in linear.src:
     ast = call.src[0]
-    for bufs, _ in unwrap_multi(resolve_params(call, ())):
+    for bufs, _ in unwrap_multi(call, resolve_params(call, ())):
       if ast.op is Ops.STORE:
         # Handle bulk STORE: extract source data to initialize destination buffer
         if len(bufs) >= 2:
