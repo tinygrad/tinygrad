@@ -1,7 +1,8 @@
 import gc, itertools, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, amd_fma_gemv_supported, QUANT_SIZES, FMA_QUANT_TYPES, \
+  HALFWORD_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.helpers import not_support_multi_device
 
@@ -107,8 +108,34 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
+  def test_fma_gemv(self):
+    # CDNA path: fused dequant+GEMV straight from the packed weights, plain f32 math
+    if not amd_fma_gemv_supported(Tensor.empty(1).device) or amd_custom_kernels_supported(Tensor.empty(1).device):
+      self.skipTest("requires an AMD device without RDNA custom kernel support")
+    rng = np.random.default_rng(42)
+    for typ in FMA_QUANT_TYPES:
+      with self.subTest(ggml_type=typ):
+        in_features, out_features = 512, 64
+        elems_per_block = 32 if typ == 8 else 256  # Q8_0 has 32-weight blocks
+        block_bytes = 34 if typ == 8 else QUANT_SIZES[typ]
+        packed = rng.integers(0, 256, (in_features*out_features//elems_per_block, block_bytes), dtype=np.uint8)
+        # keep scale headers small so random payloads produce sane values
+        packed[:, :2] = np.array([0.01], dtype=np.float16).view(np.uint8)
+        if typ == 14: packed[:, -2:] = np.array([0.01], dtype=np.float16).view(np.uint8)  # Q6_K d is at the end
+        raw = Tensor(packed.flatten()).realize()
+        decoded = ggml_data_to_tensor(raw, out_features*in_features, typ).reshape(out_features, in_features)
+        weight = decoded.numpy()
+        linear = Linear(in_features, out_features, bias=False)
+        linear.weight = decoded
+        x = rng.normal(size=(3, in_features)).astype(np.float32)
+        actual = linear(Tensor(x)).numpy()
+        self.assertEqual(linear.ggml_type, typ)
+        np.testing.assert_allclose(actual, x @ weight.T, rtol=3e-3, atol=2e-2)
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
-    if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
+    if amd_custom_kernels_supported(Tensor.empty(1).device) or amd_fma_gemv_supported(Tensor.empty(1).device):
+      self.skipTest("run with DISABLE_AMD_KERNELS=1")
     # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here
     for typ in (12, 14, 17, 23):
       with self.subTest(ggml_type=typ):

@@ -21,6 +21,15 @@ QUANT_SIZES = {Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XS: 74,
 HALFWORD_QUANTS = (Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S)
 QUANT_NAMES = {Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
                IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s"}
+Q8_0 = 8
+
+@functools.cache
+def amd_fma_gemv_supported(device:str|tuple[str, ...]|None) -> bool:
+  # the FMA dequant+GEMV kernels use no dp4a/WMMA, so they also run on CDNA (wave64); the 32-lane swizzle reduce is safe there
+  if getenv("DISABLE_AMD_KERNELS"): return False
+  if isinstance(device, tuple): device = device[0]
+  if device is None or device.split(":")[0] != "AMD": return False
+  with Context(ALLOW_DEVICE_USAGE=1): return isinstance(Device[device].renderer, HIPRenderer)
 
 def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp) else v
 
@@ -63,6 +72,7 @@ class Linear(nn.Linear):
   def set_quantized(self, decoded:Tensor):
     if self.in_features % GGML_BLOCK_SIZE: return
     packed_sizes = {typ: decoded.numel() // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
+    packed_sizes[Q8_0] = decoded.numel() // 32 * 34  # not in QUANT_SIZES (the RDNA dp4a path doesn't support it)
     graph = decoded.uop.toposort()
     raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
                 prod(u.shape) in packed_sizes.values()), None)
@@ -82,7 +92,7 @@ class Linear(nn.Linear):
       if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
     else: return
     # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
-    word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
+    word_dtype = dtypes.uint16 if ggml_type in (*HALFWORD_QUANTS, Q8_0) else dtypes.uint32
     raw_offset = raw.contiguous_view_offset()
     if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return
     self.ggml_type = ggml_type
@@ -90,8 +100,13 @@ class Linear(nn.Linear):
     self.weight = Tensor(raw).flatten().bitcast(word_dtype).contiguous()
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
-    if self.ggml_type is None and supported:
-      self.set_quantized(self.weight)
+    fma_ok = self.use_custom_quant and not supported and amd_fma_gemv_supported(self.weight.device)
+    if self.ggml_type is None and (supported or fma_ok):
+      decoded = self.weight
+      self.set_quantized(decoded)
+      if self.ggml_type is not None and not (supported and self.ggml_type in QUANT_SIZES) \
+        and not (fma_ok and self.ggml_type in FMA_QUANT_TYPES):
+        self.ggml_type, self.weight = None, decoded  # no custom kernel for this format on this device: restore the decoded weight
       if self.ggml_type is None:
         # tiny dense fp16 matmul (e.g. the ssm beta/alpha head rows): single fp16 gemv kernel instead of a
         # generic matmul schedule, and realize the densely packed weight once if it is still a lazy ggml view
@@ -101,12 +116,18 @@ class Linear(nn.Linear):
           if isinstance(numel, int) or prod(max_shape) // self.in_features <= 32:
             out = f16_gemv(self, x if isinstance(numel, int) else x.pad_to(max_shape))
             return out if isinstance(numel, int) else out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
-        self.use_custom_quant = supported = False  # not a supported quant format
+        self.use_custom_quant = supported = fma_ok = False  # not a supported quant format
     if self.ggml_type in QUANT_SIZES and supported:
       if isinstance(x.numel(), int): return q8_linear(self, x)
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = q8_linear(self, x.pad_to(x.max_shape))
       return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
+    if self.ggml_type in FMA_QUANT_TYPES and fma_ok:
+      # fused dequant+GEMV straight from the packed weights (CDNA-friendly: plain FMA, no dp4a/WMMA)
+      if isinstance(x.numel(), int): return quant_gemv_fma(self.weight, self.ggml_type, x.reshape(-1, self.in_features),
+                                                           self.out_features).reshape(*x.shape[:-1], self.out_features)
+      out = quant_gemv_fma(self.weight, self.ggml_type, x.pad_to(x.max_shape).reshape(-1, self.in_features), self.out_features)
+      return out.reshape(*x.max_shape[:-1], self.out_features).shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
     return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
@@ -466,6 +487,141 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   if splits > 1: result = result.reshape(splits, tokens, out_features).sum(0)
   result = result.reshape(*x.shape[:-1], out_features)
   return result if layer.bias is None else result + layer.bias
+
+# ******** cdna/rnda-generic fused dequant+GEMV (plain FMA; no dp4a/WMMA needed) ********
+
+FMA_QUANT_TYPES = (IQ4_XS, IQ3_S, Q8_0, Q6_K)
+
+def _fma4(word:UOp) -> tuple[UOp, ...]:
+  # unpack 4 int8 values to floats
+  return tuple(((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8)).float() for b in range(4))
+
+@functools.cache
+def _quant_gemv_fma_kernel(out:UOp, *srcs:UOp, out_features:int, in_features:int,
+                           k_experts:int, shared_x:bool, ggml_type:int) -> UOp:
+  # one 32-lane wave per (row, output); lanes iterate 32-weight groups in strides of 32 lanes
+  sel:UOp|None = srcs[0] if k_experts > 1 else None
+  raw:UOp = srcs[1 if k_experts > 1 else 0]
+  x:UOp = srcs[2 if k_experts > 1 else 1]
+  grid:UOp|None = srcs[-1] if ggml_type == IQ3_S else None
+  rows = out.shape[0] // out_features
+  row_out = UOp.range(rows*out_features, 0, AxisType.GLOBAL)
+  lane = UOp.range(32, 1, AxisType.LOCAL)
+  row, output = row_out // out_features, row_out % out_features
+  x_row = row//k_experts if shared_x else row
+  w_row = (sel[row].load().cast(dtypes.int64) * out_features + output) if sel is not None else output
+  groups = in_features // 32
+  acc = UOp.const(0, dtypes.float32)
+  for it in range((groups + 31) // 32):
+    group = lane + it*32
+    def dot(g:UOp) -> UOp:
+      if ggml_type == Q8_0:
+        base = (w_row * groups + g) * 17  # u16 words per 32-weight block
+        d = _half(raw[base])
+        part = UOp.const(0, dtypes.float32)
+        for i in range(8):
+          word = _load_u32(raw, base, 2 + i*4, stream=True)
+          for b, val in enumerate(_fma4(word)): part = part + val * x[x_row, g*32 + i*4 + b].load().float()
+        return part * d
+      block, subgroup = g//8, g%8
+      base = (w_row * (in_features//256) + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
+      if ggml_type == IQ4_XS:
+        scale = _iq4_scale(raw, base, subgroup)
+        part = UOp.const(0, dtypes.float32)
+        for i in range(8):
+          word = _quant_word(raw, base, subgroup, i, IQ4_XS, None)
+          for b, val in enumerate(_fma4(word)):
+            part = part + val * x[x_row, g*32 + (i%4)*4 + b + (i//4)*16].load().float()
+        return part * scale
+      if ggml_type == IQ3_S:
+        d = _half(raw[base])
+        sc = _load_byte(raw, base, 106 + subgroup//2)
+        sc = (1 + 2*((sc >> ((subgroup%2)*4)) & 15)).float()
+        part = UOp.const(0, dtypes.float32)
+        for i in range(8):
+          word = _quant_word(raw, base, subgroup, i, IQ3_S, grid)
+          for b, val in enumerate(_fma4(word)): part = part + val * x[x_row, g*32 + i*4 + b].load().float()
+        return part * d * sc
+      if ggml_type == Q6_K:
+        d = _half(raw[base+104])
+        sc = [(_load_byte(raw, base, 192 + subgroup*2 + h).cast(dtypes.uint8).bitcast(dtypes.int8)).float() for h in range(2)]
+        parts = [UOp.const(0, dtypes.float32)] * 2
+        for i in range(8):
+          word = _quant_word(raw, base, subgroup, i, Q6_K, None)
+          for b in range(4):
+            val = ((word >> (b*8)) & 63).float() - 32
+            parts[i//4] = parts[i//4] + val * x[x_row, g*32 + i*4 + b].load().float()
+        return (parts[0]*sc[0] + parts[1]*sc[1]) * d
+      raise NotImplementedError
+    value = (group < groups).where(dot(group.minimum(groups-1)), UOp.const(0, dtypes.float32)) if groups % 32 else dot(group)
+    acc = acc + value
+  total = warp_reduce(acc, full_wave=True)
+  # NOTE: flat 1D store; gating a 2D mod-derived index breaks the coalescer
+  return out[(row*out_features + output).valid(lane.eq(0))].store(total).end(row_out, lane).sink(
+    arg=KernelInfo(name=f"gemv_{'q8_0' if ggml_type == Q8_0 else QUANT_NAMES[ggml_type]}_fma", opts_to_apply=()))
+
+def quant_gemv_fma(weight:Tensor, ggml_type:int, x:Tensor, out_features:int, sel:Tensor|None=None, shared_x:bool=False) -> Tensor:
+  """out[row, o] = dot(dequant(weight[sel[row] or row])[o], x[row or row//k]) computed fused from the packed weights."""
+  in_features = x.shape[-1]
+  assert in_features % 32 == 0 and (ggml_type != Q8_0 or True)
+  assert ggml_type in (Q8_0,) or in_features % GGML_BLOCK_SIZE == 0
+  k = sel.shape[-1] if sel is not None else 1
+  rows = x.shape[0]*k if (sel is not None and shared_x) else x.shape[0]
+  word_dtype = dtypes.uint16 if ggml_type in (*HALFWORD_QUANTS, Q8_0) else dtypes.uint32
+  raw = weight.bitcast(word_dtype).reshape(-1) if weight.dtype != word_dtype else weight.reshape(-1)
+  grid = _iq_grid(x.device, ggml_type) if ggml_type == IQ3_S else None
+  out = Tensor.empty(rows*out_features, dtype=dtypes.float32, device=x.device)
+  srcs = (out, sel.reshape(-1) if sel is not None else None, raw, x.reshape(-1, in_features), grid)
+  fxn = functools.partial(_quant_gemv_fma_kernel, out_features=out_features, in_features=in_features,
+                          k_experts=k, shared_x=shared_x, ggml_type=ggml_type)
+  result = Tensor.custom_kernel(*[s for s in srcs if s is not None], fxn=fxn)[0]
+  return result.reshape((rows//k, k, out_features) if sel is not None else (rows, out_features))
+
+# ******** mHC sinkhorn: affine+sigmoid+sinkhorn on the 24 mixing coefficients, one thread per token ********
+
+def _sigmoid_u(x:UOp) -> UOp: return (UOp.const(1.0, dtypes.float32) + (x * -LOG2E).exp2()).reciprocal()
+
+@functools.cache
+def _hc_sinkhorn_kernel(pre:UOp, post:UOp, comb:UOp, mixes:UOp, base:UOp, scale:UOp, hc:int, iters:int, eps:float) -> UOp:
+  assert hc == 4, "kernel is specialized for hc=4"
+  tok = UOp.range(pre.shape[0], 0, AxisType.GLOBAL)
+  m = [mixes[tok, i].load().float() for i in range((2+hc)*hc)]
+  s0, s1, s2 = scale[0].load().float(), scale[1].load().float(), scale[2].load().float()
+  b = [base[i].load().float() for i in range((2+hc)*hc)]
+  # pre/post gates
+  pre_v = [_sigmoid_u(m[i]*s0 + b[i]) + eps for i in range(hc)]
+  post_v = [_sigmoid_u(m[hc+i]*s1 + b[hc+i]) * 2.0 for i in range(hc)]
+  # comb[src][dst]: softmax over dst, then sinkhorn: colnorm once, then (iters-1) x (rownorm, colnorm)
+  c = [[m[2*hc + s*hc + d]*s2 + b[2*hc + s*hc + d] for d in range(hc)] for s in range(hc)]
+  for s in range(hc):
+    mx = functools.reduce(lambda a,bb: a.maximum(bb), c[s])
+    c[s] = [((v - mx) * LOG2E).exp2() + 0 for v in c[s]]
+    sm = functools.reduce(lambda a,bb: a+bb, c[s])
+    c[s] = [v / sm for v in c[s]]
+  c = [[v + eps for v in row] for row in c]
+  def colnorm():
+    for d in range(hc):
+      cs = eps + sum(c[s][d] for s in range(hc))
+      for s in range(hc): c[s][d] = c[s][d] / cs
+  def rownorm():
+    for s in range(hc):
+      rs = eps + sum(c[s])
+      c[s] = [v / rs for v in c[s]]
+  colnorm()
+  for _ in range(iters-1): rownorm(); colnorm()
+  stores = [pre[tok, i].store(pre_v[i]) for i in range(hc)] + [post[tok, i].store(post_v[i]) for i in range(hc)] + \
+           [comb[tok, s*hc+d].store(c[s][d]) for s in range(hc) for d in range(hc)]
+  return UOp.group(*stores).end(tok).sink(arg=KernelInfo(name="hc_sinkhorn", opts_to_apply=()))
+
+def hc_sinkhorn(mixes:Tensor, base:Tensor, scale:Tensor, hc:int, iters:int, eps:float) -> tuple[Tensor, Tensor, Tensor]:
+  """Fused affine+sigmoid+sinkhorn for hyper-connection mixing coefficients. mixes: (N, (2+hc)*hc) -> (N,hc), (N,hc), (N,hc,hc)."""
+  n = mixes.shape[0]
+  pre = Tensor.empty(n, hc, dtype=dtypes.float32, device=mixes.device)
+  post = Tensor.empty(n, hc, dtype=dtypes.float32, device=mixes.device)
+  comb = Tensor.empty(n, hc*hc, dtype=dtypes.float32, device=mixes.device)
+  fxn = functools.partial(_hc_sinkhorn_kernel, hc=hc, iters=iters, eps=eps)
+  pre, post, comb = Tensor.custom_kernel(pre, post, comb, mixes, base, scale, fxn=fxn)[:3]
+  return pre, post, comb.reshape(n, hc, hc)
 
 # ******** tiny dense fp16 gemv ********
 

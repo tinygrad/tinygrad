@@ -170,7 +170,8 @@ def main():
   if not args.no_chat_template and (ct := kv.get('tokenizer.chat_template')) is not None:
     try:
       import jinja2
-      env = jinja2.Environment()
+      import jinja2.ext
+      env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
@@ -178,6 +179,7 @@ def main():
       env.globals['eos_token'] = tok.decode([tok.eos_id])
       template = env.from_string(ct)
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
+    except jinja2.exceptions.TemplateError as e: print(f"warning: chat template disabled: {e}")
 
   # warmup the JIT
   if args.warmup or args.serve:
