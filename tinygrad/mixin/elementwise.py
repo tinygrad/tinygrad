@@ -252,10 +252,10 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) or a.dtype == dtypes.bool: a = a.cast(dtypes.default_float)
     # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a weak CONST is kept weak)
     d = a.alu(Ops.MUL, b.reciprocal())
-    match rounding_mode:
-      case "trunc": return d.trunc()
-      case "floor": return d.floor()
-      case _: return d
+    if rounding_mode is None: return d
+    if rounding_mode == "trunc": return d.trunc()
+    if rounding_mode == "floor": return d.floor()
+    raise RuntimeError(f"{rounding_mode=} is not supported")
 
   def __neg__(self) -> Self:
     return self.neg()
