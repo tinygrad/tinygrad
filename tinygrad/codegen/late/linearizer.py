@@ -3,21 +3,18 @@ from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
+from tinygrad.helpers import getenv, dedup, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
-  priorities:dict[UOp, tuple[int, int, int, Any]] = {}
+  priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
     for s in u.src_without_body: out_degree[s] += 1
-
-    # we place UOps with higher run_counts later
-    run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
@@ -30,7 +27,8 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END | Ops.BACKEDGE: priority = -5     # placing loop exits is bad
       case _: priority = 0            # everything else has priority 0
-    priorities[u] = (run_count, len(u.ranges), priority, extra)
+    # we place UOps in more ranges later, so no UOp lands inside a loop it does not depend on
+    priorities[u] = (len(u.ranges), priority, extra)
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
