@@ -27,7 +27,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     git = iter(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return (None,) + tuple(None if i in outputs else next(git) for i in range(len(args)))
   assert outputs, f"expected a CALL with output STOREs or a grad_fxn, got {fxn.op}"
-  params = {p.arg.slot:p for p in fxn.toposort(enter_calls=False) if p.op is Ops.PARAM and p.arg.slot >= 0}
+  params = {p.arg.slot:p for p in fxn.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
   grad_args = tuple(ctx.src[i] for i in outputs)
   root_grad = UOp.sink(*[g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)])
   grads = compute_gradient(UOp.sink(*[st.src[1] for st in outputs.values()]), root_grad, set(params.values()))
@@ -41,7 +41,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   args += grad_args
   bwd_body = renumber_invalid_outputs(bwd_body)
   # Compact this scope's PARAMs, capturing free Variables as inputs.
-  used = sorted((p for p in bwd_body.toposort(enter_calls=False) if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
+  used = sorted((p for p in bwd_body.toposort() if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
   bwd_args = [p if p.arg.slot < 0 else args[p.arg.slot] for p in used]
   bwd_body = bwd_body.substitute({p:p.replace(arg=dataclasses.replace(p.arg, slot=i, name=None, val=None))
                                   for i,p in enumerate(used)}, walk=True)

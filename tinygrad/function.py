@@ -21,7 +21,7 @@ pm_ctx = PatternMatcher([
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
   (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
    not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
-   any(is_implicit_storage(ctx, b) for b in x.toposort(enter_calls=False)) else None),
+   any(is_implicit_storage(ctx, b) for b in x.toposort()) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:
@@ -33,7 +33,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
 def renumber_invalid_outputs(uret:UOp) -> UOp:
   invalid = invalid_outputs(uret)
   return uret.substitute({b:b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=i, buffer=None, bind_on_realize=False))
-                          for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
+                          for i,b in enumerate(x for x in uret.toposort() if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
