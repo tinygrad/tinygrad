@@ -128,7 +128,8 @@ class AMDDriver(VirtDriver):
       if struct.flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED:
         self.track_address(struct.va_addr, struct.va_addr + struct.size, lambda mv,off: None, lambda mv, off: self._emulate_execute())
     elif nr == _ioctl_nr(kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU):
-      self.object_by_handle.pop(struct.handle)
+      va = self.object_by_handle.pop(struct.handle).va_addr
+      self.tracked_addresses = [x for x in self.tracked_addresses if x[0] != va]
     elif nr == _ioctl_nr(kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU):
       dev_ids = (ctypes.c_int32 * struct.n_devices).from_address(struct.device_ids_array_ptr)
       for i in range(struct.n_devices):
