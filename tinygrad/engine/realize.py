@@ -6,17 +6,20 @@ from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCount
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
 
-def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_bound_var)
-def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
-  # a bound value is a bare CONST: the Variable states the width
+def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_variable)
+def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
+  # one per kernel param in order: a buffer is its address, a value bound in the call is a CONST, any other value is its slotless var read
+  # from var_vals at every run (the jit unbinds its input variables)
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  return [bound.get(v.expr, v) for v in prg.arg.vars]
+  return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
+          call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -32,7 +35,7 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
     return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
-  return [(d, call, None) for d in to_tuple(call.src[1].device)]
+  return [(d, call, None) for d in to_tuple(get_call_arg_uops(call)[0].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -67,7 +70,8 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = [] if isinstance(call.arg.aux, HCQInfo) else resolve_params(call, ctx.input_uops)
-  lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
+  prg_args = [_resolve(call.src[1+g], ctx.input_uops) for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args
+  lanes = list(unwrap_multi(call, prg_args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None
     bufs = lanes[i][0] if i < len(lanes) else [cast(Buffer, ctx.input_uops[s].buffer) for s in (stats[3] if stats else ())]
@@ -150,32 +154,30 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
-  resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
+  for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
     if devices is None and device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
-    var_vals = {**ctx.var_vals, **device_vars}
-    prg_bufs = [b.ensure_allocated() for b in bufs]
+    var_vals = {**ctx.var_vals, **device_vars, **{s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}}
+    prg_bufs = {i:b.ensure_allocated() for i,b in zip(ast.arg.globals, bufs)}
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: vals = tuple(var_vals[v.expr] if v.is_variable else _resolve(call.src[1 + v.arg.slot], ctx.input_uops).val for v in ast.arg.vars)
+    try: args = [(var_vals[p.expr] if p.is_variable else _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU else
+                 prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_sz, local_size=local_sz, vals=vals, wait=ctx.wait, timeout=ctx.timeout))
+    ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  resolved = resolve_params(call, ctx.input_uops)
   Device["CPU"].synchronize(ctx.timeout)
-  for bufs, device_vars in unwrap_multi(call, resolved):
-    bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
-    var_vals = {**ctx.var_vals, **device_vars}
-    cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
-    global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
+  pos = [k for k, s in enumerate(call.src[1:]) if not s.is_variable]
+  for lane, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    bufs, dev_bufs = dict(zip(pos, lane[:len(lane)//2])), dict(zip(pos, lane[len(lane)//2:]))
     for i in prg.arg.outs:
-      dt = _to_np_dtype(resolved[i].dtype)
-      assert dt is not None, f"no np dtype for {resolved[i].dtype}"
+      dt = _to_np_dtype(call.src[1+i].dtype)
+      assert dt is not None, f"no np dtype for {call.src[1+i].dtype}"
       np.testing.assert_allclose(np.frombuffer(dev_bufs[i].ensure_allocated().as_memoryview(), dt),
                                  np.frombuffer(bufs[i].as_memoryview(), dt), rtol=1e-3, atol=1e-3)
   return []
@@ -204,10 +206,10 @@ pm_flatten_linear = PatternMatcher([
 ])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *params)))
+  shadows = tuple(p if p.is_bound_var else
+                  UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
+  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if not p.is_bound_var)
+  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
