@@ -93,8 +93,9 @@ def store_hazard_boundary(s:UOp):
 
 def fix_store_hazard(target:UOp, src:UOp):
   if (base:=target.base) not in src.toposort(): return None
-  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  # PERMUTE/EXPAND can reorder or repeat reads through composed views, including decomposed flips.
+  # SHRINK can have overlapping regions when dest is also shrunk.
+  unsafe = {Ops.PERMUTE, Ops.EXPAND} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=store_hazard_boundary):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)

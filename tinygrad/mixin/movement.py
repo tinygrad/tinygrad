@@ -250,8 +250,18 @@ class MovementMixin:
     assert all(not isinstance(x, bool) and x >= 0 and x < self.ndim for x in axis_arg), f"flip args must be axis ints {axis_arg}"
     if len(axis_arg) != len(dedup(axis_arg)):
       raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
-    flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
-    return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
+    ret = self
+    for axis in axis_arg:
+      if resolve((n:=ret.shape[axis]) <= 1, False): continue
+      order = (axis,) + tuple(i for i in range(ret.ndim) if i != axis)
+      x = ret.permute(order)
+      tail, bounds = x.shape[1:], (None,) * (x.ndim-1)
+      width, offset = smax(n-1, 1), smax(n-1, 0)
+      # Repeated rows start one element earlier modulo n; their first column is the reversed axis.
+      x = x._mop(Ops.EXPAND, (width+1,)).reshape(n*(width+1), *tail)
+      x = x.shrink(((offset, offset+n*width),)+bounds).reshape(n, width, *tail)
+      ret = x.shrink((None, (0,1))+bounds).reshape(n, *tail).permute(argsort(order))
+    return ret
 
   def stack(self, *args: Self, dim: int = 0) -> Self:
     """

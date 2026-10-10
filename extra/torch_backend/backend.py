@@ -18,7 +18,7 @@ def _to_torch_device(device: str): return torch.device("tiny", int(device.partit
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
-# TODO: this assumes a contiguous source, so PERMUTE/EXPAND/PAD/FLIP are wrong. UOp.contiguous_view_offset does it
+# TODO: this assumes a contiguous source, so PERMUTE/EXPAND/PAD are wrong. UOp.contiguous_view_offset does it
 # properly, but it needs a device (these are deviceless)
 alias_ops = GroupOp.Movement | {Ops.BITCAST, Ops.DETACH, Ops.AFTER}
 def calculate_storage_offset(x: Tensor) -> int:
