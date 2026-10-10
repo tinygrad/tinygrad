@@ -589,9 +589,6 @@ class HIPRenderer(CStyleLanguage):
         elif (N, M, K) == (16, 16, 32): type_map = {**type_map, dtypes.bf16: "_bf16", dtypes.f16: "_f16"}
         elif (N, M, K) == (16, 16, 128): type_map = {**type_map, dtypes.fp8e4m3: "_f8f6f4", dtypes.fp8e5m2: "_f8f6f4"}
         prefix.append(f"#define __{name} __builtin_amdgcn_mfma_{'scale_' if K == 128 else ''}f32_{N}x{M}x{K}{type_map[dtype_in]}")
-      # #define __WMMA_16_16_16_f16_f16 __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
-      elif self.tensor_cores == tc.amd_rdna4 and dtype_out != dtypes.int32:
-        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
       elif dtype_out == dtypes.int32:
         # RDNA4 uses 8 int8 values per lane in 2 VGPRs, RDNA3 uses 16 in 4 VGPRs
         num_regs = 2 if (is_rdna4:=self.tensor_cores == tc.amd_rdna4) else 4
@@ -599,6 +596,9 @@ class HIPRenderer(CStyleLanguage):
           f"static inline __attribute__((device)) int8 __{name}"+f"""(signed_char{num_regs*4} a, signed_char{num_regs*4} b, int8 c) {{
   return __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32{'_gfx12' if is_rdna4 else ''}(true, __builtin_bit_cast(wmma_int{num_regs}, a),
     true, __builtin_bit_cast(wmma_int{num_regs}, b), c, false);\n}}""")
+      # #define __WMMA_16_16_16_f16_f16 __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
+      elif self.tensor_cores == tc.amd_rdna4:
+        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
       elif dtype_out == dtypes.float:
         prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_in == dtypes.half else 'bf16'}_w32")
       else: prefix.append(f"static inline __attribute__((device)) half8 __{name}"+"""(half16 a, half16 b, half8 c) {
