@@ -409,9 +409,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           if len(ps) != len(self.marg) or not all(resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=s) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
           return tuple(sz for _,sz in self.marg)
-        case Ops.FLIP:
-          if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
-          return ps
         case Ops.UNSHARD: return tuple(s*(int(self.src[1:][self.arg.index(a)].vmax)+1) if a in self.arg else s for a,s in enumerate(ps))
         case Ops.REDUCE:
           num_axes = self.arg[1]
@@ -793,7 +790,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape
       case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape, self.src[2].as_shape))
-      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case Ops.PERMUTE: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg) -> UOp:
@@ -805,7 +802,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
-      case Ops.PERMUTE | Ops.FLIP: src_args = []
+      case Ops.PERMUTE: src_args = []
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
         dtype = dtype_from_uop(Ops.STACK, srcs, None)
@@ -1118,6 +1115,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (c:=s1_vmin) == s1_vmax < 0: return (s0_vmin%c, s0_vmax%c) if s0_vmin//c == s0_vmax//c else (c+1, 0)
         if s1_vmin > 0: return (0, s1_vmax-1)
         if s1_vmax < 0: return (s1_vmin+1, 0)
+        # Nonnegative modulo cannot exceed its dividend, even when the divisor's interval includes zero.
+        if s0_vmin >= 0 and s1_vmin >= 0: return (0, s0_vmax)
       if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int):
         return ~int(s0_vmax), ~int(s0_vmin)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)

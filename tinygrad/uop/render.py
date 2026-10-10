@@ -92,7 +92,6 @@ def marg_str(ctx, a:sint) -> str: return str(a) if not isinstance(a, UOp) else c
 
 def render_marg(ctx,x:UOp):
   if x.op is Ops.PERMUTE: return str(x.marg)
-  if x.op is Ops.FLIP: return str(tuple([i for i,x in enumerate(x.marg) if x]))
   pieces = []
   if x.op in {Ops.RESHAPE, Ops.EXPAND}: pieces = [marg_str(ctx, a) for a in x.marg]
   if x.op in {Ops.PAD, Ops.SHRINK}: pieces = [f"({marg_str(ctx, a[0])}, {marg_str(ctx, a[1])})" for a in x.marg]

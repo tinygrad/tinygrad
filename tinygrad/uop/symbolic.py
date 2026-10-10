@@ -239,6 +239,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x", dtype=dtypes.bool).logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
+  (UPat.var("a") & (UPat.var("a") | UPat.var("b")), lambda a,b: a),
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),

@@ -52,14 +52,16 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
 def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
   # A write through a non-overlapping view replaces only that region of the returned state.
   path, base = [], view
-  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD}:
+  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.PAD, Ops.EXPAND}:
     path.append(base)
     base = base.src[0]
   if base is not dest: return None
   grad = ctx
   for mop in reversed(path): grad = mop.replace(src=(grad,)+mop.src[1:])
   mask = grad.const_like(1)
-  for mop in path: mask = pm_gradient.rewrite(mop, ctx=mask)[0]
+  for mop in path:
+    mask = pm_gradient.rewrite(mop, ctx=mask)[0]
+    if mop.op is Ops.EXPAND: mask = mask._rop(Ops.ADD, tuple(range(len(mop.marg))))
   return mask.cast(dtypes.bool).where(0, ctx), grad
 
 # ctx is grad_output
@@ -85,9 +87,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
   (UPat(Ops.EXPAND), lambda ctx: (ctx, None)),
   (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
-  (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[0]-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
+  (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx._mop(Ops.PAD, tuple((p[0], s) for s,p in zip(ret.src[0].shape, ret.marg))), None, None)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
-  (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),) + (None,) * (len(ret.src)-1)),
   (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),

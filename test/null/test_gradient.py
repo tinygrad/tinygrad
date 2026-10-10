@@ -3,7 +3,7 @@ import unittest, math
 import torch
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.mixin.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
@@ -43,6 +43,13 @@ class TestGradient(unittest.TestCase):
 
         self._cmp_nan_okay(tg_out_x, torch_out_x)
         self._cmp_nan_okay(tg_out_y, torch_out_y)
+
+  def test_symbolic_shrink_restores_source_shape(self):
+    n = UOp.variable('n', 2, 8)
+    x = UOp.param(0, dtypes.float, (n*n,))
+    shrunk = x._mop(Ops.SHRINK, ((n-1, n*(n-1)),))
+    grad = compute_gradient(shrunk, UOp.param(1, dtypes.float, shrunk.shape), {x})[x]
+    self.assertIs(grad.shape[0], x.shape[0])
 
   # unary ops unit
   def test_recip(self): self._test_one_input_function(lambda x: 1.0/x)
