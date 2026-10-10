@@ -4,21 +4,23 @@ assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
-from tinygrad.runtime.support.hcq2 import layout_args, make_program
-from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
+from tinygrad.runtime.support.hcq2 import layout_args, make_program, ccall, ins, get_time_ms
+from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator, AddrSpace
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ
-from tinygrad.helpers import ProfileEvent, unwrap
+from tinygrad.helpers import ProfileEvent, unwrap, to_tuple, ceildiv
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
-from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
+from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa, libc, libusb
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import PCIIfaceBase, MAP_FIXED
+from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager, NVUSBPCIDevice
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_copy_rewriter
+from tinygrad.runtime.support.usb import usb_asm24, usb_cq, usb_link, usb_stage, usb_ctrl, usb_bulk, usb_poke, usb_stack, usb_fail
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -198,6 +200,7 @@ class NVCopyQueue(NVQueue):
   def semaphore(self, addr:UOp, value:UOp, typ:str): # a one word release writes just the payload, a four word one the timestamp after it
     self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *hilo(addr), value.ccast(dtypes.uint32))
     self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, nv_flags("NVC6B5_LAUNCH_DMA", flush_enable="true", semaphore_type=f"release_{typ}_word_semaphore"))
+  def wait(self, signal:UOp, value:UOp, eq:bool=False): self.sem(signal.getaddr(self.devs), value, operation="acquire" if eq else "acq_circ_geq")
   def timestamp(self, signal:UOp): self.semaphore(signal.getaddr(self.devs), UOp.const(0, dtypes.uint32), "four")
   def signal(self, signal:UOp, value:UOp): self.semaphore(signal.getaddr(self.devs), value, "one")
 
@@ -532,6 +535,9 @@ class PCIIface(PCIIfaceBase):
     super().__init__(dev, dev_id, vendor=0x10de, devices=((0xff00, (0x2200,0x2400,0x2500,0x2600,0x2700,0x2800,0x2b00,0x2c00,0x2d00,0x2f00)),),
       base_class=0x03, vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size, dev_impl_t=NVDev)
 
+    self._init_nvd()
+
+  def _init_nvd(self):
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
@@ -552,10 +558,81 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
+def nv_usb_vram(dev) -> UOp:
+  return UOp.alloc((4,), dtypes.uint32, 0, device=to_tuple(dev)[0]).rtag(to_name(to_tuple(dev)[0], "usb_vram"))
+
+@uopfunc
+def nv_usb_wait(dev:str, h:UOp, value:UOp) -> UOp:
+  loop = UOp.range(UOp(Ops.NOOP).after(h, start:=get_time_ms(h)), next(UOp.unique_num), dtype=dtypes.void)
+  slot = usb_stack(dtypes.uint32, 0)
+  read = slot.index(0).store(nv_usb_vram(dev).after(h, loop).index(2).load())
+  def pending(dep:UOp) -> UOp: return slot.after(dep).index(0).load().ne(value)
+  done = read.backedge(loop, h.after(read).index(5).load().eq(0) & pending(read) & (get_time_ms(read) - start < 1000))
+  return usb_fail(h.after(done), pending(done).cast(dtypes.int) * libusb.LIBUSB_ERROR_TIMEOUT).sink()
+
+class USBIface(PCIIface):
+  SRAM_PADDR, SLOT_SIZE = 0x200000, 0x4000
+  TRANSFER_START_SLOT, TRANSFER_SLOT_COUNT = 5, 25
+  TRANSFER_PADDR, TRANSFER_SIZE = SRAM_PADDR + TRANSFER_START_SLOT * SLOT_SIZE, TRANSFER_SLOT_COUNT * SLOT_SIZE
+
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
+    visible = filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "NV")
+    self.dev, self.pci_dev, self.vram_bar, self.count = dev, NVUSBPCIDevice(*visible[dev_id]), 1, len(visible)
+    self.dev_impl = NVDev(self.pci_dev)
+    self._init_nvd()
+
+  @functools.cached_property
+  def ctrl(self) -> Buffer:
+    vaddr, pieces = self.dev_impl.mm.alloc_vaddr(size=0x85000), [(0x1000, 0x828000, 0x1000), (0x5000, self.TRANSFER_PADDR, self.TRANSFER_SIZE)]
+    for off, paddr, n in pieces: self.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=AddrSpace.SYS, uncached=True)
+    return Buffer(self.dev.device, 0x85000, options=BufferSpec(external_ptr=vaddr), opaque=BufferStorage(vaddr))
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
+            **kwargs) -> BufferStorage:
+    if not host and not cpu_access: return super().alloc(size, uncached=uncached, zero=zero, **kwargs)
+    mapping = self.dev_impl.mm.valloc_cpu_visible(size:=round_up(size, 0x1000), uncached=uncached, zero=zero)
+    barview = self.pci_dev.map_bar(self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size)
+    return BufferStorage(mapping.va_addr, PCIAllocationMeta(mapping, False, hMemory=mapping.paddrs[0][0]), barview)
+
+  def map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf.host.addr)
+  def unmap(self, mapping:BufferStorage): pass
+
+  def usb_copy_commands(self, vram:UOp, addr:UOp, nb:int, n:UOp, run:int, upload:bool) -> list[UOp]:
+    dev = vram.device
+    sram = usb_asm24(dev)[0x5000:0x5000 + self.TRANSFER_SIZE].getaddr(dev)
+    progress = nv_usb_vram(dev)
+    seq = (usb_link(dev).index(2).load() + n).cast(dtypes.uint32) + 1
+    cmds = [ins("wait_eq", progress[:2].bitcast(dtypes.uint64), seq), ins("copy", addr if upload else sram, sram if upload else addr, nb)]
+    if not upload: cmds.append(ins("store", usb_cq(dev), 0))
+    return cmds + [ins("store", progress[2:3], seq)]
+
+  def usb_transfer(self, dev:str, h:UOp, runs:list[tuple[bool, int, UOp, int]], n:int) -> UOp:
+    stage, progress = usb_stage(dev), nv_usb_vram(dev)
+    prefix = self.TRANSFER_PADDR - self.SRAM_PADDR
+    for upload, first, table, count in runs:
+      i = UOp.range(count, next(UOp.unique_num), dtype=dtypes.int) if count > 1 else UOp.const(0, dtypes.int)
+      addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
+      seq = (h.index(2).load() + first + i.cast(dtypes.uint64)).cast(dtypes.uint32)
+      hi = h.after(i, nv_usb_wait(dev, h.after(i), seq))
+      live = UOp.range(hi.index(5).load().eq(0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int)
+      hi = hi.after(live)
+      wire = round_up(size if upload else prefix + size, 512)
+      if upload: hi = hi.after(ccall(libc.memcpy, stage.index(0), addr, size.cast(dtypes.uint64)))
+      hi = hi.after(usb_ctrl(hi, 0x40, 0xF2, wire // 512 if upload else (wire // 512) | 0x8000,
+                            (self.TRANSFER_START_SLOT if upload else 0) | (ceildiv(wire, self.SLOT_SIZE) << 8), UOp.const(0, dtypes.uint64), 0))
+      if upload: hi = hi.after(usb_bulk(hi, 0x02, stage.index(0), wire))
+      hi = hi.after(usb_poke(hi, progress.getaddr("CPU"), seq + 1))
+      if not upload:
+        hi = hi.after(usb_bulk(hi, 0x81, stage.index(0), wire))
+        hi = hi.after(ccall(libc.memcpy, addr, stage.after(hi).index(prefix), size.cast(dtypes.uint64)))
+      done = nv_usb_wait(dev, hi, seq + 1).end(live)
+      h = h.after(done.end(i) if count > 1 else done)
+    return h.index(2).store(h.index(2).load() + n)
+
 class MOCKIface(NVKIface): count = 1
 
 class NVDevice(Compiled):
-  ifaces = [NVKIface, PCIIface, MOCKIface]
+  ifaces = [NVKIface, PCIIface, USBIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
     (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_compute"), UPat()), name="s"), lambda s: NVComputeQueue(s).encode()),
@@ -568,6 +645,8 @@ class NVDevice(Compiled):
 
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
+    self.is_usb = isinstance(self.iface, USBIface)
+    if self.is_usb: self.rtalloc_size = 4 << 20
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)
@@ -605,6 +684,11 @@ class NVDevice(Compiled):
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
+
+    if self.is_usb:
+      setup_usb_rules(self)
+      self.pm_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), lambda s, iface=self.iface:
+        usb_copy_rewriter(s, iface.TRANSFER_SIZE, iface.usb_copy_commands, iface.usb_transfer))])
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
@@ -726,6 +810,7 @@ class NVDevice(Compiled):
               (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4))))
 
   def on_device_hang(self):
+    if self.is_usb and self.error_state.host.view(fmt='q')[0]: return
     # Prepare fault report.
     # TODO: Restore the GPU using NV83DE_CTRL_CMD_CLEAR_ALL_SM_ERROR_STATES if needed.
 
