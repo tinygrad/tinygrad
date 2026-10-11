@@ -119,7 +119,7 @@ pm_reduce_collapse = pm_flatten_range + pm_reduce_unparented + PatternMatcher([
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
 ])+symbolic
 
-pm_reduce_load_collapse = PatternMatcher([
+pm_reduce_masks = PatternMatcher([
   # Sum [r+base == idx]*expr by substituting r = idx-base, provided it is in bounds.
   (UPat.any(
     (UPat.any(UPat(Ops.RANGE, name="x").or_casted(), UPat.var("x", dtypes.weakint)) != UPat.var("idx")).where(0, UPat.var("expr")),
@@ -142,13 +142,12 @@ pm_reduce_load_collapse = PatternMatcher([
   ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,c,expr,cond=UOp.const(True):
     sum((x != k).where(0, cond.where(expr, 0)).reduce(r, arg=Ops.ADD) for k in range(c.val, int(x.vmax)+1))
     if 0 <= x.vmax-c.val <= 1 else None),
-])+pm_reduce_collapse+PatternMatcher([
+])
+
+pm_reduce_load_collapse = pm_reduce_masks+pm_reduce_collapse+PatternMatcher([
   # lift x+y out of reduce on ne
   ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
 ])
-
-# Match reductions before normalizing their operands; arithmetic rewrites still run source-first.
-pm_reduce_first = PatternMatcher([(UPat(Ops.REDUCE, name="red"), lambda ctx,red: ctx.rewrite(red))])
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
@@ -163,7 +162,8 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
         if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
-    sink = graph_rewrite(collapse_fxn, pm, ctx=pm, bpm=pm_reduce_first, name="reduce_collapse")
+    collapse_fxn = graph_rewrite(collapse_fxn, pm_reduce_masks, bottom_up=True, name="reduce_masks")
+    sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
     if r in sink.backward_slice_with_self: return None
     u = sink.substitute({v:k for k,v in replaces.items()})
   return u

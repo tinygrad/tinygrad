@@ -58,10 +58,7 @@ def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
   if base is not dest: return None
   grad = ctx
   for mop in reversed(path): grad = mop.replace(src=(grad,)+mop.src[1:])
-  mask = grad.const_like(1)
-  for mop in path:
-    mask = pm_gradient.rewrite(mop, ctx=mask)[0]
-    if mop.op is Ops.EXPAND: mask = mask._rop(Ops.ADD, tuple(range(len(mop.marg))))
+  mask = compute_gradient(view, grad.const_like(1), {dest})[dest]
   return mask.cast(dtypes.bool).where(0, ctx), grad
 
 # ctx is grad_output
