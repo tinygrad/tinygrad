@@ -15,13 +15,15 @@ def _randomize(block, seed:int) -> dict[str, np.ndarray]:
 class TestGLM5KDA(unittest.TestCase):
   def test_qk_l2norm_small_vectors(self):
     # the first token's state update is beta * v (x) l2norm(k): with q/k projections tiny, FLA's x/sqrt(sum(x²)+eps) isn't a unit vector
-    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True, gate_lower_bound=-5.0, qk_l2norm_eps=1e-6)
+    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True, gate_lower_bound=-5.0,
+                    qk_l2norm_eps=1e-6)
     block = GatedDeltaNetBlock(_config(ssm=ssm), ssm)
     w = _randomize(block, 0)
     qkv_names = [n for n in ("attn_q.weight", "attn_k.weight", "attn_v.weight", "attn_qkv.weight") if n in w]
     qkv_w = np.concatenate([w[n] for n in qkv_names], axis=0)
     qkv_w[:32] *= 1e-4  # tiny q and k
-    for n, part in zip(qkv_names, np.split(qkv_w, np.cumsum([w[n].shape[0] for n in qkv_names])[:-1])): nn.state.get_state_dict(block)[n].replace(Tensor(part))
+    for n, part in zip(qkv_names, np.split(qkv_w, np.cumsum([w[n].shape[0] for n in qkv_names])[:-1])):
+      nn.state.get_state_dict(block)[n].replace(Tensor(part))
     x = np.random.default_rng(1).standard_normal((1, 1, 16)).astype(np.float32)
     block._init_state(Tensor(x))
     block._attention(Tensor(x), 0).realize()
