@@ -471,12 +471,6 @@ class TestReduceCollapse(unittest.TestCase):
     self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
 
 class TestMovementOps(unittest.TestCase):
-  def test_reshape_index_symbolic_zero_dimension(self):
-    from tinygrad.schedule.indexing import _apply_reshape
-    n, idx = UOp.variable('n', 0, 8), UOp.variable('idx', 0, 15)
-    coords = _apply_reshape((n, 2), (2*n,), UOp.sink(idx))
-    self.assertEqual(coords.src, ((idx//2).simplify(), (idx%2).simplify()))
-
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
     from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(32, 4))

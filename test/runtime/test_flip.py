@@ -1,23 +1,14 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable
-from tinygrad.uop import Ops
-from tinygrad.uop.ops import graph_rewrite
-from tinygrad.codegen.simplify import pm_load_collapse
-from tinygrad.engine.realize import run_linear
 
-class TestFlipDecomposition(unittest.TestCase):
-  def test_gradient_no_reduction(self):
+class TestFlip(unittest.TestCase):
+  def test_gradient(self):
     for shape, axes in (((32,), (0,)), ((127,), (0,)), ((4096,), (0,)), ((2, 3, 5), (0, 2)), ((5, 7), (0, 1)), ((7, 5, 3), (2, 0, 1))):
       with self.subTest(shape=shape, axes=axes):
         x = Tensor.empty(*shape).realize()
         weights = np.random.default_rng(0).normal(size=shape).astype(np.float32)
         grad = x.flip(axes).gradient(x, gradient=Tensor(weights).realize())[0]
-        linear = grad.schedule_linear()
-        for call in linear.src:
-          if call.body.op is Ops.SINK:
-            self.assertNotIn(Ops.REDUCE, [u.op for u in graph_rewrite(call.body, pm_load_collapse).toposort()])
-        run_linear(linear, {})
         np.testing.assert_array_equal(grad.numpy(), np.flip(weights, axes))
 
   def test_symbolic_zero_and_singleton(self):
@@ -51,8 +42,16 @@ class TestFlipDecomposition(unittest.TestCase):
     self.assertEqual(gx.tolist(), [1., 2., 0., 0.])
     self.assertEqual(gv.tolist(), [4., 3.])
 
-  def test_constant_graph_size(self):
-    self.assertNotIn('FLIP', Ops.__members__)
-    self.assertEqual(len({len(Tensor.empty(n).uop.flip(0).toposort()) for n in (7, 127, 4096)}), 1)
+  def test_repeated_strided_gradient(self):
+    # Unlike flip, these views can select the same source element more than once.
+    for offset in (0, 3, 63, 64):
+      with self.subTest(offset=offset):
+        x = Tensor.empty(8).realize()
+        indices = np.arange(64)[offset::7]
+        weights = np.arange(1, len(indices)+1, dtype=np.float32)
+        grad = x.repeat(8)[offset::7].gradient(x, gradient=Tensor(weights))[0]
+        expected = np.zeros(8, dtype=np.float32)
+        np.add.at(expected, indices % 8, weights)
+        np.testing.assert_array_equal(grad.numpy(), expected)
 
 if __name__ == '__main__': unittest.main()

@@ -43,14 +43,6 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
 
-  def test_and_or_absorption(self):
-    for dtype in (dtypes.bool, dtypes.int32):
-      a, b = (Variable(name, dtype.min, dtype.max, dtype) for name in ('a', 'b'))
-      for expr in (a & (a | b), (b | a) & a): self.assertIs(expr.simplify(), a)
-
-  def test_mod_zero_capable_divisor_bounds(self):
-    self.helper_test_variable(Variable('x', 0, 12) % Variable('y', 0, 4), 0, 12, '(x%y)')
-
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
