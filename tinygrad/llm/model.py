@@ -124,8 +124,7 @@ class TransformerConfig:
   expert_bias: bool = False
   expert_proj_bias: bool = False
   swiglu_alpha: float = 1.0
-  swiglu_clamp_exp: float|None = None
-  swiglu_clamp_shexp: float|None = None  # (the shared expert and the dense FFN)
+  swiglu_clamp_exp: float|None = None  # (all FFNs)
   swiglu_up_bias: float = 0.0
   sliding_window: int = 0
   sliding_window_pattern: int = 0
@@ -187,12 +186,12 @@ class FFNBlock:
       x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
-        shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_clamp_shexp).contiguous())
+        shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_clamp_exp).contiguous())
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
     # TODO: remove the need for this contiguous
-    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_clamp_shexp).contiguous())
+    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_clamp_exp).contiguous())
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -212,8 +211,7 @@ class FFNBlock:
     return _run(x, start_pos)
 
   def _hyper_connection(self, name:str, xs:Tensor, sublayer:Callable[[Tensor], Tensor]) -> Tensor:
-    """mHC: the sublayer runs on a pre-weighted sum of the (B, T, hc, D) streams, its output is spread back by post weights, on top of the
-    streams mixed by comb. pre, post and comb come from the normed streams"""
+    """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     cfg, base, scale = unwrap(self.config.hc), getattr(self, f'hc_{name}_base')["weight"], getattr(self, f'hc_{name}_scale')["weight"]
     hc, eps = cfg.count, cfg.eps
     flat = xs.flatten(2)
@@ -347,8 +345,7 @@ class MLATransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
 
 class DSAMLATransformerBlock(MLATransformerBlock):
-  """MLA with DeepSeek sparse attention (glm5-next): the indexer scores pools of kpool keys, a query sees the top_k/kpool best pools (and its
-  own pool)"""
+  """MLA with DeepSeek sparse attention (glm5-next): a query sees the top_k/kpool best pools of keys, picked by the indexer"""
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     idx = unwrap(config.indexer)
@@ -579,10 +576,6 @@ class Transformer:
         state_dict[name] = w.rearrange("n (h two) d -> n (two h) d", two=2).reshape(-1, w.shape[-1])
       elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
         state_dict[name] = state_dict[name][:kv_lora_rank].cat(state_dict[name][kv_lora_rank:].rearrange("(h two) d -> (two h) d", two=2), dim=0)
-    def swiglu_limit(key:str) -> float|None:  # per layer in the GGUF, the same for all layers in the supported models
-      if (limits:=kv.get(f'{arch}.{key}')) is None: return None
-      assert len(set(limits)) == 1, f"{key}: per layer limits are not supported"
-      return limits[0]
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0), dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
@@ -609,8 +602,8 @@ class Transformer:
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
-      swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_clamp_exp=7.0 if arch == 'gpt-oss' else swiglu_limit('swiglu_clamp_exp'),
-      swiglu_clamp_shexp=swiglu_limit('swiglu_clamp_shexp'),
+      # (glm5-next has the same limit for every layer and FFN)
+      swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_clamp_exp=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0),
