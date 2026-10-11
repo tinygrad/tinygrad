@@ -77,6 +77,8 @@ pm_mops = PatternMatcher([
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # A store through a padded view gates the destination index, not its loaded value.
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("dst"), 0), UPat.var("pad")).store(UPat.var("val")),
+   lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
   (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
    lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
   # move movement ops and INDEX after AFTER

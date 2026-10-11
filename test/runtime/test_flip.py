@@ -40,6 +40,15 @@ class TestFlip(unittest.TestCase):
             expected[:, :size] = np.flip(weights[:, :size], axes)
             np.testing.assert_array_equal(grad.numpy(), expected)
 
+  def test_symbolic_partial_store(self):
+    data, values = [1., 2., 3., 4.], [10., 20., 30., 40.]
+    for size in (0, 1, 2, 4):
+      with self.subTest(size=size):
+        x = Tensor(data).realize()
+        n = Variable('flip_store_size', 0, 4).bind(size)
+        x[:n].flip(0).assign(Tensor(values)[:n])
+        self.assertEqual(x.tolist(), values[:size][::-1] + data[size:])
+
   def test_partial_store_gradient(self):
     x = Tensor([1., 2., 3., 4.])
     y, value = x.clone(), Tensor([10., 20.])
