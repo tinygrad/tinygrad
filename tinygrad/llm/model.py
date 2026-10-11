@@ -124,7 +124,7 @@ class TransformerConfig:
   expert_bias: bool = False
   expert_proj_bias: bool = False
   swiglu_alpha: float = 1.0
-  swiglu_clamp_exp: float|None = None  # (all FFNs)
+  swiglu_limit: float|None = None
   swiglu_up_bias: float = 0.0
   sliding_window: int = 0
   sliding_window_pattern: int = 0
@@ -182,16 +182,16 @@ class FFNBlock:
       if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
       probs = probs * self.config.routed_scaling_factor
       gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
-      act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_clamp_exp, up_bias=self.config.swiglu_up_bias)
+      act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
       x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
-        shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_clamp_exp).contiguous())
+        shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous())
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
     # TODO: remove the need for this contiguous
-    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_clamp_exp).contiguous())
+    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit).contiguous())
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -212,15 +212,15 @@ class FFNBlock:
 
   def _hyper_connection(self, name:str, xs:Tensor, sublayer:Callable[[Tensor], Tensor]) -> Tensor:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
-    cfg, base, scale = unwrap(self.config.hc), getattr(self, f'hc_{name}_base')["weight"], getattr(self, f'hc_{name}_scale')["weight"]
-    hc, eps = cfg.count, cfg.eps
+    hc, eps, iters = (cfg:=unwrap(self.config.hc)).count, cfg.eps, cfg.sinkhorn_iters
+    base, scale = getattr(self, f'hc_{name}_base')["weight"], getattr(self, f'hc_{name}_scale')["weight"]
     flat = xs.flatten(2)
     mix = getattr(self, f'hc_{name}_fn')(flat * (flat.square().mean(-1, keepdim=True) + self.config.norm_eps).rsqrt())
     pre = (mix[..., :hc] * scale[0] + base[:hc]).sigmoid() + eps
     post = (mix[..., hc:2*hc] * scale[1] + base[hc:2*hc]).sigmoid() * 2
     comb = (mix[..., 2*hc:] * scale[2] + base[2*hc:]).reshape(*mix.shape[:-1], hc, hc).softmax(-1) + eps  # (..., src, dst)
     # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
-    for i in range(2 * cfg.sinkhorn_iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + eps)
+    for i in range(2 * iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + eps)
     out = sublayer((xs * pre.unsqueeze(-1)).sum(2))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2).unsqueeze(-1) * xs.unsqueeze(2)).sum(3)
 
@@ -375,8 +375,8 @@ class DSAMLATransformerBlock(MLATransformerBlock):
 
   def _init_state(self, x:Tensor):
     super()._init_state(x)
-    if not hasattr(self, "cache_kg"):  # zeros: the pools not complete yet stay finite
-      idx = unwrap(self.config.indexer)  # (whole pools: max_context rounded up)
+    if not hasattr(self, "cache_kg"):  # whole pools, zeros so the incomplete ones stay finite
+      idx = unwrap(self.config.indexer)
       self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.config.max_context, idx.kpool), 2, idx.head_dim, device=x.device)
 
 class GatedDeltaNetBlock(FFNBlock):
@@ -414,9 +414,9 @@ class GatedDeltaNetBlock(FFNBlock):
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    gate, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
-    # the decay: log_alpha = softplus(alpha + dt) * A, or bounded by gate_lower_bound: sigmoid(-(alpha + dt) * A) * lb
-    log_alpha = gate.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (gate * -a).sigmoid() * lb
+    g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
+    # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(-g * A) * lb
+    log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
     conv_state = initial.where(0, self.conv_state)
@@ -603,7 +603,7 @@ class Transformer:
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
       # (glm5-next has the same limit for every layer and FFN)
-      swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_clamp_exp=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
+      swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0),
