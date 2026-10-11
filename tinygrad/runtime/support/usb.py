@@ -289,9 +289,10 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp: # kernargs: poke on change
     return usb_patch(link, addr, v, patch(cache, [], bytes(v.dtype.itemsize * cache.max_numel())).index(idx - idx.vmin))
   return usb_poke_word(link, addr, v)
 
-def usb_load(b:UOp, idx:UOp, ld:UOp) -> UOp:
-  slot, n = usb_stack(ld.dtype), UOp.const(ld.dtype.itemsize, dtypes.int)
-  return slot.after(usb_stream(usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, ld.dtype), slot.index(0), n, False)).index(0).load()
+def usb_load(b:UOp, idx:UOp, ld:UOp) -> UOp: # all ones once the link failed, like a dead pcie device, so polls end
+  link, slot, n = usb_link(b.device).after(*usb_deps(b)), usb_stack(ld.dtype), UOp.const(ld.dtype.itemsize, dtypes.int)
+  read = usb_stream(link, usb_addr(b, idx, ld.dtype), slot.index(0), n, False)
+  return link.after(read).index(5).load().ne(0).where(UOp.const(ld.dtype.max, ld.dtype), slot.after(read).index(0).load())
 
 pm_usb_lower = PatternMatcher([
   (UPat.var("dst").index(UPat.var("di")).store(UPat.var("v")).end(UPat(Ops.RANGE, name="r")), usb_copy),

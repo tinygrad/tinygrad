@@ -54,7 +54,7 @@ def _memoryview(cls, mem):
     addr = ctypes.addressof(mem) if isinstance(mem, ctypes.Array) else mem
     for d in drivers:
       for st,en,rcb,wcb in d.tracked_addresses:
-        if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
+        if st <= addr < en: return TrackedMemoryView(mem, rcb, wcb)
   return original_memoryview(mem)
 class _MockMemoryviewMeta(type):
   def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))
