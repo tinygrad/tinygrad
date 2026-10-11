@@ -877,6 +877,17 @@ class TestOps(TensorTestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().div(4, rounding_mode="trunc").item(), 0)  # NOTE this is trunc-div behaviour
 
+  @Context(TRANSCENDENTAL=2)
+  def test_sin_transcendental(self): self.test_sin()
+  @Context(TRANSCENDENTAL=2)
+  def test_cos_transcendental(self): self.test_cos()
+  @Context(TRANSCENDENTAL=2)
+  def test_tan_transcendental(self): self.test_tan()
+  @Context(TRANSCENDENTAL=2)
+  def test_exp_transcendental(self): self.test_exp()
+  @Context(TRANSCENDENTAL=2)
+  def test_log_transcendental(self): self.test_log()
+
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
