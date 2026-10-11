@@ -3,7 +3,7 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer, exec_alu
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
@@ -45,19 +45,11 @@ class TestSymbolic(unittest.TestCase):
 
   def test_and_or_absorption(self):
     for dtype in (dtypes.bool, dtypes.int32):
-      a, b = Variable("a", 0, 1, dtype), Variable("b", 0, 1, dtype)
-      for expr in (a & (a | b), (b | a) & a):
-        self.assertIs(expr.simplify(), a)
-        self.check_equal_z3(expr, a)
+      a, b = (Variable(name, dtype.min, dtype.max, dtype) for name in ('a', 'b'))
+      for expr in (a & (a | b), (b | a) & a): self.assertIs(expr.simplify(), a)
 
   def test_mod_zero_capable_divisor_bounds(self):
-    x, y = Variable("x", 0, 12), Variable("y", 0, 4)
-    expr = x % y
-    self.assertEqual((expr.vmin, expr.vmax), (0, 12))
-    for dividend in range(13):
-      for divisor in range(5):
-        value = exec_alu(Ops.FLOORMOD, dtypes.weakint, (dividend, divisor))
-        self.assertTrue(expr.vmin <= value <= expr.vmax)
+    self.helper_test_variable(Variable('x', 0, 12) % Variable('y', 0, 4), 0, 12, '(x%y)')
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")

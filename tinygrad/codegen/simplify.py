@@ -119,11 +119,32 @@ pm_reduce_collapse = pm_flatten_range + pm_reduce_unparented + PatternMatcher([
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
 ])+symbolic
 
-pm_reduce_eq = PatternMatcher([
-  # reduce on gated load becomes can substitute the range and remove the reduce
-  ((UPat.var("idx")!=(UPat(Ops.RANGE, name="r").or_casted())).where(0, UPat.var("expr")).reduce(UPat.var("r"), arg=Ops.ADD),
-   lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)
-     if r not in idx.ranges else None),
+pm_reduce_load_collapse = PatternMatcher([
+  # Sum [r+base == idx]*expr by substituting r = idx-base, provided it is in bounds.
+  (UPat.any(
+    (UPat.any(UPat(Ops.RANGE, name="x").or_casted(), UPat.var("x", dtypes.weakint)) != UPat.var("idx")).where(0, UPat.var("expr")),
+    ((UPat.any(UPat(Ops.RANGE, name="x").or_casted(), UPat.var("x", dtypes.weakint)) != UPat.var("idx")).logical_not() &
+     UPat.var("cond")).where(UPat.var("expr"), 0),
+  ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,idx,expr,cond=UOp.const(True):
+    (v:=((idx:=(idx.cast(r.dtype)-base).simplify()) >= 0) & (idx < r.src[0])).where(cond.where(expr, 0).substitute({r:idx.valid(v)}), 0).simplify()
+    if (x is r or x.dtype is r.dtype is dtypes.weakint) and r not in (base:=(x-r).simplify()).ranges and r not in idx.ranges else None),
+  # [x % m == 0] is the disjoint union of [x == k*m]. Only expand short quotient intervals.
+  (UPat.any(
+    (UPat.var("x", dtypes.weakint) % UPat.var("m", dtypes.weakint) < 1).where(UPat.var("expr"), 0),
+    ((UPat.var("x", dtypes.weakint) % UPat.var("m", dtypes.weakint) < 1) & UPat.var("cond")).where(UPat.var("expr"), 0),
+  ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,m,expr,cond=UOp.const(True):
+    sum((x != k*m).where(0, cond.where(expr, 0)).reduce(r, arg=Ops.ADD) for k in range(int(q.vmin), int(q.vmax)+1))
+    if m.vmin > 0 and 0 <= (q:=(x//m).simplify()).vmax-q.vmin <= 2 else None),
+  # [x >= c] is the disjoint union of [x == c], ..., [x == xmax].
+  (UPat.any(
+    (UPat.var("x", dtypes.weakint) < UPat.cvar("c", dtypes.weakint)).where(0, UPat.var("expr")),
+    ((UPat.var("x", dtypes.weakint) < UPat.cvar("c", dtypes.weakint)).logical_not() & UPat.var("cond")).where(UPat.var("expr"), 0),
+  ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,c,expr,cond=UOp.const(True):
+    sum((x != k).where(0, cond.where(expr, 0)).reduce(r, arg=Ops.ADD) for k in range(c.val, int(x.vmax)+1))
+    if 0 <= x.vmax-c.val <= 1 else None),
+])+pm_reduce_collapse+PatternMatcher([
+  # lift x+y out of reduce on ne
+  ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
 ])
 
 # Match reductions before normalizing their operands; arithmetic rewrites still run source-first.
@@ -137,8 +158,8 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     included = u.toposort(gate=lambda x: x in bounds or not local.isdisjoint(x.ranges))
     if any(x.op in {Ops.STORE, Ops.AFTER, Ops.CALL} for x in included): return None
     replaces: dict[UOp, UOp] = {}
-    for x in included:
-      for s in x.src:
+    for u in included:
+      for s in u.src:
         if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
@@ -146,36 +167,6 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     if r in sink.backward_slice_with_self: return None
     u = sink.substitute({v:k for k,v in replaces.items()})
   return u
-
-pm_reduce_masks = PatternMatcher([
-  # Normalize r+b == idx to r == idx-b, then use the existing equality reduction rule.
-  (UPat.any(
-    (UPat.var("x", dtypes.weakint) != UPat.var("idx", dtypes.weakint)).where(0, UPat.var("expr")),
-    ((UPat.var("x", dtypes.weakint) != UPat.var("idx", dtypes.weakint)).logical_not() & UPat.var("cond")).where(UPat.var("expr"), 0),
-  ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,idx,expr,cond=UOp.const(True):
-    pm_reduce_eq.rewrite((r != (idx-base).simplify()).where(0, cond.where(expr, 0)).reduce(r, arg=Ops.ADD)).simplify()
-    if r not in (base:=(x-r).simplify()).ranges and r not in idx.ranges else None),
-  # [x % m == 0] is the disjoint union of [x == k*m]. Only expand short quotient intervals.
-  (UPat.any(
-    (UPat.var("x", dtypes.weakint) % UPat.var("m", dtypes.weakint) < 1).where(UPat.var("expr"), 0),
-    ((UPat.var("x", dtypes.weakint) % UPat.var("m", dtypes.weakint) < 1) & UPat.var("cond")).where(UPat.var("expr"), 0),
-  ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,m,expr,cond=UOp.const(True):
-    sum((x != k*m).where(0, cond.where(expr, 0)).reduce(r, arg=Ops.ADD)
-        for k in range(int(q.vmin), int(q.vmax)+1))
-    if m.vmin > 0 and 0 <= (q:=(x//m).simplify()).vmax-q.vmin <= 2 else None),
-  # [x >= c] is the disjoint union of [x == c], ..., [x == xmax].
-  (UPat.any(
-    (UPat.var("x", dtypes.weakint) < UPat.cvar("c", dtypes.weakint)).where(0, UPat.var("expr")),
-    ((UPat.var("x", dtypes.weakint) < UPat.cvar("c", dtypes.weakint)).logical_not() & UPat.var("cond")).where(UPat.var("expr"), 0),
-  ).reduce(UPat(Ops.RANGE, name="r"), arg=Ops.ADD), lambda r,x,c,expr,cond=UOp.const(True):
-    sum((x != k).where(0, cond.where(expr, 0)).reduce(r, arg=Ops.ADD) for k in range(c.val, int(x.vmax)+1))
-    if 0 <= x.vmax-c.val <= 1 else None),
-])
-
-pm_reduce_load_collapse = pm_reduce_masks + pm_reduce_collapse + pm_reduce_eq + PatternMatcher([
-  # lift x+y out of reduce on ne
-  ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
-])
 
 def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red, u, pm=pm_reduce_load_collapse)
 

@@ -89,7 +89,7 @@ class Ops(FastEnum):
   # buffer ops
   STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
-  # the core 6 movement ops! these only exist in the tensor graph
+  # the core 5 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto()
   UNSHARD = auto()  # UNSHARD is really a movement op
 

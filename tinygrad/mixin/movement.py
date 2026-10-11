@@ -253,14 +253,13 @@ class MovementMixin:
     ret = self
     for axis in axis_arg:
       if resolve((n:=ret.shape[axis]) <= 1, False): continue
-      order = (axis,) + tuple(i for i in range(ret.ndim) if i != axis)
-      x = ret.permute(order)
+      x = ret.transpose(0, axis)
       tail, bounds = x.shape[1:], (None,) * (x.ndim-1)
       width, offset = smax(n-1, 1), smax(n-1, 0)
       # Repeated rows start one element earlier modulo n; their first column is the reversed axis.
       x = x._mop(Ops.EXPAND, (width+1,)).reshape(n*(width+1), *tail)
       x = x.shrink(((offset, offset+n*width),)+bounds).reshape(n, width, *tail)
-      ret = x.shrink((None, (0,1))+bounds).reshape(n, *tail).permute(argsort(order))
+      ret = x.shrink((None, (0,1))+bounds).reshape(n, *tail).transpose(0, axis)
     return ret
 
   def stack(self, *args: Self, dim: int = 0) -> Self:
