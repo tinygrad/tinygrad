@@ -5,7 +5,7 @@ from tinygrad.helpers import getenv, DEBUG, getbits, round_up, ceildiv
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, VirtMapping, AddrSpace, MMIOInterface
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
-from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice
+from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System
 from tinygrad.runtime.support.usb import SLOT
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
@@ -16,16 +16,9 @@ class NVUSBPCIDevice(USBPCIDevice):
     if (pci_id:=self.read_config(pci.PCI_VENDOR_ID, 4)) != 0x220410DE: raise RuntimeError(f"Expected RTX 3090, found PCI ID {pci_id:#010x}")
 
   def reset(self) -> None:
-    cap = 0x78
-    command = self.read_config(pci.PCI_COMMAND, 2)
-    bars = [(off, self.read_config(off, 4)) for off in (0x10, 0x18, 0x1c, 0x20)]
-    devctl = self.read_config(cap + pci.PCI_EXP_DEVCTL, 2)
-    self.write_config_flush(pci.PCI_COMMAND, command & ~pci.PCI_COMMAND_MASTER, 2)
-    self.write_config(cap + pci.PCI_EXP_DEVCTL, devctl | pci.PCI_EXP_DEVCTL_BCR_FLR, 2)
-    time.sleep(0.1)
-    for off, value in bars: self.write_config(off, value, 4)
-    self.write_config(cap + pci.PCI_EXP_DEVCTL, devctl, 2)
-    self.write_config_flush(pci.PCI_COMMAND, command, 2)
+    self.usb.set_pcie_power(False)
+    self.usb.set_pcie_power(True)
+    self._bar_info = System.pci_setup_usb_bars(self.usb, self.gpu_bus, mem_base=0x10000000, pref_mem_base=(32 << 30))
 
   def stream_gsp_boot(self, flcn:NV_FLCN, base:int) -> None:
     image = flcn.nvdev.gsp.gsp_image
