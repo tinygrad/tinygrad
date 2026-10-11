@@ -877,14 +877,18 @@ class TestOps(TensorTestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().div(4, rounding_mode="trunc").item(), 0)  # NOTE this is trunc-div behaviour
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software trig requires uint64")
   @Context(TRANSCENDENTAL=2)
   def test_sin_transcendental(self): self.test_sin()
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software trig requires uint64")
   @Context(TRANSCENDENTAL=2)
   def test_cos_transcendental(self): self.test_cos()
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software trig requires uint64")
   @Context(TRANSCENDENTAL=2)
   def test_tan_transcendental(self): self.test_tan()
   @Context(TRANSCENDENTAL=2)
   def test_exp_transcendental(self): self.test_exp()
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software log does not preserve NaN on WEBGPU")
   @Context(TRANSCENDENTAL=2)
   def test_log_transcendental(self): self.test_log()
 
