@@ -34,6 +34,7 @@ jobs:
       with:
         key: unittest-macos
         deps: testing_unit
+        llvm: 'true'
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/runtime/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
@@ -100,6 +101,7 @@ jobs:
       with:
         key: macos-metal
         deps: testing_unit
+        llvm: 'true'
     - name: Check Device.DEFAULT and print some source
       run: |
         python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"

@@ -802,6 +802,19 @@ class TestUnshardStore(unittest.TestCase):
     out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
     np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_unshard_value_2axis_reshape(self):
+    # the reshape keeps both sharded axes, each with its own shard count (4 and 2)
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(4, 0, AxisType.LOCAL)
+      tx = UOp.range(2, 1, AxisType.LOCAL)
+      frag = UOp.placeholder((2, 1, 1, 2), dtypes.float32, 0, AddrSpace.REG).unshard((1, 2), (ty, tx))
+      v = (frag.after(frag.store(0.0)) + A).reshape(2, 4, 2, 2, 1)
+      return C.store(v).end(tx, ty).sink(arg=KernelInfo(name="store_unshard_2axis_reshape", opts_to_apply=()))
+    a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
+    out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2, 1), inputs=(a,))
+    np.testing.assert_allclose(out, a.numpy().reshape(2, 4, 2, 2, 1), atol=1e-4)
+
   def _test_store_load_fragment(self, addrspace:AddrSpace):
     # thread ty stores A[ty*8:ty*8+8] into its fragment, then reads it back into the same slice of C
     def kernel(C:UOp, A:UOp) -> UOp:

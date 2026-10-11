@@ -12,7 +12,7 @@ def check(status):
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
+    self.arch = init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode().split(":")[0]
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t, lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
 
     super().__init__(device, HIPAllocator(self), [HIPRenderer], HIPProgram, arch=self.arch)

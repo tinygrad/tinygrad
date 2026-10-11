@@ -26,26 +26,28 @@ class TestTranscendentalMath(unittest.TestCase):
                                  atol=3e-2, rtol=1e-5)  # sin can have bigger atol for very big x
 
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
-  @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
-    ([(Tensor.sin, np.sin)] if dtypes.ulong in supported_dtypes else [])))
+  @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float32(self, x, op):
-    # wrong nan behavior on Vulkan
-    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and Device.DEFAULT == "WEBGPU" and not OSX: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float32)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
                                  atol=2e-5, rtol=1e-5)
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
-  @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
-    ([(Tensor.sin, np.sin)] if dtypes.ulong in supported_dtypes else [])))
+  @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float16(self, x, op):
-    # wrong nan behavior on Vulkan
-    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and Device.DEFAULT == "WEBGPU" and not OSX: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float16)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
                                  atol=1e-2, rtol=5e-3)  # exp can have bigger rtol
+
+  @Context(TRANSCENDENTAL=2)
+  def test_log2_special_values(self):
+    for dtype, np_dtype in ((dtypes.float16, np.float16), (dtypes.float32, np.float32)):
+      if dtype not in supported_dtypes: continue
+      with self.subTest(dtype=dtype), np.errstate(all='ignore'):
+        values = np.array([0.0, -0.0, math.inf, -math.inf, math.nan, -math.nan, 1.0, -1.0], dtype=np_dtype)
+        np.testing.assert_allclose(Tensor(values).log2().numpy(), np.log2(values))
 
   # TODO: WEBGPU produces incorrect values near infinity
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU incorrect values near inf")
@@ -61,7 +63,6 @@ class TestTranscendentalMath(unittest.TestCase):
 
 class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
-  @unittest.skipUnless(dtypes.ulong in supported_dtypes, "Needs ulong")
   def test_sin(self, dtype):
     if dtype not in supported_dtypes: return
     if dtype == dtypes.float64:
@@ -115,7 +116,6 @@ class TestFloat16Log2(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=1e-3, err_msg=f"log2({val})")
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "Nan handling differs on Vulkan")
   def test_float16_log2_special(self):
     # special values: inf, -inf, nan, 0, negative
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):

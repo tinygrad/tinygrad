@@ -249,7 +249,7 @@ RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0),
 ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
+HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:LLVM")
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
