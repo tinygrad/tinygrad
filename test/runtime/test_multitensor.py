@@ -73,6 +73,12 @@ class TestMultiTensor(unittest.TestCase):
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
+  def test_device_num_stack_arg(self):
+    # out, 4 xs, a, then _device_num as the 7th arg: past the 6 register args of the x86 abi
+    xs, a = [np.random.rand(4, 8).astype(np.float32) for _ in range(4)], np.random.rand(4).astype(np.float32)
+    out = sum(Tensor(x).shard(devices_2, 0) for x in xs) * Tensor(a).to(devices_2).reshape(4, 1)
+    np.testing.assert_allclose(out.numpy(), sum(xs) * a.reshape(4, 1), rtol=1e-6)
+
   def test_empty_axis(self):
     GlobalCounters.reset()
     x = Tensor.empty(4, 6, device=devices_2, axis=1).realize()
@@ -996,12 +1002,13 @@ class TestMultiTransformer(unittest.TestCase):
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
 
     from extra.models.llama import Transformer
-    args = {"dim": 32, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 1024,
+    args = {"dim": 32, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 32,
             "hidden_dim": 32, "max_context": 12}
     real_model = Transformer(**args)
     shard_model = Transformer(**args)
 
-    # copy state
+    # Realize initialization once, rather than fusing random weight generation into the forward pass.
+    Tensor.realize(*nn.state.get_parameters(real_model))
     nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
 
     # shard
@@ -1014,6 +1021,7 @@ class TestMultiTransformer(unittest.TestCase):
       elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
       elif 'output.weight' in k: v.shard_(device, axis=0)
       else: v.shard_(device, axis=None)
+    Tensor.realize(*nn.state.get_parameters(shard_model))
 
     last_tok = 0
     # i=0: bypasses jit, i=1: jit warmup, i=2: capture and run, i>=3: re-execute jit with new start_pos (catches stale bindings)

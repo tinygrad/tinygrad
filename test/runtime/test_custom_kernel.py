@@ -588,6 +588,22 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [1, 1, 8, 1])
 
+  def test_call_body_range_is_not_ours(self):
+    @uopfunc
+    def mul(out:UOp, A:UOp):
+      k = UOp.range(4, 0)
+      return out[k].store(A[k]*3).end(k).sink()
+
+    def kernel(C:UOp, A:UOp):
+      m, i, call = UOp.range(3, 1), UOp.range(4, 0), mul(C, A)
+      self.assertIn(i, call.body.toposort())
+      end_m = C.after(call)[m].store(A[m]).end(m)
+      return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
   @unittest.expectedFailure
   def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)
 
@@ -785,6 +801,19 @@ class TestUnshardStore(unittest.TestCase):
     a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
     out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
     np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_unshard_value_2axis_reshape(self):
+    # the reshape keeps both sharded axes, each with its own shard count (4 and 2)
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(4, 0, AxisType.LOCAL)
+      tx = UOp.range(2, 1, AxisType.LOCAL)
+      frag = UOp.placeholder((2, 1, 1, 2), dtypes.float32, 0, AddrSpace.REG).unshard((1, 2), (ty, tx))
+      v = (frag.after(frag.store(0.0)) + A).reshape(2, 4, 2, 2, 1)
+      return C.store(v).end(tx, ty).sink(arg=KernelInfo(name="store_unshard_2axis_reshape", opts_to_apply=()))
+    a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
+    out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2, 1), inputs=(a,))
+    np.testing.assert_allclose(out, a.numpy().reshape(2, 4, 2, 2, 1), atol=1e-4)
 
   def _test_store_load_fragment(self, addrspace:AddrSpace):
     # thread ty stores A[ty*8:ty*8+8] into its fragment, then reads it back into the same slice of C

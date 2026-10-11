@@ -276,8 +276,8 @@ class TestCallSchedule(unittest.TestCase):
           x = Tensor([1., 2., 3., 4.]).realize()
           if devices is not None: x = x.shard(devices, axis=0).realize()
           out = outer(x)
-          for call in (u for u in out.uop.toposort() if u.op is Ops.CALL):
-            self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort()))
+          for call in (u for u in out.uop.toposort(enter_calls=True) if u.op is Ops.CALL):
+            self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort(enter_calls=True)))
           self.assertEqual(sched_key(out), sched_key(outer(x)))
           out.sum().backward()
           np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])

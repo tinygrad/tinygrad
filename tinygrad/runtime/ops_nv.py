@@ -447,17 +447,18 @@ class NVKIface:
     page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (mmap.PAGESIZE if isinstance(self, MOCKIface) else
                                                                                              4 << 10))
     size = round_up(size, page_size)
-    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access) if (alloced:=cpu_addr is None) else cpu_addr
+    # host memory keeps its cpu address unless the cpu touches it: semaphores only reach 40 bits, so those go low
+    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access) if cpu_addr is None or cpu_access else cpu_addr
 
     if host:
-      if alloced: va_addr = FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
+      cpu_addr = cpu_addr or FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
 
       flags = (nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) \
             | (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30)
 
       NVKIface.host_object_enumerator += 1
       made = nv_gpu.nv_ioctl_nvos02_parameters_with_fd(params=nv_gpu.NVOS02_PARAMETERS(hRoot=self.root, hObjectParent=self.dev.nvdevice, flags=flags,
-        hObjectNew=NVKIface.host_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, pMemory=va_addr, limit=size-1), fd=-1)
+        hObjectNew=NVKIface.host_object_enumerator, hClass=nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR, pMemory=cpu_addr, limit=size-1), fd=-1)
       nv_iowr(self.fd_dev, nv_gpu.NV_ESC_RM_ALLOC_MEMORY, made)
 
       if made.params.status != 0: raise RuntimeError(f"host alloc returned {get_error_str(made.params.status)}")
@@ -516,8 +517,8 @@ class NVKIface:
     if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.device.startswith("NV")), None)) is None:
-        return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta, True))
-    return replace(mapping:=self._gpu_uvm_map(buf._buf, mem.length, mem.hMemory, create_range=False), meta=(mapping.meta, False))
+        return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf, cpu_access=buf.options.cpu_access), meta=(mem.meta, True))
+    return replace(mapping:=self._gpu_uvm_map(mem.base, mem.length, mem.hMemory, create_range=False), meta=(mapping.meta, False))
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)

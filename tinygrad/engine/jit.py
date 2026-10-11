@@ -61,7 +61,7 @@ class CapturedJit(Generic[ReturnType]):
   def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 
   @functools.cached_property
-  def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort(enter_calls=False) if u.op is Ops.BUFFER}
+  def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort() if u.op is Ops.BUFFER}
 
   @functools.cached_property
   def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:

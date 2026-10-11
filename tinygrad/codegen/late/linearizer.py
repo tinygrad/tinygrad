@@ -7,9 +7,9 @@ from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort(enter_calls=False))
+  lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
-  priorities:dict[UOp, tuple[int, int, Any]] = {}
+  priorities:dict[UOp, tuple[int, int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
@@ -30,7 +30,7 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END | Ops.BACKEDGE: priority = -5     # placing loop exits is bad
       case _: priority = 0            # everything else has priority 0
-    priorities[u] = (run_count, priority, extra)
+    priorities[u] = (run_count, len(u.ranges), priority, extra)
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
@@ -62,7 +62,7 @@ class CFGContext:
     for u in sink.toposort():
       # get the deps from the src
       deps[u] = {}
-      for s in u.src: deps[u] |= deps[s]
+      for s in u.src_without_body: deps[u] |= deps[s]
 
       if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}

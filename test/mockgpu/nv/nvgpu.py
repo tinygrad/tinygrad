@@ -121,7 +121,7 @@ class GPFIFO:
     return SchedResult.CONT
 
   def _exec_signal(self) -> SchedResult:
-    signal = self._state64_le(nv_gpu.NVC56F_SEM_ADDR_LO)
+    signal = self._state64_le(nv_gpu.NVC56F_SEM_ADDR_LO) & ((1 << 40) - 1) # SEM_ADDR_HI is 8 bits
     val = self._state64_le(nv_gpu.NVC56F_SEM_PAYLOAD_LO)
     flags = self._next_dword()
     typ = (flags >> 0) & 0b111

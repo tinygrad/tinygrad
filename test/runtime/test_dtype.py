@@ -208,6 +208,8 @@ class TestBFloat16DType(unittest.TestCase):
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
+  def test_bf16_floor(self): self.assertEqual(Tensor([-1.5, 2.5], dtype=dtypes.bfloat16).floor().tolist(), [-2., 2.])
+
 class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)

@@ -13,7 +13,7 @@ static_assert(ROUTER_M % (4 * NUM_WARPS * PREFETCH) == 0);
 
 // Each block computes 16 features for all 32 experts, retaining FP32 logit gradients and accumulation.
 extern "C" __global__ __launch_bounds__(THREADS, 2) void moe_router_fp32_wgrad(
-    float *__restrict__ out, const bf16 *__restrict__ x, const float *__restrict__ gradient) {
+    bf16 *__restrict__ out, const bf16 *__restrict__ x, const float *__restrict__ gradient) {
   const int lane = laneid();
   const int warp = threadIdx.x / 64;
   const int feature_base = blockIdx.x * TILE;
@@ -62,7 +62,8 @@ extern "C" __global__ __launch_bounds__(THREADS, 2) void moe_router_fp32_wgrad(
       }
       const int expert = et * TILE + lane % 16;
       const int feature0 = feature_base + 4 * (lane / 16);
-      *reinterpret_cast<float4_t *>(out + (long long)expert * ROUTER_K + feature0) = total;
+      #pragma unroll
+      for (int i = 0; i < 4; i++) out[(long long)expert * ROUTER_K + feature0 + i] = (bf16)total[i];
     }
   }
 }

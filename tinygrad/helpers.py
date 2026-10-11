@@ -249,7 +249,7 @@ RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0),
 ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
+HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:LLVM")
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
@@ -586,7 +586,7 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 class tqdm(Generic[T]):
   def __init__(self, iterable:Iterable[T]|None=None, desc:str='', disable:bool|None=False,
                unit:str='it', unit_scale=False, total:int|None=None, rate:int=100):
-    self.disable = not sys.stderr.isatty() if disable is None else disable
+    self.disable, self.tty = not sys.stderr.isatty() if disable is None else disable, sys.stderr.isatty()
     self.iterable, self.unit, self.unit_scale, self.rate = iterable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
     self.set_description(desc)
@@ -602,7 +602,7 @@ class tqdm(Generic[T]):
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
-    if self.disable or (not close and self.i % self.skip != 0): return
+    if self.disable or (not close and (self.i % self.skip != 0 or not self.tty)): return
     prog, elapsed, ncols = self.n/self.t if self.t else 0, time.perf_counter()-self.st, shutil.get_terminal_size().columns
     if elapsed and self.i/elapsed > self.rate and self.i: self.skip = max(int(self.i/elapsed)//self.rate,1)
     def HMS(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
@@ -613,12 +613,12 @@ class tqdm(Generic[T]):
     prog_text = f'{SI(self.n)}{f"/{SI(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
     est_text = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else ''
     it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}") if self.n else "?"
-    suf = f'{prog_text} [{HMS(elapsed)}{est_text}, {it_text}{self.unit}/s]'
+    pre, suf = '\r'*self.tty, f'{prog_text} [{HMS(elapsed)}{est_text}, {it_text}{self.unit}/s]'
     sz = max(ncols-ansilen(self.desc)-3-2-2-len(suf), 1)
-    bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
+    bar = pre + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
     print(bar, flush=True, end='\n'*close, file=sys.stderr)
   @classmethod
-  def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
+  def write(cls, s:str): print('\r\033[K' * sys.stderr.isatty() + s, flush=True, file=sys.stderr)
 
 def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 

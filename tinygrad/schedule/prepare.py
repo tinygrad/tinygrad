@@ -25,7 +25,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
     key = base if base.op is Ops.ALLOC else src
     if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
-       target.storage_base not in st.src[1].toposort(enter_calls=False):
+       target.storage_base not in st.src[1].toposort():
       if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
         placed[key] = target.storage_base
       elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
@@ -76,6 +76,11 @@ def _mop_index(r:UOp, idx:UOp):
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
+  # A store through a padded view gates the destination index, not its loaded value.
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("dst"), 0), UPat.var("pad")).store(UPat.var("val")),
+   lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
+  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
+   lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
   # move movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
@@ -92,9 +97,9 @@ def store_hazard_boundary(s:UOp):
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(enter_calls=False): return None
-  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  if (base:=target.base) not in src.toposort(): return None
+  # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk
+  unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=store_hazard_boundary):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
@@ -126,7 +131,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 def resolve_function(c:UOp) -> UOp|None:
   if not c.is_inline_call: return None
-  nodes = c.body.toposort(enter_calls=False)
+  nodes = c.body.toposort()
   # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
   args = c.src[1:]
 
