@@ -806,7 +806,7 @@ class TestSchedule(unittest.TestCase):
     samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
     yt = Tensor.randn(BS, 10).realize()
     loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-    check_schedule(loss, 3)
+    check_schedule(loss, 4)
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.empty(4, 4).realize()

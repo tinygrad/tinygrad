@@ -254,12 +254,17 @@ class MovementMixin:
     for axis in axis_arg:
       if resolve((n:=ret.shape[axis]) <= 1, False): continue
       x = ret.transpose(0, axis)
-      tail, bounds = x.shape[1:], (None,) * (x.ndim-1)
-      width, offset = smax(n-1, 1), smax(n-1, 0)
-      # Repeated rows start one element earlier modulo n; their first column is the reversed axis.
-      x = x._mop(Ops.EXPAND, (width+1,)).reshape(n*(width+1), *tail)
-      x = x.shrink(((offset, offset+n*width),)+bounds).reshape(n, width, *tail)
-      ret = x.shrink((None, (0,1))+bounds).reshape(n, *tail).transpose(0, axis)
+      bounds, crop = (None,) * (x.ndim-1), tuple((0, s) for s in x.shape[1:])
+      tail = tuple(s if resolve(s > 0, False) else s+1 for s in x.shape[1:])
+      m, tail_pad = n if resolve(n >= 2, False) else n+2, tuple((0, s) for s in tail)
+      # Place values on an anti-diagonal, transpose it, then extract the anti-diagonal.
+      # Pad possibly empty dimensions before reshaping, then crop them back afterwards.
+      x = x._mop(Ops.PAD, ((0, m),)+tail_pad).reshape(m, 1, *tail)
+      x = x._mop(Ops.PAD, ((0, m), (0, m-1))+tail_pad).reshape(m*(m-1), *tail)
+      x = x._mop(Ops.PAD, ((m-1, m*m),)+tail_pad).reshape(m, m, *tail).transpose(0, 1).reshape(m*m, *tail)
+      x = x._mop(Ops.SHRINK, ((m-1, m*(m-1)),)+tail_pad).reshape(m, m-1, *tail)
+      x = x.shrink((None, (0, 1))+bounds).reshape(m, *tail)
+      ret = x.shrink(((m-n, m),)+crop).transpose(0, axis)
     return ret
 
   def stack(self, *args: Self, dim: int = 0) -> Self:

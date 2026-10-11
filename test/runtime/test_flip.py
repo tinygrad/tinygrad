@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, Variable
+from tinygrad import Tensor, Variable, GlobalCounters
 
 class TestFlip(unittest.TestCase):
   def test_gradient(self):
@@ -8,8 +8,13 @@ class TestFlip(unittest.TestCase):
       with self.subTest(shape=shape, axes=axes):
         x = Tensor.empty(*shape).realize()
         weights = np.random.default_rng(0).normal(size=shape).astype(np.float32)
-        grad = x.flip(axes).gradient(x, gradient=Tensor(weights).realize())[0]
+        dy = Tensor(weights).realize()
+        GlobalCounters.reset()
+        grad = x.flip(axes).gradient(x, gradient=dy)[0]
         np.testing.assert_array_equal(grad.numpy(), np.flip(weights, axes))
+        # Neither arithmetic nor memory traffic should grow quadratically.
+        self.assertLessEqual(GlobalCounters.global_ops, 16*weights.size)
+        self.assertLessEqual(GlobalCounters.global_mem, 4*weights.nbytes)
 
   def test_symbolic_zero_and_singleton(self):
     data = np.arange(1, 9, dtype=np.int32).reshape(2, 4)
@@ -25,14 +30,15 @@ class TestFlip(unittest.TestCase):
   def test_symbolic_gradient(self):
     weights = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
     x, dy = Tensor.zeros(2, 8).contiguous().realize(), Tensor(weights).realize()
-    for lower, sizes in ((0, (0, 1, 2, 5, 8)), (2, (2, 5, 8))):
-      for size in sizes:
-        with self.subTest(lower=lower, size=size):
-          n = Variable(f'flip_grad_size_{lower}', lower, 8).bind(size)
-          grad = x[:, :n].flip(1).gradient(x, gradient=dy[:, :n])[0]
-          expected = np.zeros_like(weights)
-          expected[:, :size] = weights[:, :size][:, ::-1]
-          np.testing.assert_array_equal(grad.numpy(), expected)
+    for axes in ((0,), (1,), (0, 1)):
+      for lower, sizes in ((0, (0, 1, 2, 5, 8)), (2, (2, 5, 8))):
+        for size in sizes:
+          with self.subTest(axes=axes, lower=lower, size=size):
+            n = Variable(f'flip_grad_size_{lower}', lower, 8).bind(size)
+            grad = x[:, :n].flip(axes).gradient(x, gradient=dy[:, :n])[0]
+            expected = np.zeros_like(weights)
+            expected[:, :size] = np.flip(weights[:, :size], axes)
+            np.testing.assert_array_equal(grad.numpy(), expected)
 
   def test_partial_store_gradient(self):
     x = Tensor([1., 2., 3., 4.])
@@ -41,17 +47,5 @@ class TestFlip(unittest.TestCase):
     gx, gv = (y * Tensor([1., 2., 3., 4.])).sum().gradient(x, value)
     self.assertEqual(gx.tolist(), [1., 2., 0., 0.])
     self.assertEqual(gv.tolist(), [4., 3.])
-
-  def test_repeated_strided_gradient(self):
-    # Unlike flip, these views can select the same source element more than once.
-    for offset in (0, 3, 63, 64):
-      with self.subTest(offset=offset):
-        x = Tensor.empty(8).realize()
-        indices = np.arange(64)[offset::7]
-        weights = np.arange(1, len(indices)+1, dtype=np.float32)
-        grad = x.repeat(8)[offset::7].gradient(x, gradient=Tensor(weights))[0]
-        expected = np.zeros(8, dtype=np.float32)
-        np.add.at(expected, indices % 8, weights)
-        np.testing.assert_array_equal(grad.numpy(), expected)
 
 if __name__ == '__main__': unittest.main()

@@ -159,10 +159,9 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     acc *= s
   combined_axes = UOp.const(0).usum(axes_in)
   axes_out:list[UOp] = []
-  for s in in_shape[:0:-1]:
+  for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
     combined_axes //= s
-  if in_shape: axes_out.append(combined_axes)
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
   return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
