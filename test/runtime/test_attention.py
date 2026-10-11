@@ -119,8 +119,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x_float = x.astype(np.float32)
     return (x_float / np.sqrt((x_float * x_float).mean(axis=-1, keepdims=True) + eps)) * weight.astype(np.float32)
 
-  def _normalize_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:
-    return x / np.maximum(np.sqrt((x * x).sum(axis=-1, keepdims=True)), eps)
+  def _l2norm_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:  # as in the FLA kernels
+    return x / np.sqrt((x * x).sum(axis=-1, keepdims=True) + eps)
 
   def _softplus_np(self, x:np.ndarray) -> np.ndarray:
     return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
@@ -155,8 +155,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       conv_window = np.concatenate([conv_state, self._linear_np(x_half, qkv_weight)], axis=1)
       conv_out = self._silu_np((conv_window * conv_weight).sum(axis=1))
       q, k, v = np.split(conv_out, [block.q_dim, 2 * block.q_dim], axis=-1)
-      q = self._normalize_np(q.reshape(B, block.num_k_heads, block.head_k_dim))
-      k = self._normalize_np(k.reshape(B, block.num_k_heads, block.head_k_dim))
+      q = self._l2norm_np(q.reshape(B, block.num_k_heads, block.head_k_dim))
+      k = self._l2norm_np(k.reshape(B, block.num_k_heads, block.head_k_dim))
       v = v.reshape(B, block.num_v_heads, block.head_v_dim)
       if block.num_v_heads != block.num_k_heads:
         k_repeat = block.num_v_heads // block.num_k_heads
