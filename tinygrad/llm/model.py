@@ -72,6 +72,7 @@ class SSMConfig:
   inner_size: int
   kda: bool = False
   gate_lower_bound: float|None = None  # kda: bounded decay gate
+  qk_l2norm_eps: float|None = None  # q/k l2 norm as x/sqrt(sum(x²)+eps) (FLA), else x/max(|x|, eps)
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -435,9 +436,10 @@ class GatedDeltaNetBlock(FFNBlock):
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    qk_eps = 1e-12 if is_kda else 1e-6
-    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=qk_eps)
-            .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
+    def l2norm(z:Tensor) -> Tensor:
+      if (eps:=unwrap(self.config.ssm).qk_l2norm_eps) is not None: return z * (z.square().sum(-1, keepdim=True) + eps).rsqrt()
+      return z.normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
+    q, k = (l2norm(z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim)).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
     v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
     # layout the per-step operands to broadcast against the (B, H, V, K) state
     q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
@@ -545,7 +547,7 @@ class Transformer:
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)]
       n_kv_heads = max(n_kv_heads)
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True,
-                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'))
+                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), qk_l2norm_eps=1e-6 if arch == 'glm5-next' else None)
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)
