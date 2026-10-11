@@ -111,6 +111,13 @@ class TestParseExpr(unittest.TestCase):
     """Test parsing hex literals."""
     self.assertIs(parse_expr('0xFF', {}), UOp.const(255, dtypes.uint32))
 
+  def test_24bit_operands(self):
+    for value, signed, unsigned in ((0x3FFFFFFF, -1, 0xFFFFFF), (0xFF800000, -8388608, 0x800000), (0xAB000001, 1, 1)):
+      with self.subTest(value=value):
+        src = {'S0': UOp.const(value, dtypes.uint32)}
+        self.assertEqual(parse_expr('S0.i24', src).ssimplify(), signed)
+        self.assertEqual(parse_expr('S0.u24', src).ssimplify(), unsigned)
+
   def test_variable_lookup(self):
     """Test variable lookup in parse_expr."""
     vrs = {'x': UOp.const(42, dtypes.uint32)}
