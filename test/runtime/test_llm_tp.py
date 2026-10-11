@@ -102,27 +102,29 @@ class TestTensorParallel(unittest.TestCase):
   def test_model(self):
     rng = np.random.default_rng(42)
     # Keep GQA, partial RoPE, gated attention, and AMD flash/SSM kernel eligibility while shrinking the feature dimensions.
-    config = TransformerConfig(num_blocks=2, dim=64, hidden_dim=64, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=64, head_dim=64,
-      v_head_dim=64, rope_theta=10000, rope_dim=16, max_context=64, qk_norm=64, attn_output_gate=True, ssm=SSMConfig(4, 32, 2, 4, 16),
+    config = TransformerConfig(num_blocks=2, dim=16, hidden_dim=16, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=16, head_dim=64,
+      v_head_dim=64, rope_theta=10000, rope_dim=16, max_context=16, qk_norm=64, attn_output_gate=True, ssm=SSMConfig(4, 32, 2, 4, 16),
       ssm_layers=(True, False))
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'qwen35')
-      for key,value in {'context_length':64, 'embedding_length':64, 'feed_forward_length':64, 'block_count':2, 'full_attention_interval':2,
+      for key,value in {'context_length':16, 'embedding_length':16, 'feed_forward_length':16, 'block_count':2, 'full_attention_interval':2,
                         'ssm.conv_kernel':4, 'ssm.state_size':32, 'ssm.group_count':2, 'ssm.time_step_rank':4, 'ssm.inner_size':16,
                         'attention.head_count':4, 'attention.head_count_kv':2, 'attention.key_length':64, 'rope.dimension_count':16}.items():
         writer.add_uint32('qwen35.'+key, value)
       writer.add_float32('qwen35.rope.freq_base', 10000)
       writer.add_float32('qwen35.attention.layer_norm_rms_epsilon', 1e-5)
-      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(64)])
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(16)])
       for name,weight in nn.state.get_state_dict(Transformer(config)).items():
         value = -rng.random(weight.shape) if name.endswith('ssm_a') else rng.normal(1, .1, weight.shape) if 'norm' in name else \
                 rng.normal(0, .5 if 'token_embd' in name else .05, weight.shape)
         writer.add_tensor(name.replace('ffn_norm', 'post_attention_norm'), value.astype(np.float32))
       write_gguf(writer)
       # Materialize weights once instead of repeatedly compiling GGUF loading/casts into the model's kernels.
-      single, parallel = Transformer.from_gguf(path, 64, realize=True)[0], Transformer.from_gguf(path, 64, realize=True, shard=2)[0]
-      prompt = [int(x) for x in rng.integers(0, 64, 40)]
-      self.assertEqual(list(itertools.islice(parallel.generate(list(prompt)), 6)), list(itertools.islice(single.generate(list(prompt)), 6)))
+      single, parallel = Transformer.from_gguf(path, 16, realize=True)[0], Transformer.from_gguf(path, 16, realize=True, shard=2)[0]
+      # Two prefill chunks (one partial) with custom kernels, otherwise tokenwise. Keep decode JIT capture and replay.
+      prompt = [int(x) for x in rng.integers(0, 16, 6)]
+      self.assertEqual(list(itertools.islice(parallel.generate(list(prompt), chunk_size=4), 4)),
+                       list(itertools.islice(single.generate(list(prompt), chunk_size=4), 4)))
       # the kv cache is sharded on its heads, the gated deltanet is copied to every device
       self.assertEqual(parallel.blk[1].cache_kv.uop.axis, 2)
       for t in (parallel.blk[0].attn_qkv.weight, parallel.blk[0].recurrent_state): self.assertEqual((t.device, t.uop.axis), (DEVICES, None))
