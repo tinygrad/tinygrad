@@ -72,7 +72,6 @@ class SSMConfig:
   inner_size: int
   kda: bool = False
   gate_lower_bound: float|None = None  # kda: bounded decay gate
-  qk_l2norm_eps: float|None = None  # q/k l2 norm as x/sqrt(sum(x²)+eps) (FLA), else x/max(|x|, eps)
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -214,8 +213,7 @@ class FFNBlock:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     hc, eps, iters = (cfg:=unwrap(self.config.hc)).count, cfg.eps, cfg.sinkhorn_iters
     base, scale = getattr(self, f'hc_{name}_base')["weight"], getattr(self, f'hc_{name}_scale')["weight"]
-    flat = xs.flatten(2)
-    mix = getattr(self, f'hc_{name}_fn')(flat * (flat.square().mean(-1, keepdim=True) + self.config.norm_eps).rsqrt())
+    mix = getattr(self, f'hc_{name}_fn')(xs.flatten(2).rmsnorm(eps=self.config.norm_eps))
     pre = (mix[..., :hc] * scale[0] + base[:hc]).sigmoid() + eps
     post = (mix[..., hc:2*hc] * scale[1] + base[hc:2*hc]).sigmoid() * 2
     comb = (mix[..., 2*hc:] * scale[2] + base[2*hc:]).reshape(*mix.shape[:-1], hc, hc).softmax(-1) + eps  # (..., src, dst)
@@ -355,6 +353,7 @@ class DSAMLATransformerBlock(MLATransformerBlock):
     self.indexer_compressor_gate = Linear(config.dim, idx.head_dim, bias=False)
     self.indexer_compressor_ape = {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
+  # DSA as a mask: the pools not picked by the indexer get -inf. this is exact, but attention still reads every cached row
   def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:
     (B, T, _), idx, S = x.shape, unwrap(self.config.indexer), start_pos + x.shape[1]
     if self.config.max_context <= idx.top_k: return super()._attn_mask(x, start_pos)  # every pool is always picked
@@ -433,10 +432,9 @@ class GatedDeltaNetBlock(FFNBlock):
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    def l2norm(z:Tensor) -> Tensor:
-      if (eps:=unwrap(self.config.ssm).qk_l2norm_eps) is not None: return z * (z.square().sum(-1, keepdim=True) + eps).rsqrt()
-      return z.normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
-    q, k = (l2norm(z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim)).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
+    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim) for z in (q, k))
+    # l2 norm as in the FLA kernels, then the v heads share the k heads
+    q, k = ((z * (z.square().sum(-1, keepdim=True) + 1e-6).rsqrt()).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
     v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
     # layout the per-step operands to broadcast against the (B, H, V, K) state
     q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
@@ -544,7 +542,7 @@ class Transformer:
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)]
       n_kv_heads = max(n_kv_heads)
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True,
-                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), qk_l2norm_eps=1e-6 if arch == 'glm5-next' else None)
+                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'))
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)

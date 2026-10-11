@@ -9,8 +9,8 @@ def _config(**kwargs):
 
 class TestGLM5(unittest.TestCase):
   def test_kda_qk_l2norm(self):
-    # GLM normalizes q/k as x/sqrt(sum(x²)+1e-6): tiny vectors aren't scaled up to unit length
-    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True, qk_l2norm_eps=1e-6)
+    # q/k are normalized as x/sqrt(sum(x²)+1e-6) like FLA: tiny vectors aren't scaled up to unit length
+    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True)
     block = GatedDeltaNetBlock(_config(ssm=ssm), ssm)
     block.attn_qkv.weight = Tensor([1e-4]*32 + [1.0]*16).reshape(48, 1).expand(48, 16) / 16  # x of ones: q = k = 1e-4, v = 1
     block.ssm_conv1d["weight"], block.ssm_beta.weight = Tensor.ones(48, 4), Tensor.zeros(2, 16)
