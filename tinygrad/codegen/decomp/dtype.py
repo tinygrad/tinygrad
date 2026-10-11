@@ -24,7 +24,9 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
   elif len(uops) == 3: a0, a1, b0 = uops  # a shift's count is a single word
   elif len(uops) == 4: a0, a1, b0, b1 = uops
   match op:
-    case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
+    case Ops.NEG:
+      lo, hi = l2i(Ops.SUB, dt, zero, zero, *uops)
+      return (lo & 0xffffffff, hi & 0xffffffff) if dt == dtypes.uint else (lo, hi)
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong) and uops[0].dtype not in dtypes.floats:
       # the high word is the sign extension, and unsigned and bool sources zero extend
       x, lo = uops[0], uops[0].cast(l2i_dt[dt])
