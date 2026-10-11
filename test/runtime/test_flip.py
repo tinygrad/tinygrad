@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable, GlobalCounters
+from tinygrad.engine.realize import run_linear
 
 class TestFlip(unittest.TestCase):
   def test_gradient(self):
@@ -32,10 +33,13 @@ class TestFlip(unittest.TestCase):
     x, dy = Tensor.zeros(2, 8).contiguous().realize(), Tensor(weights).realize()
     for axes in ((0,), (1,), (0, 1)):
       for lower, sizes in ((0, (0, 1, 2, 5, 8)), (2, (2, 5, 8))):
+        n = Variable(f'flip_grad_size_{lower}', lower, 8).bind(sizes[0])
+        grad = x[:, :n].flip(axes).gradient(x, gradient=dy[:, :n])[0].contiguous()
+        # The graph depends on the bounds, not the binding. Schedule once and run every size through it.
+        linear, var_vals = grad.linear_with_vars()
         for size in sizes:
           with self.subTest(axes=axes, lower=lower, size=size):
-            n = Variable(f'flip_grad_size_{lower}', lower, 8).bind(size)
-            grad = x[:, :n].flip(axes).gradient(x, gradient=dy[:, :n])[0]
+            run_linear(linear, var_vals | {n.expr:size})
             expected = np.zeros_like(weights)
             expected[:, :size] = np.flip(weights[:, :size], axes)
             np.testing.assert_array_equal(grad.numpy(), expected)
