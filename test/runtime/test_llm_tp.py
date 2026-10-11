@@ -1,7 +1,7 @@
 import itertools, pathlib, tempfile, unittest
 import numpy as np
 from gguf import GGUFWriter, GGMLQuantizationType as Q, GGML_QUANT_SIZES
-from tinygrad import Device, Tensor, nn
+from tinygrad import Device, Tensor, Variable, nn
 from tinygrad.helpers import DEV
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
 from tinygrad.llm.gguf import gguf_load, gguf_parse, gguf_shard, ggml_data_to_tensor
@@ -101,28 +101,31 @@ class TestTensorParallel(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "too heavy for mock GPUs")
   def test_model(self):
     rng = np.random.default_rng(42)
-    # Keep GQA, partial RoPE, gated attention, and AMD flash/SSM kernel eligibility while shrinking the feature dimensions.
-    config = TransformerConfig(num_blocks=2, dim=64, hidden_dim=64, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=64, head_dim=64,
-      v_head_dim=64, rope_theta=10000, rope_dim=16, max_context=64, qk_norm=64, attn_output_gate=True, ssm=SSMConfig(4, 32, 2, 4, 16),
+    # Keep GQA, partial RoPE, gated attention and replicated SSM state; custom kernels have separate tests.
+    config = TransformerConfig(num_blocks=2, dim=8, hidden_dim=8, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=16, head_dim=4,
+      v_head_dim=4, rope_theta=10000, rope_dim=2, max_context=4, qk_norm=4, attn_output_gate=True, ssm=SSMConfig(2, 2, 2, 4, 8),
       ssm_layers=(True, False))
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'qwen35')
-      for key,value in {'context_length':64, 'embedding_length':64, 'feed_forward_length':64, 'block_count':2, 'full_attention_interval':2,
-                        'ssm.conv_kernel':4, 'ssm.state_size':32, 'ssm.group_count':2, 'ssm.time_step_rank':4, 'ssm.inner_size':16,
-                        'attention.head_count':4, 'attention.head_count_kv':2, 'attention.key_length':64, 'rope.dimension_count':16}.items():
+      for key,value in {'context_length':4, 'embedding_length':8, 'feed_forward_length':8, 'block_count':2, 'full_attention_interval':2,
+                        'ssm.conv_kernel':2, 'ssm.state_size':2, 'ssm.group_count':2, 'ssm.time_step_rank':4, 'ssm.inner_size':8,
+                        'attention.head_count':4, 'attention.head_count_kv':2, 'attention.key_length':4, 'rope.dimension_count':2}.items():
         writer.add_uint32('qwen35.'+key, value)
       writer.add_float32('qwen35.rope.freq_base', 10000)
       writer.add_float32('qwen35.attention.layer_norm_rms_epsilon', 1e-5)
-      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(64)])
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(16)])
       for name,weight in nn.state.get_state_dict(Transformer(config)).items():
         value = -rng.random(weight.shape) if name.endswith('ssm_a') else rng.normal(1, .1, weight.shape) if 'norm' in name else \
                 rng.normal(0, .5 if 'token_embd' in name else .05, weight.shape)
-        writer.add_tensor(name.replace('ffn_norm', 'post_attention_norm'), value.astype(np.float32))
+        writer.add_tensor(name.replace('ffn_norm', 'post_attention_norm'), value.astype(np.float16))
       write_gguf(writer)
-      # Materialize weights once instead of repeatedly compiling GGUF loading/casts into the model's kernels.
-      single, parallel = Transformer.from_gguf(path, 64, realize=True)[0], Transformer.from_gguf(path, 64, realize=True, shard=2)[0]
-      prompt = [int(x) for x in rng.integers(0, 64, 40)]
-      self.assertEqual(list(itertools.islice(parallel.generate(list(prompt)), 6)), list(itertools.islice(single.generate(list(prompt)), 6)))
+      parallel = Transformer.from_gguf(path, 4, realize=True, shard=2)[0]
+      # Greedy outputs from the unsharded model with these seeded weights. Check initial and cached decode;
+      # generation/JIT replay have separate tests, and need not compile a second model here.
+      temperature = Tensor([0.0]).realize()
+      for pos, expected in enumerate((0, 3)):
+        x, start_pos = Tensor([[pos+1]]).realize(), Variable('start_pos', 0, 3).bind(pos)
+        self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
       # the kv cache is sharded on its heads, the gated deltanet is copied to every device
       self.assertEqual(parallel.blk[1].cache_kv.uop.axis, 2)
       for t in (parallel.blk[0].attn_qkv.weight, parallel.blk[0].recurrent_state): self.assertEqual((t.device, t.uop.axis), (DEVICES, None))

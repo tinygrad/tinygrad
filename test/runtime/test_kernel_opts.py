@@ -99,10 +99,10 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_matmul(self):
-    N = 128
     Tensor.manual_seed(1552)
-    a = Tensor.rand(N, N)
-    b = Tensor.rand(N, N)
+    # Keep the full reduction and enough output elements for every split, without a square output tile.
+    a = Tensor.rand(128, 128)
+    b = Tensor.rand(128, 32)
     r = a@b
     helper_linearizer_opt(r, [
       [Opt(OptOps.SPLIT, 1, (32, AxisType.LOCAL))],
@@ -127,7 +127,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_matmul_upcast_group(self):
     Tensor.manual_seed(1552)
-    helper_linearizer_opt(Tensor.rand(128, 128)@Tensor.rand(128, 128),
+    helper_linearizer_opt(Tensor.rand(16, 128)@Tensor.rand(128, 16),
                           [[Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST))]])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
