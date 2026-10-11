@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import prod, dedup, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
+from tinygrad.helpers import prod, dedup, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC, ALLOW_DEVICE_USAGE
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
@@ -163,7 +163,6 @@ pm_no_views = PatternMatcher([
         src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER, Ops.ALLOC)),), allow_any_len=True), lambda v: v.src[0]),
 ])
 
-DEVICE_MAX_BUFS = {"WEBGPU": 8} # TODO: get from device?
 @dataclass
 class LimitBufsContext:
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
@@ -172,7 +171,10 @@ class LimitBufsContext:
 def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
-  if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or getattr(Device[device], "max_kernel_buffers", 0)): return None
+  if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value):
+    assert ALLOW_DEVICE_USAGE, f"buffer limit for {device} unavailable; supply MAX_KERNEL_BUFFERS"
+    MAX_BUFS = getattr(Device[device], "max_kernel_buffers", 0)
+  if not MAX_BUFS: return None
 
   def visitor(u:UOp) -> frozenset[UOp]:
     if u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: return frozenset((u,))
