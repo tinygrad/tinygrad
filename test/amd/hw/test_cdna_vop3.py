@@ -43,12 +43,11 @@ def _run_emu(instructions: list, out_reg: int = 2) -> int:
 
 def _run_hw(instructions: list, out_reg: int = 2) -> int:
   from tinygrad.device import Device, TinyELF, Buffer
-  from tinygrad.dtype import dtypes
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
   dev = Device["AMD"]
   if dev.arch != "gfx950": raise unittest.SkipTest("requires gfx950 hardware")
-  out_gpu = Buffer(dev.device, LANES * 4, dtypes.uint8, preallocate=True)
+  out_gpu = Buffer(dev.device, LANES * 4, preallocate=True)
   code = _code(instructions, out_reg, out_gpu._buf)
   byte_str = ", ".join(f"0x{b:02x}" for b in code)
   asm_src = f""".text

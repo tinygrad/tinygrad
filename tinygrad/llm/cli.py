@@ -3,7 +3,7 @@ import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv, round_up
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -145,16 +145,19 @@ def main():
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
-  parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
+  parser.add_argument("--benchmark", nargs='?', type=lambda s: tuple(int(x) for x in (s if "," in s else f"0,{s}").split(",", 1)), const=(0, 20),
+                      metavar="[PREFILL,]DECODE", help="Benchmark tok/s (PREFILL prompt tokens then DECODE new tokens, default 0,20)")
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
+  parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
+  if args.benchmark: args.max_context = max(args.max_context, round_up(sum(args.benchmark)+1, 1024))
 
   # load the model
   st = time.perf_counter()
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
-    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
+    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
+  file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
         f"and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
@@ -185,14 +188,17 @@ def main():
 
   # do benchmark
   if args.benchmark is not None:
-    gen = model.generate(toks:=[tok.bos_id or 0])
-    for i in range(args.benchmark):
-      profile_marker(f"decode @ {i}")
+    keep, (n_pp, n_tg) = 20, args.benchmark
+    gen = model.generate(toks:=tok.encode(" ".join(map(str, range(n_pp))))[:n_pp] if n_pp else [tok.bos_id or 0])
+    for i in range(n_tg+1):
+      profile_marker(f"decode @ {i-1}" if i else "prefill")
+      if i == keep+1 and n_tg > 2*keep: print("...")
       GlobalCounters.reset()
       if (log:=getenv("BENCHMARK_LOG", "")): from extra.bench_log import WallTimeEvent, BenchEvent
-      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
+      with Timing(on_exit=lambda x: f", {(max(n_pp, 1) if i == 0 else 1)*1e9/x:8.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
                   f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
-                  tok.decode(toks).replace("\n", "\\n")):
+                  tok.decode(toks[n_pp if i <= keep or n_tg <= 2*keep else max(n_pp, 1)+n_tg-keep+1:]).replace("\n", "\\n"),
+                  prefix=f"prefill {max(n_pp, 1):5d}: " if i == 0 else f"decode {i-1:6d}: ", enabled=i <= keep or i > n_tg-keep):
         if log:
           with WallTimeEvent(BenchEvent.STEP): next(gen)
         else: next(gen)

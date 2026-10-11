@@ -224,6 +224,7 @@ def _control(h, rtype, req, val, idx, data, n, timeout):
 def _bulk(h, ep, data, n, actual, timeout):
   if ep & 0x80: ctypes.memmove(data, bytes(MockUSB3.inst.bulk_read(n)), n)
   else: MockUSB3.inst.bulk_write(ctypes.string_at(data, n))
+  if actual: actual[0] = n
   return 0
 def _submit(t):
   MockUSB3.inst.bulk_write(ctypes.string_at(t.contents.buffer, t.contents.length))

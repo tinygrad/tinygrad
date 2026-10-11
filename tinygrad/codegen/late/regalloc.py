@@ -5,7 +5,7 @@ from tinygrad.renderer.isa import ISARenderer, Register, rdef, LinearContext
 from typing import Any
 from dataclasses import replace
 
-PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
+PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register

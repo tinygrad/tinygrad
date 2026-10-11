@@ -109,7 +109,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const consumer = g.node(consumerId);
       // add +- toggle if this consumer has collapsible sources
       const edge = g.edge(n, consumerId);
-      const collapsible = consumer.collapsePorts != null ? consumer.collapsePorts.includes(edge?.label?.text) : node.exclude;
+      const collapsible = consumer.collapsePorts != null ? (consumer.collapsePorts.includes(edge?.label?.text) || node.exclude) : node.exclude;
       if (!collapsible) continue;
       consumer.collapsible = true;
       // increase width of call/function/program nodes to make space for a toggle

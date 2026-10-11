@@ -425,6 +425,9 @@ class TestUOpGraph(unittest.TestCase):
 
     e = UOp(Ops.NOOP).end(r)
     self.assertNotIn(r, e.ranges)
+    group = UOp.group(e, None, e)
+    self.assertIs(group, UOp(Ops.STACK).after(e, e))
+    self.assertIs(group.simplify(), UOp(Ops.STACK).after(e))
 
     a = c.after(e)
     self.assertNotIn(r, a.ranges)

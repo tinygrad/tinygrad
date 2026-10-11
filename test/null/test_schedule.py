@@ -88,9 +88,9 @@ class TestBufferUOp(unittest.TestCase):
   def test_view_does_not_realize(self):
     a = Tensor.randn(1, 4).expand(4, 4)
     a.realize()
-    self.assertEqual(a.uop.base.realized.size, 4)
+    self.assertEqual(a.uop.base.realized.nbytes, 4 * a.dtype.itemsize)
     a2 = a.contiguous().realize()
-    self.assertEqual(a2.uop.base.realized.size, 16)
+    self.assertEqual(a2.uop.base.realized.nbytes, 16 * a2.dtype.itemsize)
 
 class TestContiguous(unittest.TestCase):
   def test_contiguous_buffer(self):
@@ -123,13 +123,13 @@ class TestContiguous(unittest.TestCase):
     a = Tensor.empty(4)
     b = a.expand((4, 4))
     check_schedule(b, 0)
-    self.assertEqual(b.uop.base.buffer.size, 4)
+    self.assertEqual(b.uop.base.buffer.nbytes, 4 * b.dtype.itemsize)
 
   def test_contiguous_view_realizes(self):
     a = Tensor.empty(4)
     b = a.expand((4, 4)).contiguous()
     check_schedule(b, 1)
-    self.assertEqual(b.uop.base.buffer.size, 16)
+    self.assertEqual(b.uop.base.buffer.nbytes, 16 * b.dtype.itemsize)
 
 class TestSimpleSchedule(unittest.TestCase):
   def test_reduce_doesnt_split(self):
@@ -671,18 +671,18 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.arange(4).reshape(1, 4).clone().realize()
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
     casted_view.realize()
-    self.assertEqual(casted_view.uop.base.realized.size, 8)
+    self.assertEqual(casted_view.uop.base.realized.nbytes, 8 * casted_view.dtype.itemsize)
     contig = casted_view.contiguous().realize()
-    self.assertEqual(contig.uop.base.realized.size, 8)
+    self.assertEqual(contig.uop.base.realized.nbytes, 8 * contig.dtype.itemsize)
 
   # NOTE: we only reorder CAST if it's an EXPAND
   def test_cast_after_shrink(self):
     a = Tensor.arange(4).reshape(1, 4).clone().realize()
     casted_view = a.shrink(((0, 1), (0, 2))).cast(dtypes.float)
     casted_view.realize()
-    self.assertEqual(casted_view.uop.base.realized.size, 2)
+    self.assertEqual(casted_view.uop.base.realized.nbytes, 2 * casted_view.dtype.itemsize)
     realized_view = casted_view.contiguous().realize()
-    self.assertEqual(realized_view.uop.base.realized.size, 2)
+    self.assertEqual(realized_view.uop.base.realized.nbytes, 2 * realized_view.dtype.itemsize)
 
   def test_cast_const_view(self):
     a = Tensor.ones((4, 4), dtype=dtypes.float32, buffer=False)
@@ -1812,7 +1812,7 @@ class TestUOpBecome(unittest.TestCase):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
-    self.assertEqual(b.uop.base.buffer.size, 4)
+    self.assertEqual(b.uop.base.buffer.nbytes, 4 * b.dtype.itemsize)
     self.assertEqual(b.uop.shape, (4, 4))
 
   def test_reorder_expand_alt(self):

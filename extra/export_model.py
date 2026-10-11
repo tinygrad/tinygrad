@@ -26,7 +26,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     if bu.op is Ops.PARAM: key, name, size = ("in", bu.arg.slot), f"input{bu.arg.slot}", prod(bu.shape)*bu.dtype.itemsize
     else:
       b = bu.buffer
-      key, size = (id(b.base), b.offset, b.size, b.dtype), b.size*b.dtype.itemsize
+      key, size = (id(b.base), b.offset, b.nbytes, bu.dtype), b.nbytes
       if key in bufs: return bufs[key][0]
       if (name:=output_name.get(id(b))) is None:
         name, n = f"buf_{n}", n+1
@@ -244,7 +244,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   with Context(JIT=2): linear, output_bufs = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(linear, output_bufs)
   state = get_state_dict(model)
-  weight_names = {(id(b), b.offset, b.size, b.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
+  weight_names = {(id(b), b.offset, b.nbytes, x.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
   input_names = [f"input{i}" for i in range(len(inputs))]
   output_names = [f"output{i}" for i in range(len(output_bufs))]
 

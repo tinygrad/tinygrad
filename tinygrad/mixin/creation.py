@@ -45,7 +45,8 @@ class CreationMixin(DTypeMixin, MovementMixin):
         if new_shape[axis] % len(dev) != 0: raise RuntimeError(f"can't split {new_shape} on axis {axis} over {dev}")
         local = tuple(s//len(dev) if i == axis else s for i,s in enumerate(new_shape))
         return cls._wrap_uop(cls.empty(*local, device=dev, dtype=dt)._uop.unshard(axis))
-    u = UOp(Ops.ALLOC, src=UOp.device_range_src(dev), arg=ParamArg(next(UOp.unique_num), dt, prod(max_shape), device=dev, bind_on_realize=True))
+    u = UOp(Ops.ALLOC, src=(UOp.const(prod(max_shape)),)+UOp.device_range_src(dev),
+            arg=ParamArg(next(UOp.unique_num), dt, device=dev, bind_on_realize=True))
     u = u.reshape(max_shape).shrink_to(new_shape)
     return cls._wrap_uop(u)
 

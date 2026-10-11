@@ -27,6 +27,10 @@ class TestWeakConstFolding(unittest.TestCase):
     out = (UOp.const(1.25) + UOp.const(2.5)).simplify()
     self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.weakfloat, 3.75))
 
+  def test_nan_compare(self):
+    nan = UOp.const(math.nan)
+    self.assertTrue(nan.ne(nan).simplify().val)
+
   def test_invalid_poison(self):
     self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
 

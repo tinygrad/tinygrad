@@ -560,9 +560,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
-    # TODO: int pow
-    if not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)) and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
-      raise RuntimeError("base needs to be float")
+    if not reverse and isinstance(x, int) and x < 0 and not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)):
+      raise RuntimeError("integers to negative integer powers are not allowed")
     return base.alu(Ops.POW, exponent)
 
   def __pow__(self, x: Self | ConstType) -> Self:

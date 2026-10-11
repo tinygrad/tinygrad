@@ -95,9 +95,6 @@ class NVDev:
   def rreg(self, addr:int) -> int: return self.mmio[addr // 4]
 
   def _early_ip_init(self):
-    self.reg_names:set[str] = set()
-    self.reg_offsets:dict[str, tuple[int, int]] = {}
-
     self.include("nv_ref", "")
     self.include("dev_fb", "tu102")
     self.include("dev_gc6_island", "ga102")

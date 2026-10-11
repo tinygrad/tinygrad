@@ -249,10 +249,10 @@ def xlog2(d:UOp) -> UOp:
   r = d.ne(0.0).where(r, r.const_like(-math.inf))
   # log2(x) = NaN for x < 0
   r = (d<-0.0).where(r.const_like(math.nan), r)
-  # log2(NaN) = NaN
-  r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  r = d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  # Check NaN last: comparisons of its reciprocal are not reliable on every backend.
+  return d.ne(d).where(r.const_like(math.nan), r)
 
 def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))
@@ -263,6 +263,23 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
   neg_base = non_int.where(base.ne(-math.inf).where(ret.const_like(math.nan), ret), is_odd.where(-ret, ret))
   # x ** 0 = 1, including 0 ** 0 and inf ** 0
   return exponent.eq(0).where(ret.const_like(1), (base < 0).where(neg_base, ret))
+
+def xpow_int(base:UOp, exponent:UOp, dt:DType) -> UOp|None:
+  if dt not in dtypes.ints: return None
+  # square and multiply over the exponent bits in unsigned, masking so products wrap instead of growing
+  udt = dt if dtypes.is_unsigned(dt) else dtypes.uints[dtypes.sints.index(dt)]
+  ret, sq = (b:=base.cast(dt).bitcast(udt)).const_like(1), b
+  edt = exponent.dtype
+  lo, hi = (edt.min, edt.max) if edt in dtypes.ints and exponent.overflows(edt) else (exponent.vmin, exponent.vmax)
+  for i in range(nbits:=int(max(hi, 0)).bit_length()):
+    ret = ((exponent >> i) & 1).ne(0).where((ret*sq) & udt.max, ret)
+    if i < nbits-1: sq = (sq*sq) & udt.max
+  ret = ret.bitcast(dt)
+  if lo >= 0: return ret
+  # negative exponent truncates to 0, except for 1 and -1
+  one = ret.const_like(1)
+  neg = (sb:=b.bitcast(dt)).eq(-1).where((exponent & 1).ne(0).where(-one, one), sb.eq(1).where(one, 0))
+  return (exponent < 0).where(neg, ret)
 
 @functools.cache
 def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) -> PatternMatcher:

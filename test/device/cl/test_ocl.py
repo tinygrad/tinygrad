@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import patch
 from tinygrad import Device
 from tinygrad.device import Buffer, TinyELF
-from tinygrad.dtype import dtypes
 from tinygrad.helpers import Target
 from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
 
@@ -35,8 +34,8 @@ class TestCLError(unittest.TestCase):
   def test_unaligned_copy(self):
     data = list(range(65))
     unaligned = memoryview(bytearray(data))[1:]
-    buffer = Buffer("CL", 64, dtypes.uint8).allocate()
-    buffer.copy_from(Buffer("PYTHON", 64, dtypes.uint8, opaque=unaligned))
+    buffer = Buffer("CL", 64).allocate()
+    buffer.copy_from(Buffer("PYTHON", 64, opaque=unaligned))
     result = memoryview(bytearray(len(data) - 1))
     result[:] = buffer.as_memoryview()
     assert unaligned == result, "Unaligned data copied in must be equal to data copied out."

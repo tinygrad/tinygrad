@@ -9,8 +9,7 @@ class TestInvalidTensor(unittest.TestCase):
     linear, var_vals = out.linear_with_vars()
     buf = out.uop.buffer
     buf.allocate()
-    sentinel = memoryview(bytearray(b'\x42' * buf.nbytes))
-    buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=sentinel))
+    buf.copy_from(Buffer("PYTHON", buf.nbytes, initial_value=b'\x42' * buf.nbytes))
     before = buf.as_memoryview().cast(out.dtype.fmt).tolist()
     run_linear(linear, var_vals)
     ret = buf.as_memoryview().cast(out.dtype.fmt).tolist()

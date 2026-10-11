@@ -48,15 +48,16 @@ class TestHCQ2Schedule(unittest.TestCase):
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
   def test_repeated_copy(self):
-    vram, host, new = [Buffer(d, 4096, dtypes.uint8, preallocate=True) for d in (Device.DEFAULT, "CPU", "CPU")]
+    vram, host, new = [Buffer(d, 4096, preallocate=True) for d in (Device.DEFAULT, "CPU", "CPU")]
     new.host[:] = bytes(range(256)) * 16
-    copyout, copyin = UOp.from_buffer(host).store_call(UOp.from_buffer(vram)), UOp.from_buffer(vram).store_call(UOp.from_buffer(new))
+    hu, vu, nu = [UOp.from_buffer(b, dtypes.uint8) for b in (host, vram, new)]
+    copyout, copyin = hu.store_call(vu), vu.store_call(nu)
     run_linear(UOp(Ops.LINEAR, src=(copyout, copyin, copyout)), wait=True)
     self.assertEqual(bytes(host.host[:]), bytes(new.host[:]))
 
   @unittest.skipIf(Device.DEFAULT == "METAL", "unified memory: METAL copies on the host and maps nothing")
   def test_map_cpu_buffer_preserves_contents(self):
-    src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
+    src = Buffer("CPU", 16, preallocate=True)
     data = bytes(range(16))
     src.host[:] = data
     src.get_buf(Device.DEFAULT)
@@ -65,8 +66,8 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_caches_hold_no_buffers(self):
     # an eager template caches without its buffers and the jit's linear compiles once uncached: freeing the tensors frees the device memory
     def step(i):
-      buf = Buffer("NPY", 1024, dtypes.float32, initial_value=struct.pack("f", i) * 1024)
-      x = Tensor(UOp.from_buffer(buf)).to(Device.DEFAULT).realize()
+      buf = Buffer("NPY", 4096, initial_value=struct.pack("f", i) * 1024)
+      x = Tensor(UOp.from_buffer(buf, dtypes.float32)).to(Device.DEFAULT).realize()
       @TinyJit
       def f(a): return (a * 2 + 1).contiguous().realize()
       for _ in range(3): out = f(x)
@@ -85,7 +86,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     ranges = [((b:=dev.rt_buffer(spec))._buf, b._buf + b.nbytes) for spec in specs]
     x, f = chain_input(device=dev.device), TinyJit(lambda a: chain(a, 2).realize())
     for _ in range(2): f(x)
-    for u in f.captured.linear.toposort():
+    for u in f.captured.linear.toposort(enter_calls=True):
       if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and (buf:=u.buffer).device == dev.device:
         self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
@@ -117,20 +118,20 @@ class TestHCQ2Fence(unittest.TestCase):
     self.assertFalse(t.is_alive())
     self.assertEqual(self.tl[1], base + 2)
 
-@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, LLVMRenderer)), "CALL is rendered in C style and LLVM only")
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
-  def _run(body:UOp) -> list[Buffer]:
+  def _run(body:UOp) -> list[UOp]:
     linear = hcq2.hcq_link(lower_and_compile(lower_hcq(body)), allow_cache=False)
     assert hcq2.hcq_link(linear, allow_cache=False) is linear, "a linked linear links to itself, with the refs its call keeps"
     run_linear(linear, jit=True)
-    return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
+    return [u for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
   def test_ffi_ccall(self):
     with Context(HCQ_RUNTIME_DEV="CPU"):
       out = cpu_buf(dtype=dtypes.int32, slot=1, tag="ffi_result")
       bufs = self._run(out.index(0).store(hcq2.ccall(libc.dll.ffs, 0x10)))
-    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int).host.view(fmt='i')[0], 5)
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int).buffer.host.view(fmt='i')[0], 5)
 
   def test_nested_ffi_call(self, host="CPU"): # a function calls a C function: no pointer to pass, the symbol links
     @uopfunc
@@ -142,7 +143,7 @@ class TestHCQ2FFI(unittest.TestCase):
       src = hcq2.cstruct(init_c_struct_t(4, (("value", ctypes.c_uint32, 0),)), value=42)
       out = cpu_buf(2, dtypes.uint32, tag="ffi_result")
       bufs = self._run(copy_pair(out, src.bitcast(dtypes.uint32)))
-    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.uint32).host.view(fmt='I')), [42, 42])
+    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.uint32).buffer.host.view(fmt='I')), [42, 42])
   def test_nested_ffi_call_python(self): self.test_nested_ffi_call("PYTHON")
 
   def test_ffi_cstruct(self):
@@ -152,7 +153,7 @@ class TestHCQ2FFI(unittest.TestCase):
     with Context(HCQ_RUNTIME_DEV="CPU"):
       s = hcq2.cstruct(struct_t, u8=0x12, u16=UOp.const(0x3456, dtypes.uint16), u32=0x789ABCDE, u64=0xFEDCBA9876543210)
       bufs = self._run(s.index(0).load())
-    got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t)).host.view(fmt='B')))
+    got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes() == ctypes.sizeof(struct_t)).buffer.host.view(fmt='B')))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
 
   def test_nested_cstruct_patches(self):
@@ -162,43 +163,44 @@ class TestHCQ2FFI(unittest.TestCase):
       out = cpu_buf(dtype=dtypes.uint32, tag="result")
       copied = hcq2.ccall(libc.memcpy, out.index(0), outer.bitcast(dtypes.uint64).index(0).load(), 4)
       bufs = self._run(out.after(copied).index(0).load())
-    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32).host.view(fmt='I')[0], 42)
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32).buffer.host.view(fmt='I')[0], 42)
 
 @uopfunc
 def addr_of(o:UOp, b:UOp): return o.index(0).store(b.getaddr("CPU")).sink() # o[0] = &b
 
 # host functions in a batch
-@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, LLVMRenderer)), "CALL is rendered in C style and LLVM only")
 class TestHostCalls(unittest.TestCase):
   def setUp(self): self.enterContext(Context(HCQ_RUNTIME_DEV="CPU"))
 
   @staticmethod
-  def _buf(n:int, dtype=dtypes.uint64) -> Buffer: return Buffer("CPU", n, dtype, initial_value=bytes(n * dtype.itemsize))
+  def _buf(n:int, dtype=dtypes.uint64) -> UOp:
+    return UOp.from_buffer(Buffer("CPU", n * dtype.itemsize, initial_value=bytes(n * dtype.itemsize)), dtype)
   @staticmethod
-  def _run(fxn, *bufs:Buffer, **var_vals:int) -> list: # first buffer is the output
-    run_linear(hcq2.hcq_link(lower_and_compile(lower_hcq(fxn(*[UOp.from_buffer(b) for b in bufs]))), allow_cache=False), var_vals, jit=True)
-    return bufs[0].host.view(fmt=bufs[0].dtype.fmt)[:]
+  def _run(fxn, *bufs:UOp, **var_vals:int) -> list: # first buffer is the output
+    run_linear(hcq2.hcq_link(lower_and_compile(lower_hcq(fxn(*bufs))), allow_cache=False), var_vals, jit=True)
+    return bufs[0].buffer.host.view(fmt=bufs[0].dtype.fmt)[:]
 
   def test_no_addrs_no_placeholders(self):
     @uopfunc
     def inc(o:UOp, a:UOp): return o.index(0).store(a.index(0).load() + 1).sink()
-    a = Buffer("CPU", 1, dtypes.uint64, initial_value=struct.pack("Q", 41))
+    a = UOp.from_buffer(Buffer("CPU", 8, initial_value=struct.pack("Q", 41)), dtypes.uint64)
     self.assertEqual(self._run(inc, self._buf(1), a), [42])
 
   def test_addr_of_arg(self):
     b = self._buf(16, dtypes.uint8)
-    self.assertEqual(self._run(addr_of, self._buf(1), b), [b.get_buf("CPU")])
+    self.assertEqual(self._run(addr_of, self._buf(1), b), [b.buffer.get_buf("CPU")])
 
   def test_addr_of_view(self):
     @uopfunc
     def addr(o:UOp, b:UOp): return o.index(0).store(b[4:8].getaddr("CPU")).sink()
     b = self._buf(16, dtypes.uint8)
-    self.assertEqual(self._run(addr, self._buf(1), b), [b.get_buf("CPU") + 4])
+    self.assertEqual(self._run(addr, self._buf(1), b), [b.buffer.get_buf("CPU") + 4])
 
   def test_sink_calls_function(self): # a bare sink with args calls a function that writes one arg and takes the address of the other
     def sink(o:UOp, b:UOp): return addr_of(UOp.param(0, dtypes.uint64, 1), UOp.param(1, dtypes.uint8, 16)).sink().call(o, b, name="sink")
     outs, b = [self._buf(1) for _ in range(2)], self._buf(16, dtypes.uint8)
-    for out in outs: self.assertEqual(self._run(sink, out, b), [b.get_buf("CPU")]) # the second run reuses the program
+    for out in outs: self.assertEqual(self._run(sink, out, b), [b.buffer.get_buf("CPU")]) # the second run reuses the program
 
   def test_nested_functions(self): # the address is taken two calls deep
     @uopfunc
@@ -206,13 +208,13 @@ class TestHostCalls(unittest.TestCase):
     @uopfunc
     def top(o:UOp, b:UOp): return mid(o, b).sink()
     b = self._buf(16, dtypes.uint8)
-    self.assertEqual(self._run(top, self._buf(1), b), [b.get_buf("CPU")])
+    self.assertEqual(self._run(top, self._buf(1), b), [b.buffer.get_buf("CPU")])
 
   def test_call_sites(self): # one function, called on different args
     @uopfunc
     def both(o:UOp, a:UOp, b:UOp): return UOp.sink(addr_of(o[0:1], a), addr_of(o[1:2], b))
     a, b = self._buf(16, dtypes.uint8), self._buf(16, dtypes.uint8)
-    self.assertEqual(self._run(both, self._buf(2), a, b), [a.get_buf("CPU"), b.get_buf("CPU")])
+    self.assertEqual(self._run(both, self._buf(2), a, b), [a.buffer.get_buf("CPU"), b.buffer.get_buf("CPU")])
 
   def test_nested_placeholders(self): # storage a function keeps for itself
     @uopfunc
@@ -242,7 +244,7 @@ class TestHostCalls(unittest.TestCase):
     def scale(o:UOp, a:UOp, k:UOp): return o.index(0).store(a.index(0).load() * k).sink()
     @uopfunc
     def top(o:UOp, a:UOp): return scale(o, a, UOp.variable("k", 0, 10, dtypes.uint64)).sink()
-    a = Buffer("CPU", 1, dtypes.uint64, initial_value=struct.pack("Q", 7))
+    a = UOp.from_buffer(Buffer("CPU", 8, initial_value=struct.pack("Q", 7)), dtypes.uint64)
     self.assertEqual(self._run(top, self._buf(1), a, k=6), [42])
 
   def test_weak_variable_in_function(self): # a weak variable reached in a function
@@ -261,7 +263,7 @@ class TestHostCalls(unittest.TestCase):
     @uopfunc
     def top(o:UOp, b:UOp): return addr_of(o, b.after(b.index(0).store(2))).sink()
     b = self._buf(1)
-    self.assertEqual(self._run(top, self._buf(1), b), [b.get_buf("CPU")])
+    self.assertEqual(self._run(top, self._buf(1), b), [b.buffer.get_buf("CPU")])
 
   def test_inputs_out_of_slot_order(self): # inputs reached out of slot order
     p = [UOp.param(i, dtypes.uint64, 1, "CPU") for i in range(2)]
@@ -272,7 +274,7 @@ class TestHostCalls(unittest.TestCase):
     def put(out:UOp, v:UOp): return out.index(0).store(v).sink()
     a, b = [cpu_buf(dtype=dtypes.uint64, tag=t) for t in ("cb", "enc")]
     lowered = lower_hcq(put(a, UOp.const(1, dtypes.uint64)), put(b, UOp.const(2, dtypes.uint64)))
-    self.assertEqual(len({c.body for c in lowered.toposort() if c.op is Ops.CALL and c.arg.name == "put"}), 1)
+    self.assertEqual(len({c.body for c in lowered.toposort(enter_calls=True) if c.op is Ops.CALL and c.arg.name == "put"}), 1)
 
   def test_one_function_with_registers(self): # a body numbers its own registers and loops: two traces are one function
     @uopfunc

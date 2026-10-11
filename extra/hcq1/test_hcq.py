@@ -32,8 +32,8 @@ class TestHCQ(unittest.TestCase):
 
   def setUp(self):
     TestHCQ.d0.synchronize()
-    TestHCQ.a.uop.buffer.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
-    TestHCQ.b.uop.buffer.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 0)))))
+    TestHCQ.a.uop.buffer.copy_from(Buffer("PYTHON", 8, initial_value=bytes(struct.pack("ff", 0, 1))))
+    TestHCQ.b.uop.buffer.copy_from(Buffer("PYTHON", 8, initial_value=bytes(struct.pack("ff", 0, 0))))
     TestHCQ.d0.synchronize() # wait for copyins to complete
 
   # Test signals
@@ -171,8 +171,8 @@ class TestHCQ(unittest.TestCase):
     prg = to_program(replace_opts(si.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(3, AxisType.LOCAL)) for _ in range(3)]), TestHCQ.d0.renderer)
     runtime = get_runtime(Device.DEFAULT, prg)
 
-    zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
-    zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    zb = Buffer(Device.DEFAULT, 3 * 3 * 3 * 4, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    zt = Buffer(Device.DEFAULT, 3 * 3 * 3 * 4, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     ctypes.memset(zb._buf.va_addr, 0, zb.nbytes)
     kernargs = runtime.fill_kernargs([zt._buf, zb._buf])
 
@@ -211,8 +211,8 @@ class TestHCQ(unittest.TestCase):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
     sz = 64 << 20
-    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, sz, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
     ctypes.memset(buf2._buf.va_addr, 1, sz)
 
     TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
@@ -231,8 +231,8 @@ class TestHCQ(unittest.TestCase):
 
     # NOTE: these must be a multiple of 8 for .view(fmt='Q') to work
     for sz in [(1 << 32) - 8, (1 << 32), (1 << 32) + 8, (5 << 30), (6 << 30) - 0x4642ee0]:
-      buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-      buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+      buf1 = Buffer(Device.DEFAULT, sz, options=BufferSpec(nolru=True)).ensure_allocated()
+      buf2 = Buffer(Device.DEFAULT, sz, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
 
       ctypes.memset(buf2._buf.va_addr, 0x3e, sz)
       buf2_q_view = buf2.host.view(fmt='Q')
@@ -274,8 +274,8 @@ class TestHCQ(unittest.TestCase):
     virt_dest_addr = Variable("virt_dest_addr", 0, 0xffffffffffffffff, dtypes.uint64)
 
     sz = 64 << 20
-    buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, sz, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, sz, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
     ctypes.memset(buf2._buf.va_addr, 1, sz)
 
     q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
@@ -352,8 +352,8 @@ class TestHCQ(unittest.TestCase):
 
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
     SZ = 200_000_000
-    a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
-    b = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+    a = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
+    b = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
 
     sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
     st = time.perf_counter()
@@ -380,8 +380,8 @@ class TestHCQ(unittest.TestCase):
     except Exception: self.skipTest("no multidevice, test skipped")
 
     SZ = 200_000_000
-    b = Buffer(f"{Device.DEFAULT}:1", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
-    a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+    b = Buffer(f"{Device.DEFAULT}:1", SZ, options=BufferSpec(nolru=True)).allocate()
+    a = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
     TestHCQ.d0.allocator._map(b._buf)
 
     sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
@@ -420,8 +420,8 @@ class TestHCQ(unittest.TestCase):
   def test_small_copies_from_host_buf(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 1, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
 
     for i in range(256):
       ctypes.memset(buf2._buf.va_addr, i, 1)
@@ -437,9 +437,9 @@ class TestHCQ(unittest.TestCase):
   def test_small_copies_from_host_buf_intercopy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf3 = Buffer(Device.DEFAULT, 1, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
 
     for i in range(256):
       ctypes.memset(buf3._buf.va_addr, i, 1)
@@ -459,9 +459,9 @@ class TestHCQ(unittest.TestCase):
     try: _ = Device[f"{Device.DEFAULT}:1"]
     except Exception: self.skipTest("no multidevice, test skipped")
 
-    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(f"{Device.DEFAULT}:1", 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(f"{Device.DEFAULT}:1", 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf3 = Buffer(Device.DEFAULT, 1, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
     TestHCQ.d0.allocator._map(buf2._buf)
 
     for i in range(256):
@@ -482,8 +482,8 @@ class TestHCQ(unittest.TestCase):
     prg = to_program(b.schedule_linear().src[-1].src[0], TestHCQ.d0.renderer)
     runtime = get_runtime(TestHCQ.d0.device, prg)
 
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 2, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 2, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
     kernargs_ptr = runtime.fill_kernargs([buf1._buf, buf2._buf])
 
@@ -503,9 +503,9 @@ class TestHCQ(unittest.TestCase):
   def test_memory_barrier_before_copy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    buf1 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf2 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
-    buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(Device.DEFAULT, 1, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf3 = Buffer(Device.DEFAULT, 1, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
     for i in range(256):
       ctypes.memset(buf3._buf.va_addr, i, 1)
@@ -526,7 +526,7 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_memoryview()[0] == i
 
   def test_write(self):
-    buf = Buffer(Device.DEFAULT, 4, dtypes.uint32, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    buf = Buffer(Device.DEFAULT, 16, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
     try:
       TestHCQ.d0.hw_compute_queue_t().write(buf._buf, 0x42) \
@@ -539,7 +539,7 @@ class TestHCQ(unittest.TestCase):
     assert buf.as_memoryview().cast("I")[0] == 0x42
 
   def test_poll_bit_set(self):
-    buf = Buffer(Device.DEFAULT, 4, dtypes.uint32, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    buf = Buffer(Device.DEFAULT, 16, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
     try:
       TestHCQ.d0.hw_compute_queue_t().write(buf._buf, 0x01000000, b64=False) \
@@ -551,7 +551,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_value += 1
 
   def test_poll_bit_clear(self):
-    buf = Buffer(Device.DEFAULT, 4, dtypes.uint32, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+    buf = Buffer(Device.DEFAULT, 16, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
     try:
       TestHCQ.d0.hw_compute_queue_t().write(buf._buf, 0xFE000000, b64=False) \
@@ -566,7 +566,7 @@ class TestHCQ(unittest.TestCase):
     if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")
 
     sz = 0x2000
-    cpu_buffer = Buffer("CPU", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
+    cpu_buffer = Buffer("CPU", sz, options=BufferSpec(cpu_access=True)).ensure_allocated()
     cpu_buffer.host.view(fmt='B')[:] = bytes([x & 0xff for x in range(sz)])
 
     for devid in range(6):
@@ -575,7 +575,7 @@ class TestHCQ(unittest.TestCase):
       try: d = Device[f"{Device.DEFAULT}:{devid}"]
       except Exception: break
 
-      local_buf = Buffer(f"{Device.DEFAULT}:{devid}", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
+      local_buf = Buffer(f"{Device.DEFAULT}:{devid}", sz, options=BufferSpec(cpu_access=True)).ensure_allocated()
 
       d.allocator._map(cpu_buffer._buf)
 
@@ -585,7 +585,7 @@ class TestHCQ(unittest.TestCase):
       d.timeline_signal.wait(d.timeline_value)
       d.timeline_value += 1
 
-      np.testing.assert_equal(cpu_buffer.numpy(), local_buf.numpy(), "failed")
+      np.testing.assert_equal(np.frombuffer(cpu_buffer.as_memoryview(), np.uint8), np.frombuffer(local_buf.as_memoryview(), np.uint8), "failed")
 
   @unittest.skipUnless(MOCKGPU and not (DEV.device == "AMD" and DEV.interface == "MOCKPCI"), "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):
@@ -637,8 +637,8 @@ class TestHCQ(unittest.TestCase):
     if TestHCQ.d0.peer_group == d1.peer_group: self.skipTest("devices in same peer group, no RDMA path")
 
     SZ = 200_000_000
-    a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
-    b = Buffer(f"{Device.DEFAULT}:7", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+    a = Buffer(Device.DEFAULT, SZ, options=BufferSpec(nolru=True)).allocate()
+    b = Buffer(f"{Device.DEFAULT}:7", SZ, options=BufferSpec(nolru=True)).allocate()
 
     # warmup
     TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, src_dev=d1, dest_dev=TestHCQ.d0)
@@ -655,7 +655,7 @@ class TestHCQ(unittest.TestCase):
     print(f"cross device rdma copy: {et_ms:.2f} ms, {gb_s:.2f} GB/s")
     assert 1 <= gb_s <= 100
 
-    np.testing.assert_equal(a.numpy(), b.numpy(), "failed")
+    np.testing.assert_equal(np.frombuffer(a.as_memoryview(), np.uint8), np.frombuffer(b.as_memoryview(), np.uint8), "failed")
 
 if __name__ == "__main__":
   unittest.main()

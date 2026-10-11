@@ -1,6 +1,6 @@
 from dataclasses import replace
 from tinygrad.dtype import dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
@@ -25,7 +25,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
     key = base if base.op is Ops.ALLOC else src
     if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
-       target.storage_base not in st.src[1].toposort(enter_calls=False):
+       target.storage_base not in st.src[1].toposort():
       if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
         placed[key] = target.storage_base
       elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
@@ -76,6 +76,11 @@ def _mop_index(r:UOp, idx:UOp):
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
+  # A store through a padded view gates the destination index, not its loaded value.
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("dst"), 0), UPat.var("pad")).store(UPat.var("val")),
+   lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
+  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
+   lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
   # move movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
@@ -92,9 +97,9 @@ def store_hazard_boundary(s:UOp):
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(enter_calls=False): return None
-  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  if (base:=target.base) not in src.toposort(): return None
+  # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk
+  unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=store_hazard_boundary):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
@@ -102,31 +107,31 @@ def fix_store_hazard(target:UOp, src:UOp):
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
-  if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
+  if not SPLIT_REDUCEOP or not all_int(x.shape) or prod(x.shape[:reduce.arg[1]])<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
   #   ~2**10 should be enough if GROUP is used
   # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
 
-  # get expanded by rangeifying the UOp x
-  indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else 0 for i,s in enumerate(x.shape)])
-  range_nums = [y.axis_id[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
-  is_expanded = [i not in range_nums for i in range(len(x.shape))]
+  # an axis is expanded if its range does not reach the index into the base
+  rngs = tuple(UOp.range(s, i) for i,s in enumerate(x.shape))
+  idxs, u = rngs, x
+  while u.op in GroupOp.Movement: idxs, u = apply_movement_op(u.op, u.src[0].shape, u.marg, idxs), u.src[0]
+  is_expanded = [r not in UOp.sink(*idxs).ranges for r in rngs]
 
   if not (split_candidates:=[(i,d) for i in range(reduce.arg[1])
                              for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
-  splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
-  splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
+  splitted = x.unflatten(dim_to_split, (divisor, -1)).permute(tuple([d for d in range(x.ndim+1) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
   return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),))
 
 def resolve_function(c:UOp) -> UOp|None:
   if not c.is_inline_call: return None
-  nodes = c.body.toposort(enter_calls=False)
+  nodes = c.body.toposort()
   # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
   args = c.src[1:]
 
@@ -138,9 +143,9 @@ def resolve_function(c:UOp) -> UOp|None:
     return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {p:args[p.arg.slot] for p in nodes if p.op is Ops.PARAM and p.arg.slot >= 0}
   for p, a in dict_map.items():
-    if p.arg.size is not None:
+    if p.shape:
       n, flat = flat_storage(a)
-      if p.arg.size != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      if p.src[0].val != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.src[0].val}, got {a.shape}")
       dict_map[p] = flat
     elif a.shape != ():
       raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
@@ -165,14 +170,14 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
   # the buffer takes the DEVICE range from the copy (no-op for single device copies)
-  buf = UOp(Ops.ALLOC, src=copy.src[1:],
-            arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+copy.src[1:],
+            arg=ParamArg(next(UOp.unique_num), copy.dtype, device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.ALLOC, src=UOp.device_range_src(x.device),
-            arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+UOp.device_range_src(x.device),
+            arg=ParamArg(next(UOp.unique_num), stg.dtype, device=x.device)).reshape(x.max_shape)
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 

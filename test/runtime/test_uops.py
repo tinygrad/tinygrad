@@ -10,9 +10,10 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import run_linear
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
+from test.helpers import buffer_uops
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
-  buf_uops = [UOp.from_buffer(b) for b in bufs]
+  buf_uops = buffer_uops(UOp.sink(*uops_list), bufs)
   run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -29,8 +30,8 @@ def _test_single_value(vals, op, dts):
   loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)) for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
-  buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype, initial_value=np.array([a], dtype=_to_np_dtype(dtype)).tobytes()) for a,dtype in zip(vals, dts)]
+  buf = Buffer(Device.DEFAULT, output_dtype.itemsize).allocate()
+  buf2 = [Buffer(Device.DEFAULT, dtype.itemsize, initial_value=np.array([a], dtype=_to_np_dtype(dtype)).tobytes()) for a,dtype in zip(vals, dts)]
   run_uops([out], [buf]+buf2)
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
@@ -41,7 +42,7 @@ def _test_single_value_const(vals, op, dts):
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
   out = buf_store[UOp.const(0).cast(dtypes.int32)].store(alu)
-  buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
+  buf = Buffer(Device.DEFAULT, output_dtype.itemsize).allocate()
   run_uops([out], [buf])
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
@@ -50,7 +51,7 @@ def _test_uops_result(output_dtype, uops, res):
   buf_store = uop(uops, Ops.PARAM, output_dtype, (), 0)
   # res = output_fn(uops)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
-  buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
+  buf = Buffer(Device.DEFAULT, output_dtype.itemsize).allocate()
   run_uops([out], [buf])
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
@@ -61,8 +62,8 @@ class TestBitcastBufferView(unittest.TestCase):
   def test_load(self):
     val = 0x1122334455667788
     src, out = UOp.param(0, dtypes.uint32, 4), UOp.param(1, dtypes.uint64, 1)
-    ibuf = Buffer(Device.DEFAULT, 4, dtypes.uint32, initial_value=np.array([0, 0x55667788, 0x11223344, 0], dtype=np.uint32).tobytes())
-    obuf = Buffer(Device.DEFAULT, 1, dtypes.uint64).allocate()
+    ibuf = Buffer(Device.DEFAULT, 16, initial_value=np.array([0, 0x55667788, 0x11223344, 0], dtype=np.uint32).tobytes())
+    obuf = Buffer(Device.DEFAULT, 8).allocate()
     run_uops([out.index(0).store(src.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0))], [ibuf, obuf])
     self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint64)[0], val)
 
@@ -70,7 +71,7 @@ class TestBitcastBufferView(unittest.TestCase):
   def test_store(self):
     val = 0x1122334455667788
     dst = UOp.param(0, dtypes.uint32, 6)
-    buf = Buffer(Device.DEFAULT, 6, dtypes.uint32, initial_value=bytes(24))
+    buf = Buffer(Device.DEFAULT, 24, initial_value=bytes(24))
     view = dst.shrink(((1, 5),)).bitcast(dtypes.uint64)  # two stores through one view: it must inline, not get a declared vector-pointer
     run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
     self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
@@ -80,7 +81,7 @@ class TestBitcastBufferView(unittest.TestCase):
       with self.subTest(src=src_dt, dst=dst_dt):
         src, dst = [UOp.param(i, dt, 16 // dt.itemsize) for i, dt in enumerate((src_dt, dst_dt))]
         src, dst = [b.bitcast(dtypes.uint32).index(UOp.stack(*[UOp.const(i) for i in range(4)])) for b in (src, dst)]
-        bufs = [Buffer(Device.DEFAULT, 16 // dt.itemsize, dt, initial_value=bytes(range(16)) if i == 0 else bytes(16))
+        bufs = [Buffer(Device.DEFAULT, 16, initial_value=bytes(range(16)) if i == 0 else bytes(16))
                 for i, dt in enumerate((src_dt, dst_dt))]
         run_uops([dst.store(src.load())], bufs)
         self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(range(16)))

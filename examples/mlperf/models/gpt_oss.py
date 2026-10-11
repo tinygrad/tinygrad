@@ -305,11 +305,22 @@ class GPTOSS:
       xg = dispatch_fp8(quantized, r) if quantized is not None else \
         (dispatch_fp8 if getenv("FP8_DISPATCH", 0) else dispatch)(_pad_cols(inp.cast(dtypes.bfloat16)), r)
       h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
-      y = swiglu(h, self.swiglu_limit)
-      z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
-          + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
-      out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
-      return out, [x_normed, rrms, *(xg if isinstance(xg, tuple) else (xg,)), h, y, z, r.weights, r.topi, r.dest_row, r.off,
+      if getenv("FUSED_SWIGLU", 0):
+        from extra.gptoss_kernels.swiglu import fused_swiglu_quantize
+        y = fused_swiglu_quantize(h)
+      else:
+        y = swiglu(h, self.swiglu_limit)
+      if getenv("FUSED_COMBINE", 0):
+        from extra.gptoss_kernels.combine import down_combine
+        yq, ye8 = y if isinstance(y, tuple) else quantize_mxfp8(_pad_cols(y.cast(dtypes.bfloat16)))[:2]
+        out, z = down_combine(yq, ye8, w_down, w_down_scale, r.off, w_down_bias, r.dest_row, r.weights)
+        out = out.reshape(bsz, seqlen, dim)
+      else:
+        z = grouped_mx_gemm(y if isinstance(y, tuple) else _pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
+            + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
+        out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
+      return out, [x_normed, rrms, *(xg if isinstance(xg, tuple) else (xg,)), h, *(y if isinstance(y, tuple) else (y,)), z,
+                   r.weights, r.topi, r.dest_row, r.off,
                    *([quantized[1]] if quantized is not None else [])]
     else:
       logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()

@@ -5,7 +5,7 @@ import sys, struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef
 from tinygrad.helpers import unwrap, Target
 from dataclasses import replace
@@ -170,9 +170,6 @@ pre_isel_matcher = PatternMatcher([
 ])
 
 # ***** X86 registers *****
-def alloc_reg(dt:DType, pin:Register|tuple[Register, ...]|None=None):
-  return UOp.alloc((1,), dt, addrspace=AddrSpace.REG).replace(tag=(pin,) if isinstance(pin, Register) else pin)
-
 RAX = Register("rax", 0)
 RCX = Register("rcx", 1)
 RDX = Register("rdx", 2)
@@ -192,9 +189,11 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
-stack_pointer = alloc_reg(dtypes.uint64, RSP)
+stack_pointer = UOp.alloc((1,), dtypes.uint64, slot=-1, addrspace=AddrSpace.REG).replace(tag=(RSP,))
 
 # ***** X86 instruction selection *****
+def alloc_reg(ctx:IselContext, dt:DType, pin:Register|tuple[Register, ...]|None=None):
+  return UOp.alloc((1,), dt, slot=next(ctx.alloc_n), addrspace=AddrSpace.REG).replace(tag=(pin,) if isinstance(pin, Register) else pin)
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -232,19 +231,19 @@ def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
 def idiv(ctx:IselContext, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
   val = UOp.cconst(0, x.dtype) if x.dtype in dtypes.uints else x.src[0] >> UOp.cconst(x.dtype.itemsize*8-1, x.dtype)
-  ext = [] if x.dtype in dtypes.int8s else [alloc_reg(x.dtype, RDX)[0].set(val)]
+  ext = [] if x.dtype in dtypes.int8s else [alloc_reg(ctx, x.dtype, RDX)[0].set(val)]
   dividend_dtype = dtypes.int16 if x.dtype in dtypes.int8s else x.dtype
-  dividend = alloc_reg(dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
+  dividend = alloc_reg(ctx, dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
   defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][:1+(x.dtype not in dtypes.int8s)]
-  divisor = alloc_reg(x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
+  divisor = alloc_reg(ctx, x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
   idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=tuple(defs))
   # this move "cleanses" the register constraints (rax/rdx) of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
 # a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
-def shift(x:UOp, op:X86Ops) -> UOp:
-  val = alloc_reg(x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
-  cnt = alloc_reg(x.src[1].dtype, RCX)[0].set(x.src[1])
+def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
+  val = alloc_reg(ctx, x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
+  cnt = alloc_reg(ctx, x.src[1].dtype, RCX)[0].set(x.src[1])
   return x.ins(op, src=(val, cnt))
 
 # a memory address operand is (base, index, displacement, size). the size is the element size, it scales the index in the
@@ -388,9 +387,9 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SUB, dtypes.ints, (UPat.var("a"), UPat.cvar().cast(name="c"))),
    lambda a,c: a.ins(X86Ops.SUBi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   # int binary with register
-  ((UPat(dtype=dtypes.ints) << UPat()).named("x"), lambda x: shift(x, X86Ops.SHL)),
-  ((UPat(dtype=dtypes.uints) >> UPat()).named("x"), lambda x: shift(x, X86Ops.SHR)),
-  ((UPat(dtype=dtypes.sints) >> UPat()).named("x"), lambda x: shift(x, X86Ops.SAR)),
+  ((UPat(dtype=dtypes.ints) << UPat()).named("x"), lambda ctx,x: shift(ctx, x, X86Ops.SHL)),
+  ((UPat(dtype=dtypes.uints) >> UPat()).named("x"), lambda ctx,x: shift(ctx, x, X86Ops.SHR)),
+  ((UPat(dtype=dtypes.sints) >> UPat()).named("x"), lambda ctx,x: shift(ctx, x, X86Ops.SAR)),
   (UPat.var("a", dtypes.ints) + UPat.var("b"), lambda a,b: a.ins(X86Ops.ADD, src=(a, b))),
   (UPat.var("a", dtypes.ints) * UPat.var("b"), lambda a,b: a.ins(X86Ops.IMUL, src=(a, b))),
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.var("b"), lambda a,b: a.ins(X86Ops.AND, src=(a, b))),
@@ -699,7 +698,7 @@ class X86LinearContext(LinearContext):
     used = {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
     for r in CALLEE_SAVED:
       if r.name in used:
-        a = alloc_reg(dtypes.uint64, r)
+        a = UOp(Ops.BUFFER, arg=ParamArg(-1-r.index, dtypes.uint64, addrspace=AddrSpace.REG)).replace(tag=(r,))
         slot = self.assign_spill_slot(r,a)
         before.append(self.ren.spill(slot,a))
         after.append(self.ren.fill(slot,a,r))

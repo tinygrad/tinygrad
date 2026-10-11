@@ -375,8 +375,8 @@ function setFocus(key) {
     if (e.arg.trace != null) html.append(() => traceBlock(e.arg.trace.slice(1).reverse()));
   }
   if (eventType === EventTypes.BUF) {
-    const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
-    const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
+    const [nbytes, dur] = e.arg.tooltipText.split("\n");
+    const rows = [["Size", nbytes], ["Lifetime", dur]];
     if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
     html.append(() => tabulate(rows));
     const kernels = html.append("div").classed("args", true);
@@ -432,7 +432,7 @@ async function renderProfiler(path, opts) {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
@@ -524,9 +524,9 @@ async function renderProfiler(path, opts) {
         if (linear) { const ts = u32(), value = u64(); timestamps.push(ts); valueMap.set(ts, value); continue; }
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
-          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
+          const nbytes = u64();
           allocs.set(key, {nbytes, shapeKey:`${k}-${shapeIdx++}`});
-          memEvents.push({alloc, key, dtype, sz, nbytes});
+          memEvents.push({alloc, key, nbytes});
           timestamps.push(ts);
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
@@ -557,7 +557,7 @@ async function renderProfiler(path, opts) {
         let x = 0, y = 0;
         for (const e of memEvents) {
           if (e.alloc) {
-            const shape = {x:[x], y:[y], dtype:e.dtype, sz:e.sz, nbytes:e.nbytes, key:e.key};
+            const shape = {x:[x], y:[y], nbytes:e.nbytes, key:e.key};
             buf_shapes.set(e.key, shape); temp.set(e.key, shape);
             x += 1; y += e.nbytes;
           } else {
@@ -573,10 +573,10 @@ async function renderProfiler(path, opts) {
             }
           }
         }
-        for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
+        for (const [num, {nbytes, y, x:steps, users}] of buf_shapes) {
           const x = steps.map(s => timestamps[s]);
           const dur = x.at(-1)-x[0];
-          const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${bufShapes.length}` };
+          const arg = { tooltipText:`${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${bufShapes.length}` };
           bufShapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, bufShapes.length) });
         }
         return bufShapes;

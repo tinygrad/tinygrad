@@ -31,8 +31,7 @@ class Ops(FastEnum):
   PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
-  # GROUP is a NOOP that just merges things together
-  SINK = auto(); AFTER = auto(); GROUP = auto()
+  SINK = auto(); AFTER = auto()
 
   # vector creation / item selection
   STACK = auto()
@@ -90,8 +89,8 @@ class Ops(FastEnum):
   # buffer ops
   STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
-  # the core 6 movement ops! these only exist in the tensor graph
-  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); FLIP = auto()
+  # the core 5 movement ops! these only exist in the tensor graph
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto()
   UNSHARD = auto()  # UNSHARD is really a movement op
 
   # reduce
@@ -115,7 +114,7 @@ class GroupOp:
   Defines = {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
-  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
+  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}

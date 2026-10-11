@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 from tinygrad.helpers import Context, TC_SELECT, TC_OPT
-from test.helpers import slow, replace_opts
+from test.helpers import slow, replace_opts, buffer_uops
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -20,11 +20,12 @@ from test.runtime.test_linearizer import helper_realized_ast, helper_linearizer_
 
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
-def _tc_rand(*shape, dtype:DType) -> Tensor:
+def _tc_rand(*shape, dtype:DType, signed:bool=False) -> Tensor:
+  if signed and dtypes.is_float(dtype): return Tensor.randn(*shape).cast(dtype).realize()
   return Tensor.randint(*shape, low=dtype.min, high=dtype.max+1, dtype=dtype) if dtypes.is_int(dtype) else Tensor.rand(*shape, dtype=dtype)
 
 def run_program(prg:UOp, bufs:list[Buffer]):
-  buf_uops = [UOp.from_buffer(b) for b in bufs]
+  buf_uops = buffer_uops(prg, bufs)
   run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
 
 def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):
@@ -59,9 +60,9 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
     except KernelOptError: pass
 
 def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1,
-                       extra_opts:list[Opt]=[]):
+                       extra_opts:list[Opt]=[], signed:bool=False):
   _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
-  a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
+  a, b = _tc_rand(M, K, dtype=dtype_in, signed=signed), _tc_rand(K, N, dtype=dtype_in, signed=signed)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
   if dtype_in == dtypes.bfloat16: r = r.float()
@@ -76,11 +77,17 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = (1e-1, 2e-2) if dtype_out == dtypes.bfloat16 else (1e-2, 1e-2)
   elif not dtypes.is_float(dtype_in): tc_atol, tc_rtol = 0, 0
   else: tc_atol, tc_rtol = 5e-3, 1e-4
-  c = bufs[0].numpy().reshape((M,N))
+  c = np.frombuffer(bufs[0].as_memoryview(), _to_np_dtype(r.dtype)).reshape((M,N))
   ref = (np_a.astype(np.int32) @ np_b.astype(np.int32)) if not dtypes.is_float(dtype_in) else (np_a @ np_b)
   np.testing.assert_allclose(c, ref, atol=tc_atol, rtol=tc_rtol)
 
 class TestTensorCores(unittest.TestCase):
+  def test_tensor_cores_fp8_signed(self):
+    for i, tc in enumerate(Device[Device.DEFAULT].renderer.tensor_cores):
+      if tc.dtype_in not in dtypes.fp8s: continue
+      with self.subTest(tc=tc):
+        helper_tc_allclose(tc.dims[0]*3, tc.dims[1]*2, tc.dims[2]*4, tc.dtype_in, tc.dtype_out, tc_select=i, signed=True)
+
   # TODO: don't skip bf16 for real device (METAL, AMD)
   @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -97,7 +104,7 @@ class TestTensorCores(unittest.TestCase):
         a, b = Tensor.full((tc.dims[1], tc.dims[2]), float("nan"), dtype=tc.dtype_in), Tensor.ones(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
         realized_ast, bufs = helper_realized_ast(a.matmul(b, dtype=tc.dtype_out))
         run_program(replace_opts(realized_ast, [Opt(OptOps.TC, 0, (-1, 0, 1))]), bufs)
-        self.assertTrue(np.isnan(bufs[0].numpy()).all())
+        self.assertTrue(np.isnan(np.frombuffer(bufs[0].as_memoryview(), _to_np_dtype(tc.dtype_out))).all())
 
   @unittest.skipUnless(Device.DEFAULT == "PYTHON" and Device[Device.DEFAULT].renderer.tensor_cores, "test requires emulated tensor cores")
   def test_tensor_cores_emulated_half(self):
@@ -295,11 +302,11 @@ class TestTensorCores(unittest.TestCase):
         assert len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
         # TODO: support this even if numpy doesn't
-        if _to_np_dtype(real_bufs[0].dtype) is None: continue
+        if _to_np_dtype(c.dtype) is None: continue
         # Zero to check that all values are filled
-        real_bufs[0].copy_from(Buffer("PYTHON", real_bufs[0].size, real_bufs[0].dtype, opaque=memoryview(bytearray(real_bufs[0].nbytes))))
+        real_bufs[0].copy_from(Buffer("PYTHON", real_bufs[0].nbytes, initial_value=bytes(real_bufs[0].nbytes)))
         run_program(ast, real_bufs)
-        result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(real_bufs[0].dtype))
+        result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(c.dtype))
 
         # ensure the results for each choice of axis matches
         if golden_result is None: golden_result = result.copy()
