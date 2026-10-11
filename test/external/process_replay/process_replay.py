@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, functools, base64, codecs
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from typing import Callable, Any
 
@@ -108,12 +109,9 @@ def _pmap(fxns:dict[str, Callable]) -> None:
   finally:
     cur.close()
 
-  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
-    bar = tqdm(total=row_count)
-    for _ in pool.imap_unordered(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(s)
-    pool.close()
-    pool.join()
-    pool.terminate()
+  with ProcessPoolExecutor(multiprocessing.cpu_count(), mp_context=multiprocessing.get_context("spawn")) as pool:
+    with tqdm(total=row_count) as bar:
+      for _ in pool.map(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(min(s, row_count-bar.n))
 
 # *** main loop
 

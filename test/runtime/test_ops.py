@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", message="Non-empty compiler output encountered
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 COMPILE_ONLY = Device.DEFAULT == "NULL"
-QCOM_SIN = Device.DEFAULT == "QCOM" and DEV.renderer == "IR3" and TRANSCENDENTAL < 2 # its sin reduces the range in f32, too coarse at 1e6
+def qcom_sin(): return Device.DEFAULT == "QCOM" and DEV.renderer == "IR3" and TRANSCENDENTAL < 2 # its sin reduces the range in f32, too coarse at 1e6
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
@@ -878,12 +878,23 @@ class TestOps(TensorTestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().div(4, rounding_mode="trunc").item(), 0)  # NOTE this is trunc-div behaviour
 
+  @Context(TRANSCENDENTAL=2)
+  def test_sin_transcendental(self): self.test_sin()
+  @Context(TRANSCENDENTAL=2)
+  def test_cos_transcendental(self): self.test_cos()
+  @Context(TRANSCENDENTAL=2)
+  def test_tan_transcendental(self): self.test_tan()
+  @Context(TRANSCENDENTAL=2)
+  def test_exp_transcendental(self): self.test_exp()
+  @Context(TRANSCENDENTAL=2)
+  def test_log_transcendental(self): self.test_log()
+
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
     # works on real CUDA but not CI
-    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or QCOM_SIN):
+    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or qcom_sin()):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -893,7 +904,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([], lambda: torch.tensor(2.0).cos(), lambda: Tensor(2).cos(), forward_only=True)
     helper_test_op([()], lambda x: x.cos())
-    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or QCOM_SIN):
+    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or qcom_sin()):
       helper_test_op(None, lambda x: x.cos(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -904,7 +915,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5)
     helper_test_op([()], lambda x: x.tan())
-    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or QCOM_SIN):
+    if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU" or qcom_sin()):
       helper_test_op(None, lambda x: x.tan(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.tan(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -1733,6 +1744,10 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x, p=3, dim=0), lambda x: x.normalize(p=3, dim=0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x, p=0), lambda x: x.normalize(p=0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x, p=-1), lambda x: x.normalize(p=-1), atol=1e-7, grad_atol=1e-7)
+  def test_rmsnorm(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.rms_norm(x, (65,), eps=1e-6), lambda x: x.rmsnorm(), atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(10,10,10)], lambda x: torch.nn.functional.rms_norm(x, (10,10), eps=1e-3), lambda x: x.rmsnorm((1,2), eps=1e-3),
+                   atol=1e-6, grad_atol=1e-6)
   def test_normalize_int(self):
     helper_test_op(None, lambda x: torch.nn.functional.normalize(x.float(), p=2), lambda x: x.normalize(p=2), forward_only=True,
                    vals=[[[3, 4], [6, 8]]])

@@ -170,8 +170,7 @@ def fast_final_rmsnorm(x:Tensor, weight:Tensor, eps:float) -> Tensor:
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   local_shape = x.uop.shard_shape if axis is not None else x.shape
   if axis not in (None, 0) or math.prod(local_shape[:-1]) != 16384:
-    xf = x.float()
-    return (xf * (xf.square().mean(-1, keepdim=True) + eps).rsqrt()).cast(x.dtype) * weight
+    return x.float().rmsnorm(eps=eps).cast(x.dtype) * weight
   fxn = _fast_final_rmsnorm_fwd_fxn(x.as_param(0).uop, weight.as_param(1).uop, eps, x.device)
   outputs = UOp.call_with_outputs((fxn[0].uop, fxn[1].uop, fxn[2].uop),
     x.uop, weight.uop, grad_fxn=functools.partial(_fast_final_rmsnorm_bwd, eps=eps))

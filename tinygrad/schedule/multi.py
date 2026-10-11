@@ -179,11 +179,6 @@ def shrink_multi(root:UOp, multi:UOp):
   val = multi.src[0]._mop(Ops.SHRINK, tuple(local_marg))
   return val if not remaining else val.unshard(tuple(a for a,_ in remaining), tuple(r for _,r in remaining))
 
-def flip_multi(root:UOp, multi:UOp):
-  for ax, _ in multi.sharding:
-    if root.marg[ax]: raise RuntimeError(f"flipping not supported on sharded axis {ax}")
-  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).unshard(multi.arg, multi.src[1:])
-
 def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
@@ -284,7 +279,6 @@ multi_pm = PatternMatcher([
   (UPat(Ops.PAD, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), pad_multi),
   (UPat(Ops.SHRINK, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
   (UPat(Ops.PERMUTE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), permute_multi),
-  (UPat(Ops.FLIP, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),

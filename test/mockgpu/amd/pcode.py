@@ -715,6 +715,9 @@ class Parser:
         dt_name = self.eat('IDENT').val
         return result.cast(DTYPES.get(dt_name, dtypes.uint32))
       return result
+    if field in ('i24', 'u24'):
+      val = base.cast(dtypes.uint32) & _u32(0xFFFFFF)
+      return _signext_from_bit(val, _u32(24)).bitcast(dtypes.int32) if field == 'i24' else val
     dt = DTYPES.get(field)
     if dt is None: return base
     if dt == base.dtype: return base
