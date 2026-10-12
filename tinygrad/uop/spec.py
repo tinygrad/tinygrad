@@ -31,7 +31,7 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
   rng = src[0]
   return rng.op is Ops.RANGE and rng.axis_type is AxisType.DEVICE and int(rng.vmax)+1 == len(device)
 
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=False):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
 
   with Context(TRACK_MATCH_STATS=0):

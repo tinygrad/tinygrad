@@ -270,7 +270,7 @@ pm_implicit_barriers = PatternMatcher([
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
-  if SPEC: type_verify(ast, spec_tensor, enter_calls=False)
+  if SPEC: type_verify(ast, spec_tensor)
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")
@@ -383,11 +383,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC:
     import os
     if os.environ.get("DBGTV"):
-      try: type_verify(sink, spec_program, enter_calls=False)
+      try: type_verify(sink, spec_program)
       except RuntimeError:
         print(render_uir(sink))
         raise
-    else: type_verify(sink, spec_program, enter_calls=False)
+    else: type_verify(sink, spec_program)
 
   # return the rewritten sink
   return sink
@@ -415,7 +415,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   return newlst
 
 call_cache: dict[tuple, UOp] = {}
-def lower_call(ctx:Renderer, call:UOp):
+def lower_call(ctx:Renderer, call:UOp) -> UOp:
   if (body:=call_cache.get(key:=(to_program_key(call.body, ctx), call.arg.name, TUPLE_ORDER.value))) is None:
     body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
     body = full_rewrite_to_sink(body, ctx, optimize=False)

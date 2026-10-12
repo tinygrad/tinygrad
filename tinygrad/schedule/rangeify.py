@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, dedup, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
@@ -222,7 +222,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
     return buf.after(*ended_stores)
 
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.ALLOC, src=(UOp.const(size),)+UOp.device_range_src(x.arg.device), arg=ParamArg(next(ctx), dtype, device=x.arg.device))
+    buf = UOp.alloc((size,), dtype, slot=next(ctx), device=x.arg.device)
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 
@@ -276,7 +276,7 @@ class LocalAddBufferContext:
   range:int = 0
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),), arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
+  param = UOp.param(ctx.dg, buf.dtype, buf.max_numel(), addrspace=buf.addrspace, device=buf.device)
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
@@ -367,5 +367,5 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   if SPEC:
     # validate the kernel graph
     from tinygrad.uop.spec import type_verify, spec_kernel_graph
-    type_verify(tsink, spec_kernel_graph, enter_calls=False)
+    type_verify(tsink, spec_kernel_graph)
   return tsink
