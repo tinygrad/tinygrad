@@ -1230,7 +1230,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
     max_shape = to_max_shape(shape)
-    ret = self.reshape(max_shape) if len(shape) > 1 else self
+    ret = self.reshape(max_shape) if shape else self
     if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
     return ret if axis is None else ret.unshard(axis)
 
