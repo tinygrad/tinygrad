@@ -825,21 +825,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # BUFFER/ALLOC/COPY carry a DEVICE range when targeting multiple devices
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
+  def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None) -> UOp:
+    return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
+               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device, buffer=buffer))
+  @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     slot = next(UOp.unique_num) if num is None else num
     buf = MultiBuffer(device, size * dtype.itemsize) if isinstance(device, tuple) else Buffer(device, size * dtype.itemsize)
-    return UOp(Ops.BUFFER, src=(UOp.const(size),)+UOp.device_range_src(device), arg=ParamArg(slot, dtype, device=device, buffer=buf))
+    return UOp._buffer(size, dtype, slot, device=device, buffer=buf)
   @staticmethod
   def from_buffer(opaque:Buffer|MultiBuffer, dtype:DType, device:str|tuple[str, ...]|None=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
     # Both storage identity and interpretation are part of the UOp key.
-    return UOp(Ops.BUFFER, src=(UOp.const(opaque.nbytes // dtype.itemsize),)+UOp.device_range_src(device or opaque.device),
-               arg=ParamArg(-id(opaque), dtype, device=device or opaque.device, buffer=opaque))
+    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, -id(opaque), device=device or opaque.device, buffer=opaque)
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -1177,10 +1180,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
-            spec:BufferSpec|None=None):
-    ret = UOp(Ops.ALLOC, src=(UOp.const(prod(to_max_shape(shape))),)+UOp.device_range_src(device),
+            spec:BufferSpec|None=None, bind_on_realize:bool=False):
+    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
-                           addrspace=addrspace, device=device, spec=spec))
+                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
@@ -1189,11 +1192,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, src=(UOp.const(prod(shape)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
+      ret = UOp.param(slot, dtype, prod(shape), device=device)
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       assert device is None, "LOCAL and REG placeholders cannot have a device"
-      ret = UOp(Ops.BUFFER, src=(UOp.const(prod(shape)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
+      ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
@@ -1222,13 +1225,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return self.replace(arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
-      return UOp(Ops.PARAM, src=(UOp.const(prod(to_max_shape(self.shard_shape))),),
-                 arg=ParamArg(slot, self.dtype, name=name, device=self.device)).view_as(self.shard_shape, self.axis)
+      return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)
     return UOp.param(slot, self.dtype, self._shape, self.device, name=name)
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
     max_shape = to_max_shape(shape)
-    ret = self.reshape(max_shape) if len(shape) > 1 else self
+    ret = self.reshape(max_shape) if shape else self
     if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
     return ret if axis is None else ret.unshard(axis)
 
