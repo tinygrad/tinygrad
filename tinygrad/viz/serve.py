@@ -483,7 +483,7 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   for ts,en,e in flatten_events(profile, device_ts_diffs):
     if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
     else:
-      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(et-st), e))
+      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en) if isinstance(e,ProfilePointEvent) else max(st+1,int(en)), float(et-st),e))
       if start_ts is None or st < start_ts: start_ts = st
       if end_ts is None or et > end_ts: end_ts = et
       if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
