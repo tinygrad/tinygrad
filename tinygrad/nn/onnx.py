@@ -683,9 +683,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0)).cast(x.dtype)
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
-  def Squeeze(data:Tensor, axes:Sequence[int]|None=None):
-    if axes is None: return data.squeeze()
-    return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(map(data._resolve_dim, axes), reverse=True), data)
+  def Squeeze(data:Tensor, axes:Sequence[int]|None=None): return data.squeeze(axes)
   def Unsqueeze(data:Tensor, axes:Sequence[int]):
     return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(data._resolve_dim(a, extra=len(axes)) for a in axes), data)
 

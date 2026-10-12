@@ -224,9 +224,8 @@ def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
 # *****************
 # 2. transfers
 
-def usb_word(v:UOp|int, dt:DType) -> UOp: return v.cast(dt) if isinstance(v, UOp) else UOp.const(v, dt)
 def usb_stack(dt:DType, *vals:UOp|int) -> UOp:
-  return (r:=UOp.placeholder((len(vals) or 1,), dt, addrspace=AddrSpace.REG)).after(*[r.index(i).store(usb_word(v, dt)) for i, v in enumerate(vals)])
+  return (r:=UOp.placeholder((len(vals) or 1,), dt, addrspace=AddrSpace.REG)).after(*[r.index(i).store(UOp.const(v, dt)) for i, v in enumerate(vals)])
 
 def usb_fail(link:UOp, code:UOp) -> UOp: return link.index(UOp.const(5).valid(link.after(code).index(5).load().eq(0))).store(code.cast(dtypes.uint64))
 def usb_ctrl(link:UOp, rtype:int, req:int, val:UOp|int, idx:UOp|int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp:
@@ -380,7 +379,7 @@ def usb_hostaddr(host:UOp, dev:str) -> UOp:
 
 def usb_table(hosts:list[tuple[UOp, int]], n:int, win:int, dev:str) -> UOp: # [address, bytes] per chunk
   rows = [(16 * (k + r) + o, w) for host, k in hosts for r, nb in chunks(host.nbytes(), win)
-          for o, w in ((0, usb_hostaddr(host, dev) + usb_word(r, dtypes.uint64) * win), (8, UOp.const(nb, dtypes.uint64)))]
+          for o, w in ((0, usb_hostaddr(host, dev) + UOp.const(r, dtypes.uint64) * win), (8, UOp.const(nb, dtypes.uint64)))]
   return patch(UOp.alloc((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.device).rtag("usb_table"), rows)
 
 def usb_copy_commands(dev:str, addr:UOp, nb:int, n:UOp, run:int, upload:bool) -> list[UOp]:
@@ -400,7 +399,7 @@ def usb_chunks(call:UOp, first:int, run:int, window:int|None=None,
   upload, (host, win), ops = is_host(src), usb_window(call, window), list[UOp]()
   vram = (dst if upload else src).bitcast(dtypes.uint8)
   for r, nb in chunks(host.nbytes(), win):
-    i = usb_word(r, dtypes.uint64)
+    i = UOp.const(r, dtypes.uint64)
     cmds = commands(vram.device, vram.getaddr(vram.device) + i * win, nb, i + first, run, upload)
     ops += [UOp(Ops.LINEAR, src=tuple(cmds)).end(r)] if isinstance(r, UOp) else cmds # full chunks as one block
   return ops
