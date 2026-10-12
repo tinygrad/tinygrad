@@ -600,7 +600,7 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
     if (offset:=parse_branch(inst, op:=getattr(inst, "op_name", "").lower())) is not None:
       if op == "s_branch": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
-    elif nx in leaders: paths[curr][nx] = UNCOND
+    elif nx in leaders and op != "s_endpgm": paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
