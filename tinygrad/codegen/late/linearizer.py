@@ -69,7 +69,7 @@ class CFGContext:
     indices: dict[UOp, int] = {}
     controls: list[UOp] = []
     ends = assigned = 0
-    nesting: dict[UOp, UOp] = {}
+    siblings: dict[UOp, list[UOp]] = {}
     for u in sink.toposort():
       deps[u] = 0
       for s in u.src_without_body: deps[u] |= deps[s]
@@ -84,7 +84,7 @@ class CFGContext:
           pending -= bit
           x = controls[bit.bit_length()-1]
           if not parent or deps[x] & parent:
-            nesting[x] = u
+            siblings.setdefault(u, []).append(x)
             assigned |= bit
       if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE):
         indices[u] = len(controls)
@@ -94,8 +94,6 @@ class CFGContext:
         if u.op is not Ops.RANGE: ends |= bit
 
     self.edges: dict[UOp, UOp] = {}
-    siblings: dict[UOp, list[UOp]] = {}
-    for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
       # ranges that have dependencies on other siblings need to be scheduled after them
       siblings_mask = sum(1 << indices[u] for u in v)

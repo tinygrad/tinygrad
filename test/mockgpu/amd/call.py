@@ -266,12 +266,12 @@ def decode_cfg(lib_bytes:bytes, arch:str):
   return insts, cfg, cfg_regions(cfg["paths"], 0)
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
-def lift_dispatch(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
+def lift_dispatch(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
                   user_data:list[int]|None, backend:str) -> UOp:
   lib_bytes = ctypes.string_at(lib, lib_sz)
-  dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, tuple(0 if i < 2 else v for i,v in enumerate(user_data)) if user_data else None)
+  dispatch = (lx, ly, lz, rsrc2, scratch_size, tuple(0 if i < 2 else v for i,v in enumerate(user_data)) if user_data else None)
   renderer = backend_renderer(backend)
-  key = (lib_bytes, arch, backend, dispatch[3:], type(renderer), renderer.target, *(x.value for x in to_program_config))
+  key = (lib_bytes, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_config))
   if key not in dispatch_cache:
     dispatch_cache[key] = _lift(lib_bytes, arch, backend, dispatch)
   return dispatch_cache[key]
@@ -281,10 +281,8 @@ dispatch_cache:dict[tuple, UOp] = {}
 def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   lib_sz, entry = len(lib_bytes), 0
   insts, cfg, regions = decode_cfg(lib_bytes, arch)
-  afters: dict[UOp, UOp] = {}
   axes = itertools.count(lib_sz)
-  temporaries = itertools.count(6)  # reserve 0..5 for the register, LDS, and scratch allocations
-  gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data = dispatch
+  lx, ly, lz, rsrc2, scratch_size, user_data = dispatch
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
@@ -302,13 +300,12 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   code_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   # Keep grid dimensions unsigned: mixing the uint64 workgroup index with int32 promotes division/modulo to floats.
-  dims = [gx, gy, lx, ly, total_threads]
-  dims = [gx, gy, *(UOp.const(x, dtypes.int) for x in dims[2:])]
+  dims = [gx, gy, *(UOp.const(x, dtypes.int) for x in (lx, ly, total_threads))]
   ctx = _Ctx(4, wave_size)
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
-  routes = UOp.alloc((n_waves,), dtypes.int, next(temporaries), AddrSpace.REG)
+  routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   buffers[routes] = (routes, 0)
   init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), lds, args_ptr, *dims,
                    wave_size, lds_size, scratch_size, rsrc2, arch, user_data,
@@ -326,7 +323,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
       template, bufs, word_offsets, branch_cond = instruction_call(inst, arch)
       if branch_cond is not None: cond = branch_cond
-      if branch_cond is None and not has_effects(template.body): continue
+      if not has_effects(template.body): continue
       instructions.append((off, (template, bufs, word_offsets, branch_cond)))
     return instructions, cond
 
@@ -337,11 +334,11 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     for chunk in instruction_chunks(instructions, chunk_size):
       off = chunk[0][0]
       body, bufs = instruction_block([((pc-off)//4, info) for pc,info in chunk])
-      args = [afters.get(b, b).after(*scopes) for b in bufs]
+      args = [afters[b].after(*scopes) for b in bufs]
       call = body.call(*args, (code_addr>>2)+off//4, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
       afters.update((b, arg.without_after.after(call, *scopes)) for b, arg in zip(bufs, args))
-    return cond.substitute({u:buffers[u.src[0]][0].after(afters[u.src[0]]).index(wave*buffers[u.src[0]][1]+u.src[1])
+    return cond.substitute({u:buffers[u.src[0]][0].after(afters[u.src[0]], *scopes).index(wave*buffers[u.src[0]][1]+u.src[1])
                             for u in cond.toposort() if u.op is Ops.INDEX and u.src[0] in buffers}, walk=True)
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...]):
     for pc, body in regions:
@@ -349,12 +346,9 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(UOp.group(*afters.values())),))
         emit_dispatch(body, scopes+(loop,))
         # Waves that exited keep their route while the remaining waves repeat the loop.
-        active = UOp.alloc((1,), dtypes.int, next(temporaries), AddrSpace.REG)
-        zero = active.after(*afters.values()).after(*scopes, loop)[0].store(0)
         w = UOp.range(n_waves, next(axes))
-        ptr = active.after(zero, w)
-        check = ptr[0].store(ptr[0].load() | afters[routes][w].load().eq(pc).cast(dtypes.int)).end(w)
-        end = check.backedge(loop, active.after(check)[0].load().ne(0))
+        active = afters[routes].after(*scopes, loop)[w].load().eq(pc).cast(dtypes.uint32).reduce(w, arg=Ops.MAX)
+        end = UOp.group(*afters.values()).backedge(loop, active.ne(0))
       else:
         # Complete the block for every participating wave before entering its successors, including barrier successors.
         w = UOp.range(n_waves, next(axes))

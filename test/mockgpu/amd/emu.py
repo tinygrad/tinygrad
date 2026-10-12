@@ -1973,7 +1973,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   if ASM_CALL:
     from test.mockgpu.amd.call import lift_dispatch
-    prg = lift_dispatch(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, user_data, ASM_CALL_BACKEND)
+    prg = lift_dispatch(lib, lib_sz, lx, ly, lz, rsrc2, scratch_size, arch, user_data, ASM_CALL_BACKEND)
     if user_data: args_ptr = user_data[0] | ((user_data[1] if len(user_data) > 1 else 0) << 32)
     with _MXCSRContext():
       get_runtime(ASM_CALL_BACKEND, prg)(*[0]*len(prg.arg.globals),
