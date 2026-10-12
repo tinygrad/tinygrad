@@ -221,89 +221,42 @@ def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int,
       paths[pc] = {header:UNCOND}
     blocks[header], paths[header] = [header], dests
 
-def dominators(paths:dict[int, dict[int, int]], entry:int) -> dict[int, int]:
-  # Lengauer-Tarjan: predecessor lists and a compressed forest avoid all-pairs dominance sets.
-  order, parent = [entry], {entry:entry}
-  preds:dict[int, list[int]] = {entry:[]}
-  stack = [(entry, iter(paths[entry]))]
-  while stack:
-    pc, edges = stack[-1]
-    if (dst:=next(edges, None)) is None:
-      stack.pop()
-      continue
-    preds.setdefault(dst, []).append(pc)
-    if dst not in parent:
-      parent[dst] = pc
-      order.append(dst)
-      stack.append((dst, iter(paths[dst])))
-  semi = {pc:i for i,pc in enumerate(order)}
-  label = {pc:pc for pc in order}
-  ancestor:dict[int, int] = {}
-  buckets:dict[int, list[int]] = {pc:[] for pc in order}
-  idom = {entry:entry}
-  def evaluate(pc:int) -> int:
-    trail = []
-    at = pc
-    while at in ancestor and ancestor[at] in ancestor:
-      trail.append(at)
-      at = ancestor[at]
-    for at in reversed(trail):
-      par = ancestor[at]
-      if semi[label[par]] < semi[label[at]]: label[at] = label[par]
-      ancestor[at] = ancestor[par]
-    return label[pc]
-  for pc in reversed(order[1:]):
-    semi[pc] = min(semi[evaluate(src)] for src in preds[pc])
-    buckets[order[semi[pc]]].append(pc)
-    ancestor[pc] = par = parent[pc]
-    for node in buckets[par]:
-      other = evaluate(node)
-      idom[node] = other if semi[other] < semi[node] else par
-    buckets[par].clear()
-  for pc in order[1:]:
-    if idom[pc] != order[semi[pc]]: idom[pc] = idom[idom[pc]]
-  return idom
+# A block has an empty body; a loop contains its header block and the rest of its iteration.
+CFGRegion = tuple[int, list["CFGRegion"]]
 
-def cfg_loops(paths:dict[int, dict[int, int]], entry:int) -> dict[int, set[int]]:
-  idom = dominators(paths, entry)
-  children:dict[int, list[int]] = {pc:[] for pc in idom}
-  preds:dict[int, list[int]] = {pc:[] for pc in idom}
-  for pc, par in idom.items():
-    if pc != entry: children[par].append(pc)
-    for dst in paths[pc]: preds[dst].append(pc)
-  # Euler intervals answer dominance queries in constant time.
-  starts:dict[int, int] = {}
-  ends:dict[int, int] = {}
-  stack = [(entry, False)]
-  while stack:
-    pc, finish = stack.pop()
-    if finish: ends[pc] = len(starts)
-    else:
-      starts[pc] = len(starts)
-      stack.append((pc, True))
-      stack.extend((child, False) for child in children[pc])
-  backedges = {(src, dst) for src in idom for dst in paths[src] if starts[dst] <= starts[src] < ends[dst]}
-  loops:dict[int, set[int]] = {}
-  for src, header in backedges:
-    body = loops.setdefault(header, {header})
-    pending = [src]
-    while pending:
-      if (pc:=pending.pop()) in body: continue
-      body.add(pc)
-      pending.extend(preds[pc])
-  # A topological traversal after removing backedges also detects irreducible control flow.
-  incoming = {pc:sum((src, pc) not in backedges for src in preds[pc]) for pc in idom}
-  pending = [pc for pc,n in incoming.items() if n == 0]
-  seen = 0
+def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
+  # Number the reachable blocks in DFS postorder, without recursion on long instruction streams.
+  order:dict[int, int] = {}
+  seen, pending = set(), [(entry, False)]
   while pending:
-    pc = pending.pop()
-    seen += 1
-    for dst in paths[pc]:
-      if (pc, dst) in backedges: continue
-      incoming[dst] -= 1
-      if incoming[dst] == 0: pending.append(dst)
-  assert seen == len(idom), "irreducible control flow is not supported in ASM_CALL"
-  return loops
+    pc, visited = pending.pop()
+    if visited: order[pc] = len(order)
+    elif pc not in seen:
+      seen.add(pc)
+      pending.append((pc, True))
+      pending.extend((dst, False) for dst in sorted(paths[pc], reverse=True))
+  preds:dict[int, set[int]] = {pc:set() for pc in order}
+  for pc in order:
+    for dst in paths[pc]: preds[dst].add(pc)
+  def build(remaining:set[int]) -> list[CFGRegion]:
+    regions: list[CFGRegion] = []
+    # Reverse postorder and predecessor walks partition this region into SCCs in execution order.
+    for pc in sorted(remaining, key=order.__getitem__, reverse=True):
+      if pc not in remaining: continue
+      component, todo = set(), [pc]
+      while todo:
+        if (dst:=todo.pop()) not in remaining: continue
+        remaining.remove(dst)
+        component.add(dst)
+        todo.extend(preds[dst])
+      body:list[CFGRegion] = []
+      if len(component) > 1 or pc in paths[pc]:
+        assert all(preds[dst] <= component for dst in component if dst != pc), "irreducible control flow is not supported in ASM_CALL"
+        # Removing the single entry exposes nested loops; the original DFS order still applies.
+        body = [(pc, [])] + build(component - {pc})
+      regions.append((pc, body))
+    return regions
+  return build(set(order))
 
 @functools.cache
 def decode_cfg(lib_bytes:bytes, arch:str):
@@ -329,13 +282,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   cfg:dict[str, dict] = {"blocks":{pc:list(block) for pc,block in cached_cfg["blocks"].items()},
          "paths":{pc:dict(paths) for pc,paths in cached_cfg["paths"].items()}}
   merge_branches(insts, cfg["blocks"], cfg["paths"])
-  loops = cfg_loops(cfg["paths"], entry)
-  members:set[int] = set()
-  pending = [entry]
-  while pending:
-    if (pc:=pending.pop()) in members: continue
-    members.add(pc)
-    pending.extend(cfg["paths"][pc])
+  regions = cfg_regions(cfg["paths"], entry)
   afters: dict[UOp, UOp] = {}
   axes = itertools.count(lib_sz)
   temporaries = itertools.count(6)  # reserve 0..5 for the register, LDS, and scratch allocations
@@ -371,13 +318,6 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   initialized = routes.after(init).index(wave).store(entry).end(wave)
   afters = {b:buf.after(initialized) for b,(buf,_) in buffers.items()}
 
-  loop_parents:dict[int, int|None] = dict.fromkeys(loops)
-  for outer, body in sorted(loops.items(), key=lambda kv:len(kv[1])):
-    for inner in body:
-      if inner != outer and inner in loops and loop_parents[inner] is None: loop_parents[inner] = outer
-  loop_children:dict[int|None, dict[int, set[int]]] = {}
-  for header, parent in loop_parents.items(): loop_children.setdefault(parent, {})[header] = loops[header]
-
   def block_instructions(block_pc:int):
     cond = UOp.const(True)
     instructions = []
@@ -406,25 +346,11 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
       afters.update((b, arg.without_after.after(call, *scopes)) for b, arg in zip(bufs, args))
     return cond.substitute({u:buffers[u.src[0]][0].after(afters[u.src[0]]).index(wave*buffers[u.src[0]][1]+u.src[1])
                             for u in cond.toposort() if u.op is Ops.INDEX and u.src[0] in buffers}, walk=True)
-  def emit_dispatch(start:int, members:set[int], scopes:tuple[UOp, ...], parent:int|None=None):
-    # Topologically order this region with nested natural loops treated as single nodes.
-    children = loop_children.get(parent, {})
-    enclosed = {pc for h,body in children.items() for pc in body if pc != h}
-    edges = {pc:{dst for src in (children[pc] if pc in children else {pc}) for dst in cfg["paths"][src]
-                 if dst in members and dst != start and dst not in children.get(pc, set())}
-             for pc in members if pc not in enclosed}
-    order, seen, pending = [], set(), [(start, False)]
-    while pending:
-      pc, visited = pending.pop()
-      if visited: order.append(pc)
-      elif pc not in seen:
-        seen.add(pc)
-        pending.append((pc, True))
-        pending.extend((dst, False) for dst in sorted(edges[pc], reverse=True))
-    for pc in reversed(order):
-      if pc in children:
+  def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...]):
+    for pc, body in regions:
+      if body:
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(UOp.group(*afters.values())),))
-        emit_dispatch(pc, children[pc], scopes+(loop,), pc)
+        emit_dispatch(body, scopes+(loop,))
         # Waves that exited keep their route while the remaining waves repeat the loop.
         active = UOp.alloc((1,), dtypes.int, next(temporaries), AddrSpace.REG)
         zero = active.after(*afters.values()).after(*scopes, loop)[0].store(0)
@@ -447,7 +373,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
         end = routes.after(*afters.values()).after(*scopes, w, gate)[w].store(target).end(gate).end(w)
       afters.update((b, buf.after(end)) for b,(buf,_) in buffers.items())
 
-  emit_dispatch(entry, members, (wg,))
+  emit_dispatch(regions, (wg,))
   body = UOp.group(*afters.values()).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
   name = f"asm_call_{arch}_{body.key.hex()[:16]}_{entry}"
