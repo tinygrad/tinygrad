@@ -5,16 +5,18 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.autogen import hip
 from tinygrad.runtime.support.hcq2 import ccall
-from tinygrad.runtime.ops_cuda import CUDAQueue, CUDADevice, out
+from tinygrad.runtime.support.c import init_c_var
+from tinygrad.runtime.ops_cuda import CUDAQueue, CUDADevice, check
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-HIPIFY = dict(cuInit=hip.hipInit, cuDeviceGet=hip.hipDeviceGet, cuDeviceGetCount=hip.hipGetDeviceCount, cuCtxCreate_v2=hip.hipCtxCreate,
-  cuCtxSetCurrent=hip.hipCtxSetCurrent, cuCtxSynchronize=hip.hipDeviceSynchronize, cuStreamCreate=hip.hipStreamCreateWithFlags,
-  cuMemAlloc_v2=hip.hipMalloc, cuMemFree_v2=hip.hipFree, cuMemHostAlloc=lambda p, sz, _: hip.hipHostMalloc(p, sz, hip.hipHostMallocCoherent),
-  cuMemFreeHost=hip.hipHostFree, cuMemHostRegister_v2=hip.hipHostRegister, cuMemHostUnregister=hip.hipHostUnregister,
-  cuModuleLoadData=hip.hipModuleLoadData, cuModuleGetFunction=hip.hipModuleGetFunction, cuLaunchKernel=hip.hipModuleLaunchKernel,
-  cuMemcpyAsync=hip.hipMemcpyAsync, cuStreamWaitValue64_v2=hip.hipStreamWaitValue64, cuStreamWriteValue64_v2=hip.hipStreamWriteValue64,
-  cuLaunchHostFunc=hip.hipLaunchHostFunc)
+HIPIFY = dict(CUdevice=hip.hipDevice_t, CUcontext=hip.hipCtx_t, CUstream=hip.hipStream_t, CUdeviceptr=hip.hipDeviceptr_t, CUmodule=hip.hipModule_t,
+  CUfunction=hip.hipFunction_t, cuInit=hip.hipInit, cuDeviceGet=hip.hipDeviceGet, cuDeviceGetCount=hip.hipGetDeviceCount,
+  cuCtxCreate_v2=hip.hipCtxCreate, cuCtxSetCurrent=hip.hipCtxSetCurrent, cuCtxSynchronize=hip.hipDeviceSynchronize,
+  cuStreamCreate=hip.hipStreamCreateWithFlags, cuMemAlloc_v2=hip.hipMalloc, cuMemFree_v2=hip.hipFree,
+  cuMemHostAlloc=lambda p, sz, _: hip.hipHostMalloc(p, sz, hip.hipHostMallocCoherent), cuMemFreeHost=hip.hipHostFree,
+  cuMemHostRegister_v2=hip.hipHostRegister, cuMemHostUnregister=hip.hipHostUnregister, cuModuleLoadData=hip.hipModuleLoadData,
+  cuModuleGetFunction=hip.hipModuleGetFunction, cuLaunchKernel=hip.hipModuleLaunchKernel, cuMemcpyAsync=hip.hipMemcpyAsync,
+  cuStreamWaitValue64_v2=hip.hipStreamWaitValue64, cuStreamWriteValue64_v2=hip.hipStreamWriteValue64, cuLaunchHostFunc=hip.hipLaunchHostFunc)
 
 def to_hip(c:UOp, f:UOp) -> UOp|None:
   if (fn:=HIPIFY.get(f.arg.name)) is None: return None
@@ -29,4 +31,5 @@ class HIPDevice(CUDADevice):
   pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function(f"submit_hip_{q}"), UPat()), name="s"),
     lambda s: graph_rewrite(CUDAQueue(s).encode(), pm_to_hip, enter_calls=True, name="to hip")) for q in ("compute", "copy")])
 
-  def get_arch(self, device_id:int) -> str: return out(hip.hipGetDeviceProperties, device_id).gcnArchName.decode().split(":")[0]
+  def get_arch(self, device_id:int) -> str:
+    return init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, device_id))).gcnArchName.decode().split(":")[0]

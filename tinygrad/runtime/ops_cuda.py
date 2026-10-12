@@ -18,10 +18,6 @@ if DEV.target("CUDA").interface == "MOCK": import test.mockgpu.cuda.cuda  # noqa
 def check(status:int):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {cuda.enum_cudaError_enum.get(status, 'unknown')}")
 
-def out(fn, *args): # fills the first param
-  check(fn(ctypes.byref(ret:=fn.argtypes[0]._type_()), *args))
-  return ret
-
 def as_int(handle) -> int: return unwrap(ctypes.cast(handle, ctypes.c_void_p).value)
 
 def host_stamp(slot:int): ctypes.c_uint64.from_address(slot).value = time.perf_counter_ns()
@@ -74,7 +70,7 @@ class CUDAAllocator(Allocator['CUDADevice']):
     if options.host or options.cpu_access:
       ptr = init_c_var(ctypes.c_void_p, lambda x: check(api.cuMemHostAlloc(ctypes.byref(x), size, 0))).value
       return BufferStorage(ptr, None, MMIOInterface(ptr, size))
-    return BufferStorage(out(api.cuMemAlloc_v2, size).value)
+    return BufferStorage(init_c_var(api.CUdeviceptr, lambda x: check(api.cuMemAlloc_v2(ctypes.byref(x), size))).value)
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
     self.dev.synchronize()
@@ -102,9 +98,10 @@ class CUDADevice(Compiled):
 
   def __init__(self, device:str=""):
     device_id = int(device.split(":")[1]) if ":" in device else 0
-    check(self.api.cuInit(0))
-    self.context = out(self.api.cuCtxCreate_v2, 0, out(self.api.cuDeviceGet, device_id))
-    self.streams = [out(self.api.cuStreamCreate, cuda.CU_STREAM_NON_BLOCKING) for _ in range(2)]
+    check((api:=self.api).cuInit(0))
+    self.cu_device = init_c_var(api.CUdevice, lambda x: check(api.cuDeviceGet(ctypes.byref(x), device_id)))
+    self.context = init_c_var(api.CUcontext, lambda x: check(api.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
+    self.streams = [init_c_var(api.CUstream, lambda x: check(api.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
     super().__init__(device, CUDAAllocator(self), self.renderers, None, arch=self.get_arch(device_id))
     Compiled.pm_bufferize += PatternMatcher([
       (UPat(Ops.ALLOC, tag=self.tag("cuda")), lambda d=self: d.handles),
@@ -126,9 +123,11 @@ class CUDADevice(Compiled):
   def function(self, lib:bytes, name:str) -> Buffer:
     if DEBUG >= 5 and self.api is cuda: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode()).split("\n"))]))
     check(self.api.cuCtxSetCurrent(self.context))
-    return extern(as_int(out(self.api.cuModuleGetFunction, out(self.api.cuModuleLoadData, lib), name.encode())))
+    check(self.api.cuModuleLoadData(ctypes.byref(module:=self.api.CUmodule()), lib))
+    check(self.api.cuModuleGetFunction(ctypes.byref(func:=self.api.CUfunction()), module, name.encode()))
+    return extern(as_int(func))
 
-  def count(self) -> int: return out(self.api.cuDeviceGetCount).value
+  def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(self.api.cuDeviceGetCount(ctypes.byref(x)))).value
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None): # a fault raises here
     check(self.api.cuCtxSetCurrent(self.context))
