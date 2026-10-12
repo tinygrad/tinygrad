@@ -561,7 +561,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
   dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
 
   # a device owns the placeholders it names, the rest are allocated where they live
-  if (r:=cast(Buffer|None, Compiled.pm_bufferize.rewrite(b))) is not None: pass
+  if (r:=cast(Buffer|None, Compiled.pm_bufferize.rewrite(b, ctx))) is not None: pass
   elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
   else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
 
