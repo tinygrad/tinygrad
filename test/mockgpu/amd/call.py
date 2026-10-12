@@ -68,11 +68,11 @@ class CallClangRenderer(ClangRenderer):
     return '\n'.join(self._render_defines(all_uops)+definitions+[entry])
 
 @functools.cache
-def clang_renderer(arch:str, fast_compile:bool=False):
-  return (CallClangRenderer if fast_compile else ClangRenderer)(Target("CPU", "CLANG", arch))
+def clang_renderer(arch:str):
+  return CallClangRenderer(Target("CPU", "CLANG", arch))
 
-def backend_renderer(backend:str, fast_compile:bool=False):
-  return clang_renderer(Device["CPU"].renderer.target.arch, fast_compile) if backend == "CPU" else Device[backend].renderer
+def backend_renderer(backend:str):
+  return clang_renderer(Device["CPU"].renderer.target.arch) if backend == "CPU" else Device[backend].renderer
 
 InstructionCall = tuple[UOp, list[UOp], tuple[int, ...], UOp|None]
 instruction_cache:dict[tuple, list[tuple[int, int, InstructionCall]]] = {}
@@ -172,8 +172,8 @@ def instruction_chunks(instructions:list[tuple[int, InstructionCall]], size:int)
 def has_effects(body:UOp) -> bool:
   return any(u.op in (Ops.STORE, Ops.CALL) for u in body.toposort())
 
-def instruction_block(instructions:list[tuple[int, InstructionCall]], backend:str) -> tuple[UOp, list[UOp]]:
-  key = (backend, tuple((off, template, tuple(bufs), offsets) for off,(template,bufs,offsets,_) in instructions))
+def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
+  key = tuple((off, template, tuple(bufs), offsets) for off,(template,bufs,offsets,_) in instructions)
   if key not in block_cache:
     bufs = sorted({b for _,(_,bs,_,_) in instructions for b in bs}, key=lambda b:b.arg.slot)
     base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
@@ -378,7 +378,6 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   loop_children:dict[int|None, dict[int, set[int]]] = {}
   for header, parent in loop_parents.items(): loop_children.setdefault(parent, {})[header] = loops[header]
 
-  @functools.cache
   def block_instructions(block_pc:int):
     cond = UOp.const(True)
     instructions = []
@@ -398,10 +397,9 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   def emit_block(block_pc:int, wave:UOp, scopes:tuple[UOp, ...]) -> UOp:
     instructions, cond = block_instructions(block_pc)
     for chunk in instruction_chunks(instructions, chunk_size):
-      off, (template, bufs, word_offsets, _) = chunk[0]
-      if chunk_size > 1:
-        body, bufs = instruction_block([((pc-off)//4, info) for pc,info in chunk], backend)
-        template, word_offsets = body.call(*bufs, UOp.const(0, dtypes.uint64), name="asm_block"), (0,)
+      off = chunk[0][0]
+      body, bufs = instruction_block([((pc-off)//4, info) for pc,info in chunk])
+      template, word_offsets = body.call(*bufs, UOp.const(0, dtypes.uint64), name="asm_block"), (0,)
       args = [afters.get(b, b).after(*scopes) for b in bufs]
       call = template.replace(src=(template.body, *args, *((code_addr>>2)+(off//4+i) for i in word_offsets)))
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
@@ -455,5 +453,5 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   name = f"asm_call_{arch}_{body.key.hex()[:16]}_{entry}"
   sink = UOp.sink(body, arg=KernelInfo(name=name, opts_to_apply=())).rtag(1)
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    renderer = backend_renderer(backend, fast_compile=True)
+    renderer = backend_renderer(backend)
     return to_program(sink, renderer)

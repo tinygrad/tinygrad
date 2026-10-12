@@ -259,7 +259,7 @@ class TestAsmKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     from test.mockgpu.amd import call
     if getenv("ASM_CALL_BACKEND", "CPU") != "CPU": self.skipTest("Clang JIT only")
-    compiler = call.backend_renderer("CPU", fast_compile=True).compiler
+    compiler = call.backend_renderer("CPU").compiler
     def kernel_a(out:UOp):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
