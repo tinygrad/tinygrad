@@ -516,9 +516,7 @@ class TestUOpRender(unittest.TestCase):
     r = UOp.range(UOp.const(16, dtypes.int), 2, AxisType.WEAK, dtype=dtypes.int)
     offset = (r * 2) + (r * 2)
     shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, 32), offset, UOp.const(2, dtypes.int)))
-    self.assertIs(shrink.offset, offset)
-    self.assertIs(shrink.src[0].index(offset).offset, offset)
-    self.assertIsNot(shrink.offset, shrink.marg[0][0])
+    self.assertIsNot(shrink.src[1], shrink.marg[0][0])
     self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
     self.assertEqual(UOp.range(UOp.const(1, dtypes.int).after(shrink), 0, dtype=dtypes.int).render(simplify=False), "r0")
 

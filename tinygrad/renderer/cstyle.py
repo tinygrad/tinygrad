@@ -47,8 +47,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
 
   # SHRINK/INDEX
-  (UPat(Ops.INDEX, src=(UPat(), UPat()), name="x"), lambda ctx,x: ctx.render_index(x)),
-  (UPat(Ops.SHRINK, src=(UPat(), UPat(), UPat.cvar().cast()), name="x"), lambda ctx,x: ctx.render_index(x)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
+  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var('idx'), UPat.cvar().cast()), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
   (UPat(Ops.STACK, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_type(x))}" + \
                  f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
@@ -166,8 +166,7 @@ class CStyleLanguage(Renderer):
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
-  def render_index(self, x:UOp):
-    buf, idx = x.src[0], x.offset
+  def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
       # this is lane access in C
       if not (idx.op is Ops.CAST and idx.src[0].op is Ops.CONST): return f"({self[buf]})[{self[idx]}]"

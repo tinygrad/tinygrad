@@ -558,11 +558,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
     return UOp(Ops.INDEX, src=(self,)+tuple(new_srcs), **kwargs)
-  @property
-  def offset(self) -> UOp:
-    """Raw element offset of a 1-D INDEX or SHRINK, without simplifying the expression."""
-    assert self.op in (Ops.INDEX, Ops.SHRINK)
-    return self.src[1]
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if self.addrspace in (None, AddrSpace.ALU) or self.device is not None: return super(UOp, self).__getitem__(idx)

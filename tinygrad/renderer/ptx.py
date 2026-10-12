@@ -85,9 +85,8 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
    f"ld.param.{ctx.types[dtypes.ulong] if x.addrspace is AddrSpace.GLOBAL else ctx.mem_types[x.dtype]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
   # address computation: addr = buf + idx*itemsize
-  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x:
-   [f"cvt.s64.{ctx.types[x.offset.dtype]} {ctx.r[x]}, {ctx.r[x.offset]};",
-    f"mad.lo.s64 {ctx.r[x]}, {ctx.r[x]}, {x.dtype.itemsize}, {ctx.r[x.src[0]]};"]),
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("idx")), allow_any_len=True, name="x"), lambda ctx, x, buf, idx:
+   [f"cvt.s64.{ctx.types[idx.dtype]} {ctx.r[x]}, {ctx.r[idx]};", f"mad.lo.s64 {ctx.r[x]}, {ctx.r[x]}, {x.dtype.itemsize}, {ctx.r[buf]};"]),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
@@ -201,9 +200,9 @@ class PTXRenderer(Renderer):
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
-        if u.op is not Ops.LOAD and not (u.offset.op is Ops.CAST and u.offset.src[0].op is Ops.CONST):
+        if u.op is not Ops.LOAD and not (u.src[1].op is Ops.CAST and u.src[1].src[0].op is Ops.CONST):
           raise RuntimeError(f"PTX does not support dynamic register indexing: {u}")
-        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.offset.src[0].val]
+        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].src[0].val]
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:

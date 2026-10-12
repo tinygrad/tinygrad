@@ -14,8 +14,8 @@ def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, 
 def reindex(idx:UOp, off:int, mul=2) -> UOp:
   if idx.op is Ops.SHRINK:
     assert mul == 1, "can't reindex SHRINK with mul != 1"
-    return idx.replace(op=Ops.INDEX, src=(idx.src[0], idx.offset+off))
-  return idx.replace(src=(idx.src[0], idx.offset*mul+off, *idx.src[2:]))
+    return idx.replace(op=Ops.INDEX, src=(idx.src[0], idx.src[1]+off))
+  return idx.replace(src=(idx.src[0], idx.src[1]*mul+off, *idx.src[2:]))
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
