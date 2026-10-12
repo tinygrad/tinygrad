@@ -262,13 +262,11 @@ def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
   return UOp(root.op, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
 
-def rewrite_into_function(ctx:dict[UOp, UOp]|None, call:UOp):
+def rewrite_into_function(call:UOp):
   if not call.is_inline_call: return None
   # the call body is a plain parametric program: multi rewrites it like anything else (the output PARAM dests sub-view per
   # shard through the normal store rules), and all srcs (args and RETURNEDs) become their per-shard views
-  cache = {} if ctx is None else ctx
-  if call.body not in cache: cache[call.body] = graph_rewrite(call.body, multi_pm, ctx=cache, name="subcall")
-  new_body = cache[call.body]
+  new_body = graph_rewrite(call.body, multi_pm, name="subcall")
   assert new_body.op is Ops.SINK
   return call.replace(src=(new_body,) + tuple(a.src[0] if a.op is Ops.UNSHARD else a for a in call.src[1:]))
 
@@ -291,7 +289,7 @@ multi_pm = PatternMatcher([
 
   # rewrite value-producing calls explicitly for UNSHARD
   # NOTE: lambda for late binding, rewrite_into_function references multi_pm
-  (UPat(Ops.CALL, name="call"), lambda ctx,call: rewrite_into_function(ctx, call)),
+  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call)),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:

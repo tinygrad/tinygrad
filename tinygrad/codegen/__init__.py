@@ -273,7 +273,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor, enter_calls=False)
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
-  sink = graph_rewrite(ast, multi_pm, ctx={}, name="multi_pm")
+  sink = graph_rewrite(ast, multi_pm, name="multi_pm")
 
   # preprocess
   sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
