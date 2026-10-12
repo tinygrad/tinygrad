@@ -249,10 +249,10 @@ def xlog2(d:UOp) -> UOp:
   r = d.ne(0.0).where(r, r.const_like(-math.inf))
   # log2(x) = NaN for x < 0
   r = (d<-0.0).where(r.const_like(math.nan), r)
-  # log2(NaN) = NaN
-  r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  r = d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  # Check NaN last: comparisons of its reciprocal are not reliable on every backend.
+  return d.ne(d).where(r.const_like(math.nan), r)
 
 def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))

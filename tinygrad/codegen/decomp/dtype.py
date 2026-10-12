@@ -2,7 +2,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, shape_to_shape_arg
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
@@ -83,7 +83,8 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
 def l2i_define(x:UOp) -> UOp:
   # cannot decomp a Variable
   if x.addrspace == AddrSpace.ALU: raise RuntimeError(f"long decomposition of variable {x.arg.name} unsupported")
-  return x.replace(arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(UOp.const(x.src[0].val*2) if x.shape else x.src[0], *x.src[1:]))
+  size = shape_to_shape_arg((x.max_numel()*2,)) if x.shape else x.src[0]
+  return x.replace(arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(size, *x.src[1:]))
 
 def split_l2i(ctx:dict, op: Ops, dt: DType, *uops:UOp):
   # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself.

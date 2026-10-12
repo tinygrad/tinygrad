@@ -683,9 +683,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0)).cast(x.dtype)
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
-  def Squeeze(data:Tensor, axes:Sequence[int]|None=None):
-    if axes is None: return data.squeeze()
-    return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(map(data._resolve_dim, axes), reverse=True), data)
+  def Squeeze(data:Tensor, axes:Sequence[int]|None=None): return data.squeeze(axes)
   def Unsqueeze(data:Tensor, axes:Sequence[int]):
     return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(data._resolve_dim(a, extra=len(axes)) for a in axes), data)
 
@@ -1094,8 +1092,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
-    norm = X.cast(dtypes.float).square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
-    return X * norm * scale
+    return X.cast(dtypes.float).rmsnorm(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), eps=epsilon) * scale
 
   def RotaryEmbedding(X:Tensor, cos_cache:Tensor, sin_cache:Tensor, position_ids:Tensor|None=None, interleaved:int=0, num_heads:int|None=None,
                       rotary_embedding_dim:int=0):

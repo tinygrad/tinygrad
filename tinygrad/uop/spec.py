@@ -31,7 +31,7 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
   rng = src[0]
   return rng.op is Ops.RANGE and rng.axis_type is AxisType.DEVICE and int(rng.vmax)+1 == len(device)
 
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=False):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
 
   with Context(TRACK_MATCH_STATS=0):
@@ -163,7 +163,7 @@ spec_tensor = PatternMatcher([
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
   (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(), UPat()), name="x"), lambda x: x.src[1].shape == x.src[2].shape),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
+  (UPat(Ops.PERMUTE, name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # REDUCE has arg=(op, num_axes), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
