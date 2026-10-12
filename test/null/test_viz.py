@@ -761,9 +761,14 @@ class TestVizProfiler(unittest.TestCase):
   def test_node_overlap(self):
     prof = [ProfileRangeEvent(device='NV', name='E_1', st=decimal.Decimal('1000.633'), en=decimal.Decimal('1045.753')),
             ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal('1045.953'), en=decimal.Decimal('1090.473')),
+            ProfileRangeEvent(device='NV', name='E_3', st=decimal.Decimal('1091.1'), en=decimal.Decimal('1091.3')),
+            ProfilePointEvent(device='NV', name='marker', key=0, arg={'name':'end'}, ts=decimal.Decimal(92)),
             ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000))]
-    events = load_profile(prof)['layout']['NV']['events']
+    profile = load_profile(prof)
+    events = profile['layout']['NV']['events']
     self.assertLessEqual(events[0]['st'] + events[0]['dur'], events[1]['st'])
+    self.assertEqual(events[2]['dur'], 1)
+    self.assertEqual(events[2]['st'] + events[2]['dur'], profile['dur'])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char).realize()
