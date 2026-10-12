@@ -21,10 +21,10 @@ class TestHCQ2Schedule(unittest.TestCase):
     for jit in (False, True):
       with self.subTest(jit=jit):
         out, compiled, inputs = compiled_chain(2, jit=jit, device=Device.DEFAULT)
-        linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
+        linked = link_linear(compiled, input_uops=inputs, use_rt=not jit)
         before = tuple(inputs)
         for linear in (compiled, linked): self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
-        self.assertIs(link_linear(linked, input_uops=inputs, allow_cache=not jit), linked)
+        self.assertIs(link_linear(linked, input_uops=inputs, use_rt=not jit), linked)
         self.assertEqual(tuple(inputs), before)
         run_linear(linked, input_uops=inputs, jit=True, wait=True)
         self.assertEqual(out.tolist(), [4] * 4)
@@ -101,7 +101,7 @@ class TestHCQ2Fence(unittest.TestCase):
   def test_a_schedule_waits_for_its_previous_run(self):
     slots = UOp.alloc((4,), dtypes.uint64, device="CPU").rtag("slots")
     program = lower_and_compile(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])))
-    linked = hcq2.hcq_link(program, allow_cache=False)
+    linked = hcq2.hcq_link(program, use_rt=False)
     (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.without_after.tag == "slots"]
     slots_mv = linked.src[0].without_after.src[1 + i].buffer.host.view(fmt='Q')
     slots_mv[2], base = 7, self.tl[1]
@@ -122,8 +122,8 @@ class TestHCQ2Fence(unittest.TestCase):
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
   def _run(body:UOp) -> list[UOp]:
-    linear = hcq2.hcq_link(lower_and_compile(lower_hcq(body)), allow_cache=False)
-    assert hcq2.hcq_link(linear, allow_cache=False) is linear, "a linked linear links to itself, with the refs its call keeps"
+    linear = hcq2.hcq_link(lower_and_compile(lower_hcq(body)), use_rt=False)
+    assert hcq2.hcq_link(linear, use_rt=False) is linear, "a linked linear links to itself, with the refs its call keeps"
     run_linear(linear, jit=True)
     return [u for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
@@ -178,7 +178,7 @@ class TestHostCalls(unittest.TestCase):
     return UOp.from_buffer(Buffer("CPU", n * dtype.itemsize, initial_value=bytes(n * dtype.itemsize)), dtype)
   @staticmethod
   def _run(fxn, *bufs:UOp, **var_vals:int) -> list: # first buffer is the output
-    run_linear(hcq2.hcq_link(lower_and_compile(lower_hcq(fxn(*bufs))), allow_cache=False), var_vals, jit=True)
+    run_linear(hcq2.hcq_link(lower_and_compile(lower_hcq(fxn(*bufs))), use_rt=False), var_vals, jit=True)
     return bufs[0].buffer.host.view(fmt=bufs[0].dtype.fmt)[:]
 
   def test_no_addrs_no_placeholders(self):
