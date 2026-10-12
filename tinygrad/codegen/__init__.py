@@ -423,15 +423,19 @@ pm_lower_calls = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),
 ])
 
+def fixup_call(call:UOp) -> UOp:
+  body = graph_rewrite(call.body, pm_call_fixup, name="call fixup", walk=True)
+  body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)),
+             arg=to_function_name(call.arg.name))
+  return call.replace(src=(body,)+call.src[1:])
+
 pm_call_fixup = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="call"),
-   lambda call,sink: call.replace(src=(UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)),
-                                           arg=to_function_name(call.arg.name)),)+call.src[1:])),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), fixup_call),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  sink = graph_rewrite(sink, pm_call_fixup, name="call fixup", enter_calls=True)
+  sink = graph_rewrite(sink, pm_call_fixup, name="call fixup", walk=True)
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)
   prg = prg.replace(src=(lst[-1],))
   # isa renderers need to allocate registers
