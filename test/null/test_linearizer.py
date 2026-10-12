@@ -95,6 +95,12 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
+  def test_stack_select_folds_into_index(self):
+    x = Tensor.empty(7, 4).realize()
+    r = Tensor.stack(x.const_like(0), x, x.const_like(0)).reshape(21, 4).shrink(((4, 19), None)).contiguous()
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    self.assertEqual([u.op for u in uops if u.op in {Ops.FLOORDIV, Ops.FLOORMOD, Ops.CDIV, Ops.CMOD}], [])
+
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
