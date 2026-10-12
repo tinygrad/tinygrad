@@ -231,7 +231,6 @@ class TestAsmKernel(unittest.TestCase):
       run_asm(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, ctypes.addressof(args), arch="rdna3")
       self.assertEqual(out.value, value)
       prg = call.lift_dispatch(ctypes.addressof(buf), len(buf), 1, 1, 1, 0x19c, 0, "rdna3", None, getenv("ASM_CALL_BACKEND", "CPU"))
-      self.assertIsNotNone(prg)
       self.assertIs(prg, programs.setdefault(value, prg))
     # Operands are read from the current code allocation, so these share the compiled graph too.
     self.assertIs(programs[4], programs[5])
@@ -260,38 +259,30 @@ class TestAsmKernel(unittest.TestCase):
     from test.mockgpu.amd import call
     if getenv("ASM_CALL_BACKEND", "CPU") != "CPU": self.skipTest("Clang JIT only")
     compiler = call.backend_renderer("CPU").compiler
-    def kernel_a(out:UOp):
+    def kernel(out:UOp, second=False):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
         s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
         v_lshlrev_b32_e32(v[0], 2, v[0]),
-        v_mov_b32_e32(v[1], 5),
-        v_add_nc_u32_e32(v[2], 3, v[1]),
-        v_add_nc_u32_e32(v[3], 7, v[2]),
-        global_store_b32(addr=v[0], data=v[3], saddr=s[0:1]),
-        s_endpgm(),
-      ]
-      sink = UOp.sink(out.base, UOp.special(32, "lidx0"), UOp.special(1, "gidx0"), arg=KernelInfo("external_call_reuse_a"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
-    def kernel_b(out:UOp):
-      insts = [
-        s_load_b64(s[0:1], s[0:1], soffset=NULL),
-        s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
-        v_lshlrev_b32_e32(v[0], 2, v[0]),
+      ] + ([
         v_mov_b32_e32(v[4], 9),
         v_add_nc_u32_e32(v[5], 11, v[4]),
         v_xor_b32_e32(v[6], 3, v[5]),
         global_store_b32(addr=v[0], data=v[6], saddr=s[0:1]),
-        s_endpgm(),
-      ]
-      sink = UOp.sink(out.base, UOp.special(32, "lidx0"), UOp.special(1, "gidx0"), arg=KernelInfo("external_call_reuse_b"))
+      ] if second else [
+        v_mov_b32_e32(v[1], 5),
+        v_add_nc_u32_e32(v[2], 3, v[1]),
+        v_add_nc_u32_e32(v[3], 7, v[2]),
+        global_store_b32(addr=v[0], data=v[3], saddr=s[0:1]),
+      ]) + [s_endpgm()]
+      sink = UOp.sink(out.base, UOp.special(32, "lidx0"), UOp.special(1, "gidx0"), arg=KernelInfo(f"external_call_reuse_{second}"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
     modules = len(compiler.modules)
-    a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel_a)[0]
+    a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
     self.assertEqual(a.tolist(), [15]*32)
     self.assertEqual(len(compiler.modules), modules+1)
     functions = dict(compiler.functions)
-    b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel_b)[0]
+    b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=lambda out: kernel(out, second=True))[0]
     self.assertEqual(b.tolist(), [23]*32)
     self.assertEqual(len(compiler.modules), modules+2)
     self.assertTrue(functions.keys() < compiler.functions.keys())

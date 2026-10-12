@@ -1,6 +1,4 @@
 import ctypes, itertools, functools, struct, re, subprocess, tempfile
-from pathlib import Path
-from collections.abc import Iterator
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_config
@@ -31,29 +29,27 @@ class CallClangJIT(ClangCompiler):
       if m[1] in self.functions:
         declaration = f"static void (*{m[1]})({m[2]}) = (void (*)({m[2]})){self.functions[m[1]]}ul;"
         src = src[:m.start()]+declaration+src[m.end():]
-    self.add_module(src, new_functions)
+    with tempfile.TemporaryDirectory() as directory, cpu_profile('Clang JIT compile'):
+      path = f'{directory}/module.so'
+      subprocess.run([getenv('CC', 'clang'), '-shared', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno',
+                      '-fno-strict-aliasing', *self.args, '-', '-o', path, '-lm'], input=src.encode(), check=True, capture_output=True)
+      module = ctypes.CDLL(path)
+    self.modules.append(module)
+    self.functions.update((name, unwrap(ctypes.cast(getattr(module, name), ctypes.c_void_p).value)) for name in new_functions)
     addr = self.functions[entry]
     if self.arch == 'x86_64': return b'\x48\xb8'+struct.pack('<Q', addr)+b'\xff\xe0'
     if self.arch == 'arm64': return struct.pack('<IIQ', 0x58000050, 0xd61f0200, addr)
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
 
-  def add_module(self, src:str, names:list[str]):
-    with tempfile.TemporaryDirectory() as directory, cpu_profile('Clang JIT compile'):
-      path = str(Path(directory)/'module.so')
-      subprocess.run([getenv('CC', 'clang'), '-shared', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno',
-                      '-fno-strict-aliasing', *self.args, '-', '-o', path, '-lm'], input=src.encode(), check=True, capture_output=True)
-      module = ctypes.CDLL(path)
-    self.modules.append(module)
-    self.functions.update((name, unwrap(ctypes.cast(getattr(module, name), ctypes.c_void_p).value)) for name in names)
-
 class CallClangRenderer(ClangRenderer):
+  kernel_typedef = "__attribute__((noinline, optnone)) void"
   def __init__(self, target:Target):
     super().__init__(target)
     self.compiler = CallClangJIT(target.arch.split(','))
 
   def render(self, uops:list[UOp]) -> str:
     topo = UOp.sink(*uops).toposort(enter_calls=True)
-    self.fn_names = {b:('asm_block_' if b.arg == 'asm_block' else 'asm_fn_')+b.key.hex() for b in topo if b.op is Ops.LINEAR}
+    self.fn_names = {b:'asm_fn_'+b.key.hex() for b in topo if b.op is Ops.LINEAR}
     definitions = []
     all_uops = list(uops)
     for body, name in self.fn_names.items():
@@ -64,7 +60,6 @@ class CallClangRenderer(ClangRenderer):
       all_uops.extend(body.src)
     name, lines, bufs = self._render(uops)
     entry = super().render_kernel(name, lines, bufs, [], None)
-    entry = entry.replace('void '+name, '__attribute__((noinline, optnone)) void '+name, 1)
     return '\n'.join(self._render_defines(all_uops)+definitions+[entry])
 
 @functools.cache
@@ -155,40 +150,23 @@ def instruction_call(inst:Inst, arch:str) -> InstructionCall:
   entries.append((base, mask, ret))
   return ret
 
-block_cache:dict[tuple, tuple[UOp, list[UOp]]] = {}
-
-def instruction_chunks(instructions:list[tuple[int, InstructionCall]], size:int) -> Iterator[list[tuple[int, InstructionCall]]]:
-  # Choose boundaries from instruction bodies, so an insertion needn't invalidate every following block.
-  start = code_hash = 0
-  for i,(_,info) in enumerate(instructions):
-    code_hash = ((code_hash << 1) + int.from_bytes(info[0].body.key[:4], "little")) & (size-1)
-    length = i-start+1
-    if length >= max(size//4, 1) and (code_hash == 0 or length >= size*2):
-      yield instructions[start:i+1]
-      start = i+1
-  if start < len(instructions): yield instructions[start:]
-
 @functools.cache
 def has_effects(body:UOp) -> bool:
   return any(u.op in (Ops.STORE, Ops.CALL) for u in body.toposort())
 
 def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
-  key = tuple((off, template, tuple(bufs), offsets) for off,(template,bufs,offsets,_) in instructions)
-  if key not in block_cache:
-    bufs = sorted({b for _,(_,bs,_,_) in instructions for b in bs}, key=lambda b:b.arg.slot)
-    base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
-    params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
-    inst = None
-    for off,(template,bs,offsets,_) in instructions:
-      args = [params[b] for b in bs]
-      invoke = template.replace(src=(template.body, *args,
-                           *(base+UOp.const(off+i, dtypes.uint64) if off+i else base for i in offsets)))
-      if inst is not None:
-        invoke = invoke.replace(src=(*invoke.src[:-1], invoke.src[-1].after(inst)))
-      inst = invoke
-    body = UOp.sink(inst)
-    block_cache[key] = body, bufs
-  return block_cache[key]
+  bufs = sorted({b for _,(_,bs,_,_) in instructions for b in bs}, key=lambda b:b.arg.slot)
+  base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
+  params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
+  inst = None
+  for off,(template,bs,offsets,_) in instructions:
+    args = [params[b] for b in bs]
+    invoke = template.replace(src=(template.body, *args,
+                         *(base+UOp.const(off+i, dtypes.uint64) if off+i else base for i in offsets)))
+    if inst is not None:
+      invoke = invoke.replace(src=(*invoke.src[:-1], invoke.src[-1].after(inst)))
+    inst = invoke
+  return UOp.sink(inst), bufs
 
 def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # Thread jump-only blocks, then share identical conditional branches with the same destinations.
@@ -331,7 +309,8 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
 
   def emit_block(block_pc:int, wave:UOp, scopes:tuple[UOp, ...]) -> UOp:
     instructions, cond = block_instructions(block_pc)
-    for chunk in instruction_chunks(instructions, chunk_size):
+    for i in range(0, len(instructions), chunk_size):
+      chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
       body, bufs = instruction_block([((pc-off)//4, info) for pc,info in chunk])
       args = [afters[b].after(*scopes) for b in bufs]
@@ -368,7 +347,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   body = UOp.group(*afters.values()).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
   name = f"asm_call_{arch}_{body.key.hex()[:16]}"
-  sink = UOp.sink(body, arg=KernelInfo(name=name, opts_to_apply=())).rtag(1)
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+  sink = UOp.sink(body, arg=KernelInfo(name=name)).rtag(1)
+  with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     renderer = backend_renderer(backend)
     return to_program(sink, renderer)
