@@ -140,7 +140,7 @@ class MetalQueue(HWQueue):
     dims = (*prg.arg.global_size, *prg.arg.local_size)
     if any(isinstance(d, UOp) for d in dims):
       self.sizes.append((len(self.cmds), at:=round_up(self.nbytes, 8)))
-      self.rows += layout_args([d.cast(dtypes.uint64) if isinstance(d, UOp) else UOp.const(d, dtypes.uint64) for d in dims], at)
+      self.rows += layout_args([UOp.const(d, dtypes.uint64) for d in dims], at)
       self.nbytes = at + 48
     self.cmds.append((obj.lib, obj.name, tuple(1 if isinstance(d, UOp) else int(d) for d in dims), off))
 

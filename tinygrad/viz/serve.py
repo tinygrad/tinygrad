@@ -282,7 +282,7 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
       if mem > peak: peak = mem
     if e.name == "exec" and e.arg["bufs"]:
       for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
-    if e.name == "free":
+    if e.name == "free" and e.key in temp:
       events.append(encode_mem_free(e.key, rel_ts(e.ts, start_ts, f"free on {e.device}"), buf_ei.pop(e.key, []), scache))
       mem -= temp.pop(e.key)
   for t in temp: events.append(encode_mem_free(t, rel_ts(end_ts, start_ts, f"end_ts for {k}"), buf_ei.pop(t, []), scache))
@@ -483,7 +483,7 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   for ts,en,e in flatten_events(profile, device_ts_diffs):
     if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
     else:
-      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
+      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en) if isinstance(e,ProfilePointEvent) else max(st+1,int(en)), float(et-st),e))
       if start_ts is None or st < start_ts: start_ts = st
       if end_ts is None or et > end_ts: end_ts = et
       if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
@@ -552,10 +552,10 @@ def amd_decode(buf:bytes, arch:str, off:int=0) -> dict[int, Inst]:
   from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
   code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
   addr_table:dict[int, Inst] = {}
-  offset = 0
+  offset, view = 0, memoryview(buf)
   while offset < len(buf):
-    remaining = buf[offset:]
-    if code_end is not None and remaining.startswith(code_end): break
+    if code_end is not None and buf.startswith(code_end, offset): break
+    remaining = view[offset:]
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded

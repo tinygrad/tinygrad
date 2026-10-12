@@ -409,9 +409,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           if len(ps) != len(self.marg) or not all(resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=s) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
           return tuple(sz for _,sz in self.marg)
-        case Ops.FLIP:
-          if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
-          return ps
         case Ops.UNSHARD: return tuple(s*(int(self.src[1:][self.arg.index(a)].vmax)+1) if a in self.arg else s for a,s in enumerate(ps))
         case Ops.REDUCE:
           num_axes = self.arg[1]
@@ -793,7 +790,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape
       case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape, self.src[2].as_shape))
-      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case Ops.PERMUTE: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg) -> UOp:
@@ -805,7 +802,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
-      case Ops.PERMUTE | Ops.FLIP: src_args = []
+      case Ops.PERMUTE: src_args = []
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
         dtype = dtype_from_uop(Ops.STACK, srcs, None)
@@ -922,7 +919,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # CL 1.1 provides the clCreateSubBuffer API, but at the time of writing, relevant CL runtimes (rusticl, adreno, nvidia, amd) do not provide
     # reasonable values for CL_DEVICE_MEM_BASE_ADDR_ALIGN. cl_ext_buffer_device_address could potentially help, but this extension is not provided
     # by relevant CL runtimes at time of writing.
-    if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((dev,) if isinstance(dev, str) else dev)): return None
+    if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in to_tuple(dev)): return None
 
     rng = UOp.range(self.numel(), 0)
     out = graph_rewrite(self.flatten().index(rng), pm_mops+symbolic, name="contiguous_view_offset")
@@ -959,10 +956,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     # a bare STAGE (same-device materialization) keeps the source's buffer
     if self.op is Ops.STAGE and self.arg is None: return self.src[0].buffer
-    if self.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+    if self.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER, Ops.BITCAST}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
     # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage
-    if self is not self.base or self.op is Ops.BITCAST:
+    if self is not self.base:
       src, offset = self._buffer_view
       if isinstance(buf:=src.buffer, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
