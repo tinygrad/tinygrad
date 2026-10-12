@@ -47,7 +47,7 @@ def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte o
   if v.op in (Ops.BITCAST, Ops.AFTER): return unwrap_view(v.src[0])
   if v.op is not Ops.SHRINK: return v, 0
   base, off = unwrap_view(v.src[0])
-  return base, off + v.src[1].val * v.dtype.itemsize
+  return base, off + v.offset.val * v.dtype.itemsize
 
 def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a lane select to (base, lane, byte offset)
   sel, off = unwrap_view(v)

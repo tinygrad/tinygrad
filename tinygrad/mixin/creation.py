@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Callable, Self
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype
-from tinygrad.helpers import argfix, prod
+from tinygrad.helpers import argfix
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 
@@ -32,12 +32,11 @@ class CreationMixin(DTypeMixin, MovementMixin):
     print(t.shape)
     ```
     """
-    from tinygrad.uop.ops import UOp, Ops, ParamArg, to_max_shape
+    from tinygrad.uop.ops import UOp
     from tinygrad.device import canonicalize_device
     dt = to_dtype(dtype) if dtype is not None else dtypes.default_float
     if dt in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dt}")
     new_shape = argfix(*shape)
-    max_shape = to_max_shape(new_shape)
     dev = canonicalize_device(device)
     if axis is not None and isinstance(dev, tuple):
       axis = range(max(1, len(new_shape)))[axis]
@@ -45,10 +44,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
         if new_shape[axis] % len(dev) != 0: raise RuntimeError(f"can't split {new_shape} on axis {axis} over {dev}")
         local = tuple(s//len(dev) if i == axis else s for i,s in enumerate(new_shape))
         return cls._wrap_uop(cls.empty(*local, device=dev, dtype=dt)._uop.unshard(axis))
-    u = UOp(Ops.ALLOC, src=(UOp.const(prod(max_shape)),)+UOp.device_range_src(dev),
-            arg=ParamArg(next(UOp.unique_num), dt, device=dev, bind_on_realize=True))
-    u = u.reshape(max_shape).shrink_to(new_shape)
-    return cls._wrap_uop(u)
+    return cls._wrap_uop(UOp.alloc(new_shape, dt, device=dev, bind_on_realize=True))
 
   def empty_like(self, dtype: DTypeLike|None=None, device: str|tuple[str, ...]|None=None) -> Self:
     """

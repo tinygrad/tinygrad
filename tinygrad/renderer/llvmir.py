@@ -80,7 +80,7 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 base_rewrite = PatternMatcher([
   # memory load/store
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: None if x.src[0].addrspace in (None, AddrSpace.ALU) else
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.offset.dtype)} {ctx[x.offset]}"),
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda ctx,buf,c,x:
    f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {c.val}" if buf.addrspace == AddrSpace.ALU else None),
@@ -159,8 +159,8 @@ class LLVMRenderer(Renderer):
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + PatternMatcher([
     # GEP sign-extends indices to pointer width, so unsigned indices must be widened first.
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.uint32), name="i")),
-          allow_any_len=True, name="x"), lambda x,i: x.replace(src=(x.src[0], i.cast(dtypes.int64), *x.src[2:]))),
+    (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: x.replace(src=(x.src[0], x.offset.cast(dtypes.int64), *x.src[2:]))
+     if x.offset.dtype in (dtypes.uint8, dtypes.uint16, dtypes.uint32) else None),
   ])
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.

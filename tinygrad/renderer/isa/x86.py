@@ -197,7 +197,7 @@ stack_pointer = def_reg(RSP)
 def alloc_reg(ctx:IselContext, dt:DType, pin:Register|tuple[Register, ...]|None=None):
   return UOp.alloc((1,), dt, slot=next(ctx.alloc_n), addrspace=AddrSpace.REG).replace(tag=(pin,) if isinstance(pin, Register) else pin)
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
-def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
+def lane(x:UOp, i:int) -> int: return s.offset.src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
@@ -253,7 +253,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0))
-  base, idx = x.src[0], x.src[1]
+  base, idx = x.src[0], x.offset
   # buffers are indexed by element, everything else (the stack pointer) by byte
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.AFTER} else 1
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:

@@ -71,7 +71,8 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   if size % (ALIGN * 4) != 0: return [] if (base.itemsize * size) % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
   return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
-def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
+def transform_to_image(ctx, view:UOp) -> UOp|None:
+  buf, x = view.src[0], view.offset
   shapes, ren = ctx
   if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
   valid, x = x.get_valid(), x.get_idx()
@@ -102,7 +103,7 @@ def store_image(x:UOp, d:UOp) -> UOp:
   return x.store(UOp.stack(*[as_float(s) for s in lanes]))
 
 pm_simplify_add_image = PatternMatcher([
-  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM), UPat(), UPat(arg=4)), name="view"), transform_to_image),
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), store_image),
 ])
 

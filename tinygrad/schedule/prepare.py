@@ -1,6 +1,6 @@
 from dataclasses import replace
 from tinygrad.dtype import dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
@@ -145,7 +145,7 @@ def resolve_function(c:UOp) -> UOp|None:
   for p, a in dict_map.items():
     if p.shape:
       n, flat = flat_storage(a)
-      if p.src[0].val != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.src[0].val}, got {a.shape}")
+      if p.max_numel() != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.max_numel()}, got {a.shape}")
       dict_map[p] = flat
     elif a.shape != ():
       raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
@@ -170,14 +170,13 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
   # the buffer takes the DEVICE range from the copy (no-op for single device copies)
-  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+copy.src[1:],
-            arg=ParamArg(next(UOp.unique_num), copy.dtype, device=copy.device)).reshape(x.max_shape)
+  buf = UOp.alloc((x.max_numel(),), copy.dtype, device=copy.device)
+  buf = buf.replace(src=buf.src[:1]+copy.src[1:]).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.ALLOC, src=(UOp.const(prod(x.max_shape)),)+UOp.device_range_src(x.device),
-            arg=ParamArg(next(UOp.unique_num), stg.dtype, device=x.device)).reshape(x.max_shape)
+  buf = UOp.alloc(x.max_shape, stg.dtype, device=x.device)
   view = buf.shrink_to(stg.shape)
   return view.after(view.store(x))
 

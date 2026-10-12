@@ -115,14 +115,14 @@ class PythonProgram(Program['PythonDevice']):
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []
           if u.src[0].addrspace == AddrSpace.ALU:
-            ret = [src_values[0][i][t] for t,i in enumerate(src_values[1])]
+            ret = [src_values[0][i][t] for t,i in enumerate(values[u.offset])]
           elif is_image_shape(u.src[0]._shape):
             for m,oy,ox in zip(*src_values):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
             scale = v.dtype.itemsize // v.src[0].dtype.itemsize if (v:=u.src[0].without_after).op is Ops.BITCAST else 1
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
+            for m,o in zip(src_values[0], values[u.offset]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
         elif u.op is Ops.RANGE:
           if u not in values: values[u] = [0] * warp_size

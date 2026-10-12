@@ -134,8 +134,8 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     # nor to REG/ALU register picks, which keep their own index dtype
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"),
-     lambda x,buf,off: x.replace(src=(buf,off.ccast(dtypes.long))+x.src[2:])
+    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),), allow_any_len=True, name="x"),
+     lambda x,buf: x.replace(src=(buf,x.offset.ccast(dtypes.long))+x.src[2:])
       if buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
@@ -146,15 +146,15 @@ class NIRRenderer(Renderer):
     (UPat.cvar("c").cast(name="x"), lambda ctx,x,c: nimm(ctx.b, c.val, x.dtype)),
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
-    (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),UPat.var("off")), allow_any_len=True), UPat.var("val"))),
-     lambda ctx,buf,off,val: nstore(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.addrspace, buf.dtype.itemsize), ctx.r[val])),
-    (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True), UPat.var("alt"),
+    (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),), allow_any_len=True, name="idx"), UPat.var("val"))),
+     lambda ctx,buf,idx,val: nstore(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[idx.offset], buf.addrspace, buf.dtype.itemsize), ctx.r[val])),
+    (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),), allow_any_len=True, name="idx"), UPat.var("alt"),
                          UPat.var("gate")), name="x"),
-     lambda ctx,x,buf,off,alt,gate: if_phi(ctx.b, ctx.r[gate],
-      lambda: nload(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.addrspace, buf.dtype.itemsize, ctx.r[gate]), x),
+     lambda ctx,x,buf,idx,alt,gate: if_phi(ctx.b, ctx.r[gate],
+      lambda: nload(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[idx.offset], buf.addrspace, buf.dtype.itemsize, ctx.r[gate]), x),
       lambda: ctx.r[alt])),
-    (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True),), name="x"),
-     lambda ctx,x,buf,off: nload(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.addrspace, buf.dtype.itemsize), x)),
+    (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),), allow_any_len=True, name="idx"),), name="x"),
+     lambda ctx,x,buf,idx: nload(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[idx.offset], buf.addrspace, buf.dtype.itemsize), x)),
     (UPat(Ops.STACK, name="x"), lambda ctx,x: nalu(ctx.b, f"vec{x.max_numel()}", *[ctx.r[src] for src in x.src])),
     (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx.b, aop[x.src[0].dtype][x.op], *[ctx.r[src] for src in x.src])),
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx.b, ctx.r[x.src[0]], x.src[0].dtype, x.dtype)),
@@ -193,7 +193,7 @@ class NIRRenderer(Renderer):
       if u.op in {Ops.NOOP, Ops.CONST} or (u.op is Ops.STACK and len(u.src) == 0): pass
       elif u.op in {Ops.INDEX, Ops.SHRINK}:
         # INDEX on a register value picks the element, memory INDEX is handled in the LOAD/STORE patterns
-        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].src[0].val)
+        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.offset.src[0].val)
       elif u.op is Ops.AFTER:
         if u.dtype is not dtypes.void: self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
