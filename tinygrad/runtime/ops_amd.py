@@ -23,7 +23,6 @@ from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_so
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset
 from tinygrad.runtime.support.memory import AddrSpace
-OVERLAP_KERNELS = getenv("AMD_OVERLAP_KERNELS", 1)
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
@@ -412,8 +411,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *prg.arg.local_size, 0, 0)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
-    # the next kernel can start right away, unless it depends on this one (kernel_barrier) or this one is profiled
-    if self.dev.prof_enabled or self.dev.sqtt_enabled or not OVERLAP_KERNELS: self.kernel_barrier()
+    if self.dev.prof_enabled or self.dev.sqtt_enabled: self.kernel_barrier() # else the next kernel starts unless hcq2 adds a kernel_barrier
     if self.dev.prof_enabled: self.prof_stop(slot)
 
   def kernel_barrier(self):

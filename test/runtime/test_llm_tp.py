@@ -128,7 +128,6 @@ class TestTensorParallel(unittest.TestCase):
         self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
       # the kv cache is sharded on its heads, the gated deltanet on its key heads (and the value heads that read them)
       self.assertEqual(parallel.blk[1].cache_kv.uop.axis, 2)
-      for t,axis in ((parallel.blk[0].attn_qkv.weight, 0), (parallel.blk[0].recurrent_state, 1), (parallel.blk[0].ssm_out.weight, 1)):
-        self.assertEqual((t.device, t.uop.axis), (DEVICES, axis))
+      for t,a in ((parallel.blk[0].attn_qkv.weight, 0), (parallel.blk[0].recurrent_state, 1)): self.assertEqual((t.device, t.uop.axis), (DEVICES, a))
 
 if __name__ == '__main__': unittest.main()

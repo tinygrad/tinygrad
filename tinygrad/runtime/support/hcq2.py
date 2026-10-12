@@ -265,23 +265,18 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
   call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
   queues:dict[tuple[tuple[str, ...], str], list[UOp]] = {}
-  # kernels on a queue may overlap: a kernel only waits for the earlier ones (kernel_barrier) when it touches what they write or writes
-  # what they touch. (pending writes, pending accesses) since the last barrier, per queue
+  # kernels on a queue may overlap: a kernel waits for the earlier ones (kernel_barrier) only if it accesses what they write or writes what
+  # they access. the (writes, accesses) since the last barrier per queue, as byte ranges (buffers in the jit's arena share a base)
   pending:dict[tuple[tuple[str, ...], str], tuple[list, list]] = {}
   for tag, ((call, devices, queue), waits) in enumerate(zip(ctx.batch, call_waits)):
     if not (q:=queues.setdefault((devices, queue), [])): q += _start_ins(ctx, devices[0], queue) # first use of a queue
 
     if call.op is Ops.CALL and call.body.op is Ops.PROGRAM:
-      # (base, lane, start, end): buffers in the jit's arena share a base, so compare byte ranges
       bufs = [(base, lane, off, off + b.max_numel() * b.dtype.itemsize) for b in get_call_arg_uops(call) for base, lane, off in [unwrap_lane(b)]]
-      # the arguments a program doesn't store to (loads, or arguments it only passes to inline code) count as reads
-      writes = [bufs[i] for i in get_call_outs_ins(call)[0]]
-      pw, pa = pending.setdefault((devices, queue), ([], []))
-      def overlaps(xs, ys): return any(x[:2] == y[:2] and x[2] < y[3] and y[2] < x[3] for x in xs for y in ys)
-      if overlaps(pw, bufs) or overlaps(pa, writes):
+      writes, (pw, pa) = [bufs[i] for i in get_call_outs_ins(call)[0]], pending.setdefault((devices, queue), ([], []))
+      if any(x[:2] == y[:2] and x[2] < y[3] and y[2] < x[3] for xs, ys in ((pw, bufs), (pa, writes)) for x in xs for y in ys):
         q.append(UOp(Ops.INS, arg=("kernel_barrier", dtypes.void)))
-        pw.clear()
-        pa.clear()
+        del pw[:], pa[:]
       pw.extend(writes)
       pa.extend(bufs)
 
@@ -563,9 +558,8 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
     use_rt = len(linear.src) < HCQ_CACHE_THRESH # small schedules use runtime address patches so linked schedules can be cached without input buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
-    # the buffer-free linear is the key: a hit skips all the rewrites below
-    if (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+  if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
