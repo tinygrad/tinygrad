@@ -1,4 +1,4 @@
-import struct, ctypes, functools
+import struct, ctypes
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, i2u, unwrap
 from tinygrad.runtime.autogen import libc
@@ -37,10 +37,6 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
       image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
       sh.header.sh_addr = len(image) - len(sh.content)
 
-  # Resolve each external symbol once per image; the same function can have many relocations.
-  @functools.cache
-  def resolve_sym(name:str) -> int: return link_sym(name, link_libs or [])
-
   # Relocations
   relocs = []
   for sh, trgt_sh_name, c_rels in rel + rela:
@@ -48,7 +44,7 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, unwrap(symtab)[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)], getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
              getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, resolve_sym(_strtab(sh_strtab, sym.st_name)) if sym.st_shndx == 0 else
+    relocs += [(target_image_off + roff, link_sym(_strtab(sh_strtab, sym.st_name), link_libs or []) if sym.st_shndx == 0 else
                 sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs

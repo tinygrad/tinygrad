@@ -261,7 +261,9 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 @functools.cache
 def decode_cfg(lib_bytes:bytes, arch:str):
   insts = amd_decode(lib_bytes, arch)
-  return insts, get_cfg(insts, render=False)["data"]
+  cfg = get_cfg(insts, render=False)["data"]
+  merge_branches(insts, cfg["blocks"], cfg["paths"])
+  return insts, cfg, cfg_regions(cfg["paths"], 0)
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift_dispatch(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
@@ -278,11 +280,7 @@ dispatch_cache:dict[tuple, UOp] = {}
 
 def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   lib_sz, entry = len(lib_bytes), 0
-  insts, cached_cfg = decode_cfg(lib_bytes, arch)
-  cfg:dict[str, dict] = {"blocks":{pc:list(block) for pc,block in cached_cfg["blocks"].items()},
-         "paths":{pc:dict(paths) for pc,paths in cached_cfg["paths"].items()}}
-  merge_branches(insts, cfg["blocks"], cfg["paths"])
-  regions = cfg_regions(cfg["paths"], entry)
+  insts, cfg, regions = decode_cfg(lib_bytes, arch)
   afters: dict[UOp, UOp] = {}
   axes = itertools.count(lib_sz)
   temporaries = itertools.count(6)  # reserve 0..5 for the register, LDS, and scratch allocations
@@ -339,9 +337,8 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     for chunk in instruction_chunks(instructions, chunk_size):
       off = chunk[0][0]
       body, bufs = instruction_block([((pc-off)//4, info) for pc,info in chunk])
-      template, word_offsets = body.call(*bufs, UOp.const(0, dtypes.uint64), name="asm_block"), (0,)
       args = [afters.get(b, b).after(*scopes) for b in bufs]
-      call = template.replace(src=(template.body, *args, *((code_addr>>2)+(off//4+i) for i in word_offsets)))
+      call = body.call(*args, (code_addr>>2)+off//4, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
       afters.update((b, arg.without_after.after(call, *scopes)) for b, arg in zip(bufs, args))
     return cond.substitute({u:buffers[u.src[0]][0].after(afters[u.src[0]]).index(wave*buffers[u.src[0]][1]+u.src[1])
