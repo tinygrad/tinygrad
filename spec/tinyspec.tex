@@ -83,7 +83,6 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Permute} & $(T,)$ & axis order $\pi$ & Reorder axes. $\pi = (1,0)$ is transpose. \\
-\op{Flip} & $(T,)$ & bools $\mathbf{f}$ & Reverse along flagged axes. \\
 \op{Reshape} & $(T, \mathbf{s'})$ & --- & Reinterpret in row-major order. $\prod s_k = \prod s'_k$. \\
 \op{Expand} & $(T, \mathbf{n})$ & --- & Prepend axes $\mathbf{n}$ on the left. Output shape is $\mathbf{n} + T.\mathrm{shape}$. \\
 \op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in an invalid-filled output of shape $s'_k$. \\

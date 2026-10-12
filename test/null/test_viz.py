@@ -758,6 +758,13 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(layout[:2], ["USER","TINY"])
     self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
+  def test_node_overlap(self):
+    prof = [ProfileRangeEvent(device='NV', name='E_1', st=decimal.Decimal('1000.633'), en=decimal.Decimal('1045.753')),
+            ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal('1045.953'), en=decimal.Decimal('1090.473')),
+            ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000))]
+    events = load_profile(prof)['layout']['NV']['events']
+    self.assertLessEqual(events[0]['st'] + events[0]['dur'], events[1]['st'])
+
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char).realize()
   a.uop.buffer.allocate()
@@ -853,7 +860,7 @@ class TestVizMemoryLayout(unittest.TestCase):
       for _ in range(n:=4): a.add(1).realize()
     profile = load_profile(cpu_events+Buffer.profile_events)
     programs = profile["layout"][a.device]["events"]
-    users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
+    users = max((e["arg"].get("users", []) for e in profile["layout"][f"{a.device} Memory"]["events"]), key=len)
     self.assertEqual(len(programs), len(set(users)), n)
 
 from tinygrad.uop.ops import KernelInfo

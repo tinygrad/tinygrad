@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
-from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -130,8 +130,10 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
     # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
-    has_dnum = any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
-                   for x in call.body.toposort())
+    # on archs like x86, stack args (after the 6th) aren't PARAMs in the body, so also check the PROGRAM's vars
+    has_dnum = ((isinstance(call.body.arg, ProgramInfo) and any(v.arg.name == '_device_num' for v in call.body.arg.vars)) or
+                any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
+                    for x in call.body.toposort()))
     lanes = max(len(b.bufs) for b in bufs if isinstance(b, MultiBuffer)) # a single buffer is shared by every lane
     per_lane = [b.bufs if isinstance(b, MultiBuffer) else (b,)*lanes for b in bufs]
     for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j} if has_dnum else {}
@@ -182,10 +184,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   info = call.arg.aux
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
+  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
+  for d in {d for devs, _, _, prof, *_ in info.kernels for d in devs if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   if not (ctx.wait or PROFILE): return ets
 
-  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   for devs, name, _, prof, pkey, *_ in info.kernels:
     for d in (devs if prof else ()): cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
   if ctx.wait:
@@ -224,12 +227,12 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   # a PROGRAM with a ProgramInfo and a BINARY is already compiled
   if (ast.op is Ops.SINK and isinstance(ast.arg, KernelInfo)) or \
      (ast.op is Ops.PROGRAM and not (isinstance(ast.arg, ProgramInfo) and ast.src[-1].op is Ops.BINARY)):
-    return ast, Device[c.device if isinstance(c.device, str) else c.device[0]].renderer
+    return ast, Device[to_tuple(c.device)[0]]._select_renderer(HCQ_RUNTIME_DEV if isinstance(c.arg.aux, HCQInfo) else DEV)
   return None
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   # collect the kernels to lower and compile, deduped by their compile cache key
-  if not len(ar:={c: a for c in linear.toposort(enter_calls=False) if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
+  if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 
   # lower and compile what's not cached, in parallel if there's a worker pool
   keys = {c: to_program_key(*a) for c, a in ar.items()}

@@ -250,8 +250,22 @@ class MovementMixin:
     assert all(not isinstance(x, bool) and x >= 0 and x < self.ndim for x in axis_arg), f"flip args must be axis ints {axis_arg}"
     if len(axis_arg) != len(dedup(axis_arg)):
       raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
-    flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
-    return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
+    ret = self
+    for axis in axis_arg:
+      if resolve((n:=ret.shape[axis]) <= 1, False): continue
+      x = ret.transpose(0, axis)
+      bounds, crop = (None,) * (x.ndim-1), tuple((0, s) for s in x.shape[1:])
+      tail = tuple(s if resolve(s > 0, False) else s+1 for s in x.shape[1:])
+      m, tail_pad = n if resolve(n >= 2, False) else n+2, tuple((0, s) for s in tail)
+      # Place values on an anti-diagonal, transpose it, then extract the anti-diagonal.
+      # Pad possibly empty dimensions before reshaping, then crop them back afterwards.
+      x = x._mop(Ops.PAD, ((0, m),)+tail_pad).reshape(m, 1, *tail)
+      x = x._mop(Ops.PAD, ((0, m), (0, m-1))+tail_pad).reshape(m*(m-1), *tail)
+      x = x._mop(Ops.PAD, ((m-1, m*m),)+tail_pad).reshape(m, m, *tail).transpose(0, 1).reshape(m*m, *tail)
+      x = x._mop(Ops.SHRINK, ((m-1, m*(m-1)),)+tail_pad).reshape(m, m-1, *tail)
+      x = x.shrink((None, (0, 1))+bounds).reshape(m, *tail)
+      ret = x.shrink(((m-n, m),)+crop).transpose(0, axis)
+    return ret
 
   def stack(self, *args: Self, dim: int = 0) -> Self:
     """
@@ -587,6 +601,7 @@ class MovementMixin:
     ```
     """
     repeats = argfix(repeats, *args)
+    if any(resolve(r < 0, False) for r in repeats): raise RuntimeError(f"repeats should be non negative, got {repeats} instead")
     base_shape = _align_left(self.shape, repeats)[0]
     unsqueezed_shape = flatten([[s] if r == 1 else [1, s] for r, s in zip(repeats, base_shape)])
     expanded_shape = flatten([[s] if r == 1 else [r, s] for r, s in zip(repeats, base_shape)])
