@@ -1,14 +1,14 @@
 from __future__ import annotations
-import enum, functools, itertools, math, pathlib, re, time
+import array, enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, gated_delta_decode, amd_sample, swiglu_q8, flash_attention
-from tinygrad.llm.kernels.amd import attn_decode_prep, amd_flash_attention_decode, flash_decode_supported
-from tinygrad.llm.kernels.amd import amd_custom_kernels_supported, rms_norm_q8, fused_norm_supported, p2p_partial, p2p_comm, amd_embedding
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, gated_delta_decode, flash_attention, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import rms_norm_q8, fused_norm_supported, p2p_partial
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import prod
+from tinygrad.device import Buffer, BufferSpec
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -169,12 +169,8 @@ class FFNBlock:
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
-    gate, up = self.ffn_gate(x), self.ffn_up(x)
-    # decode on RDNA3/4: silu(gate)*up and its quantization for ffn_down are one kernel
-    if isinstance(prod(x.shape[:-1]), int) and gate.shape[-1] % 32 == 0 and amd_custom_kernels_supported(x.device):
-      return self.ffn_down(swiglu_q8(gate, up))
     # TODO: remove the need for this contiguous
-    return self.ffn_down(gate.silu().contiguous() * up)
+    return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -226,13 +222,6 @@ class TransformerBlock(FFNBlock):
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
-    c = self.config
-    if T == 1 and B == 1 and isinstance(start_pos, UOp) and c.qk_norm == c.head_dim and c.attn_output_gate and not c.sliding_window and \
-       not c.attn_sinks and c.rope_dim % 2 == 0 and amd_custom_kernels_supported(x.device) and \
-       flash_decode_supported(c.head_dim, N:=cast(int, self.cache_kv.shape[3]), c.n_heads // c.n_kv_heads):
-      # decode (RDNA3/4): one kernel for the q/k norm, the rope and the cache write, the gate and the quantization in the combine
-      qr, assigned_kv = attn_decode_prep(q, k, v, self.attn_q_norm, self.attn_k_norm, self.freqs_cis, self.cache_kv, start_pos, c.n_heads, True)
-      return self.attn_output(amd_flash_attention_decode(qr, assigned_kv, start_pos+1, N, gate=q))
     if self.config.attn_output_gate:
       qg = q.reshape(B, T, self.config.n_heads, 2, self.config.head_dim)
       q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.config.n_heads * self.config.head_dim)
@@ -479,64 +468,29 @@ class Transformer:
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
 
-  def logits(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
-    dev, (B, T), D = self.token_embd.weight.device, tokens.shape, self.token_embd.weight.shape[1]
-    if isinstance(T, int) and amd_custom_kernels_supported(dev) and fused_norm_supported(self.output_norm, D):
-      # decode on RDNA3/4: see FFNBlock.fused. the embedding of a vocab split over the devices is summed by the first norm
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+    x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
+    if isinstance(x.shape[1], int) and amd_custom_kernels_supported(x.device) and fused_norm_supported(self.output_norm, x.shape[-1]):
+      # decode on RDNA3/4: see FFNBlock.fused
       pending:Tensor|None = None
-      if (emb:=amd_embedding(self.token_embd, tokens)) is not None and emb[1]:
-        x, pending = Tensor.zeros(B, T, D, device=dev).contiguous(), emb[0].float()
-      else: x = (emb[0].reshape(B, T, D) if emb is not None else self.token_embd(tokens.to(dev))).float()
       for block in self.blk: x, pending = block.fused(x, pending, start_pos)
       xn = rms_norm_q8(self.output_norm, x[:, -1:], None if pending is None else pending[:, -1:])[1]
     else:
-      x = self.token_embd(tokens.to(dev)).float()  # (B, T, D)
       for block in self.blk: x = block(x, start_pos)
       xn = self.output_norm(x[:, -1:])
     # only run the output projection on the last token
-    return self.output(xn)[:, -1, :]
-
-  @functools.cached_property
-  def _sample_on_device(self) -> bool:
-    # sampling runs on the device (see amd_sample) with unsharded logits, or with logits sharded on the vocab that p2p can gather
-    dev = self.output.weight.device
-    return amd_custom_kernels_supported(dev) and (isinstance(dev, str) or (self.output.weight.uop.axis == 0 and p2p_comm(dev) is not None))
-
-  @functools.cached_property
-  def _next_tok(self) -> Tensor:
-    # the next decode step reads the sampled token on the device. with tensor parallel every device keeps a copy, so the next
-    # step needs no broadcast
-    from tinygrad.device import Buffer, BufferSpec, MultiBuffer
-    devs = cast(str|tuple[str, ...], self.token_embd.weight.device)
-    bufs = [Buffer(d, 4, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for d in (devs if isinstance(devs, tuple) else (devs,))]
-    # every step also records its token at its last position, so the host can read it while the next step runs
-    hist = Buffer(bufs[0].device, 4*self.max_context, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
-    self._hist, self._hist_host = Tensor(UOp.from_buffer(hist, dtypes.int32)), hist.as_memoryview(allow_zero_copy=True).cast('i')
-    if isinstance(devs, str): return Tensor(UOp.from_buffer(bufs[0], dtypes.int32)).reshape(1, 1)
-    mb = MultiBuffer.__new__(MultiBuffer)
-    mb.bufs = bufs
-    return Tensor(UOp.from_buffer(mb, dtypes.int32, devs)).reshape(1, 1)
-
-  def forward(self, tokens:Tensor|None, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    if tokens is None: tokens = self._next_tok
-    logits = self.logits(tokens, start_pos)
-    if self._sample_on_device and logits.shape[0] == 1:
-      tok = amd_sample(logits, temperature, cast(str|tuple[str, ...], self._next_tok.device))
-      assert tok is not None, "sampling on the device is not supported for these logits"
-      last = start_pos + tokens.shape[1] - 1
-      hist = self._hist[last:last+1].uop.store(tok.to(self._hist.device).reshape(1).uop)
-      return Tensor(self._next_tok.uop.after(self._next_tok.uop.store(tok.uop), hist))
-    logits = logits.to(tokens.device)
+    logits = self.output(xn)[:, -1, :].to(tokens.device)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+    tok = (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+    # the tokens are a view of generate's token buffer: write the sampled token after them, the next step reads it from there
+    if (buf:=getattr(self, "_token_buf", None)) is not None and tokens.uop.base is buf.uop.base:
+      dst = buf[:, (nxt:=start_pos + tokens.shape[1]):nxt+1].uop
+      tok = Tensor(dst.after(dst.store(tok.cast(buf.dtype).uop)))
+    return tok
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    # decoding from our own last sample: read it on the device instead of feeding it back as an input
-    if self._sample_on_device and tokens is getattr(self, "_last_out", None) and not resolve(tokens.shape[1] != 1):
-      self._last_out = self.rollout_jit(None, start_pos, temperature)
-      return self._last_out
-    self._last_out = (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
-    return self._last_out
+    if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -664,13 +618,6 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def _read_token(self, pos:int, timeout:float=60.0) -> int:
-    # the step writes its token to host memory when it's done
-    st = time.perf_counter()
-    while (tok:=self._hist_host[pos]) < 0:
-      if time.perf_counter() - st > timeout: raise RuntimeError(f"timed out waiting for the token at {pos}")
-    return int(tok)
-
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
@@ -678,31 +625,35 @@ class Transformer:
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
+    if (fast:=amd_custom_kernels_supported(self.token_embd.weight.device)):
+      # in host memory: every step writes its sampled token into it (see forward), the host reads it without a copy
+      if not hasattr(self, "_token_buf"):
+        buf = Buffer(Device.DEFAULT, 4*(self.max_context+1), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+        self._token_host = buf.as_memoryview(allow_zero_copy=True).cast('i')
+        self._token_buf = Tensor(UOp.from_buffer(buf, dtypes.int32)).reshape(1, -1)
+      # a step run ahead by the last generate may still write its token
+      else: Device[Device.DEFAULT].synchronize()
+      self._token_host[:] = array.array('i', tokens + [-1] * (self.max_context + 1 - len(tokens)))
+      t = self._token_buf
+    else: t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
     out, prompt_len, ahead = None, len(tokens), False
-    if self._sample_on_device: self._next_tok  # allocates the token buffers  # noqa: B018
     while len(tokens) < self.max_context:
-      if not ahead:
-        n_toks = min(chunk_size, len(tokens) - start_pos)
-        sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
-        if self._sample_on_device: self._hist_host[start_pos + n_toks - 1] = -1
-        out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
-        start_pos += n_toks
-        # chunked prefill: keep processing until all prompt tokens are consumed
-        if start_pos < len(tokens): continue
-      if self._sample_on_device and out is getattr(self, "_last_out", None):
-        # run ahead: submit the next step (it reads this token on the device) before waiting for this one, so the host work
-        # of the submission overlaps the device work. the caches then hold every token
-        pos, ahead = start_pos - 1, len(tokens) + 1 < self.max_context
-        if ahead:
-          self._hist_host[start_pos] = -1
-          out = self(cast(Tensor, out), v_start_pos.bind(start_pos), temp)
-          start_pos += 1
-        tokens.append(self._read_token(pos))
-        self._cached_tokens = tokens[:] if ahead else tokens[:-1]
+      n_toks = min(chunk_size, len(tokens) - start_pos)
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
+      # with run ahead the previous step already submitted this one
+      if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
+      start_pos += n_toks
+      # chunked prefill: keep processing until all prompt tokens are consumed
+      if start_pos < len(tokens): continue
+      if not fast: tokens.append(int(cast(Tensor, out).item()))
       else:
-        tokens.append(int(cast(Tensor, out).item()))
-        self._cached_tokens = tokens[:-1]
+        # run ahead: submit the next step (it reads this token on the device) before waiting for this one, the host work of the
+        # submission overlaps the device work
+        if ahead:=len(tokens) + 1 < self.max_context: self(t[:, (sp:=v_start_pos.bind(start_pos)):sp+1], sp, temp)
+        while (tok:=self._token_host[start_pos]) < 0: pass
+        tokens.append(tok)
+      # the caches hold every token once the step run ahead is done
+      self._cached_tokens = tokens[:] if ahead else tokens[:-1]
       yield tokens[-1]
