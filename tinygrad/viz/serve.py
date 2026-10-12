@@ -562,8 +562,8 @@ def amd_decode(buf:bytes, arch:str, off:int=0) -> dict[int, Inst]:
     offset += decoded.size()
   return addr_table
 
-def parse_branch(inst) -> int|None:
-  if "branch" in getattr(inst, "op_name", "").lower():
+def parse_branch(inst, op:str) -> int|None:
+  if "branch" in op:
     x = inst.simm16 & 0xffff
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
@@ -582,7 +582,9 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
-    if (offset:=parse_branch(inst)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
+    op = getattr(inst, "op_name", "").lower()
+    if (offset:=parse_branch(inst, op)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
+    elif op in {"s_endpgm"}: leaders.add(pc+inst.size())
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
@@ -595,8 +597,8 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
     blocks[curr].append(pc)
     # otherwise a basic block can have exactly one or two paths
     nx = pc+inst.size()
-    if (offset:=parse_branch(inst)) is not None:
-      if inst.op_name == "S_BRANCH": paths[curr][nx+offset] = UNCOND
+    if (offset:=parse_branch(inst, op:=getattr(inst, "op_name", "").lower())) is not None:
+      if op == "s_branch": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}

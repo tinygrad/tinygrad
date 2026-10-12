@@ -1096,6 +1096,22 @@ class TestCfg(unittest.TestCase):
     self.assertEqual([t["st"] for t in mfma_tok[1:5]], ["a[0:3]", "v[4:7]", "v[8:11]", "a[0:3]"])
     self.assertTrue(set(read_tok[1]["keys"]).isdisjoint(read_tok[2]["keys"]))
 
+  def test_endpgm(self):
+    k = Kernel()
+    k.emit(s_mov_b32(s[1], 2))
+    k.label("cmp")
+    k.emit(s_cmp_eq_i32(s[1], 1))
+    k.emit(s_cbranch_scc1(), target="loop")
+    k.emit(s_endpgm())
+    k.emit(s_mov_b32(s[1], 1))
+    k.label("loop")
+    k.emit(s_branch(), target="cmp")
+    ret = self.get_cfg("endpgm", k)
+    self.assertEqual(len(ret["data"]["blocks"]), 5)
+    # the endpgm block has no path out
+    endpc = next(pc for pc,s in ret["data"]["pc_tokens"].items() if s[0]["st"].startswith("s_endpgm"))
+    self.assertEqual(len(ret["data"]["paths"][endpc]), 0)
+
 # launch viz cli without subprocess
 def run_cli(*cli_args, json_fmt=True) -> list[dict]:
   from tinygrad.viz.cli import main, get_arg_parser
