@@ -545,11 +545,11 @@ jobs:
 
   driverbenchmarks:
     name: PCI Driver Benchmark (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, tinyboxrandom]
+    runs-on: ${{ matrix.dev == 'AMD' && '9060xt' || '3080' }}
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD::gfx1201', 'NV']
+        dev: ['AMD', 'NV']
     timeout-minutes: 5
     defaults:
       run:
@@ -611,7 +611,7 @@ jobs:
     - name: Remote
       if: ${{ matrix.dev != 'NV' }}
       env:
-        DEV: PCI+AMD::gfx1201
+        DEV: PCI+AMD
       run: |
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
         server_pid=$!
