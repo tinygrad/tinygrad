@@ -115,7 +115,7 @@ def _stack_select(r0:UOp, srcs:list[UOp], lo:int, hi:int) -> UOp:
   # Bound lookup depth for large constant tables, rather than building a linear chain of thousands of WHEREs.
   if hi-lo <= 8:
     ret = srcs[hi-1]
-    for k in range(hi-2, lo-1, -1): ret = r0.eq(k).where(srcs[k], ret)
+    for k in range(hi-2, lo-1, -1): ret = (r0 < k+1).where(srcs[k], ret)
     return ret
   mid = (lo+hi)//2
   return (r0 < mid).where(_stack_select(r0, srcs, lo, mid), _stack_select(r0, srcs, mid, hi))
@@ -126,8 +126,7 @@ def convert_stack_to_where(ctx:IndexingContext, x:UOp):
   # use the src list directly, a transient STACK of mid-rangeify srcs violates the spec shape rule
   srcs = create_bufferize_and_index_srcs(ctx, x)
   r0 = ctx.range_map[x][1][0]
-  ret = _stack_select(r0, srcs, 0, len(srcs))
-  return (r0 < 0).where(srcs[-1], ret) if len(srcs) > 8 else ret
+  return _stack_select(r0, srcs, 0, len(srcs))
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
