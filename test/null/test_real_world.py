@@ -45,6 +45,7 @@ supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
+    Tensor.ones(4).contiguous().realize() # warmup: an eager link allocates the rt ring once
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
