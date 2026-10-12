@@ -17,7 +17,7 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # 0. helpers
 
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "NULL", "METAL"))
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
 
 @dataclass(frozen=True)
