@@ -322,9 +322,9 @@ class GatedDeltaNetBlock(FFNBlock):
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
     self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
     if ssm.kda:
-      if ssm.full_rank_fg[1]: self.ssm_g_a, self.ssm_g_b = Linear(config.dim, ssm.inner_size, bias=False), lambda x: x
+      if ssm.full_rank_fg[1]: self.ssm_g = Linear(config.dim, ssm.inner_size, bias=False)
       else: self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
-      if ssm.full_rank_fg[0]: self.ssm_f_a, self.ssm_f_b = Linear(config.dim, ssm.inner_size, bias=False), lambda x: x
+      if ssm.full_rank_fg[0]: self.ssm_f = Linear(config.dim, ssm.inner_size, bias=False)
       else: self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
     else:
       self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
@@ -340,19 +340,19 @@ class GatedDeltaNetBlock(FFNBlock):
     # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
     initial = Tensor(start_pos).eq(0)
-    is_kda = hasattr(self, "ssm_g_a")
+    is_kda = unwrap(self.config.ssm).kda
     symbolic = isinstance(T, UOp)
     T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
     x = x.half()
-    out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
+    out_gate = (self.ssm_g(x) if hasattr(self, "ssm_g") else self.ssm_g_b(self.ssm_g_a(x))) if is_kda else self.attn_gate(x)
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
-    alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
+    alpha = (self.ssm_f(x) if hasattr(self, "ssm_f") else self.ssm_f_b(self.ssm_f_a(x))) if is_kda else self.ssm_alpha(x)
     g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
-    # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(-g * A) * lb (A = -exp(A_log))
-    log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
+    # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(g * |A|) * lb (A is stored as -exp(A_log) or exp(A_log))
+    log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * a.abs()).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
     conv_state = initial.where(0, self.conv_state)
@@ -485,7 +485,9 @@ class Transformer:
         state_dict[f"blk.{i}.ssm_conv1d.weight"] = state_dict.pop(f"blk.{i}.ssm_conv1d_q.weight").cat(
           state_dict.pop(f"blk.{i}.ssm_conv1d_k.weight"), state_dict.pop(f"blk.{i}.ssm_conv1d_v.weight"), dim=0).squeeze(1).contiguous()
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
-        if arch == 'bailingmoe3': state_dict[f"blk.{i}.ssm_a"] = -state_dict[f"blk.{i}.ssm_a"]  # gguf stores exp(A_log), not -exp(A_log)
+        state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)
+        for name, full in zip(("ssm_f", "ssm_g"), ssm.full_rank_fg):  # a full-rank gate is a single ssm_f/ssm_g projection
+          if full and f"blk.{i}.{name}_a.weight" in state_dict: state_dict[f"blk.{i}.{name}.weight"] = state_dict.pop(f"blk.{i}.{name}_a.weight")
     if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
 
