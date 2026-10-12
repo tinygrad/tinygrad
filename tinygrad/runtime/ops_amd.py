@@ -164,7 +164,7 @@ class AMDComputeQueue(HWQueue):
       memsel_dw = self.pm4.DATA_SEL(data_sel) | self.pm4.INT_SEL(int_sel)
       ctxid = 0
     addr_w = address if isinstance(address, UOp) else UOp.const(address, dtypes.uint64)
-    val_w = value.cast(dtypes.uint64) if isinstance(value, UOp) else UOp.const(value, dtypes.uint64)
+    val_w = UOp.const(value, dtypes.uint64)
     self.pkt3(self.pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, addr_w, val_w, ctxid)
 
   def memory_barrier(self):

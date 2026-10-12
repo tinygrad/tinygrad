@@ -437,7 +437,7 @@ class Inst:
     return None
 
   @classmethod
-  def from_bytes(cls, data: bytes):
+  def from_bytes(cls, data: bytes|memoryview):
     inst = object.__new__(cls)
     inst._raw = int.from_bytes(data[:cls._base_size], 'little')
     # Upgrade to variant class if needed (_LIT, _DPP8, _DPP16, _SDWA)

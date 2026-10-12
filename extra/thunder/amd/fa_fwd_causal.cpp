@@ -269,7 +269,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
     qo_tile<D, float> q_reg_fl;
     load<1, qo_tile<D, float>, _gl_QKVO>(q_reg_fl, g.Qg, {batch_idx, tile_idx, head_idx, 0});
-    #if !WINDOW
+    #if !WINDOW && ATTN_D != 64  // D64 builds scale AFTER the MMA in fp32 to keep forward LSE consistent with backward P
     mul(q_reg_fl, q_reg_fl, TEMPERATURE_SCALE);  // Use sqrtf for clarity
     #endif
     copy(q_reg, q_reg_fl);
@@ -290,8 +290,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[0]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
-    #if WINDOW
-    mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
+    #if WINDOW || ATTN_D == 64
+    mul(att_block[0], att_block[0], TEMPERATURE_SCALE);  // fp32 scale-after -> unbiased online LSE
     #endif
     __builtin_amdgcn_sched_barrier(0);
     if constexpr (causal) {
@@ -342,8 +342,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         zero(att_block[1]);
         transpose(k_reg_transposed, k_reg);
         mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
-        #if WINDOW
-        mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
+        #if WINDOW || ATTN_D == 64
+        mul(att_block[1], att_block[1], TEMPERATURE_SCALE);  // fp32 scale-after -> unbiased online LSE
         #endif
 #if WINDOW
         // window masks interior tiles that causal skips
@@ -409,8 +409,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         zero(att_block[0]);
         transpose(k_reg_transposed, k_reg);
         mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
-        #if WINDOW
-        mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
+        #if WINDOW || ATTN_D == 64
+        mul(att_block[0], att_block[0], TEMPERATURE_SCALE);  // fp32 scale-after -> unbiased online LSE
         #endif
         //      Finish softmax for QK1
         exp2(att_block[1].tiles[1][0], att_block[1].tiles[1][0]);
@@ -480,8 +480,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[1]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
-    #if WINDOW
-    mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
+    #if WINDOW || ATTN_D == 64
+    mul(att_block[1], att_block[1], TEMPERATURE_SCALE);  // fp32 scale-after -> unbiased online LSE
     #endif
     //      Finish softmax for QK2
     exp2(att_block[0].tiles[1][0], att_block[0].tiles[1][0]);
@@ -549,8 +549,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[0]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
-    #if WINDOW
-    mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
+    #if WINDOW || ATTN_D == 64
+    mul(att_block[0], att_block[0], TEMPERATURE_SCALE);  // fp32 scale-after -> unbiased online LSE
     #endif
     //      Finish softmax for QK3
     exp2(att_block[1].tiles[1][0], att_block[1].tiles[1][0]);
@@ -614,8 +614,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[1]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
-    #if WINDOW
-    mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
+    #if WINDOW || ATTN_D == 64
+    mul(att_block[1], att_block[1], TEMPERATURE_SCALE);  // fp32 scale-after -> unbiased online LSE
     #endif
     //      Finish softmax for QK4
     exp2(att_block[0].tiles[1][0], att_block[0].tiles[1][0]);
