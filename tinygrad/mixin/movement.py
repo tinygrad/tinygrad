@@ -298,10 +298,10 @@ class MovementMixin:
     """`.view` is an alias for `.reshape`."""
     return self.reshape(shape, *args)
 
-  def squeeze(self, dim: int | None = None) -> Self:
+  def squeeze(self, dim: int | Sequence[int] | None = None) -> Self:
     """
     Returns a tensor with specified dimensions of input of size 1 removed.
-    If `dim` is not specified, all dimensions with size 1 are removed.
+    `dim` can be an int or a sequence of ints. If `dim` is not specified, all dimensions with size 1 are removed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.zeros(2, 1, 2, 1, 2)
@@ -313,11 +313,12 @@ class MovementMixin:
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.squeeze(1).shape)
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.squeeze((1, 3)).shape)
+    ```
     """
-    if dim is None:
-      return self.reshape(tuple(dim for dim in self.shape if dim != 1))
-    dim = self._resolve_dim(dim)
-    return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim + 1 :])
+    dims = range(self.ndim) if dim is None else [self._resolve_dim(d) for d in make_tuple(dim, 1)]
+    return self.reshape(tuple(s for i,s in enumerate(self.shape) if i not in dims or s != 1))
 
   def unsqueeze(self, dim: int) -> Self:
     """
