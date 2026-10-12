@@ -552,10 +552,10 @@ def amd_decode(buf:bytes, arch:str, off:int=0) -> dict[int, Inst]:
   from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
   code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
   addr_table:dict[int, Inst] = {}
-  offset = 0
+  offset, view = 0, memoryview(buf)
   while offset < len(buf):
-    remaining = buf[offset:]
-    if code_end is not None and remaining.startswith(code_end): break
+    if code_end is not None and buf.startswith(code_end, offset): break
+    remaining = view[offset:]
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
