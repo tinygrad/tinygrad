@@ -367,5 +367,5 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   if SPEC:
     # validate the kernel graph
     from tinygrad.uop.spec import type_verify, spec_kernel_graph
-    type_verify(tsink, spec_kernel_graph, enter_calls=False)
+    type_verify(tsink, spec_kernel_graph)
   return tsink
