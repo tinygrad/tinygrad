@@ -266,13 +266,13 @@ def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x), dtype=dtype
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   i = ctx.func_args.index(x)
+  sz = imm(dtypes.uint32, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)
   def _stack_arg(disp:int):
-    return (stack_pointer, UOp(Ops.NOOP), UOp(Ops.INS, arg=(X86Ops.FRAME_INDEX, dtypes.int32), src=(imm(dtypes.int32, disp),)),
-            imm(dtypes.uint32, 8))
+    return (stack_pointer, UOp(Ops.NOOP), UOp(Ops.INS, arg=(X86Ops.FRAME_INDEX, dtypes.int32), src=(imm(dtypes.int32, disp),)), sz)
   if sys.platform == "win32": src = (x.replace(tag=((RCX, RDX, GPR[8], GPR[9])[i],)),) if i < 4 else _stack_arg((i-3)*8+32)
   else: src = (x.replace(tag=((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i],)),) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
-  return x.ins(X86Ops.MOV, dtype=dtypes.uint64, src=src)
+  return x.ins(X86Ops.MOV, dtype=x.dtype if x.addrspace is AddrSpace.ALU else dtypes.uint64, src=src)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
