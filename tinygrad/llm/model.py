@@ -5,6 +5,7 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_parse, gguf_shard
 from tinygrad.uop.ops import resolve
+from tinygrad.helpers import unwrap
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -69,6 +70,8 @@ class SSMConfig:
   time_step_rank: int
   inner_size: int
   kda: bool = False
+  full_rank_fg: tuple[bool, bool] = (False, False)  # KDA decay (f) / output (g) gate: one full-rank ssm_x_a, or low-rank ssm_x_a -> ssm_x_b
+  gate_lower_bound: float|None = None
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -110,6 +113,9 @@ class TransformerConfig:
   swiglu_up_bias: float = 0.0
   sliding_window: int = 0
   sliding_window_pattern: int = 0
+  expert_group_count: int = 0
+  expert_group_used: int = 0
+  mla_nope: bool = False
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -150,6 +156,11 @@ class FFNBlock:
       elif gating == ExpertGating.SIGMOID:        scores = logits.sigmoid()
       elif gating == ExpertGating.SQRT_SOFTPLUS:  scores = logits.softplus().sqrt()
 
+      if (G:=self.config.expert_group_count) > 1:  # only experts in the expert_group_used groups with the largest top-2 sums
+        gs = pairwise_topk((scores if bias is None else scores + bias).reshape(x.shape[0], -1, self.config.num_experts//G), 2)[0].sum(-1)
+        gs = gs.reshape(x.shape[0], -1, G)
+        keep = (gs >= pairwise_topk(gs, self.config.expert_group_used)[0].min(-1, keepdim=True)).repeat_interleave(self.config.num_experts//G, -1)
+        bias = keep.where(0 if bias is None else bias, float("-inf"))
       _, sel = pairwise_topk(scores if bias is None else scores + bias, self.config.num_experts_per_tok)
       probs = scores.gather(-1, sel)
       # SOFTMAX_WEIGHT applies softmax after top-k selection
@@ -267,6 +278,7 @@ class MLATransformerBlock(FFNBlock):
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+    if config.attn_output_gate: self.attn_gate = Linear(config.dim, config.n_heads, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
@@ -274,13 +286,13 @@ class MLATransformerBlock(FFNBlock):
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.mla_nope: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
     q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.mla_nope: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
@@ -292,6 +304,7 @@ class MLATransformerBlock(FFNBlock):
     if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+    if self.config.attn_output_gate: attn = attn * self.attn_gate(x).sigmoid().repeat_interleave(self.config.v_head_dim, -1)
     return self.attn_output(attn)
 
   def _init_state(self, x:Tensor):
@@ -309,8 +322,10 @@ class GatedDeltaNetBlock(FFNBlock):
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
     self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
     if ssm.kda:
-      self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
-      self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
+      if ssm.full_rank_fg[1]: self.ssm_g_a, self.ssm_g_b = Linear(config.dim, ssm.inner_size, bias=False), lambda x: x
+      else: self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
+      if ssm.full_rank_fg[0]: self.ssm_f_a, self.ssm_f_b = Linear(config.dim, ssm.inner_size, bias=False), lambda x: x
+      else: self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
     else:
       self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
       self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
@@ -335,8 +350,9 @@ class GatedDeltaNetBlock(FFNBlock):
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) *
-                 self.ssm_a.reshape(self.num_v_heads, -1))
+    g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
+    # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(-g * A) * lb (A = -exp(A_log))
+    log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
     conv_state = initial.where(0, self.conv_state)
@@ -456,10 +472,12 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(kv[f'{arch}.block_count']))
-    elif arch == 'kimi-linear':
+    elif arch in ('kimi-linear', 'bailingmoe3'):
       ssm_layers = tuple(x == 0 for x in n_kv_heads)
       n_kv_heads = max(n_kv_heads)
-      ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True)
+      ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True,
+                      full_rank_fg=('blk.0.ssm_f_b.weight' not in state_dict, 'blk.0.ssm_g_b.weight' not in state_dict),
+                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'))
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.attn_qkv.weight"] = state_dict.pop(f"blk.{i}.attn_q.weight").cat(
@@ -467,6 +485,7 @@ class Transformer:
         state_dict[f"blk.{i}.ssm_conv1d.weight"] = state_dict.pop(f"blk.{i}.ssm_conv1d_q.weight").cat(
           state_dict.pop(f"blk.{i}.ssm_conv1d_k.weight"), state_dict.pop(f"blk.{i}.ssm_conv1d_v.weight"), dim=0).squeeze(1).contiguous()
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
+        if arch == 'bailingmoe3': state_dict[f"blk.{i}.ssm_a"] = -state_dict[f"blk.{i}.ssm_a"]  # gguf stores exp(A_log), not -exp(A_log)
     if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
 
@@ -504,6 +523,7 @@ class Transformer:
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
       expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func',
         ExpertGating.SOFTMAX_WEIGHT if arch == 'gpt-oss' else ExpertGating.SOFTMAX)),
+      expert_group_count=kv.get(f'{arch}.expert_group_count', 0), expert_group_used=kv.get(f'{arch}.expert_group_used_count', 0),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
@@ -511,8 +531,8 @@ class Transformer:
         kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
-      ssm_layers=ssm_layers,
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe', 'bailingmoe3'), ssm=ssm,
+      ssm_layers=ssm_layers, mla_nope=arch == 'kimi-linear',
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
