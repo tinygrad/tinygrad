@@ -417,8 +417,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 def lower_call(ctx:Renderer, call:UOp) -> UOp:
   body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
   body = full_rewrite_to_sink(body, ctx, optimize=False)
-  body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)),
-             arg=to_function_name(call.arg.name))
+  body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)), arg=to_function_name(call.arg.name))
   return call.replace(src=(body,)+call.src[1:])
 
 pm_lower_calls = PatternMatcher([
