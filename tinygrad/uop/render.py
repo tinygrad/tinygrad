@@ -147,7 +147,6 @@ def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], sp
     depth[u] = 0 if u in to_render else op_depth
     ren = pm.rewrite(u, ctx=r)
     assert isinstance(ren, str)
-    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
     if u not in to_render: r[u] = ren
     else:
       r[u] = f"c{i}" if u is not lst[-1] else "ast"

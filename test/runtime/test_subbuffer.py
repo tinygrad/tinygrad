@@ -46,6 +46,10 @@ class TestSubBuffer(unittest.TestCase):
     dbuf = t.uop[4:8].detach()[1:3].buffer.ensure_allocated()
     assert dbuf.as_memoryview().tolist() == vbuf.as_memoryview().tolist() == [5, 6]
 
+  def test_subbuffer_bitcast(self):
+    t = Tensor.arange(0, 10, dtype=dtypes.uint8).clone().realize()
+    self.assertIs(t.uop.bitcast(dtypes.int8).buffer, t.uop.buffer)
+
   @needs_second_gpu
   @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} or DEV.interface.startswith("MOCK"), "only NV, AMD, CUDA")
   def test_subbuffer_transfer(self):
