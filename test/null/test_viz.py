@@ -853,7 +853,7 @@ class TestVizMemoryLayout(unittest.TestCase):
       for _ in range(n:=4): a.add(1).realize()
     profile = load_profile(cpu_events+Buffer.profile_events)
     programs = profile["layout"][a.device]["events"]
-    users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
+    users = max((e["arg"].get("users", []) for e in profile["layout"][f"{a.device} Memory"]["events"]), key=len)
     self.assertEqual(len(programs), len(set(users)), n)
 
 from tinygrad.uop.ops import KernelInfo
