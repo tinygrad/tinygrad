@@ -215,6 +215,7 @@ pm_reduce_local = pm_wmma_add+PatternMatcher([
   # remove reduces
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
+  (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
 ])+pm_clean_up_group_sink
 
 def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != u.src[0].shape
@@ -305,8 +306,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
-  # Merge once over the whole body, not repeatedly over every nested SINK.
-  if (merged:=merge_reduce_ends(sink)) is not None: sink = merged
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
