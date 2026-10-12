@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence
-import functools, itertools, weakref, ctypes, struct, time
+import functools, itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
-from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
+from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, getenv, to_name
 from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
@@ -16,7 +16,6 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # *****************
 # 0. helpers
 
-HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
 HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "NULL", "METAL"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
 
@@ -111,11 +110,10 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
 # *****************
 # 0.1. prep: eager buffers become tagged params
 
-def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
-  use_rt, bufs, slots = ctx
+def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
+  bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  param = UOp.param(slots[b], b.dtype, b.max_numel(), b.device)
-  return param if use_rt else param.replace(tag="lt_input")
+  return UOp.param(slots[b], b.dtype, b.max_numel(), b.device).replace(tag="lt_input")
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b))])
 
 # *****************
@@ -541,9 +539,8 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
   if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
 
   if cache and input_uops is not None:
-    use_rt = len(linear.src) < HCQ_CACHE_THRESH # small schedules use runtime address patches so linked schedules can be cached without input buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
+    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
   linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode")
@@ -617,17 +614,9 @@ pm_link = PatternMatcher([
    a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
 
-link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
-
 @rewrite_group(lambda _,input_uops=None,allow_cache=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
-  if allow_cache and (linked:=link_linear_cache.get(linear)) is not None: return linked
-
-  # if we have any link time buffers, do not cache this linear
-  cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
-
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
-  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
+  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
-  if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked

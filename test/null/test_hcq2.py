@@ -1,14 +1,12 @@
 import unittest
-from typing import cast
 from types import SimpleNamespace
 from collections import defaultdict
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, dtypes
 from tinygrad.device import Buffer, Compiled, ProfileGraphEvent
 from tinygrad.helpers import Context, unwrap, to_tuple
-from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
-from tinygrad.engine.realize import compile_linear, link_linear, get_call_arg_uops, lower_and_compile, run_linear
+from tinygrad.engine.realize import compile_linear, get_call_arg_uops, lower_and_compile, run_linear
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
 
@@ -203,16 +201,6 @@ class TestHCQ2Profile(unittest.TestCase):
 
 class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))
-
-  def test_links_serve_any_input(self):
-    a, inputs = chain_input(), list[UOp]()
-    linear = compile_linear(chain(a, 2).schedule_linear(), input_uops=inputs, cache=True)
-    linked = link_linear(linear, input_uops=inputs)
-    self.assertIs(link_linear(linear, input_uops=[chain_input(3).uop.base, *inputs[1:]]), linked)
-    bufs = [cast(Buffer, u.buffer) for u in linked.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL]
-    self.assertNotIn(a.uop.base.buffer, bufs)
-    words = [w for b in bufs if b.options.external_ptr and b.nbytes % 8 == 0 for w in b.host.view(fmt='Q')[:]]
-    self.assertNotIn(cast(Buffer, a.uop.base.buffer)._buf, words)
 
   def test_eager_templates_compile_once(self): self.assertIs(compiled_chain(3)[1], compiled_chain(3)[1])
 
