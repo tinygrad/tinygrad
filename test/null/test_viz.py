@@ -1240,16 +1240,20 @@ class TestCLI(unittest.TestCase):
       # call inner twice, it should not codegen inner twice
       call = inner(out)
       return inner(out.after(call)).sink()
-    def kernel(out:UOp): return outer(out).sink(arg=KernelInfo(name="nested_calls"))
+    def kernel(out:UOp, name="nested_calls"): return outer(out).sink(arg=KernelInfo(name=name))
     with save_viz() as viz, Context(SCACHE=0):
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
+      Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=lambda out: kernel(out, "cached_calls"))[0].realize()
     with write_files(viz) as files:
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
+      cached = run_cli(*files, "-s", "TINY", "do_to_program for cached_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
     # The inner body is cached; inner, outer, and caller each undergo lowering once.
     self.assertEqual(len(codegen_count), 3)
+    # A different caller reuses both lowered bodies.
+    self.assertEqual(sum("View Output AST" in s for s in cached), 1)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
 

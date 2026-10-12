@@ -331,7 +331,7 @@ class _Ctx:
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
 
-  def __init__(self, inst_size: int, wave_size: int = 32, inst_addr: int | UOp | None = None):
+  def __init__(self, inst_size: int, wave_size: int = 32, inst_addr: int | None = None):
     self.inst_size, self._axis_id, self.wave_size, self.inst_addr = inst_size, 0, wave_size, inst_addr
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
     if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
@@ -1858,9 +1858,6 @@ _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 _BARRIER_SOP1_OPS: set = set()
 if hasattr(ir4.SOP1Op, 'S_BARRIER_SIGNAL'): _BARRIER_SOP1_OPS.add(ir4.SOP1Op.S_BARRIER_SIGNAL)
-def _is_barrier(inst: Inst) -> bool:
-  return (isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS) or \
-         (isinstance(inst, ir4.SOP1) and inst.op in _BARRIER_SOP1_OPS)
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
   ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
 
@@ -2001,7 +1998,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
       (prg, runtime), inst = _decode_at(pc, arch)
-      is_barrier = _is_barrier(inst)
+      is_barrier = (isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS) or \
+                   (isinstance(inst, (ir4.SOP1,)) and inst.op in _BARRIER_SOP1_OPS)
       program[pc] = (runtime.fxn, prg.arg.globals, is_barrier, inst)
       if DEBUG >= 3:
         msg = f"[emu] PC={pc - lib}: {inst!r}"

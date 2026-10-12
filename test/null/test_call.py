@@ -116,20 +116,6 @@ class TestArgOrder(unittest.TestCase):
       UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
 
 class TestCallCodegen(unittest.TestCase):
-  def test_shared_body_lowered_once(self):
-    out = UOp.param(0, dtypes.int, (2,))
-    index = UOp.param(1, dtypes.int, addrspace=AddrSpace.ALU)
-    body = out[index].store(index + 10).sink()
-    first = body.call(out, UOp.const(0, dtypes.int), name="shared_callee")
-    second = body.call(out.after(first), UOp.const(1, dtypes.int), name="shared_callee")
-    sink = out.after(second).sink(arg=KernelInfo("shared_body_lowered_once"))
-    prg = to_program(sink, ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
-    other = to_program(sink.replace(arg=KernelInfo("another_caller")), ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
-    calls = [u for u in prg.src[1].src if u.op is Ops.CALL]
-    self.assertEqual(len(calls), 2)
-    self.assertIs(calls[0].body, calls[1].body)
-    self.assertIs(calls[0].body, next(u for u in other.src[1].src if u.op is Ops.CALL).body)
-
   def test_compiled_scalar_slots_are_not_call_slots(self):
     out = UOp.placeholder((1,), dtypes.int)
     p = out.param_like(0)

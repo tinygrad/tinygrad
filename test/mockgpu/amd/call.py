@@ -279,7 +279,7 @@ def lift_dispatch(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratc
 dispatch_cache:dict[tuple, UOp] = {}
 
 def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
-  lib_sz, entry = len(lib_bytes), 0
+  lib_sz = len(lib_bytes)
   insts, cfg, regions = decode_cfg(lib_bytes, arch)
   axes = itertools.count(lib_sz)
   lx, ly, lz, rsrc2, scratch_size, user_data = dispatch
@@ -310,7 +310,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), lds, args_ptr, *dims,
                    wave_size, lds_size, scratch_size, rsrc2, arch, user_data,
                    *([accvgpr.index(wave*256*wave_size)] if wave_size == 64 else []))
-  initialized = routes.after(init).index(wave).store(entry).end(wave)
+  initialized = routes.after(init).index(wave).store(0).end(wave)
   afters = {b:buf.after(initialized) for b,(buf,_) in buffers.items()}
 
   def block_instructions(block_pc:int):
@@ -367,7 +367,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   emit_dispatch(regions, (wg,))
   body = UOp.group(*afters.values()).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
-  name = f"asm_call_{arch}_{body.key.hex()[:16]}_{entry}"
+  name = f"asm_call_{arch}_{body.key.hex()[:16]}"
   sink = UOp.sink(body, arg=KernelInfo(name=name, opts_to_apply=())).rtag(1)
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     renderer = backend_renderer(backend)
