@@ -492,7 +492,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     if self.op is Ops.CONST: return self
-    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
+    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src)) for s in self.src): return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
