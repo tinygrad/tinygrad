@@ -140,6 +140,16 @@ class TestUOpsStats(unittest.TestCase):
   def test_xor_gather(self):
     self.assertEqual(get_stats(Tensor.empty(32)[Tensor.arange(32) ^ 16])[0], 0)
 
+  def test_or_gather(self):
+    self.assertEqual(get_stats(Tensor.empty(32)[Tensor.arange(16) | 16])[0], 0)
+
+  def test_and_gather(self):
+    self.assertEqual(get_stats(Tensor.empty(16)[Tensor.arange(32) & (Tensor.arange(32) % 16)])[0], 0)
+
+  def test_shift_gather(self):
+    self.assertEqual(get_stats(Tensor.empty(32)[Tensor.arange(8) << (Tensor.arange(8) % 2)])[0], 0)
+    self.assertEqual(get_stats(Tensor.empty(8)[Tensor.arange(32) >> (Tensor.arange(32) % 3 + 2)])[0], 0)
+
   def test_simple_matmul(self, M=1024, N=1024, K=1024):
     a = Tensor.empty(M,N)
     b = Tensor.empty(N,K)

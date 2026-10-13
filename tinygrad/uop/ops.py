@@ -1092,12 +1092,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
       if self.op is Ops.SUB: return s0_vmin-s1_vmax, s0_vmax-s1_vmin
-      if self.op is Ops.AND and dtypes.is_int(self.dtype) and s1_vmin == s1_vmax >= 0:
-        return 0, s1_vmax if s0_vmin < 0 else min(s0_vmax, int(s1_vmax) & ((1 << int(s0_vmax).bit_length()) - 1))
+      if self.op is Ops.AND and dtypes.is_int(self.dtype) and (s0_vmin >= 0 or s1_vmin >= 0):
+        # a non-negative operand x < 2**k bounds the result by x and by what the other operand can be mod 2**k
+        def top(lo, hi, k): return int(hi) % (1 << k) if int(lo) >> k == int(hi) >> k else (1 << k) - 1  # the largest y % 2**k over y in [lo, hi]
+        sides = ((s0_vmin, s0_vmax), (s1_vmin, s1_vmax))
+        return 0, min(min(hi, top(*other, int(hi).bit_length())) for (lo, hi), other in zip(sides, sides[::-1]) if lo >= 0)
       if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
-      # SHL/SHR on consts only
-      if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
-      if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
+      if self.op in (Ops.SHL, Ops.SHR) and 0 <= s1_vmin and s1_vmax < self.dtype.bitsize and all_int(t:=(s0_vmin, s0_vmax, s1_vmin, s1_vmax)):
+        # a shift is monotone in the value and, for a fixed value, in the shift: the extremes sit at the corners
+        return min(vals:=tuple(python_alu[self.op](x, y) for x in t[:2] for y in t[2:])), max(vals)
       if self.op is Ops.CMOD:
         if (c:=s1_vmin) == s1_vmax > 0:
           return (0 if s0_vmin > 0 else s0_vmin if 0 >= s0_vmin > -c else -(s1_vmax-1), 0 if s0_vmax < 0 else s0_vmax if 0 <= s0_vmax < c else c-1)
@@ -1120,8 +1123,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if s1_vmax < 0: return (s1_vmin+1, 0)
       if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int):
         return ~int(s0_vmax), ~int(s0_vmin)
-      if self.op is Ops.XOR and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
-        return 0, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1
+      if self.op in (Ops.OR, Ops.XOR) and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
+        # non-negative operands: at most their sum and below the wider operand's next power of two; OR keeps every bit of both
+        return max(s0_vmin, s1_vmin) if self.op is Ops.OR else 0, min(s0_vmax+s1_vmax, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))

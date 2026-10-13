@@ -135,6 +135,17 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x.vmin, 0)
     self.assertEqual(x.vmax, 10 >> 2)
 
+  def test_vmin_vmax_variable_shift(self):
+    # the extremes sit at the corners, for negative values too
+    self.assertEqual((UOp.variable('x', 0, 10) << UOp.variable('y', 1, 3))._min_max, (0, 80))
+    self.assertEqual((UOp.variable('x', -3, 5) << UOp.variable('y', 0, 2))._min_max, (-12, 20))
+    self.assertEqual((UOp.variable('x', -7, 5) >> UOp.variable('y', 0, 2))._min_max, (-7, 5))
+    self.assertEqual((UOp.variable('x', 8, 100) >> UOp.variable('y', 1, 3))._min_max, (1, 50))
+    # a shift that may be negative or reach the bit width is undefined and not bounded
+    self.assertEqual((UOp.variable('x', 0, 10) << UOp.variable('y', -1, 3))._min_max, (dtypes.weakint.min, dtypes.weakint.max))
+    x = UOp.variable('x', 0, 10, dtypes.int32) << UOp.variable('y', 0, 32, dtypes.int32)
+    self.assertEqual(x._min_max, (dtypes.int32.min, dtypes.int32.max))
+
   def test_vmin_vmax_cast_unsigned(self):
     # a fitting source keeps exact bounds: no wrap can occur
     self.assertEqual(UOp.variable('x', 5, 10).cast(dtypes.uint8)._min_max, (5, 10))
@@ -159,12 +170,26 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop3.vmax, ~(-5))
 
   def test_vmin_vmax_xor_nonneg(self):
-    # non-negative operands stay below the wider operand's next power of two
+    # non-negative operands stay below their sum and the wider operand's next power of two
     self.assertEqual((UOp.variable('x', 0, 31) ^ 16)._min_max, (0, 31))
-    self.assertEqual((UOp.variable('x', 3, 10) ^ UOp.variable('y', 0, 40))._min_max, (0, 63))
-    self.assertEqual((UOp.variable('x', 0, 200, dtypes.uint8) ^ UOp.variable('y', 0, 3, dtypes.uint8))._min_max, (0, 255))
+    self.assertEqual((UOp.variable('x', 3, 10) ^ UOp.variable('y', 0, 40))._min_max, (0, 50))
+    self.assertEqual((UOp.variable('x', 0, 200, dtypes.uint8) ^ UOp.variable('y', 0, 3, dtypes.uint8))._min_max, (0, 203))
     # a possibly-negative operand is not bounded
     self.assertEqual((UOp.variable('x', -1, 10) ^ 16)._min_max, (dtypes.weakint.min, dtypes.weakint.max))
+
+  def test_vmin_vmax_or_nonneg(self):
+    # OR keeps every bit of both operands, so it is at least either, and shares XOR's upper bound
+    self.assertEqual((UOp.variable('x', 0, 31) | 16)._min_max, (16, 31))
+    self.assertEqual((UOp.variable('x', 3, 10) | UOp.variable('y', 0, 40))._min_max, (3, 50))
+    self.assertEqual((UOp.variable('x', -1, 10) | 16)._min_max, (dtypes.weakint.min, dtypes.weakint.max))
+
+  def test_vmin_vmax_and_with_variable_mask(self):
+    # a non-negative operand bounds the result even when the other is a range or negative
+    self.assertEqual((UOp.variable('x', 0, 5) & UOp.variable('y', 0, 24))._min_max, (0, 5))
+    self.assertEqual((UOp.variable('x', -100, 100) & UOp.variable('y', 0, 9))._min_max, (0, 9))
+    self.assertEqual((UOp.variable('x', 8, 15) & UOp.variable('y', -3, -1))._min_max, (0, 15))
+    # against x < 2**k the other operand only contributes its value mod 2**k
+    self.assertEqual((UOp.variable('x', 0, 7) & UOp.variable('y', 16, 19))._min_max, (0, 3))
 
   def test_vmin_vmax_cast(self):
     x = UOp.variable('x', -10, 10, dtypes.int)
