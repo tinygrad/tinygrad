@@ -2,10 +2,12 @@ import ctypes, itertools, functools, struct, re, subprocess, tempfile, pathlib
 from dataclasses import replace
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
-from tinygrad.codegen import to_program, to_program_config
+from tinygrad.codegen import to_program, to_program_config, lower_call
+from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runtime, runtime_cache
 from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
 from tinygrad.helpers import Context, getenv, TracingKey, unwrap, Target, cpu_profile
@@ -168,18 +170,19 @@ def instruction_call(inst:Inst, arch:str) -> InstructionCall:
 def has_effects(body:UOp) -> bool:
   return any(u.op in (Ops.STORE, Ops.CALL) for u in body.toposort())
 
-def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
+def instruction_block(instructions:list[tuple[int, InstructionCall]], renderer:Renderer) -> tuple[UOp, list[UOp]]:
   bufs = sorted({b for _,(_,bs,_) in instructions for b in bs if b.arg.slot != -1}, key=lambda b:b.arg.slot)
   base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   inst = None
   for off,(template,bs,_) in instructions:
-    args = [base+off if b.arg.slot == -1 else params[b] for b in bs]
-    invoke = template.replace(src=(template.body, *args))
+    args = [base+UOp.const(off, dtypes.uint64) if b.arg.slot == -1 else params[b] for b in bs]
+    invoke = template.replace(src=(lower_call(renderer, template).body, *args))
     if inst is not None:
       invoke = invoke.replace(src=(*invoke.src[:-1], invoke.src[-1].after(inst)))
     inst = invoke
-  return UOp.sink(inst), bufs
+  # The block only sequences lowered calls and typed instruction addresses; it is ready for linearization.
+  return UOp(Ops.LINEAR, src=tuple(linearize(UOp.sink(inst))), arg="asm_block"), bufs
 
 def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # Thread jump-only blocks, then share identical conditional branches with the same destinations.
@@ -269,7 +272,9 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
 
 dispatch_cache:dict[tuple, UOp] = {}
 
+@Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0)
 def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
+  renderer = backend_renderer(backend)
   lib_sz = len(lib_bytes)
   insts, cfg, regions = decode_cfg(lib_bytes, arch)
   axes = itertools.count(lib_sz)
@@ -328,7 +333,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
-      body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
+      body, bufs = instruction_block([(pc-off, info) for pc,info in chunk], renderer)
       args = [afters[b].index(wave*buffers[b][1]).after(*scopes) for b in bufs]
       call = body.call(*args, code_addr+off, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
@@ -363,6 +368,4 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
   name = f"asm_call_{arch}_{body.key.hex()[:16]}"
   sink = UOp.sink(body, arg=KernelInfo(name=name)).rtag(1)
-  with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    renderer = backend_renderer(backend)
-    return to_program(sink, renderer)
+  return to_program(sink, renderer)
