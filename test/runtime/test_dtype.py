@@ -5,7 +5,7 @@ from typing import Any, List
 from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES, DEV
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.nir import LVPRenderer, NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype, min_normal
@@ -288,6 +288,12 @@ class TestDoubleDType(TestDType):
     _test_op(lambda: Tensor([3.4e40, 3.4e38, 1, 0], dtype=dtypes.float64).cast(dtypes.float32),
              dtypes.float32, [float('inf'), 3.4e38, 1, 0])
 
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, LVPRenderer), "LVP f64->f16 rounding")
+  def test_float64_to_half_midpoint(self):
+    # 1 + 2**-11 is the midpoint between float16 1.0 and the next value. Just above it must round away.
+    values = np.array([sign * (1 + 2**-11 + delta) for sign in (1, -1) for delta in (-2**-40, 0, 2**-40)], dtype=np.float64)
+    actual = Tensor(values).cast(dtypes.half).bitcast(dtypes.uint16).numpy()
+    np.testing.assert_array_equal(actual, np.array([0x3c00, 0x3c00, 0x3c01, 0xbc00, 0xbc00, 0xbc01], dtype=np.uint16))
 
 class TestIntegerCast(unittest.TestCase):
   def test_narrow_then_widen(self):
