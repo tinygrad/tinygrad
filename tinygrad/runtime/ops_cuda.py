@@ -104,6 +104,7 @@ class CUDADevice(Compiled):
     self.cu_device = init_c_var(api.CUdevice, lambda x: check(api.cuDeviceGet(ctypes.byref(x), device_id)))
     self.context = init_c_var(api.CUcontext, lambda x: check(api.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
     self.streams = [init_c_var(api.CUstream, lambda x: check(api.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
+    # http://www.jcuda.org/jcuda/doc/jcuda/driver/CUdevice_attribute.html CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM
     self.host_ptr_is_dev_ptr = not WSL or api is not cuda 
     super().__init__(device, CUDAAllocator(self), self.renderers, None, arch=self.get_arch(device_id))
     Compiled.pm_bufferize += PatternMatcher([
