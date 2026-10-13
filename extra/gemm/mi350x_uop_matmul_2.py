@@ -114,7 +114,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     C_view = C[gx, :, gy, :].reshape(BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M, BLOCK_N//TC_N, TC_N)[:, warpgroup, warp%16, :, (warp//16)*4]
     sink = copy(C_view, acc.after(sink), rng=300)
   else:
-    sink = C.after(barrier.end(K_outer_loop))[0,0,0,0].store(As[0,0]+Bs[0,0])
+    sink = C.after(barrier.end(K_outer_loop))[0,0,0,0].store((As[0,0]+Bs[0,0]).float())
 
   return sink.sink(arg=KernelInfo(name="custom_gemm", opts_to_apply=())).simplify()
 
