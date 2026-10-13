@@ -268,6 +268,17 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+def do_range_to_backedge(sink:UOp):
+  # bottom up -> end gets rewritten before range??
+  accs = {u:UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG) for u in sink.toposort() if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL)}
+  pm = PatternMatcher([
+    # range rewritten to latest acc value
+    (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x].after(UOp.loop(x.axis_id))[0].load() if x in ctx else None),
+    (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
+      body.backedge((l := UOp.loop(rng.axis_id)), acc.after(acc.store(acc.after(l)[0].load() + 1)) < bnd) if (acc := ctx.get(rng, None)) is not None else None),
+  ])
+  return graph_rewrite(sink, pm, ctx=accs, bottom_up=True)
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -371,6 +382,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
+
+  # test
+  sink = do_range_to_backedge(sink)
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
