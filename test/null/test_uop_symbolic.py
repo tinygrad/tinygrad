@@ -1498,6 +1498,7 @@ class TestGatedUopGivenValid(unittest.TestCase):
     idx = graph_rewrite(idx, pm_simplify_valid)
     # (r0-1)//3 = (r0+2)//3 - 1 (constant offset split)
     self.assertEqual(idx, (r0 < 3).where((r0 + uconst(2)) // uconst(3) + uconst(-1), UOp.invalid()))
+    self.assertEqual(graph_rewrite((r0 <= 1).where(r0//2, UOp.invalid()), pm_simplify_valid), (r0 <= 1).where(uconst(0), UOp.invalid()))
 
   def test_invalid_gate_simplifies_vectorize(self):
     r0 = Variable("r0", 0, 2)

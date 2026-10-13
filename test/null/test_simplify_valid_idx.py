@@ -248,6 +248,8 @@ class TestImageSimplification(unittest.TestCase):
     # same thing, valid has a div
     load = get_load_image_uop((10, 10, 4), gidx1//2<5, (gidx0, gidx1))
     self.check(load, None, "gidx0", "gidx1")
+    load = get_load_image_uop((10, 10, 4), gidx1<=9, (gidx0, gidx1))
+    self.check(load, None, "gidx0", "gidx1")
 
     # 10x20 image, not out of bound
     load = get_load_image_uop((20, 10, 4), gidx1<10, (gidx0, gidx1))
