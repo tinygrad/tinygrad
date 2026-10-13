@@ -1,4 +1,4 @@
-import ctypes, itertools, functools, struct, re, subprocess, tempfile
+import ctypes, itertools, functools, struct, re, subprocess, tempfile, pathlib
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_config
@@ -6,7 +6,7 @@ from tinygrad.device import Device
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
-from tinygrad.helpers import Context, getenv, TracingKey, dedup, unwrap, Target, cpu_profile
+from tinygrad.helpers import Context, getenv, TracingKey, unwrap, Target, cpu_profile
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX,
@@ -15,31 +15,39 @@ from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_inf
 class CallClangJIT(ClangCompiler):
   def __init__(self, arch:list[str]):
     super().__init__(arch)
+    self.cachekey = f"asm_call_jit_{self.cachekey}" if self.cachekey is not None else None
     self.functions:dict[str, int] = {}
     self.modules:list[ctypes.CDLL] = []
 
-  # Function addresses belong to this process and must never enter the disk cache.
-  def compile_cached(self, src:str) -> bytes: return self.compile(src)
-
-  def compile(self, src:str) -> bytes:
+  def compile_cached(self, src:str) -> bytes:
     definitions = list(re.finditer(r"^__attribute__\(\([^\n]*\)\) void (\w+)\(([^\n]*)\) \{\n.*?^\}", src, re.M|re.S))
     entry = definitions[-1][1]
     new_functions = [m[1] for m in definitions if m[1] not in self.functions]
     for m in reversed(definitions):
       if m[1] in self.functions:
-        declaration = f"static void (*{m[1]})({m[2]}) = (void (*)({m[2]})){self.functions[m[1]]}ul;"
+        declaration = f"void (*{m[1]}_ptr)({m[2]});\n#define {m[1]} {m[1]}_ptr"
         src = src[:m.start()]+declaration+src[m.end():]
-    with tempfile.TemporaryDirectory() as directory, cpu_profile('Clang JIT compile'):
+    lib = super().compile_cached(src)
+    with tempfile.TemporaryDirectory() as directory:
       path = f'{directory}/module.so'
-      subprocess.run([getenv('CC', 'clang'), '-shared', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno',
-                      '-fno-strict-aliasing', *self.args, '-', '-o', path, '-lm'], input=src.encode(), check=True, capture_output=True)
+      pathlib.Path(path).write_bytes(lib)
       module = ctypes.CDLL(path)
+    # Resolve process-local addresses after loading; the cached module contains only empty function-pointer slots.
+    for m in definitions:
+      if m[1] in self.functions: ctypes.c_void_p.in_dll(module, f"{m[1]}_ptr").value = self.functions[m[1]]
     self.modules.append(module)
     self.functions.update((name, unwrap(ctypes.cast(getattr(module, name), ctypes.c_void_p).value)) for name in new_functions)
     addr = self.functions[entry]
     if self.arch == 'x86_64': return b'\x48\xb8'+struct.pack('<Q', addr)+b'\xff\xe0'
     if self.arch == 'arm64': return struct.pack('<IIQ', 0x58000050, 0xd61f0200, addr)
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
+
+  def compile(self, src:str) -> bytes:
+    with tempfile.TemporaryDirectory() as directory, cpu_profile('Clang JIT compile'):
+      path = f'{directory}/module.so'
+      subprocess.run([getenv('CC', 'clang'), '-shared', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno',
+                      '-fno-strict-aliasing', *self.args, '-', '-o', path, '-lm'], input=src.encode(), check=True, capture_output=True)
+      return pathlib.Path(path).read_bytes()
 
 class CallClangRenderer(ClangRenderer):
   kernel_typedef = "__attribute__((noinline, optnone)) void"
@@ -69,7 +77,7 @@ def clang_renderer(arch:str):
 def backend_renderer(backend:str):
   return clang_renderer(Device["CPU"].renderer.target.arch) if backend == "CPU" else Device[backend].renderer
 
-InstructionCall = tuple[UOp, list[UOp], tuple[int, ...], UOp|None]
+InstructionCall = tuple[UOp, list[UOp], UOp|None]
 instruction_cache:dict[tuple, list[tuple[int, int, InstructionCall]]] = {}
 
 # this is meant to replace the old emulator
@@ -115,21 +123,10 @@ def pc_index(idx:int) -> UPat:
   reg, null = UPat.const(idx).cast(), UPat.const(124).cast()
   return UPat.any(reg, reg.ne(null).where(reg, UPat.const(Invalid)))
 
-def move_const_idxs(call:UOp) -> UOp|None:
-  indexes = [u for u in call.body.toposort() if u.op is Ops.INDEX and u.src[0].op is Ops.PARAM and u.src[0].arg.name == "vmem"
-             and u.src[1].op is Ops.CONST]
-  idxs = dedup(u.src[1] for u in indexes)
-  if not idxs: return None
-  rep = {idx:UOp.param(len(call.src)-1+i, dtypes.uint64, name=f"inst_{i}", addrspace=AddrSpace.ALU) for i,idx in enumerate(idxs)}
-  body = call.body.substitute({u:u.replace(src=(u.src[0], rep[u.src[1]], *u.src[2:])) for u in indexes}, walk=True)
-  return call.replace(src=(body, *call.src[1:], *(idx.cast(dtypes.uint64) for idx in idxs)))
-
 pm_asm_call = PatternMatcher([
   # remove PC from CALL body
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.PARAM, name="buf").index(UPat.any(pc_index(PC_LO_IDX), pc_index(PC_HI_IDX))),), allow_any_len=True),
    lambda buf: UOp(Ops.NOOP) if buf.arg.name == "sgpr" else None),
-  # move CONST outside CALL body
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), move_const_idxs),
 ])
 
 def instruction_call(inst:Inst, arch:str) -> InstructionCall:
@@ -139,14 +136,14 @@ def instruction_call(inst:Inst, arch:str) -> InstructionCall:
   for base, mask, ret in entries:
     if bits & mask == base: return ret
   # Dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
-  ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=0)
+  ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU))
   sink = _get_handler(inst)(inst, ctx)
   base, mask, _, name = _canonical_info(inst, ctx, inst_bytes)
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
   call = graph_rewrite(body.call(*bufs, name=name), pm_asm_call,
                        name="instruction call", bottom_up=True, enter_calls=True)
-  ret = call, bufs, tuple(int(x) for x in call.src[len(bufs)+1:]), ctx.branch_cond
+  ret = call, bufs, ctx.branch_cond
   entries.append((base, mask, ret))
   return ret
 
@@ -155,14 +152,13 @@ def has_effects(body:UOp) -> bool:
   return any(u.op in (Ops.STORE, Ops.CALL) for u in body.toposort())
 
 def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({b for _,(_,bs,_,_) in instructions for b in bs}, key=lambda b:b.arg.slot)
+  bufs = sorted({b for _,(_,bs,_) in instructions for b in bs if b.arg.slot != -1}, key=lambda b:b.arg.slot)
   base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   inst = None
-  for off,(template,bs,offsets,_) in instructions:
-    args = [params[b] for b in bs]
-    invoke = template.replace(src=(template.body, *args,
-                         *(base+UOp.const(off+i, dtypes.uint64) if off+i else base for i in offsets)))
+  for off,(template,bs,_) in instructions:
+    args = [base+off if b.arg.slot == -1 else params[b] for b in bs]
+    invoke = template.replace(src=(template.body, *args))
     if inst is not None:
       invoke = invoke.replace(src=(*invoke.src[:-1], invoke.src[-1].after(inst)))
     inst = invoke
@@ -302,10 +298,10 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
       inst_st = str(inst)
       if inst_st.startswith("s_code_end"): continue
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
-      template, bufs, word_offsets, branch_cond = instruction_call(inst, arch)
+      template, bufs, branch_cond = instruction_call(inst, arch)
       if branch_cond is not None: cond = branch_cond
       if not has_effects(template.body): continue
-      instructions.append((off, (template, bufs, word_offsets, branch_cond)))
+      instructions.append((off, (template, bufs, branch_cond)))
     return instructions, cond
 
   chunk_size = 128
@@ -315,9 +311,9 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
-      body, bufs = instruction_block([((pc-off)//4, info) for pc,info in chunk])
+      body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
       args = [afters[b].after(*scopes) for b in bufs]
-      call = body.call(*args, (code_addr>>2)+off//4, name="asm_block")
+      call = body.call(*args, code_addr+off, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
       afters.update((b, arg.without_after.after(call, *scopes)) for b, arg in zip(bufs, args))
     return cond.substitute({u:buffers[u.src[0]][0].after(afters[u.src[0]], *scopes).index(wave*buffers[u.src[0]][1]+u.src[1])
