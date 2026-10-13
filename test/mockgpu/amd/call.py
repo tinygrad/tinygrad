@@ -319,18 +319,17 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
 
   chunk_size = 128
 
-  def emit_block(block_pc:int, wave:UOp, scopes:tuple[UOp, ...]) -> UOp:
+  def emit_block(block_pc:int, scopes:tuple[UOp, ...]) -> UOp:
     instructions, cond = block_instructions(block_pc)
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
       body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
-      args = [afters[b].after(*scopes) for b in bufs]
+      args = [afters[b].index(0).after(*scopes) for b in bufs]
       call = body.call(*args, code_addr+off, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
-      afters.update((b, arg.without_after.after(call, *scopes)) for b, arg in zip(bufs, args))
-    return cond.substitute({u:buffers[u.src[0]][0].after(afters[u.src[0]], *scopes).index(wave*buffers[u.src[0]][1]+u.src[1])
-                            for u in cond.toposort() if u.op is Ops.INDEX and u.src[0] in buffers}, walk=True)
+      afters.update((b, afters[b].without_after.after(call, *scopes)) for b in bufs)
+    return cond.substitute(afters, walk=True)
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...]):
     for pc, body in regions:
       if body:
@@ -345,9 +344,9 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
         w = UOp.range(n_waves, next(axes))
         gate = UOp.range(afters[routes][w].load().eq(pc).cast(dtypes.int).after(*scopes), next(axes))
         deps = UOp.group(*afters.values())
-        afters.update((b, (buf.index(w*stride) if stride else buf).after(deps))
+        afters.update((b, (buf.shrink(((w*stride, (w+1)*stride),)) if stride else buf).after(deps, *scopes, w, gate))
                       for b,(buf,stride) in buffers.items())
-        cond = emit_block(pc, w, scopes+(w, gate))
+        cond = emit_block(pc, scopes+(w, gate))
         dsts = cfg["paths"][pc]
         target = UOp.const(-1, dtypes.int)
         for dst, kind in dsts.items():

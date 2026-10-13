@@ -502,6 +502,24 @@ class TestAsmKernel(unittest.TestCase):
     out = out.custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
 
+  def test_readlane(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def readlane_kernel(out:UOp):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL),
+        s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        v_readfirstlane_b32_e32(s[2], v[0]),
+        s_branch(simm16=0),
+        v_mov_b32_e32(v[1], s[2]),
+        v_lshlrev_b32_e32(v[0], 2, v[0]),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
+        s_endpgm(),
+      ]
+      sink = UOp.sink(out.base, UOp.special(64, "lidx0"), arg=KernelInfo("wave_sgprs"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor(np.full(64, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=readlane_kernel)[0]
+    self.assertListEqual(out.tolist(), [0]*32 + [32]*32)
+
   def test_plus_tensor(self):
     out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
     self.assertListEqual(out.tolist(), [5, 7, 9])
