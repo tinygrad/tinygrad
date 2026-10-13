@@ -103,7 +103,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   if wave_size == 64: mem[ctx.accvgpr] = (accvgpr, 256*wave_size)
   for block_idx, (block_pc, block) in enumerate(cfg["blocks"].items()):
     wave = UOp.range(n_waves, lib_sz+block_idx)
-    afters = {b:(buf.index(wave*stride) if stride else buf).after(end, wave) for b,(buf,stride) in mem.items()}
+    afters = {b:(buf.shrink(((wave*stride, (wave+1)*stride),)) if stride else buf).after(end, wave) for b,(buf,stride) in mem.items()}
     loop_path = cfg["paths"][block_pc].get(block_pc)
     loop = UOp.loop(block_pc) if loop_path is not None else None
     if loop is not None: afters = {b:arg.after(loop) for b,arg in afters.items()}
