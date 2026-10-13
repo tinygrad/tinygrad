@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
 from typing import Any
-from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
+from tinygrad.helpers import DEBUG, DEV, getenv, unwrap, WSL
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
@@ -82,9 +82,11 @@ class CUDAAllocator(Allocator['CUDADevice']):
     check((api:=self.dev.api).cuCtxSetCurrent(self.dev.context))
     if (status:=api.cuMemHostRegister_v2(host.addr, buf.nbytes, 0)) != cuda.CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:
       check(status) # another device pinned it already
-    return BufferStorage(host.addr, status == cuda.CUDA_SUCCESS)
+    addr = host.addr if not WSL else \
+      init_c_var(api.CUdeviceptr, lambda x: check(api.cuMemHostGetDevicePointer_v2(ctypes.byref(x), host.addr, 0))).value
+    return BufferStorage(addr, host.addr if status == cuda.CUDA_SUCCESS else None)
   def _unmap(self, mapping:BufferStorage):
-    if mapping.meta: check(self.dev.api.cuMemHostUnregister(mapping.buf))
+    if mapping.meta: check(self.dev.api.cuMemHostUnregister(mapping.meta))
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
 class CUDADevice(Compiled):
