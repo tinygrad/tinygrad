@@ -309,6 +309,7 @@ class MLATransformerBlock(FFNBlock):
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+    self.indexer = Indexer(config, config.indexer) if config.indexer else None
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
@@ -334,51 +335,44 @@ class MLATransformerBlock(FFNBlock):
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn)
 
-  def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:  # (1, 1, T, start_pos+T), None: everything is visible
+  def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:
+    if self.indexer and self.config.max_context > self.indexer.idx.top_k:
+      return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), self.cache_kg, start_pos)
     T = x.shape[1]
     return Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) if resolve(T != 1) else None
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
+      if self.indexer:
+        idx = self.indexer.idx
+        self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.config.max_context, idx.kpool), 2, idx.head_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
 
-class DSAMLATransformerBlock(MLATransformerBlock):
-  """MLA with DeepSeek sparse attention (glm5-next): a query sees the top_k/kpool best pools of keys, picked by the indexer"""
-  def __init__(self, config:TransformerConfig):
-    super().__init__(config)
-    idx = unwrap(config.indexer)
-    self.indexer: dict[str, Callable[[Tensor], Tensor]] = {"attn_q_b": Linear(config.q_lora_rank, idx.n_heads * idx.head_dim, bias=False),
-                    "attn_k": Linear(config.dim, idx.head_dim, bias=False), "k_norm": nn.LayerNorm(idx.head_dim, eps=idx.norm_eps),
-                    "proj": Linear(config.dim, idx.n_heads, bias=False)}
-    self.indexer_compressor_gate = Linear(config.dim, idx.head_dim, bias=False)
-    self.indexer_compressor_ape = {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
+class Indexer:
+  """Score pooled keys and build a token mask using the caller-owned cache."""
+  def __init__(self, config:TransformerConfig, idx:IndexerConfig):
+    self.idx = idx
+    self.attn_q_b, self.attn_k = Linear(config.q_lora_rank, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
+    self.proj, self.k_norm = Linear(config.dim, idx.n_heads, bias=False), nn.LayerNorm(idx.head_dim, eps=idx.norm_eps)
+    self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
-  # DSA as a mask: the pools not picked by the indexer get -inf. this is exact, but attention still reads every cached row
-  def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:
-    (B, T, _), idx, S = x.shape, unwrap(self.config.indexer), start_pos + x.shape[1]
-    if self.config.max_context <= idx.top_k: return super()._attn_mask(x, start_pos)  # every pool is always picked
+  def __call__(self, x:Tensor, q:Tensor, cache_kg:Tensor, start_pos:int|UOp) -> Tensor:
+    (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
     # cache an indexer key and a pooling gate per token. a pool's key is the gate softmax weighted sum of its keys
-    kg = self.indexer["k_norm"](self.indexer["attn_k"](x)).stack(self.indexer_compressor_gate(x), dim=2)  # (B, T, 2, head_dim)
-    kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg.float().uop))).reshape(B, -1, idx.kpool, 2, idx.head_dim)
-    pool_k = ((kg[..., 1, :] + self.indexer_compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)    # (B, pools, head_dim)
-    iq = self.indexer["attn_q_b"](self.attn_q_a_norm(self.attn_q_a(x))).reshape(B, T, idx.n_heads, 1, idx.head_dim)
-    head_w = self.indexer["proj"](x) * (idx.n_heads * idx.head_dim) ** -0.5                                # (B, T, n_heads)
-    scores = ((iq * pool_k.reshape(B, 1, 1, -1, idx.head_dim)).sum(-1).relu() * head_w.unsqueeze(-1)).sum(2)  # (B, T, pools)
+    kg = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2)  # (B, T, 2, head_dim)
+    kg = Tensor(cache_kg.uop.after(cache_kg[:, start_pos:S].uop.store(kg.float().uop))).reshape(B, -1, idx.kpool, 2, idx.head_dim)
+    pool_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)    # (B, pools, head_dim)
+    iq = self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
+    scores = (Tensor.einsum("bthd,bpd->bthp", iq, pool_k).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
     # the query sees the top_k/kpool best complete pools, and the tokens of its own pool while that's incomplete (the tail)
     tpos, pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
-    complete = (Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= tpos + 1
-    _, sel = complete.where(scores, float("-inf")).topk(idx.top_k // idx.kpool)
-    picked = (complete & (scores.zeros_like().scatter(-1, sel, 1.0) > 0)).repeat_interleave(idx.kpool, dim=-1)[..., :S]
-    visible = (picked | (pos >= (tpos + 1) // idx.kpool * idx.kpool)) & (pos <= tpos)
-    return visible.where(0.0, float("-inf")).reshape(B, 1, T, S).cast(x.dtype)
+    _, sel = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= tpos + 1).where(scores, -math.inf).topk(idx.top_k // idx.kpool)
+    # Incomplete selections add only tail/future tokens, handled by the final tail and causal mask.
+    picked = (scores.zeros_like().scatter(-1, sel, 1.0) > 0).repeat_interleave(idx.kpool, dim=-1)[..., :S]
+    return ((picked | (pos >= (tpos + 1) // idx.kpool * idx.kpool)) & (pos <= tpos)).where(0.0, -math.inf).reshape(B, 1, T, S).cast(x.dtype)
 
-  def _init_state(self, x:Tensor):
-    super()._init_state(x)
-    if not hasattr(self, "cache_kg"):  # whole pools, zeros so the incomplete ones stay finite
-      idx = unwrap(self.config.indexer)
-      self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.config.max_context, idx.kpool), 2, idx.head_dim, device=x.device)
 
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):
@@ -478,7 +472,7 @@ class Transformer:
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     self.config = config
-    block_cls = DSAMLATransformerBlock if config.indexer else MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
+    block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
     self.blk:list[FFNBlock] = []
     for i in range(config.num_blocks):
       c = dense_config if i < config.leading_dense_blocks else config
@@ -536,6 +530,11 @@ class Transformer:
     hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv[f'{arch}.hyper_connection.sinkhorn_iterations'],
                   kv[f'{arch}.hyper_connection.epsilon']) if f'{arch}.hyper_connection.count' in kv else None
     if hc is not None: state_dict = {k.replace('.hc_attn_', '.hc_attn.').replace('.hc_ffn_', '.hc_ffn.'):v for k,v in state_dict.items()}
+
+    indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
+                            kv[f'{arch}.attention.indexer.top_k'], kv[f'{arch}.attention.indexer.kpool'],
+                            kv[f'{arch}.attention.layer_norm_epsilon']) if f'{arch}.attention.indexer.kpool' in kv else None
+    if indexer is not None: state_dict = {k.replace('.indexer_compressor_', '.indexer.compressor_'):v for k,v in state_dict.items()}
 
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
 
@@ -610,10 +609,7 @@ class Transformer:
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc,
-      indexer=IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
-                            kv[f'{arch}.attention.indexer.top_k'], kv[f'{arch}.attention.indexer.kpool'],
-                            kv[f'{arch}.attention.layer_norm_epsilon']) if f'{arch}.attention.indexer.kpool' in kv else None)
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer)
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
