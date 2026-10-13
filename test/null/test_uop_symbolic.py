@@ -123,6 +123,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(n, m).ssimplify(), 2)
     self.assertEqual((n%3).ssimplify(), 0)
     self.assertEqual((m%2).ssimplify(), 0)
+    self.assertIs((n<12).simplify(), n<12)
 
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
@@ -450,7 +451,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) + 2 < 3, 0, 1, "(a<1)")
 
   def test_lt_simple_factor(self):
-    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "(((a*3)+(b*3))<4)")
+    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "((a+b)<2)")
+    self.helper_test_variable((Variable("g", 0, 1)*128+Variable("l", 0, 31)*4) < 101, 0, 1, "((l+(g*32))<26)")
+    self.helper_test_variable((Variable("a", -6, 6)*4+Variable("b", -6, 6)*8) < -3, 0, 1, "((a+(b*2))<0)")
+    self.helper_test_variable((Variable("a", 0, 6)*4+Variable("b", -1, 0)) < 3, 0, 1, "(a<1)")
 
   def test_lt_sum_factor_rhs_partial(self):
     self.helper_test_variable((Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8) < 4, 0, 1,
