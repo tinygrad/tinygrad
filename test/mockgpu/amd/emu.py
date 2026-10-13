@@ -1969,12 +1969,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   if ASM_CALL:
-    from test.mockgpu.amd.call import lift_dispatch
-    prg = lift_dispatch(lib, lib_sz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND)
+    from test.mockgpu.amd.call import lift, get_call_runtime
+    prg = lift(lib, lib_sz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND)
     vals = {"lib":lib, "args_ptr":args_ptr, "groups_x":gx, "groups_y":gy, "groups":gx*gy*gz,
             **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_runtime(ASM_CALL_BACKEND, prg)(*[0]*len(prg.arg.globals), vals=tuple(vals[v.arg.name] for v in prg.arg.vars))
+      get_call_runtime(ASM_CALL_BACKEND, prg)(*[0]*len(prg.arg.globals), vals=tuple(vals[v.arg.name] for v in prg.arg.vars))
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)

@@ -1,6 +1,25 @@
 import unittest
+import ctypes, subprocess, tempfile
+from tinygrad import dtypes
+from tinygrad.codegen import to_program
+from tinygrad.uop.ops import UOp, KernelInfo
 from test.mockgpu.amd import call
 from test.mockgpu.amd.call import cfg_regions
+
+
+class TestCallClang(unittest.TestCase):
+  def test_program_preserves_elf(self):
+    out = UOp.param(0, dtypes.int, (1,))
+    prg = to_program(out[0].store(7).sink(arg=KernelInfo(name="jit_store")), call.backend_renderer("CPU"))
+    with tempfile.NamedTemporaryFile() as f:
+      f.write(prg.src[3].arg)
+      f.flush()
+      subprocess.run(["objdump", "-d", f.name], check=True)
+    result = ctypes.c_int()
+    runtime = call.get_call_runtime("CPU", prg)
+    self.assertEqual(runtime.profile_key, prg.key)
+    runtime(ctypes.addressof(result))
+    self.assertEqual(result.value, 7)
 
 
 class TestAsmCFG(unittest.TestCase):

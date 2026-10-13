@@ -1,8 +1,10 @@
 import ctypes, itertools, functools, struct, re, subprocess, tempfile, pathlib
+from dataclasses import replace
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.device import Device
+from tinygrad.engine.realize import get_runtime, runtime_cache
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
@@ -21,7 +23,6 @@ class CallClangJIT(ClangCompiler):
 
   def compile_cached(self, src:str) -> bytes:
     definitions = list(re.finditer(r"^__attribute__\(\([^\n]*\)\) void (\w+)\(([^\n]*)\) \{\n.*?^\}", src, re.M|re.S))
-    entry = definitions[-1][1]
     new_functions = [m[1] for m in definitions if m[1] not in self.functions]
     for m in reversed(definitions):
       if m[1] in self.functions:
@@ -37,7 +38,10 @@ class CallClangJIT(ClangCompiler):
       if m[1] in self.functions: ctypes.c_void_p.in_dll(module, f"{m[1]}_ptr").value = self.functions[m[1]]
     self.modules.append(module)
     self.functions.update((name, unwrap(ctypes.cast(getattr(module, name), ctypes.c_void_p).value)) for name in new_functions)
-    addr = self.functions[entry]
+    return lib
+
+  def trampoline(self, name:str) -> bytes:
+    addr = self.functions[name]
     if self.arch == 'x86_64': return b'\x48\xb8'+struct.pack('<Q', addr)+b'\xff\xe0'
     if self.arch == 'arm64': return struct.pack('<IIQ', 0x58000050, 0xd61f0200, addr)
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
@@ -50,6 +54,7 @@ class CallClangJIT(ClangCompiler):
       return pathlib.Path(path).read_bytes()
 
 class CallClangRenderer(ClangRenderer):
+  compiler: CallClangJIT
   kernel_typedef = "__attribute__((noinline, optnone)) void"
   def __init__(self, target:Target):
     super().__init__(target)
@@ -76,6 +81,14 @@ def clang_renderer(arch:str):
 
 def backend_renderer(backend:str):
   return clang_renderer(Device["CPU"].renderer.target.arch) if backend == "CPU" else Device[backend].renderer
+
+def get_call_runtime(backend:str, prg:UOp):
+  if backend != "CPU": return get_runtime(backend, prg)
+  if (runtime:=runtime_cache.get(key:=(prg.key, backend))) is None:
+    obj = prg.to_elf()
+    lib = clang_renderer(Device["CPU"].renderer.target.arch).compiler.trampoline(obj.name)
+    runtime_cache[key] = runtime = Device[backend].runtime(replace(obj, lib=lib))
+  return runtime
 
 InstructionCall = tuple[UOp, list[UOp], UOp|None]
 instruction_cache:dict[tuple, list[tuple[int, int, InstructionCall]]] = {}
@@ -240,7 +253,7 @@ def decode_cfg(lib_bytes:bytes, arch:str):
   return insts, cfg, cfg_regions(cfg["paths"], 0)
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
-def lift_dispatch(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
+def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
                   user_data_count:int, backend:str) -> UOp:
   lib_bytes = ctypes.string_at(lib, lib_sz)
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
