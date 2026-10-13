@@ -319,17 +319,18 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
 
   chunk_size = 128
 
-  def emit_block(block_pc:int, scopes:tuple[UOp, ...]) -> UOp:
+  def emit_block(block_pc:int, wave:UOp, scopes:tuple[UOp, ...]) -> UOp:
     instructions, cond = block_instructions(block_pc)
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
       body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
-      args = [afters[b].index(0).after(*scopes) for b in bufs]
+      args = [afters[b].index(wave*buffers[b][1]).after(*scopes) for b in bufs]
       call = body.call(*args, code_addr+off, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.
       afters.update((b, afters[b].without_after.after(call, *scopes)) for b in bufs)
-    return cond.substitute(afters, walk=True)
+    return cond.substitute({b:(afters[b].shrink(((wave*s, (wave+1)*s),)) if (s:=buffers[b][1]) else afters[b])
+                            for b in cond.toposort() if b in buffers}, walk=True)
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...]):
     for pc, body in regions:
       if body:
@@ -344,9 +345,8 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
         w = UOp.range(n_waves, next(axes))
         gate = UOp.range(afters[routes][w].load().eq(pc).cast(dtypes.int).after(*scopes), next(axes))
         deps = UOp.group(*afters.values())
-        afters.update((b, (buf.shrink(((w*stride, (w+1)*stride),)) if stride else buf).after(deps, *scopes, w, gate))
-                      for b,(buf,stride) in buffers.items())
-        cond = emit_block(pc, scopes+(w, gate))
+        afters.update((b, buf.after(deps, *scopes, w, gate)) for b,(buf,_) in buffers.items())
+        cond = emit_block(pc, w, scopes+(w, gate))
         dsts = cfg["paths"][pc]
         target = UOp.const(-1, dtypes.int)
         for dst, kind in dsts.items():
