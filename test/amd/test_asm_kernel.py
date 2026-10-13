@@ -254,6 +254,21 @@ class TestAsmKernel(unittest.TestCase):
       out = Tensor.full((17*19*2,), -1, dtype=dtypes.int32).contiguous().realize()
       self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), list(range(17*19*2)))
 
+  def test_jit_entry_mixed_width_args(self):
+    from test.mockgpu.amd import call
+    from tinygrad.codegen import to_program
+    # Enough uint32 arguments to spill onto the stack before the final uint64 argument.
+    values = [0x80000000+i for i in range(12)] + [0x123456789abcdef0]
+    variables = [UOp.variable(f"arg_{i:02d}", 0, dt.max, dt) for i,dt in enumerate([dtypes.uint32]*12+[dtypes.uint64])]
+    out = UOp.param(0, dtypes.uint64, (len(values),), name="out")
+    sink = UOp.sink(*(out.index(i).store(v.cast(dtypes.uint64)) for i,v in enumerate(variables)),
+                    arg=KernelInfo(name="asm_call_mixed_width_args", opts_to_apply=()))
+    prg = to_program(sink, call.backend_renderer("CPU"))
+    result = (ctypes.c_uint64*len(values))()
+    vals = dict(zip((v.arg.name for v in variables), values))
+    call.get_call_runtime("CPU", prg)(ctypes.addressof(result), vals=tuple(vals[v.arg.name] for v in prg.arg.vars))
+    self.assertEqual(list(result), values)
+
   def test_jit_call_reuse(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     from test.mockgpu.amd import call

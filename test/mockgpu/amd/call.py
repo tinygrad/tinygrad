@@ -72,6 +72,10 @@ class CallClangRenderer(ClangRenderer):
       definitions.append(f"__attribute__(({attrs})) void {name}({params}) {{\n"+'\n'.join(lines)+"\n}")
       all_uops.extend(body.src)
     name, lines, bufs = self._render(uops)
+    # CPUProgram passes every scalar as uint64. Native arm64 macOS packs narrower stack arguments, so widen only the entry ABI.
+    lines = [f"  {self.param_type(p)} {n} = ({self.param_type(p)}){n}_arg;" for n,(p,_) in bufs if p.addrspace == AddrSpace.ALU]+lines
+    bufs = [(n+"_arg", (p.replace(arg=replace(p.arg, dtype=dtypes.uint64)), mutable)) if p.addrspace == AddrSpace.ALU else (n, (p, mutable))
+            for n,(p,mutable) in bufs]
     entry = super().render_kernel(name, lines, bufs, [], None)
     return '\n'.join(self._render_defines(all_uops)+definitions+[entry])
 
