@@ -472,6 +472,8 @@ if __name__ == "__main__":
     start_pos = prefill(model, toks[:-1])
     last_tok = toks[-1]
     generated = ""
+    import gc
+    gc.disable()
     for _ in range(20):
       GlobalCounters.reset()
       st = GlobalCounters.time_sum_s
