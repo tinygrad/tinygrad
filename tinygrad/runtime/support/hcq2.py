@@ -17,9 +17,9 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # 0. helpers
 
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL", "CL"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
-UVM_DEVS = frozenset(("QCOM", "METAL")) # the host maps their memory, so copies are host memcpys
+UVM_DEVS = frozenset(("QCOM", "METAL", "CL")) # the host maps their memory, so copies are host memcpys
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -88,7 +88,8 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
-  ret = {None: dtypes.void, ctypes.c_void_p: dtypes.u64}.get(fn.restype) or to_dtype(fn.restype.__name__[2:]) # void, void*, c_int -> int
+  ret = dtypes.void if fn.restype is None else dtypes.u64 if issubclass(fn.restype, (ctypes.c_void_p, ctypes._Pointer)) else \
+    to_dtype(fn.restype.__name__[2:]) # void, void*, c_int -> int
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.i32) if isinstance(a, int) else a for a in args])
 
 @uopfunc

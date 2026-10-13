@@ -18,10 +18,9 @@ if DEV.target("CUDA").interface == "MOCK": import test.mockgpu.cuda.cuda  # noqa
 def check(status:int):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {cuda.enum_cudaError_enum.get(status, 'unknown')}")
 
-def as_int(handle) -> int: return unwrap(ctypes.cast(handle, ctypes.c_void_p).value)
+def handle_addr(handle) -> int: return unwrap(ctypes.cast(handle, ctypes.c_void_p).value)
 
 def host_stamp(slot:int): ctypes.c_uint64.from_address(slot).value = time.perf_counter_ns()
-def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(ptr, meta))
 
 # *****************
 # queue
@@ -114,10 +113,10 @@ class CUDADevice(Compiled):
 
   @functools.cached_property
   def handles(self) -> Buffer:
-    return Buffer(HCQ_RUNTIME_DEV.device, 32, initial_value=struct.pack("4Q", *[as_int(h) for h in (self.context, *self.streams)], 0))
+    return Buffer(HCQ_RUNTIME_DEV.device, 32, initial_value=struct.pack("4Q", *[handle_addr(h) for h in (self.context, *self.streams)], 0))
 
   @functools.cached_property
-  def stamp(self) -> Buffer: return extern(as_int(fn:=cuda.CUhostFn(host_stamp)), fn)
+  def stamp(self) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(handle_addr(fn:=cuda.CUhostFn(host_stamp)), fn))
 
   @functools.cache
   def function(self, lib:bytes, name:str) -> Buffer:
@@ -125,7 +124,7 @@ class CUDADevice(Compiled):
     check(self.api.cuCtxSetCurrent(self.context))
     check(self.api.cuModuleLoadData(ctypes.byref(module:=self.api.CUmodule()), lib))
     check(self.api.cuModuleGetFunction(ctypes.byref(func:=self.api.CUfunction()), module, name.encode()))
-    return extern(as_int(func))
+    return Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(handle_addr(func)))
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(self.api.cuDeviceGetCount(ctypes.byref(x)))).value
 
