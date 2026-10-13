@@ -3,7 +3,7 @@ import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype
 from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
-from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
+from tinygrad.helpers import partition, all_same, prod, flatten, IMAGE, dedup, ceildiv
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.weak import pm_uncast_const
@@ -204,9 +204,10 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
-  p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
-  if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
-    return unwrap(UOp.usum(*np).divides(d))<(c//d)
+  p, np = partition([u.pop_const(Ops.MUL) for u in x.split_uop(Ops.ADD)], lambda uf: uf[1] == 1)
+  # d*y+p < c <=> y < ceildiv(c-p, d), so it folds when that bound is the same for p.vmin and p.vmax
+  if np and (d:=math.gcd(*[int(f) for _,f in np])) > 1 and (t:=ceildiv(c-sum(u.vmin for u,_ in p), d)) == ceildiv(c-sum(u.vmax for u,_ in p), d):
+    return UOp.usum(*[u*(f//d) for u,f in np])<t
   return None
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
@@ -286,9 +287,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** lt **
   # c0+x<c1 -> x < c1-c0
   ((UPat.cvar("c0") + UPat.var("x", dtype=dtypes.ints+(dtypes.weakint,))) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),
-  # c0*x<c1 -> sign(c0)*x < ceil(c1/abs(c0))
-  ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
-   lambda x,c0,c1: (x if c0.val > 0 else -x)<-(-c1.val//abs(c0.val)) if abs(c0.val) > 1 else None),
   # x//d<c -> x<c*d for d>0, and -> c*d<x for d<0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
    lambda x,d,c: (x<c.val*d.val) if d.val > 0 else (x>c.val*d.val) if d.val < 0 else None),
@@ -297,7 +295,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1 if y.op is not Ops.CONST else None),
   # *** rules from symbolic ***
   # generic lt folding
-  (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val) if 0 < c.val else None),
+  (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val)),
   (UPat.var("x", dtypes.weakint)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
   ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
@@ -332,15 +330,11 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
 
-  if v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].val == 1 and (s0:=v.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype):
-    # (X < c).ne(True) -> X >= c
-    return s0.src[0], False, int(s0.src[1].vmin)
-  if v.op is Ops.CMPLT and dtypes.is_int(v.src[0].dtype):
-    # c < X -> X >= c+1 (a const on the left is a lower bound on the right)
-    if v.src[0].op is Ops.CONST: return v.src[1], False, int(v.src[0].val)+1
-    # X < c -> X <= c-1
-    return v.src[0], True, int((v.src[1]).vmax)-1
-  return None
+  # a<b gives a<=b.vmax-1 (b>=a+1 for a const a), its negation a>=b.vmin (b<=a for a const a)
+  neg = v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].val == 1
+  if (lt:=v.src[0] if neg else v).op is not Ops.CMPLT or not dtypes.is_int(lt.src[0].dtype): return None
+  if (a:=lt.src[0]).op is Ops.CONST: return lt.src[1], neg, int(a.val) + (0 if neg else 1)
+  return a, not neg, int(lt.src[1].vmin) if neg else int(lt.src[1].vmax)-1
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
