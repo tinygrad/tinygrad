@@ -98,10 +98,12 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
                                                  for i,u in enumerate(user_vars)}), *init.src[1:], *user_vars))
   ctx = _Ctx(4, wave_size)
-  afters: dict[UOp, UOp] = {ctx.sgpr:sgpr.after(init), ctx.vgpr:vgpr.after(init), ctx.vmem:ctx.vmem,
-                            ctx.lds:lds.after(init), ctx.scratch:scratch.index(wave*scratch_size*wave_size).after(init)}
-  if wave_size == 64: afters[ctx.accvgpr] = accvgpr.after(init)
-  for block_pc, block in cfg["blocks"].items():
+  end = init.end(wave)
+  mem = {ctx.sgpr:(sgpr,SGPR_COUNT),ctx.vgpr:(vgpr,256*wave_size),ctx.vmem:(ctx.vmem,0),ctx.lds:(lds,0),ctx.scratch:(scratch,scratch_size*wave_size)}
+  if wave_size == 64: mem[ctx.accvgpr] = (accvgpr, 256*wave_size)
+  for block_idx, (block_pc, block) in enumerate(cfg["blocks"].items()):
+    wave = UOp.range(n_waves, lib_sz+block_idx)
+    afters = {b:(buf.index(wave*stride) if stride else buf).after(end, wave) for b,(buf,stride) in mem.items()}
     loop_path = cfg["paths"][block_pc].get(block_pc)
     loop = UOp.loop(block_pc) if loop_path is not None else None
     if loop is not None: afters = {b:arg.after(loop) for b,arg in afters.items()}
@@ -127,7 +129,8 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       if loop_path is COND_NOT_TAKEN: branch_cond = branch_cond.logical_not()
       backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
       afters = {b:arg.after(backedge) for b,arg in afters.items()}
-  sink = UOp.sink(UOp.group(*afters.values()).end(wave).end(wg), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
+      end = UOp.group(*afters.values()).end(wave)
+  sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device[backend].renderer)
