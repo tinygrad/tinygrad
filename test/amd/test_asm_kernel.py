@@ -230,7 +230,7 @@ class TestAsmKernel(unittest.TestCase):
       buf.raw, out.value = code(value), 0
       run_asm(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, ctypes.addressof(args), arch="rdna3")
       self.assertEqual(out.value, value)
-      prg = call.lift_dispatch(ctypes.addressof(buf), len(buf), 1, 1, 1, 0x19c, 0, "rdna3", None, getenv("ASM_CALL_BACKEND", "CPU"))
+      prg = call.lift_dispatch(ctypes.addressof(buf), len(buf), 1, 1, 1, 0x19c, 0, "rdna3", 0, getenv("ASM_CALL_BACKEND", "CPU"))
       self.assertIs(prg, programs.setdefault(value, prg))
     # Operands are read from the current code allocation, so these share the compiled graph too.
     self.assertIs(programs[4], programs[5])

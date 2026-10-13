@@ -81,16 +81,6 @@ def rotations(batch:UOp) -> list[list]: return [(qs:=list(queues(batch)))[i:] + 
 def orders(batch:UOp) -> set[tuple[int, ...]]: return {tuple(x for x in run(batch, prio=p)[0] if isinstance(x, int)) for p in rotations(batch)}
 
 class TestHCQ2Deps(unittest.TestCase):
-  def test_buffer_views(self):
-    b = Buffer("NULL", 16)
-    for write in ([], [0]):
-      tracker = hcq2.DepsTracker()
-      tracker.access_resources([b], write, 0)
-      self.assertEqual(tracker.access_resources([b.view(8, 4)], [0], 1), [0])
-      self.assertEqual(tracker.access_resources([b.view(4, 0)], [0], 2), [0])
-      self.assertEqual(tracker.access_resources([b.view(4, 12)], [0], 3), [0])
-      self.assertEqual(tracker.access_resources([b.view(8, 4)], [], 4), [1])
-
   def test_dependencies_through_selected_slices(self):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
     for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:

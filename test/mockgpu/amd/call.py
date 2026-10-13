@@ -75,7 +75,7 @@ instruction_cache:dict[tuple, list[tuple[int, int, InstructionCall]]] = {}
 # this is meant to replace the old emulator
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:sint, gy:sint, lx:sint, ly:sint, total_threads:sint, wave_size:int,
-              lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data:list[int]|None=None, accvgpr:UOp|None=None):
+              lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data_count:int=0, accvgpr:UOp|None=None):
   # define ranges inside a wave
   li = UOp.range((wave.eq(0)).where(max(lds_size//4, 1), 0), 2, dtype=dtypes.int)
   si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
@@ -90,8 +90,8 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:si
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   initial:list[tuple[int, sint]] = [*((128+i, i) for i in range(65)), *((193+i, (-i-1)&0xFFFFFFFF) for i in range(16)), *F32_INLINE.items()]
-  initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))][:min(len(user_data), 2) if user_data else 2]
-  if user_data: initial += [(i+2,v) for i,v in enumerate(user_data[2:])]
+  if user_data_count: initial += [(i, UOp.variable(f"user_data_{i}", 0, dtypes.uint32.max, dtypes.uint32)) for i in range(user_data_count)]
+  else: initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
   if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
   else:
     sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
@@ -245,9 +245,9 @@ def decode_cfg(lib_bytes:bytes, arch:str):
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift_dispatch(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
-                  user_data:list[int]|None, backend:str) -> UOp:
+                  user_data_count:int, backend:str) -> UOp:
   lib_bytes = ctypes.string_at(lib, lib_sz)
-  dispatch = (lx, ly, lz, rsrc2, scratch_size, tuple(0 if i < 2 else v for i,v in enumerate(user_data)) if user_data else None)
+  dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
   key = (lib_bytes, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_config))
   if key not in dispatch_cache:
@@ -260,7 +260,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   lib_sz = len(lib_bytes)
   insts, cfg, regions = decode_cfg(lib_bytes, arch)
   axes = itertools.count(lib_sz)
-  lx, ly, lz, rsrc2, scratch_size, user_data = dispatch
+  lx, ly, lz, rsrc2, scratch_size, user_data_count = dispatch
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
@@ -286,8 +286,11 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   buffers[routes] = (routes, 0)
   init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), lds, args_ptr, *dims,
-                   wave_size, lds_size, scratch_size, rsrc2, arch, user_data,
+                   wave_size, lds_size, scratch_size, rsrc2, arch, user_data_count,
                    *([accvgpr.index(wave*256*wave_size)] if wave_size == 64 else []))
+  user_vars = [u for u in init.body.toposort() if u.is_variable]
+  init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
+                                                 for i,u in enumerate(user_vars)}), *init.src[1:], *user_vars))
   initialized = routes.after(init).index(wave).store(0).end(wave)
   afters = {b:buf.after(initialized) for b,(buf,_) in buffers.items()}
 

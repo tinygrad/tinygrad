@@ -71,7 +71,7 @@ class GraphRunner:
 class HCQGraph(GraphRunner):
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
     if not hasattr(self, "deps"): self.deps = DepsTracker()
-    return self.deps.access_resources(bufs, write, new_dependency)
+    return self.deps.access_resources([UOp.from_buffer(b.base, dtypes.uint8)[b.offset:b.offset + b.nbytes] for b in bufs], write, new_dependency)
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
