@@ -1172,7 +1172,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     for dim in reversed(axes):
       mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
     # remove extra dims from reduce
-    for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
+    mask, values = mask.squeeze(axes), values.squeeze(axes)
     # select from values for each True element in mask else select from self
     return mask.where(values, self)
 

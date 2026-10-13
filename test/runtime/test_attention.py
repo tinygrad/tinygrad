@@ -215,6 +215,19 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
 
+  def test_kda_qk_l2norm(self):
+    # q/k are normalized as x/sqrt(sum(x²)+1e-6) like FLA: tiny vectors aren't scaled up to unit length
+    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True)
+    block = GatedDeltaNetBlock(self._make_config(dim=16, n_heads=2, ssm=ssm), ssm)
+    block.attn_qkv.weight = Tensor([1e-4]*32 + [1.0]*16).reshape(48, 1).expand(48, 16) / 16  # x of ones: q = k = 1e-4, v = 1
+    block.ssm_conv1d["weight"], block.ssm_beta.weight = Tensor.ones(48, 4), Tensor.zeros(2, 16)
+    x = Tensor.ones(1, 1, 16)
+    block._init_state(x)
+    block._attention(x, 0).realize()
+    # the first token's state is beta * v (x) l2norm(k), with beta = sigmoid(0) and v, k through the conv and silu
+    def silu(z): return z / (1 + np.exp(-z))
+    np.testing.assert_allclose(block.recurrent_state.numpy(), 0.5 * silu(1.0) * silu(1e-4) / np.sqrt(8 * silu(1e-4)**2 + 1e-6), rtol=1e-3)
+
   def test_kda_channel_decay(self):
     config = self._make_config(dim=4, hidden_dim=8, n_heads=2, head_dim=4, rope_dim=4, v_head_dim=4,
       ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))

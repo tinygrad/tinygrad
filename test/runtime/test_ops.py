@@ -877,6 +877,17 @@ class TestOps(TensorTestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().div(4, rounding_mode="trunc").item(), 0)  # NOTE this is trunc-div behaviour
 
+  @Context(TRANSCENDENTAL=2)
+  def test_sin_transcendental(self): self.test_sin()
+  @Context(TRANSCENDENTAL=2)
+  def test_cos_transcendental(self): self.test_cos()
+  @Context(TRANSCENDENTAL=2)
+  def test_tan_transcendental(self): self.test_tan()
+  @Context(TRANSCENDENTAL=2)
+  def test_exp_transcendental(self): self.test_exp()
+  @Context(TRANSCENDENTAL=2)
+  def test_log_transcendental(self): self.test_log()
+
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
@@ -1747,6 +1758,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(6,6,6)], lambda x: torch.logsumexp(x, dim=2), lambda x: x.logsumexp(2), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(6,6,6,6)], lambda x: torch.logsumexp(x, dim=2), lambda x: x.logsumexp(2), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(6,6,6,6)], lambda x: torch.logsumexp(x, dim=3), lambda x: x.logsumexp(3), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(6,6,6,6)], lambda x: torch.logsumexp(x, dim=(1,3)), lambda x: x.logsumexp((1,3)), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logsumexp(x, dim=-1), lambda x: x.logsumexp(-1), atol=1e-7, grad_atol=1e-7)
@@ -2090,6 +2102,9 @@ class TestOps(TensorTestCase):
     helper_test_op([(4,3,6,6)], lambda x: x.squeeze(3))
     self.helper_test_exception([(4,3,6,6)], lambda x: x.squeeze(50), expected=IndexError)
     helper_test_op([(4,3,6,1)], lambda x: x.squeeze(-1))
+    helper_test_op([(1,3,1,6)], lambda x: x.squeeze((0,2)))
+    helper_test_op([(1,3,1,6)], lambda x: x.squeeze((-2,1)))
+    helper_test_op([(1,3,1,6)], lambda x: x.squeeze(()))
     helper_test_op([(4,3,6,6)], lambda x: x.squeeze())
     helper_test_op([(1,3,6,6)], lambda x: x.squeeze())
     helper_test_op([(2,3,1)], lambda x: x.squeeze())

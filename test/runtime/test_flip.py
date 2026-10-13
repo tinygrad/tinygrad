@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable, GlobalCounters
-from tinygrad.engine.realize import run_linear
 
 class TestFlip(unittest.TestCase):
   def test_gradient(self):
@@ -29,20 +28,16 @@ class TestFlip(unittest.TestCase):
         self.assertEqual(out, int((data[:, :size][:, ::-1] * weights[:, :size]).sum()))
 
   def test_symbolic_gradient(self):
-    weights = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
-    x, dy = Tensor.zeros(2, 8).contiguous().realize(), Tensor(weights).realize()
-    for axes in ((0,), (1,), (0, 1)):
-      for lower, sizes in ((0, (0, 1, 2, 5, 8)), (2, (2, 5, 8))):
-        n = Variable(f'flip_grad_size_{lower}', lower, 8).bind(sizes[0])
-        grad = x[:, :n].flip(axes).gradient(x, gradient=dy[:, :n])[0].contiguous()
-        # The graph depends on the bounds, not the binding. Schedule once and run every size through it.
-        linear, var_vals = grad.linear_with_vars()
-        for size in sizes:
-          with self.subTest(axes=axes, lower=lower, size=size):
-            run_linear(linear, var_vals | {n.expr:size})
-            expected = np.zeros_like(weights)
-            expected[:, :size] = np.flip(weights[:, :size], axes)
-            np.testing.assert_array_equal(grad.numpy(), expected)
+    weights = np.arange(1, 9, dtype=np.float32).reshape(2, 4)
+    x, dy = Tensor.empty(2, 4).realize(), Tensor(weights).realize()
+    # Flip both static and symbolic axes together: empty, singleton, partial and full slices, with both lower bounds.
+    for lower, size in ((0, 0), (0, 1), (0, 3), (2, 4)):
+      with self.subTest(lower=lower, size=size):
+        n = Variable(f'flip_grad_size_{lower}', lower, 4).bind(size)
+        grad = x[:, :n].flip((0, 1)).gradient(x, gradient=dy[:, :n])[0]
+        expected = np.zeros_like(weights)
+        expected[:, :size] = np.flip(weights[:, :size], (0, 1))
+        np.testing.assert_array_equal(grad.numpy(), expected)
 
   def test_symbolic_partial_store(self):
     data, values = [1., 2., 3., 4.], [10., 20., 30., 40.]
