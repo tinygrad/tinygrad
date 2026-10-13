@@ -223,7 +223,6 @@ class FFNBlock:
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos)
 
-
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
@@ -344,8 +343,7 @@ class MLATransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
-      if self.indexer:
-        idx = self.indexer.idx
+      if (idx:=self.config.indexer) is not None:
         self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.config.max_context, idx.kpool), 2, idx.head_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
