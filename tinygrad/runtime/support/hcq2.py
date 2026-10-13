@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
-from tinygrad.dtype import dtypes, DType, AddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile
@@ -377,8 +377,8 @@ class HWQueue:
         self.patches.append((len(self.blob), w))
         self.blob += bytes(w.dtype.itemsize)
       else:
-        v, n = (c.val, w.dtype.itemsize) if isinstance(w, UOp) else (c, 4)
-        self.blob += (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
+        v, dt = (c.val, w.dtype) if isinstance(w, UOp) else (c, dtypes.uint32)
+        self.blob += struct.pack(unwrap(dt.fmt), truncate[dt](v))
     return len(self.blob)
 
   def loop(self, body:UOp, r:UOp):
@@ -575,26 +575,21 @@ def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   ctx.refs.append(buf) # add to refs
   return UOp.const(g.val, dtypes.uint64)
 
-def fold_binary(buf:UOp, blob:UOp) -> UOp:
-  base, off = unwrap_view(buf)
-  cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')[off:off + len(blob.arg)] = blob.arg
-  return UOp(Ops.NOOP)
-
-def write_words(buf:UOp, writes:list[tuple[int, int, int]]) -> UOp: # (word index, size, value)
+def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   base, off = unwrap_view(buf)
   mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
-  for o, n, v in writes: mv[off + o * n:off + (o + 1) * n] = (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
+  for o, data in writes: mv[off + o:off + o + len(data)] = data
   return UOp(Ops.NOOP)
 
-def words(offs:UOp, ws:UOp): return zip(*[s.src if s.op is Ops.STACK else (s,) for s in (offs, ws)]) # a stack or one word
-
-def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp: return write_words(buf, [(o.val, w.dtype.itemsize, w.val) for o, w in words(offs, ws)])
+def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
+  return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
 
 def fold_ranged(buf:UOp, offs:UOp, ws:UOp, e:UOp) -> UOp: # the words of every trip
   vs = {r: UOp.variable(f"r{i}", 0, r.vmax) for i, r in enumerate(e.src[1:])}
-  ows = list(words(offs.substitute(vs), ws.substitute(vs)))
+  ows = list(zip(offs.substitute(vs).src, ws.substitute(vs).src))
   trips = [dict(zip([v.expr for v in vs.values()], t)) for t in itertools.product(*[range(int(r.vmax) + 1) for r in vs])]
-  return write_words(buf, [(sym_infer(o, t), w.dtype.itemsize, sym_infer(w, t)) for t in trips for o, w in ows])
+  data = [(sym_infer(o, t) * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](sym_infer(w, t)))) for t in trips for o, w in ows]
+  return _write_host(buf, data)
 
 pm_link = PatternMatcher([
   # collapse committed const conversions
@@ -607,10 +602,10 @@ pm_link = PatternMatcher([
   # math on consts is a const
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"), lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
   # fold rules
-  (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
+  (UPat(name="buf").store(UPat(Ops.BINARY, name="blob").or_bitcasted()), lambda buf, blob: _write_host(buf, [(0, blob.arg)])),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
-  (UPat(name="buf").index(UPat.cvar("offs")).store(UPat.cvar().or_casted("ws")), fold_words),
-  (UPat(name="buf").index(UPat(name="offs")).store(UPat(name="ws")).end(allow_any_len=True, name="e"), fold_ranged),
+  (UPat(name="buf").index(UPat.cvar("off")).store(UPat.cvar().or_casted("w")), lambda buf, off, w: fold_words(buf, UOp.stack(off), UOp.stack(w))),
+  (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(allow_any_len=True, name="e"), fold_ranged),
   # a call keeps the deps that are not written yet
   (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"), lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.without_after.op is Ops.CALL else
