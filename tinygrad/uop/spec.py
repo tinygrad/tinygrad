@@ -1,7 +1,7 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
   CustomFunction
 from tinygrad.uop.render import render_uir
-from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid
+from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
 from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
 from tinygrad.device import is_disk_device
 
@@ -121,7 +121,9 @@ spec_shared = PatternMatcher([
   # assembly instruction
   (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[1], DType)),
 
-  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE; a STORE's value matches its target's dtype
+  (UPat(Ops.STORE, src=(UPat(name="t"), UPat(name="v")), allow_any_len=True),
+   lambda t,v: None if matches_dtype(v, t.dtype) or v.dtype == weak_dtype(t.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
