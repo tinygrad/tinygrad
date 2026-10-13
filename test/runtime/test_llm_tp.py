@@ -101,7 +101,7 @@ class TestTensorParallel(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "too heavy for mock GPUs")
   def test_model(self):
     rng = np.random.default_rng(42)
-    # Keep GQA, partial RoPE, gated attention and replicated SSM state; custom kernels have separate tests.
+    # Keep GQA, partial RoPE, gated attention and sharded SSM state; custom kernels have separate tests.
     config = TransformerConfig(num_blocks=2, dim=8, hidden_dim=8, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=16, head_dim=4,
       v_head_dim=4, rope_theta=10000, rope_dim=2, max_context=4, qk_norm=4, attn_output_gate=True, ssm=SSMConfig(2, 2, 2, 4, 8),
       ssm_layers=(True, False))
@@ -126,8 +126,8 @@ class TestTensorParallel(unittest.TestCase):
       for pos, expected in enumerate((0, 3)):
         x, start_pos = Tensor([[pos+1]]).realize(), Variable('start_pos', 0, 3).bind(pos)
         self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
-      # the kv cache is sharded on its heads, the gated deltanet is copied to every device
+      # the kv cache is sharded on its heads, the gated deltanet on its key heads (and the value heads that read them)
       self.assertEqual(parallel.blk[1].cache_kv.uop.axis, 2)
-      for t in (parallel.blk[0].attn_qkv.weight, parallel.blk[0].recurrent_state): self.assertEqual((t.device, t.uop.axis), (DEVICES, None))
+      for t,a in ((parallel.blk[0].attn_qkv.weight, 0), (parallel.blk[0].recurrent_state, 1)): self.assertEqual((t.device, t.uop.axis), (DEVICES, a))
 
 if __name__ == '__main__': unittest.main()
