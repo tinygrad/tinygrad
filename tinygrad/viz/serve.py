@@ -584,7 +584,7 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
   for pc, inst in pc_table.items():
     op = getattr(inst, "op_name", "").lower()
     if (offset:=parse_branch(inst, op)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
-    elif op in {"s_endpgm"}: leaders.add(pc+inst.size())
+    elif op in {"s_endpgm", "s_barrier", "s_barrier_wait"}: leaders.add(pc+inst.size())
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}

@@ -543,13 +543,13 @@ jobs:
     - name: Test copy speeds
       run: SIZE=64000000 GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 test/external/external_test_usb_asm24.py
 
-  driverbenchmarks:
-    name: PCI Driver Benchmark (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, tinyboxrandom]
+  drivertests:
+    name: PCI Driver Tests (DEV=${{ matrix.dev }})
+    runs-on: ${{ matrix.dev == 'AMD' && '9060xt' || '3080' }}
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD::gfx1201', 'NV']
+        dev: ['AMD', 'NV']
     timeout-minutes: 5
     defaults:
       run:
@@ -560,12 +560,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup
-      run: |
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} rmmod --expect
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} kill_pids --sudoless
-        mkdir -p extra/datasets
-        ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -593,7 +587,9 @@ jobs:
           SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
         fi
     - name: Test DISK copy time
-      run: TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
+      run: |
+        truncate -s 4G disk-benchmark
+        TESTFILE=disk-benchmark python3 test/external/external_benchmark_disk_raw.py
     - name: Test CPU copy time
       run: |
         GRAPH_ONE_KERNEL=1 NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyDefaulttoCPUJit
@@ -602,16 +598,10 @@ jobs:
     # - name: HEVC Decode Benchmark
     #   if: ${{ matrix.dev == 'NV' }}
     #   run: IGNORE_BEAM_CACHE=1 VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 PYTHONPATH=. python3 extra/hevc/decode.py
-    - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      if: ${{ matrix.dev == 'NV' }}
-      run: BENCHMARK_LOG=resnet_10steps MNISTMOCK=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
-    - name: Run 10 MLPerf Bert training steps (1 gpu)
-      # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Remote
       if: ${{ matrix.dev != 'NV' }}
       env:
-        DEV: PCI+AMD::gfx1201
+        DEV: PCI+AMD
       run: |
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
         server_pid=$!
