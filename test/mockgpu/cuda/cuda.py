@@ -62,7 +62,7 @@ def cuMemFree_v2(dptr): return free(dptr)
 def cuMemFreeHost(p): return free(p)
 def cuMemHostRegister_v2(p, size, flags): return cuda.CUDA_SUCCESS
 def cuMemHostUnregister(p): return cuda.CUDA_SUCCESS
-
+def cuMemHostGetDevicePointer_v2(pdpt, p, Flags): return out(pdpt, p)
 def cuModuleLoadData(module, image):
   modules.append(ctypes.create_string_buffer(ctypes.string_at(image)))
   return out(module, ctypes.addressof(modules[-1]))
