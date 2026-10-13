@@ -57,14 +57,14 @@ class GPFIFO:
     self.buf_sz = sz // 4
 
   def execute(self) -> bool:
-    initial_off = self.buf_ptr
+    initial_get, initial_off = self.ctrl.GPGet, self.buf_ptr
     while self.ctrl.GPGet != self.ctrl.GPPut:
       self._set_buf_state(self.gpfifo[self.ctrl.GPGet])
 
       if not self.execute_buf():
         # Buffer isn't executed fully, check if any progress and report.
         # Do not move GPGet in this case, will continue from the same state next time.
-        return self.buf_ptr != initial_off
+        return self.ctrl.GPGet != initial_get or self.buf_ptr != initial_off
 
       self.ctrl.GPGet = (self.ctrl.GPGet + 1) % self.entries_cnt
       self._reset_buf_state()

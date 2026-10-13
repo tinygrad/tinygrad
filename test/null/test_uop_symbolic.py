@@ -123,6 +123,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(n, m).ssimplify(), 2)
     self.assertEqual((n%3).ssimplify(), 0)
     self.assertEqual((m%2).ssimplify(), 0)
+    self.assertIs((n<12).simplify(), n<12)
 
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
@@ -450,7 +451,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) + 2 < 3, 0, 1, "(a<1)")
 
   def test_lt_simple_factor(self):
-    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "(((a*3)+(b*3))<4)")
+    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "((a+b)<2)")
+    self.helper_test_variable((Variable("g", 0, 1)*128+Variable("l", 0, 31)*4) < 101, 0, 1, "((l+(g*32))<26)")
+    self.helper_test_variable((Variable("a", -6, 6)*4+Variable("b", -6, 6)*8) < -3, 0, 1, "((a+(b*2))<0)")
+    self.helper_test_variable((Variable("a", 0, 6)*4+Variable("b", -1, 0)) < 3, 0, 1, "(a<1)")
 
   def test_lt_sum_factor_rhs_partial(self):
     self.helper_test_variable((Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8) < 4, 0, 1,
@@ -1280,6 +1284,9 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
+  def test_sym_infer_tagged(self):
+    a = Variable("a", 0, 10)
+    assert sym_infer((a*3+1).rtag("t"), {a.expr: 2}) == 7
 
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
@@ -1491,6 +1498,7 @@ class TestGatedUopGivenValid(unittest.TestCase):
     idx = graph_rewrite(idx, pm_simplify_valid)
     # (r0-1)//3 = (r0+2)//3 - 1 (constant offset split)
     self.assertEqual(idx, (r0 < 3).where((r0 + uconst(2)) // uconst(3) + uconst(-1), UOp.invalid()))
+    self.assertEqual(graph_rewrite((r0 <= 1).where(r0//2, UOp.invalid()), pm_simplify_valid), (r0 <= 1).where(uconst(0), UOp.invalid()))
 
   def test_invalid_gate_simplifies_vectorize(self):
     r0 = Variable("r0", 0, 2)

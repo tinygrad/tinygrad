@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceild
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
 from tinygrad.device import Buffer, BufferSpec, Compiled
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, CDTYPE, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -282,7 +282,8 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp: # kernargs: poke on change
     stored = usb_store(b, idx.src[0], v.src[0])
     for i, w in zip(idx.src[1:], v.src[1:]): stored = usb_store(b.after(stored), i, w)
     return stored
-  link, addr, v = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype), v.bitcast(CDTYPE[v.dtype.itemsize])
+  link, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
+  v = v.bitcast({d.itemsize: d for d in dtypes.uints}[v.dtype.itemsize]) # bitcast to uint raw bits
   if str(unwrap_view(b)[0].tag).startswith("kernargs"):
     cache = UOp.alloc((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.device).rtag("usb_arg_cache")
     return usb_patch(link, addr, v, patch(cache, [], bytes(v.dtype.itemsize * cache.max_numel())).index(idx - idx.vmin))

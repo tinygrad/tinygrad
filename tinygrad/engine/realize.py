@@ -35,7 +35,7 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
     return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
-  return [(d, call, None) for d in to_tuple(get_call_arg_uops(call)[0].device)]
+  return [(d, call, None) for d in to_tuple(call.device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -292,7 +292,7 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
   linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), allow_cache=ctx.cache)
   while True:
     if clear_l2:
-      if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
+      if hasattr(dev:=Device[call.device], 'invalidate_caches'): dev.invalidate_caches()
       else:
         from tinygrad.tensor import Tensor
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)

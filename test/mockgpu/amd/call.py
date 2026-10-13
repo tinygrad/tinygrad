@@ -14,7 +14,7 @@ asm_call_counter = itertools.count(1)
 # this is meant to replace the old emulator
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
-              lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data:list[int]|None=None, accvgpr:UOp|None=None):
+              lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data_count:int=0, accvgpr:UOp|None=None):
   # define ranges inside a wave
   li = UOp.range((wave.eq(0)).where(max(lds_size//4, 1), 0), 2, dtype=dtypes.int)
   si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
@@ -29,7 +29,8 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:in
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   initial:list[tuple[int, sint]] = [*((128+i, i) for i in range(65)), *((193+i, (-i-1)&0xFFFFFFFF) for i in range(16)), *F32_INLINE.items()]
-  initial += [(i,v) for i,v in enumerate(user_data)] if user_data else [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
+  if user_data_count: initial += [(i, UOp.variable(f"user_data_{i}", 0, dtypes.uint32.max, dtypes.uint32)) for i in range(user_data_count)]
+  else: initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
   if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
   else:
     sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
@@ -70,7 +71,7 @@ pm_asm_call = PatternMatcher([
 
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
-         user_data:list[int]|None=None, backend:str|None=None) -> UOp:
+         user_data_count:int=0, backend:str|None=None) -> UOp:
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
@@ -82,22 +83,27 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   wg = UOp.range(gx*gy*gz, 0)
   wave = UOp.range(n_waves, 1)
   # alloc register and LDS buffers
-  sgpr = UOp.alloc((SGPR_COUNT,), dtypes.uint32, 0, AddrSpace.REG)
-  vgpr = UOp.alloc((256*wave_size,), dtypes.uint32, 1, AddrSpace.REG)
+  sgpr = UOp.alloc((SGPR_COUNT*n_waves,), dtypes.uint32, 0, AddrSpace.REG)
+  vgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 1, AddrSpace.REG)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT)*512
   lds = UOp.alloc((max(lds_size//4, 1),), dtypes.uint32, 3, AddrSpace.REG)
   scratch = UOp.alloc((max(scratch_size*wave_size*n_waves, 1),), dtypes.uint8, 4, AddrSpace.REG)
-  accvgpr = UOp.alloc((256*wave_size,), dtypes.uint32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
+  accvgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   lib_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   inst_addr = UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU)
-  init = init_wave(wg, wave, sgpr, vgpr, lds, args_ptr, gx, gy, lx, ly, total_threads, wave_size, lds_size, scratch_size, rsrc2, arch,
-                   user_data, *([accvgpr] if wave_size == 64 else []))
+  init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), lds, args_ptr, gx, gy, lx, ly, total_threads, wave_size,
+                   lds_size, scratch_size, rsrc2, arch, user_data_count, *([accvgpr.index(wave*256*wave_size)] if wave_size == 64 else []))
+  user_vars = [u for u in init.body.toposort() if u.is_variable]
+  init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
+                                                 for i,u in enumerate(user_vars)}), *init.src[1:], *user_vars))
   ctx = _Ctx(4, wave_size)
-  afters: dict[UOp, UOp] = {ctx.sgpr:sgpr.after(init), ctx.vgpr:vgpr.after(init), ctx.vmem:ctx.vmem,
-                            ctx.lds:lds.after(init), ctx.scratch:scratch.index(wave*scratch_size*wave_size).after(init)}
-  if wave_size == 64: afters[ctx.accvgpr] = accvgpr.after(init)
-  for block_pc, block in cfg["blocks"].items():
+  end = init.end(wave)
+  mem = {ctx.sgpr:(sgpr,SGPR_COUNT),ctx.vgpr:(vgpr,256*wave_size),ctx.vmem:(ctx.vmem,0),ctx.lds:(lds,0),ctx.scratch:(scratch,scratch_size*wave_size)}
+  if wave_size == 64: mem[ctx.accvgpr] = (accvgpr, 256*wave_size)
+  for block_idx, (block_pc, block) in enumerate(cfg["blocks"].items()):
+    wave = UOp.range(n_waves, lib_sz+block_idx)
+    afters = {b:(buf.shrink(((wave*stride, (wave+1)*stride),)) if stride else buf).after(end, wave) for b,(buf,stride) in mem.items()}
     loop_path = cfg["paths"][block_pc].get(block_pc)
     loop = UOp.loop(block_pc) if loop_path is not None else None
     if loop is not None: afters = {b:arg.after(loop) for b,arg in afters.items()}
@@ -123,7 +129,8 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       if loop_path is COND_NOT_TAKEN: branch_cond = branch_cond.logical_not()
       backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
       afters = {b:arg.after(backedge) for b,arg in afters.items()}
-  sink = UOp.sink(UOp.group(*afters.values()).end(wave).end(wg), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
+    end = UOp.group(*afters.values()).end(wave)
+  sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device[backend].renderer)
