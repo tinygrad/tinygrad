@@ -180,36 +180,23 @@ pm_insert_copy_staging = PatternMatcher([
 
 class DepsTracker:
   def __init__(self):
-    # tracks (offset, end, dep) ranges per base buffer/lane to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[Any, list[tuple[int, int, Any]]] = defaultdict(list)
-    self.r_dependency_map: dict[Any, list[tuple[int, int, Any]]] = defaultdict(list)
+    self.writes:dict[Any, list[tuple[int, int, Any]]] = defaultdict(list)
+    self.reads:dict[Any, list[tuple[int, int, Any]]] = defaultdict(list)
 
-  def access_resources(self, bufs:Sequence[UOp|Buffer], write:list[int], new_dependency:Any):
-    ranges:list[tuple[Any, int, int]] = []
-    for buf in bufs:
-      if isinstance(buf, Buffer): ranges.append((id(buf.base), buf.offset, buf.offset + buf.nbytes))
-      else:
-        base, lane, off = unwrap_lane(buf)
-        ranges.append(((base, lane), off, off + buf.max_numel() * buf.dtype.itemsize))
-    wait_nodes = []
-    for i, (key, s, e) in enumerate(ranges):
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i, (key, s, e) in enumerate(ranges):
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for entry in dmap[key]:
-            st, en, dep = entry
-            if st == en: continue
-            if en <= s or e <= st: kept.append(entry)
-            else:
-              if st < s: kept.append((st, s, dep))
-              if e < en: kept.append((e, en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
+  def access_resources(self, bufs:Sequence[UOp], write:list[int], new_dependency:Any) -> list:
+    accesses = [(i in write, (base, lane), off, off + b.max_numel() * b.dtype.itemsize)
+                for i, b in enumerate(bufs) for base, lane, off in [unwrap_lane(b)]]
+
+    waits = [dep for is_write, key, start, end in accesses for lo, hi, dep in (self.writes[key] + self.reads[key] if is_write else self.writes[key])
+             if lo < end and start < hi]
+
+    for is_write, key, start, end in accesses:
+      if is_write:
+        for ranges in (self.writes, self.reads):
+          before_and_after = [((lo, min(hi, start), dep), (max(lo, end), hi, dep)) for lo, hi, dep in ranges[key]]
+          ranges[key] = [(lo, hi, dep) for parts in before_and_after for lo, hi, dep in parts if lo < hi]
+      (self.writes if is_write else self.reads)[key].append((start, end, new_dependency))
+    return dedup(waits)
 
 @dataclass
 class BatchCtx:
