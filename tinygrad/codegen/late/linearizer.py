@@ -11,12 +11,6 @@ def linearize(sink:UOp) -> list[UOp]:
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, int, Any]] = {}
 
-  # Scalar expressions derived only from constants and parameters can precede every control-flow scope.
-  invariant:set[UOp] = set()
-  for u in lst:
-    if u.op in (Ops.CONST, Ops.PARAM) or (u.op in GroupOp.ALU | {Ops.CAST} and all(s in invariant for s in u.src)):
-      invariant.add(u)
-
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
@@ -30,7 +24,8 @@ def linearize(sink:UOp) -> list[UOp]:
     match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
-      case _ if u in invariant: priority = -19
+      # Pure expressions must precede loop exits when they are shared across sibling scopes.
+      case _ if u.op in GroupOp.Elementwise | {Ops.CONST}: priority = -6
       case Ops.BUFFER | Ops.ALLOC: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
@@ -68,14 +63,14 @@ class CFGContext:
     deps: dict[UOp, int] = {}
     indices: dict[UOp, int] = {}
     controls: list[UOp] = []
-    ends = assigned = 0
+    ends = 0
     siblings: dict[UOp, list[UOp]] = {}
     for u in sink.toposort():
       deps[u] = 0
       for s in u.src_without_body: deps[u] |= deps[s]
 
       if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
-        pending = deps[u] & ends & ~assigned
+        pending = deps[u] & ends
         parent = 1 << indices[u.src[1]] if u.op is not Ops.SINK else 0
         # An end preceding the parent range in topological order cannot be nested inside it.
         if parent: pending &= -parent
@@ -85,7 +80,7 @@ class CFGContext:
           x = controls[bit.bit_length()-1]
           if not parent or deps[x] & parent:
             siblings.setdefault(u, []).append(x)
-            assigned |= bit
+            ends ^= bit
       if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE):
         indices[u] = len(controls)
         controls.append(u)
@@ -95,10 +90,8 @@ class CFGContext:
 
     self.edges: dict[UOp, UOp] = {}
     for k,v in siblings.items():
-      # ranges that have dependencies on other siblings need to be scheduled after them
-      siblings_mask = sum(1 << indices[u] for u in v)
-      order = sorted(v, key=lambda x: (deps[x] & siblings_mask).bit_count())
-      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
+      # Ends were collected in topological order, so dependencies already precede their consumers.
+      zipped = zip(v, v[1:]) if k.op is Ops.SINK else zip([k.src[1]] + v, v)
       for x,y in zipped:
         # TODO: this can happen! it causes infinite loop in shufflenet
         assert not deps[x] & (1 << indices[y.src[1]])
