@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
@@ -21,8 +21,6 @@ sys.setrecursionlimit(10000)
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
   if not b.arg.removable: return None
-  # don't optimize AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
-  if b.src[0].op is Ops.AFTER: return None
 
   new_rng = []
   hit = False
@@ -62,7 +60,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     if x.op is Ops.AFTER:
       accessed_buffers.append(x.buf_uop)
       return False
-    if (x.op is Ops.STAGE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
+    if x.op in {Ops.STAGE, Ops.MSTACK}:
       accessed_buffers.append(x)
       return False
     if x.op is Ops.STORE:
@@ -206,25 +204,9 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
-  # AFTER: add END to the existing STORE, return buffer with kernel dependency
-  if (after:=x.src[0]).op is Ops.AFTER:
-    buf = after.src[0].buf_uop.base
-    if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf
-    # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
-    ended_stores = []
-    for store in stores:
-      store_target = store.src[0]
-      if store_target.src[0].op is Ops.STAGE and store_target.src[0].src[0].op is Ops.INDEX:
-        store_target = store_target.src[0].src[0]
-      if store.src[1] is store_target: continue  # skip self-assign
-      end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
-      ended_stores.append(store_target.store(store.src[1]).end(*end_rngs))
-    return buf.after(*ended_stores)
-
-  if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp.alloc((size,), dtype, slot=next(ctx), device=x.arg.device)
-    do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
-    return buf.after(do_store).cast(x.dtype)
+  buf = UOp.alloc((size,), dtype, slot=next(ctx), device=x.arg.device)
+  do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
+  return buf.after(do_store).cast(x.dtype)
 
 # collapse any BUFFERIZE to single input BUFFERIZE
 def flatten_bufferize(x:UOp):
@@ -285,7 +267,6 @@ def debuf(ctx:LocalAddBufferContext, buf:UOp):
   return ret
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
-  if after.addrspace == AddrSpace.LOCAL: return None
   buf = after.buf_uop
   # NOTE: this is bottom up, so we only add it once
   if buf not in ctx.map: ctx.map[buf] = after
@@ -314,9 +295,6 @@ to_define_global = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
   (UPat(Ops.AFTER, name="after"), handle_after),
-
-  # remove device from local BUFFERIZE
-  (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
 
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
