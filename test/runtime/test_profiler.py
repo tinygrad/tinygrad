@@ -164,8 +164,8 @@ class TestProfiler(unittest.TestCase):
 
     if Device.DEFAULT in HCQ_DEVS:
       ents = flatten(e.ents for e in graph_evs)
-      assert len(ents) == 4, "two kernel runs and two copies are expected"
-      assert sum(ansistrip(e.name).startswith("copy") for e in ents) == 2, "two copies are expected"
+      assert len(ents) == 6, "three kernel runs and three copies are expected"
+      assert sum(ansistrip(e.name).startswith("copy") for e in ents) == 3, "three copies are expected"
     else:
       assert len(graph_evs) == 2, "2 graph events are expected"
       assert len(graph_evs[0].ents) == 2, "two entities are expected"

@@ -1280,6 +1280,9 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
+  def test_sym_infer_tagged(self):
+    a = Variable("a", 0, 10)
+    assert sym_infer((a*3+1).rtag("t"), {a.expr: 2}) == 7
 
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval

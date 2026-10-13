@@ -1,6 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
-from tinygrad.uop.ops import UOp, Ops, ParamArg
+from tinygrad.uop.ops import UOp
 
 # *** allreduce implementation ***
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
@@ -67,9 +67,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if output is None:
-    output = UOp(Ops.ALLOC, src=(UOp.const(red.max_numel()),)+UOp.device_range_src(red.device),
-                 arg=ParamArg(next(UOp.unique_num), red.dtype, device=red.device))
-    output = output.reshape(red.max_shape).shrink_to(red.shape)
+    output = UOp.alloc(red.shape, red.dtype, device=red.device)
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)

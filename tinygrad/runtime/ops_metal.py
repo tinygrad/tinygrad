@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args, to_name
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args, to_name, bufferize_buf
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
@@ -141,7 +141,7 @@ class MetalQueue(HWQueue):
     dims = (*prg.arg.global_size, *prg.arg.local_size)
     if any(isinstance(d, UOp) for d in dims):
       self.sizes.append((len(self.cmds), at:=round_up(self.nbytes, 8)))
-      self.rows += layout_args([d.cast(dtypes.uint64) if isinstance(d, UOp) else UOp.const(d, dtypes.uint64) for d in dims], at)
+      self.rows += layout_args([UOp.const(d, dtypes.uint64) for d in dims], at)
       self.nbytes = at + 48
     self.cmds.append((obj.lib, obj.name, tuple(1 if isinstance(d, UOp) else int(d) for d in dims), off))
 
@@ -217,7 +217,8 @@ class MetalDevice(Compiled):
       (UPat(Ops.ALLOC, tag=self.tag("handles")), lambda d=self: d.handles),
       (UPat(Ops.ALLOC, tag="slots", name="b"), # with stamps
        lambda b, d=self: d.new_slots(b.max_numel()) if b.device == d.device and b.max_numel() > 4 else None),
-      (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.new_icb(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("mtl_icb") else None)])
+      (UPat(Ops.ALLOC, name="b"), lambda ctx, b, d=self:
+       d.new_icb(bufferize_buf(ctx, b.rtag(None)).buffer, *b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("mtl_icb") else None)])
 
   @functools.cached_property
   def handles(self) -> Buffer:
@@ -247,9 +248,8 @@ class MetalDevice(Compiled):
     descriptor.setSupportIndirectCommandBuffers(True)
     return checked(self.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error, descriptor, metal.MTLPipelineOptionNone, None)
 
-  def new_icb(self, cmds:tuple[tuple[bytes, str, tuple[int, ...], int], ...], header:int) -> Buffer:
+  def new_icb(self, buf:Buffer, cmds:tuple[tuple[bytes, str, tuple[int, ...], int], ...], header:int) -> Buffer:
     pipes = dedup(c[:2] for c in cmds)
-    buf = Buffer(self.device, header + 8 * (1 + len(cmds) + len(pipes)), options=BufferSpec(nolru=True), preallocate=True)
     desc = metal.MTLIndirectCommandBufferDescriptor.new()
     desc.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     desc.setMaxKernelBufferBindCount(1)
@@ -259,7 +259,7 @@ class MetalDevice(Compiled):
     for cmd, (lib, name, dims, off) in zip(commands, cmds):
       cmd.setComputePipelineState(state:=self.pipeline(lib, name))
       if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
-      cmd.setKernelBuffer_offset_atIndex(buf.get_storage().meta, off, 0)
+      cmd.setKernelBuffer_offset_atIndex(buf.meta, buf.offset + off, 0)
       cmd.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*dims[:3]), metal.MTLSize(*dims[3:]))
       cmd.setBarrier()
     buf.host.view(fmt='Q')[header // 8:] = array.array('Q', [icb.value, *[c.value for c in commands], *[self.pipeline(*p).value for p in pipes]])

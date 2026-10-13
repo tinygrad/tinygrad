@@ -6,7 +6,7 @@ from tinygrad.renderer.amd.dsl import Inst, FixedBitField, EnumBitField
 # 0xf9 (249) = SDWA, 0xfa (250) = DPP16 for CDNA (GFX9)
 _VARIANT_SRC0 = {"_SDWA_SDST": 0xf9, "_SDWA": 0xf9, "_DPP16": 0xfa}
 
-def _matches(data: bytes, cls: type[Inst]) -> bool:
+def _matches(data: bytes|memoryview, cls: type[Inst]) -> bool:
   """Check if data matches all FixedBitFields and op is in allowed."""
   for _, field in cls._fields:
     dword_idx = field.lo // 32
@@ -63,7 +63,7 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
   }
   return _FORMATS
 
-def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
+def detect_format(data: bytes|memoryview, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   for cls in _load_formats()[arch]:
