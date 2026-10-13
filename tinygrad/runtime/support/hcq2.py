@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence
-import functools, itertools, weakref, ctypes, struct, time
+import itertools, weakref, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
-from tinygrad.helpers import DEBUG, VIZ, DEV, ALL2ALL, PROFILE
+from tinygrad.helpers import DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
@@ -131,11 +131,6 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 # *****************
 # 1.2. prep: staging copies
 
-STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) << 20, 2
-
-@functools.cache
-def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, preallocate=True)
-
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
   if not all(hasattr(Device[d], "iface") for d in devs) or Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None # not 2 nodes
@@ -157,13 +152,8 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   dev, host, usb_memcpys = Device[device], Device[device].host, getattr(Device[device], "is_usb", False)
   mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
   if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
-    (staging:=_staging(host)).get_buf(device)
-    base, it, copies = UOp.from_buffer(staging, dtypes.uint8), src.dtype.itemsize, []
-    chunk = (STAGING_SIZE // STAGING_SLOTS) // it
-    for i, off in enumerate(range(0, src.max_numel(), chunk)):
-      stage, part = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it], src[off:off+n]
-      copies += [stage.store_call(part), dst[off:off+n].store_call(stage)]
-    return UOp(Ops.LINEAR, src=tuple(copies))
+    stage = UOp.alloc(src.max_shape, src.dtype, int.from_bytes(call.key[:8], "little"), device=host)
+    return UOp(Ops.LINEAR, src=(stage.store_call(src), dst.store_call(stage)))
 
   if Device[device].has_copy_queue: return None
   out, inp = (UOp.param(i, dtypes.uint8, b.nbytes(), device=device) for i, b in enumerate((dst, src)))
@@ -565,7 +555,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
 
   # a device owns the placeholders it names, the rest are allocated where they live
   if (r:=cast(Buffer|None, Compiled.pm_bufferize.rewrite(b, ctx))) is not None: pass
-  elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
+  elif not ctx.use_rt or b.tag is None: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
   else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
