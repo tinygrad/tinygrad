@@ -3,6 +3,7 @@ from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
+from tinygrad.codegen.simplify import pm_reduce_unparented
 from test.helpers import full_rewrite, to_uops_list
 
 simple_pm = PatternMatcher([
@@ -460,6 +461,15 @@ class TestReduceCollapse(unittest.TestCase):
     result = graph_rewrite(red, pm_reduce_collapse, name='test')
     # Should become add of two separate reduces
     self.assertEqual(result.op, Ops.ADD)
+
+  def test_bool_reduce_unparented_keeps_dtype(self):
+    for op in (Ops.ADD, Ops.MUL):
+      self.assertIs(graph_rewrite(UOp.const(True).reduce(UOp.range(4, 0), arg=op), pm_reduce_unparented).dtype, dtypes.bool)
+
+  def test_max_reduce_unparented_empty_range(self):
+    n = Variable("n", 0, 4)
+    ret = graph_rewrite(UOp.const(1.0).reduce(UOp.range(n, 0), arg=Ops.MAX), pm_reduce_unparented)
+    self.assertEqual(ret.substitute({n: n.const_like(0)}).simplify().arg, float("-inf"))
 
   def test_reduce_shapeless_const_unroll(self):
     """a REDUCE over a shapeless CONST (e.g. x*0 folded late in codegen) must collapse before the expander"""
