@@ -880,6 +880,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.device
     if self.op is Ops.COPY: return self.arg
     if self.op is Ops.ALLREDUCE: return self.arg[1]
+    if self.op is Ops.CALL and self.body.op is Ops.STORE: return self.src[2].device # a copy pushes from its src
     for x in self.src:
       if x.device is not None: return x.device
     return None
