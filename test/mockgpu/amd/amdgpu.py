@@ -341,7 +341,7 @@ class AMDGPURegisters:
     self.regs: dict[tuple[int, int], int] = {}
   def __getitem__(self, addr:int) -> int:
     if addr == regGRBM_GFX_INDEX: return self.grbm_index
-    if regCPG_PERFCOUNTER1_LO < addr < regGUS_PERFCOUNTER_HI:
+    if regCPG_PERFCOUNTER1_LO <= addr <= regGUS_PERFCOUNTER_HI:
       assert self.regs[(regCP_PERFMON_CNTL, 0)] == 0x401, "read mode should be enabled"
       return addr << 16 | self.grbm_index
     return self.regs[(addr, getbits(self.grbm_index, 16, 23))]
