@@ -86,21 +86,19 @@ from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None:
-    device = b.device if b.device is not None else next(a.device for a in ctx[1] if a.device is not None)
-    ctx[0][b] = ret = UOp.new_buffer(device, b.max_numel(), b.dtype)
-  return ret
+def create_new_buffer(ctx:tuple[UOp, ...], b:UOp):
+  device = b.device if b.device is not None else next(a.device for a in ctx if a.device is not None)
+  return UOp.new_buffer(device, b.max_numel(), b.dtype)
 
 pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
   # bind ALLOCs to fresh BUFFERs for this invocation
   (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
