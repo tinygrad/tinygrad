@@ -560,12 +560,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup
-      run: |
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} rmmod --expect
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev != 'NV' && 'AMD' || 'NV' }} kill_pids --sudoless
-        mkdir -p extra/datasets
-        ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
