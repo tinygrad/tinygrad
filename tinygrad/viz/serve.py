@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip, merge_dicts
+from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
 from tinygrad.runtime.autogen.amd.common import OpType
