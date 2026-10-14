@@ -8,6 +8,15 @@ from test.mockgpu.amd.call import cfg_regions
 
 
 class TestCallLLVM(unittest.TestCase):
+  def test_default_names_resolve_to_their_own_module(self):
+    out = UOp.param(0, dtypes.int, (1,))
+    programs = [to_program(out[0].store(v).sink(arg=KernelInfo()), call.backend_renderer("CPU")) for v in (7, 19)]
+    self.assertEqual(programs[0].to_elf().name, programs[1].to_elf().name)
+    for prg, expected in zip(programs, (7, 19)):
+      result = ctypes.c_int()
+      call.get_call_runtime("CPU", prg)(ctypes.addressof(result))
+      self.assertEqual(result.value, expected)
+
   def test_static_functions_are_not_exported(self):
     compiler = call.CallLLVMJIT(call.backend_renderer("CPU").target.arch.split(","))
     compiler.compile_cached("define internal void @asm_fn_local(ptr %out) noinline { store i32 42, ptr %out\n ret void }\n"

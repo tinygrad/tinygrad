@@ -45,15 +45,15 @@ class CallLLVMJIT(CPULLVMCompiler):
     super().__init__(arch)
     self.cachekey = f"asm_call_obj_{self.cachekey}" if self.cachekey is not None else None
     self.functions:dict[str, int] = {}
-    self.modules:list[CallLLVMModule] = []
+    self.modules:dict[bytes, CallLLVMModule] = {}
 
   def compile_cached(self, src:str) -> bytes:
     lib = super().compile_cached(src)
-    self.modules.append(CallLLVMModule(lib, self.functions))
+    if lib not in self.modules: self.modules[lib] = CallLLVMModule(lib, self.functions)
     return lib
 
-  def trampoline(self, name:str) -> bytes:
-    addr = self.functions[name]
+  def trampoline(self, lib:bytes, name:str) -> bytes:
+    addr = self.modules[lib].exports[name]
     if self.arch == 'x86_64': return b'\x48\xb8'+struct.pack('<Q', addr)+b'\xff\xe0'
     if self.arch == 'arm64': return struct.pack('<IIQ', 0x58000050, 0xd61f0200, addr)
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
@@ -75,14 +75,15 @@ class CallLLVMRenderer(CPULLVMRenderer):
     self.compiler = CallLLVMJIT(target.arch.split(','))
 
   def _render_fn(self, name, args, kernel, prefix=None):
-    if name.startswith("asm_call_"):
+    if name == self.entry_name:
       kernel = [f"  {n} = trunc i64 {n}_arg to {ldt(p.dtype)}" for n,p in args if p.addrspace == AddrSpace.ALU and p.dtype.itemsize < 8]+kernel
       args = [(n+"_arg", p.replace(arg=replace(p.arg, dtype=dtypes.uint64))) if p.addrspace == AddrSpace.ALU and p.dtype.itemsize < 8
               else (n,p) for n,p in args]
     ret = super()._render_fn(name, args, kernel, prefix)
-    return ret.replace(" #0", " #1") if name.startswith(("asm_call_", "asm_block_")) else ret
+    return ret.replace(" #0", " #1") if name == self.entry_name or name.startswith("asm_block_") else ret
 
   def render(self, uops:list[UOp]) -> str:
+    self.entry_name = next(u.arg.function_name for u in uops if u.op is Ops.SINK)
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b:("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex() for b in topo if b.op is Ops.LINEAR}
     definitions = []
@@ -111,7 +112,7 @@ def get_call_runtime(backend:str, prg:UOp):
   if backend != "CPU": return get_runtime(backend, prg)
   if (runtime:=runtime_cache.get(key:=(prg.key, backend))) is None:
     obj = prg.to_elf()
-    lib = llvm_renderer(Device["CPU"].renderer.target.arch).compiler.trampoline(obj.name)
+    lib = llvm_renderer(Device["CPU"].renderer.target.arch).compiler.trampoline(obj.lib, obj.name)
     runtime_cache[key] = runtime = Device[backend].runtime(replace(obj, lib=lib))
   return runtime
 
@@ -400,6 +401,5 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
-  name = f"asm_call_{arch}_{body.key.hex()[:16]}"
-  sink = UOp.sink(body, arg=KernelInfo(name=name)).rtag(1)
+  sink = UOp.sink(body, arg=KernelInfo()).rtag(1)
   return to_program(sink, renderer)

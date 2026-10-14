@@ -296,13 +296,13 @@ class TestAsmKernel(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
     a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
     self.assertEqual(a.tolist(), [15]*32)
-    functions = dict(compiler.functions)
+    functions = {name:addr for name,addr in compiler.functions.items() if name.startswith("asm_fn_")}
     b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=lambda out: kernel(out, second=True))[0]
     self.assertEqual(b.tolist(), [23]*32)
     self.assertTrue(functions.keys() < compiler.functions.keys())
     for name, address in functions.items():
       self.assertEqual(compiler.functions[name], address)
-      self.assertNotIn(name, compiler.modules[-1].exports)
+      self.assertNotIn(name, next(reversed(compiler.modules.values())).exports)
 
   def test_variable(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
