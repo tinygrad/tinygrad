@@ -1,3 +1,4 @@
+import struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program
@@ -16,16 +17,19 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:in
   li = UOp.range((wave.eq(0)).where(max(lds_size//4, 1), 0), 2, dtype=dtypes.int)
   si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
   vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
+  # construct the register file binary
+  constants = {**{128+i:i for i in range(65)}, **{193+i:(-i-1)&0xFFFFFFFF for i in range(16)}, **F32_INLINE}
+  sgpr_init = UOp(Ops.BINARY, arg=struct.pack(f"<{SGPR_COUNT}I", *(constants.get(i, 0) for i in range(SGPR_COUNT)))).bitcast(dtypes.uint32)
   # zero ALLOCs
   zero_lds = lds.index(li).store(0).end(li)
-  zero_sgpr = sgpr.after(zero_lds).index(si).store(0).end(si)
+  zero_sgpr = sgpr.after(zero_lds).index(si).store(sgpr_init[si]).end(si)
   zero_vgpr = vgpr.after(zero_sgpr).index(vi).store(0)
   zero_agpr = unwrap(accvgpr).after(zero_sgpr).index(vi).store(0) if wave_size == 64 else UOp(Ops.NOOP)
   clear_vgpr = UOp.group(zero_vgpr, zero_agpr).end(vi)
   # set RANGE registers
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
-  initial:list[tuple[int, sint]] = [*((128+i, i) for i in range(65)), *((193+i, (-i-1)&0xFFFFFFFF) for i in range(16)), *F32_INLINE.items()]
+  initial:list[tuple[int, sint]] = []
   if user_data_count: initial += [(i, UOp.variable(f"user_data_{i}", 0, dtypes.uint32.max, dtypes.uint32)) for i in range(user_data_count)]
   else: initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
   if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
