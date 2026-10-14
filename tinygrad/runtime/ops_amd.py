@@ -26,7 +26,7 @@ from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.uop.ops import Ops, UPat, PatternMatcher, uopfunc
+from tinygrad.uop.ops import Ops, UPat, PatternMatcher, KernelInfo, uopfunc
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
@@ -505,9 +505,6 @@ class AMDSDMAQueue(HWQueue):
 
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin, device=self.dev.host))
 
-def amd_compute_queue(submit:UOp) -> HWQueue:
-  return (AMDComputeAQLQueue if cast(AMDDevice, Device[submit.src[1].without_after.arg[0][0]]).is_aql else AMDComputeQueue)(submit)
-
 @dataclass(frozen=True)
 class AMDProgramData:
   desc_offset:int; entry_point_offset:int; rsrc1:int; rsrc2:int; rsrc3:int; wave32:bool # noqa: E702
@@ -819,10 +816,6 @@ class AMDDevice(Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   sleep_timeout_ms = 200
   max_scratch_psize = 0
-  pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_compute"), UPat()), name="s"), lambda s: amd_compute_queue(s).encode()),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_amd_copy"), UPat()), name="s"), lambda s: AMDSDMAQueue(s).encode()),
-  ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
 
@@ -1036,3 +1029,9 @@ class AMDDevice(Compiled):
     super().collect_prof()
 
   def on_device_hang(self): self.iface.on_device_hang()
+
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("amd_compute_submit")).call(UPat(name="q")).after(allow_any_len=True, name="s"),
+   lambda s, q: (AMDComputeAQLQueue if cast(AMDDevice, Device[q.device]).is_aql else AMDComputeQueue)(s).encode()),
+  (UPat.sink(arg=KernelInfo("amd_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: AMDSDMAQueue(s).encode()),
+])

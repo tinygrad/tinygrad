@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 # **************** Device ****************
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
+HOST_DEVS = frozenset(("CPU", "PYTHON"))
+UVM_DEVS = frozenset(("QCOM", "METAL")) # the host maps their memory, so copies are host memcpys
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -480,7 +483,7 @@ class Compiled:
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
-    if not self.pm_encode.patterns: return
+    if self.device.split(":")[0] not in HCQ_DEVS: return
     from tinygrad.tensor import Tensor
     tdiffs = []
     for _ in range(5):

@@ -1498,7 +1498,7 @@ class UPat(RandMixin):
 
   # copied from UOp
   def sink(*srcs:UPat|None, **kwargs):  # pylint: disable=no-self-argument
-    return UPat(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
+    return UPat(Ops.SINK, src=tuple([x for x in srcs if x is not None]) or None, **kwargs)
   def index(self, *srcs:UPat|None, **kwargs):
     return UPat(Ops.INDEX, src=(self,)+tuple(x for x in srcs if x is not None), **kwargs)
   def cast(self, dtype=None, **kwargs):
@@ -1513,6 +1513,7 @@ class UPat(RandMixin):
     return UPat(Ops.REDUCE, self.match_dtype, src=(self,)+src, arg=arg, **kwargs)
   def broadcast(self, **kwargs): return UPat(Ops.STACK, self.match_dtype, src=self, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
+  def call(self, *src:UPat, **kwargs): return UPat(Ops.CALL, src=(self,)+src, **kwargs)
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, src=(self,)+src, **kwargs)
   def backedge(self, loop:UPat, cond:UPat, **kwargs): return UPat(Ops.BACKEDGE, src=(self, loop, cond), **kwargs)
 

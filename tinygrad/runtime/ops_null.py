@@ -2,7 +2,7 @@ import inspect, functools, itertools
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Compiled, HostAllocator, MMIOInterface, Program, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, uopfunc
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, dedup, prod, panic, cpu_events, perf_counter_us, NULL_ALLOW_COPYOUT, PROFILE
 from tinygrad.engine.realize import get_call_kernel_args
@@ -55,9 +55,12 @@ class NullAllocator(HostAllocator):
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
 
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("null_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NullQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("null_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NullQueue(s).encode()),
+])
+
 class NullDevice(Compiled):
-  pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function(f"submit_null_{q}"), UPat()), name="submit"),
-                               lambda submit: NullQueue(submit).encode()) for q in ("compute", "copy")])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))
   error_state = functools.cached_property(lambda self: self.link_buffer(1, dtypes.int64))
