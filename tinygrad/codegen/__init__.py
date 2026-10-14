@@ -269,17 +269,18 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def do_range_to_backedge(sink:UOp):
-  loop_ids, acc_slots = itertools.count(), itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in {Ops.ALLOC, Ops.BUFFER, Ops.PARAM}), default=0))
+  loop_ids, acc_slots = itertools.count(), itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
     acc = UOp.alloc((1,), u.dtype, slot=next(acc_slots), addrspace=AddrSpace.REG)
     acc = acc.replace(arg=replace(acc.arg, vmin_vmax=u._min_max))
-    return (acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)))
+    enter = UOp(Ops.RANGE, src=((u.src[0] > 0).cast(dtypes.uint32),), arg=(AxisType.WEAK, next(loop_ids)))
+    return (acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), enter)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
   pm = PatternMatcher([
-    (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x][0].after(ctx[x][1])[0].load() if x in ctx else None),
+    (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x][0].after(ctx[x][2], ctx[x][1])[0].load() if x in ctx else None),
     (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
-      body.backedge((l:=ctx[rng][1]), (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd) if rng in ctx else None),
+      body.backedge((l:=ctx[rng][1]), (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd).end(ctx[rng][2]) if rng in ctx else None),
   ])
   return graph_rewrite(sink, pm+pm_cast_const, ctx=ctx, bottom_up=True)
 
