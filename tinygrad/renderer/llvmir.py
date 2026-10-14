@@ -215,7 +215,11 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = 'win64cc' if sys.platform == 'win32' else None
-  string_rewrite = base_rewrite
+  code_for_op = LLVMRenderer.code_for_op | {Ops.SQRT:lambda:None}
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.SQRT, src=(UPat.var("x"),), name="u"), lambda ctx,u,x:
+     f"  {ctx[u]} = call {ldt(u.dtype)} @llvm.sqrt.f{u.dtype.itemsize*8}({ldt(x.dtype)} {ctx[x]})"),
+  ]) + base_rewrite
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in UOp.sink(*uops).toposort(enter_calls=True) if b.op is Ops.LINEAR)}
     defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
@@ -225,6 +229,8 @@ class CPULLVMRenderer(LLVMRenderer):
              for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.BINARY}
+    decls.update({f"llvm.sqrt.f{x.dtype.itemsize*8}":f"declare {ldt(x.dtype)} @llvm.sqrt.f{x.dtype.itemsize*8}({ldt(x.dtype)})"
+                  for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.SQRT})
     return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
