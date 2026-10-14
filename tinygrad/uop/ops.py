@@ -1132,6 +1132,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
+    if self.op is Ops.LOAD and (b:=self.src[0].buf_uop).op in GroupOp.Defines and b.arg.vmin_vmax is not None: return b.arg.vmin_vmax
     # a load from a constant table is one of its values
     if self.op is Ops.LOAD and (b:=self.src[0].buf_uop).op is Ops.BINARY:
       return min(e:=memoryview(b.arg).cast(unwrap(self.dtype.fmt)).tolist()), max(e)
