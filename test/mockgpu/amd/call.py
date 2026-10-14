@@ -107,7 +107,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
     branch_cond:UOp|None = None
     for off in block:
       inst = insts[off]
-      inst_st = str(inst)
+      inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
       ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=inst_addr)
