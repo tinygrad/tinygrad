@@ -269,15 +269,15 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def do_range_to_backedge(sink:UOp):
-  # bottom up -> end gets rewritten before range??
-  accs = {u:UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG) for u in sink.toposort() if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL)}
+  loop_ids = itertools.count()
+  ctx = {u:((acc:=UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)).after(acc[0].store(0)), UOp.loop(next(loop_ids))) for u in sink.toposort()
+    if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
   pm = PatternMatcher([
-    # range rewritten to latest acc value
-    (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x].after(UOp.loop(x.axis_id))[0].load() if x in ctx else None),
+    (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x][0].after(ctx[x][1])[0].load() if x in ctx else None),
     (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
-      body.backedge((l := UOp.loop(rng.axis_id)), acc.after(acc.store(acc.after(l)[0].load() + 1)) < bnd) if (acc := ctx.get(rng, None)) is not None else None),
+      body.backedge((l:=ctx[rng][1]), (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd) if rng in ctx else None),
   ])
-  return graph_rewrite(sink, pm, ctx=accs, bottom_up=True)
+  return graph_rewrite(sink, pm+pm_cast_const, ctx=ctx, bottom_up=True)
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
