@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
-  GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
+  GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
+  HyperConnection, HCConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
 from test.helpers import slow
@@ -68,6 +69,40 @@ class TestAttention(unittest.TestCase):
 
     expected = apply_rope_new(k[..., :rope_dim], block.freqs_cis[:seqlen]).cat(k[..., rope_dim:], dim=-1)
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
+
+  def test_hyperconnection(self):
+    hc = HyperConnection(self._make_config(dim=1, hc=HCConfig(count=2, sinkhorn_iters=1, eps=0.0)))
+    hc.fn.weight = Tensor.zeros(8, 2)
+    hc.base["weight"] = Tensor([0., 0., 0., 0., float(np.log(3)), 0., 0., 0.])
+    # pre averages streams [1, 3] to 2, the sublayer squares it to 4, and post adds 4 to both streams
+    # mixing rows [3/4, 1/4], [1/2, 1/2] normalize to [3/5, 1/3], [2/5, 2/3]
+    expected = [[[[4 + (3/5 + 3*2/5)], [4 + (1/3 + 3*2/3)]]]]
+    actual = hc(Tensor([[[[1.], [3.]]]]), lambda x: x.square())
+    np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
+
+  def test_indexer(self):
+    indexer = Indexer(self._make_config(dim=2, q_lora_rank=2), IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6))
+    indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
+    indexer.proj.weight, indexer.compressor_gate.weight = Tensor.ones(1, 2), Tensor.zeros(2, 2)
+    x, q = Tensor([[[2., 0.], [2., 0.], [0., 2.], [0., 2.]]]), Tensor([[[1., -1.]]]).expand(1, 4, 2)
+    indexer._init_state(x)
+    # the first pool scores higher, the second is visible only while incomplete
+    expected = np.where([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [1, 1, 0, 0]], 0., -np.inf)
+    for start, end in ((0, 3), (3, 4)):
+      mask = indexer(x[:, start:end], q[:, start:end], start).numpy()
+      np.testing.assert_array_equal(mask, expected[None, None, start:end, :end])
+
+  def test_mla_indexer_mask(self):
+    idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
+    block = MLATransformerBlock(self._make_config(dim=2, kv_lora_rank=2, q_lora_rank=2, max_context=5, indexer=idx))
+    block.attn_q_a.weight = Tensor([[1., 1.], [-1., -1.]])
+    block.indexer.attn_q_b.weight, block.indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
+    block.indexer.proj.weight, block.indexer.compressor_gate.weight = Tensor.ones(1, 2), Tensor.zeros(2, 2)
+    x = Tensor([[[2., 0.], [2., 0.], [0., 2.], [0., 2.], [0., 2.]]])
+    block._init_state(x)
+    # every query prefers the first pool, and incomplete pools contribute only their visible tail
+    expected = np.where([[1, 0, 0, 0, 0], [1, 1, 0, 0, 0], [1, 1, 1, 0, 0], [1, 1, 0, 0, 0], [1, 1, 0, 0, 1]], 0., -np.inf)
+    np.testing.assert_array_equal(block._attn_mask(x, 0).numpy(), expected[None, None])
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:

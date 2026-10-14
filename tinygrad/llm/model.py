@@ -80,7 +80,7 @@ class HCConfig:  # manifold-constrained hyper-connections: count residual stream
   eps: float
 
 @dataclass(frozen=True)
-class IndexerConfig:  # DSA: a query attends to the top_k keys picked by an indexer scoring pools of kpool keys
+class IndexerConfig:  # a query attends to the top_k keys picked by an indexer scoring pools of kpool keys
   n_heads: int
   head_dim: int
   top_k: int
@@ -146,7 +146,7 @@ class HyperConnection:
     # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
     for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
     out = sublayer((xs * pre.unsqueeze(-1)).sum(2))
-    return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2).unsqueeze(-1) * xs.unsqueeze(2)).sum(3)
+    return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -293,6 +293,33 @@ class TransformerBlock(FFNBlock):
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
 
+class Indexer:
+  def __init__(self, config:TransformerConfig, idx:IndexerConfig):
+    self.idx, self.max_context = idx, config.max_context
+    self.attn_q_b, self.attn_k = Linear(config.q_lora_rank, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
+    self.proj, self.k_norm = Linear(config.dim, idx.n_heads, bias=False), nn.LayerNorm(idx.head_dim, eps=idx.norm_eps)
+    self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
+
+  def _init_state(self, x:Tensor):
+    if not hasattr(self, "cache_kg"):
+      self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), 2, self.idx.head_dim, device=x.device)
+
+  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp) -> Tensor:
+    (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
+    # cache an indexer key and a pooling gate per token. a pool's key is the gate softmax weighted sum of its keys
+    kg = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2)  # (B, T, 2, head_dim)
+    kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg.float().uop))).reshape(B, -1, idx.kpool, 2, idx.head_dim)
+    pool_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)    # (B, pools, head_dim)
+    iq = self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
+    scores = ((iq @ pool_k.transpose(-1, -2).unsqueeze(1)).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
+    # the query sees the top_k/kpool best complete pools, and the tokens of its own pool while that's incomplete (the tail)
+    tpos, pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
+    _, sel = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= tpos + 1).where(scores, -math.inf).topk(idx.top_k // idx.kpool)
+    # incomplete selections add only tail/future tokens, handled by the final tail and causal mask
+    picked = (scores.zeros_like().scatter(-1, sel, 1.0) > 0).repeat_interleave(idx.kpool, dim=-1)[..., :S]
+    return ((picked | (pos >= (tpos + 1) // idx.kpool * idx.kpool)) & (pos <= tpos)).where(0.0, -math.inf).reshape(B, 1, T, S).cast(x.dtype)
+
+
 class MLATransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
@@ -334,43 +361,17 @@ class MLATransformerBlock(FFNBlock):
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn)
 
-  def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:
-    if self.indexer and self.config.max_context > self.indexer.idx.top_k:
-      return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), self.cache_kg, start_pos)
+  def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:  # (1, 1, T, start_pos+T), None: everything is visible
+    if self.indexer and self.config.max_context > self.indexer.idx.top_k: return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos)
     T = x.shape[1]
     return Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) if resolve(T != 1) else None
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
-      if (idx:=self.config.indexer) is not None:
-        self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.config.max_context, idx.kpool), 2, idx.head_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
-
-class Indexer:
-  """Score pooled keys and build a token mask using the caller-owned cache."""
-  def __init__(self, config:TransformerConfig, idx:IndexerConfig):
-    self.idx = idx
-    self.attn_q_b, self.attn_k = Linear(config.q_lora_rank, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
-    self.proj, self.k_norm = Linear(config.dim, idx.n_heads, bias=False), nn.LayerNorm(idx.head_dim, eps=idx.norm_eps)
-    self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
-
-  def __call__(self, x:Tensor, q:Tensor, cache_kg:Tensor, start_pos:int|UOp) -> Tensor:
-    (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
-    # cache an indexer key and a pooling gate per token. a pool's key is the gate softmax weighted sum of its keys
-    kg = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2)  # (B, T, 2, head_dim)
-    kg = Tensor(cache_kg.uop.after(cache_kg[:, start_pos:S].uop.store(kg.float().uop))).reshape(B, -1, idx.kpool, 2, idx.head_dim)
-    pool_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)    # (B, pools, head_dim)
-    iq = self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
-    scores = (Tensor.einsum("bthd,bpd->bthp", iq, pool_k).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
-    # the query sees the top_k/kpool best complete pools, and the tokens of its own pool while that's incomplete (the tail)
-    tpos, pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
-    _, sel = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= tpos + 1).where(scores, -math.inf).topk(idx.top_k // idx.kpool)
-    # Incomplete selections add only tail/future tokens, handled by the final tail and causal mask.
-    picked = (scores.zeros_like().scatter(-1, sel, 1.0) > 0).repeat_interleave(idx.kpool, dim=-1)[..., :S]
-    return ((picked | (pos >= (tpos + 1) // idx.kpool * idx.kpool)) & (pos <= tpos)).where(0.0, -math.inf).reshape(B, 1, T, S).cast(x.dtype)
-
+    if self.indexer: self.indexer._init_state(x)
 
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):
@@ -488,7 +489,7 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
-    if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()  # the streams
+    if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     for block in self.blk: x = block(x, start_pos)
     if hc is not None: x = x.mean(2)
     # only run the output projection on the last token
