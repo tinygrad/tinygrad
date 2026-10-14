@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, g
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
 from tinygrad.dtype import Invalid, AddrSpace, dtypes
-from tinygrad.helpers import Context, getenv, TracingKey, dedup, unwrap, to_mv
+from tinygrad.helpers import Context, getenv, TracingKey, dedup, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
