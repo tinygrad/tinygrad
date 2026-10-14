@@ -6,9 +6,9 @@ from tinygrad.codegen import to_program, to_program_config, lower_call
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runtime, runtime_cache
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer.llvmir import CPULLVMRenderer, ldt
 from tinygrad.renderer import Renderer
-from tinygrad.runtime.support.compiler_cpu import ClangCompiler
+from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.ops_cpu import CPUExecutable
@@ -19,7 +19,7 @@ from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX,
                                   SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE)
 
-class CallClangModule(CPUExecutable):
+class CallLLVMModule(CPUExecutable):
   def __init__(self, lib:bytes, functions:dict[str, int]):
     self.functions = functions
     self.exports:dict[str, int] = {}
@@ -40,17 +40,16 @@ class CallClangModule(CPUExecutable):
     self.functions.update(self.exports)
     return bytes(image)
 
-class CallClangJIT(ClangCompiler):
+class CallLLVMJIT(CPULLVMCompiler):
   def __init__(self, arch:list[str]):
     super().__init__(arch)
     self.cachekey = f"asm_call_obj_{self.cachekey}" if self.cachekey is not None else None
-    self.args += ['-fno-zero-initialized-in-bss', '-fvisibility=hidden', '-fno-strict-aliasing']
     self.functions:dict[str, int] = {}
-    self.modules:list[CallClangModule] = []
+    self.modules:list[CallLLVMModule] = []
 
   def compile_cached(self, src:str) -> bytes:
     lib = super().compile_cached(src)
-    self.modules.append(CallClangModule(lib, self.functions))
+    self.modules.append(CallLLVMModule(lib, self.functions))
     return lib
 
   def trampoline(self, name:str) -> bytes:
@@ -60,62 +59,59 @@ class CallClangJIT(ClangCompiler):
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
 
   def compile(self, src:str) -> bytes:
-    with cpu_profile('Clang JIT compile'): return super().compile(src)
+    with cpu_profile('LLVM JIT compile'): return super().compile(src)
 
-class CallClangRenderer(ClangRenderer):
-  compiler: CallClangJIT
-  kernel_typedef = "__attribute__((noinline, optnone)) void"
+class CallLLVMRenderer(CPULLVMRenderer):
+  compiler: CallLLVMJIT
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
+     f"  {ctx[x]} = load ptr, ptr @{ctx[body]}_ptr\n  call void {ctx[x]}(" +
+     ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"
+     if body.arg != "asm_block" else None),
+  ]) + CPULLVMRenderer.string_rewrite
+
   def __init__(self, target:Target):
     super().__init__(target)
-    self.compiler = CallClangJIT(target.arch.split(','))
+    self.compiler = CallLLVMJIT(target.arch.split(','))
 
-  def declarations(self, uops:list[UOp], local:set[UOp]) -> list[str]:
-    declarations = []
-    for body in dict.fromkeys(u.body for u in uops if u.op is Ops.CALL):
-      if body in local: continue
-      name = self.fn_names[body]
-      params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
-      declarations.append(f"void (*{name}_ptr)({params}) = 0;\n#define {name} {name}_ptr")
-    return declarations
+  def _render_fn(self, name, args, kernel, prefix=None):
+    if name.startswith("asm_call_"):
+      kernel = [f"  {n} = trunc i64 {n}_arg to {ldt(p.dtype)}" for n,p in args if p.addrspace == AddrSpace.ALU and p.dtype.itemsize < 8]+kernel
+      args = [(n+"_arg", p.replace(arg=replace(p.arg, dtype=dtypes.uint64))) if p.addrspace == AddrSpace.ALU and p.dtype.itemsize < 8
+              else (n,p) for n,p in args]
+    ret = super()._render_fn(name, args, kernel, prefix)
+    return ret.replace(" #0", " #1") if name.startswith(("asm_call_", "asm_block_")) else ret
 
   def render(self, uops:list[UOp]) -> str:
     topo = UOp.sink(*uops).toposort(enter_calls=True)
-    self.fn_names = {b:'asm_fn_'+b.key.hex() for b in topo if b.op is Ops.LINEAR}
-    definitions, all_uops, local = [], list(uops), set()
-    for body, name in self.fn_names.items():
+    fns = {b:("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex() for b in topo if b.op is Ops.LINEAR}
+    definitions = []
+    def module(us, definition):
+      declarations = [f"@{fns[b]}_ptr = hidden global ptr null, section \".data\"" for b in
+                      dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.arg != "asm_block")]
+      footer = self._render_footer(us).replace("alwaysinline", "noinline")
+      return "\n".join([*declarations, definition, footer, "attributes #1 = { noinline optnone nounwind }"])
+    for body, name in fns.items():
       if name in self.compiler.functions: continue
-      body_uops = list(body.src)
-      _, lines, bufs = self._render(body_uops)
-      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
-      attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
-      scope = 'static ' if body.arg == 'asm_block' else ''
-      definition = f"__attribute__(({attrs})) {scope}void {name}({params}) {{\n"+'\n'.join(lines)+"\n}"
-      if body.arg == 'asm_block':
-        definitions.append(definition)
-        all_uops.extend(body_uops)
-        local.add(body)
-      else:
-        self.compiler.compile_cached('\n'.join(self._render_defines(body_uops)+self.declarations(body_uops, set())+[definition]))
-    name, lines, bufs = self._render(uops)
-    # CPUProgram passes every scalar as uint64. Native arm64 macOS packs narrower stack arguments, so widen only the entry ABI.
-    lines = [f"  {self.param_type(p)} {n} = ({self.param_type(p)}){n}_arg;" for n,(p,_) in bufs if p.addrspace == AddrSpace.ALU]+lines
-    bufs = [(n+"_arg", (p.replace(arg=replace(p.arg, dtype=dtypes.uint64)), mutable)) if p.addrspace == AddrSpace.ALU else (n, (p, mutable))
-            for n,(p,mutable) in bufs]
-    entry = super().render_kernel(name, lines, bufs, [], None)
-    return '\n'.join(self._render_defines(all_uops)+self.declarations(all_uops, local)+definitions+[entry])
+      definition = self._render_kernel(list(body.src), name=name, fns=fns)[1]
+      if body.arg == "asm_block": definitions.append(definition.replace("define ", "define internal ", 1))
+      else: self.compiler.compile_cached(module(body.src, definition))
+    entry = self._render_kernel(uops, fns=fns)
+    all_uops = [*uops, *(u for b in fns if b.arg == "asm_block" for u in b.src)]
+    return module(all_uops, "\n".join([*entry[0], entry[1], *definitions]))
 
 @functools.cache
-def clang_renderer(arch:str):
-  return CallClangRenderer(Target("CPU", "CLANG", arch))
+def llvm_renderer(arch:str):
+  return CallLLVMRenderer(Target("CPU", "LLVM", arch))
 
 def backend_renderer(backend:str):
-  return clang_renderer(Device["CPU"].renderer.target.arch) if backend == "CPU" else Device[backend].renderer
+  return llvm_renderer(Device["CPU"].renderer.target.arch) if backend == "CPU" else Device[backend].renderer
 
 def get_call_runtime(backend:str, prg:UOp):
   if backend != "CPU": return get_runtime(backend, prg)
   if (runtime:=runtime_cache.get(key:=(prg.key, backend))) is None:
     obj = prg.to_elf()
-    lib = clang_renderer(Device["CPU"].renderer.target.arch).compiler.trampoline(obj.name)
+    lib = llvm_renderer(Device["CPU"].renderer.target.arch).compiler.trampoline(obj.name)
     runtime_cache[key] = runtime = Device[backend].runtime(replace(obj, lib=lib))
   return runtime
 

@@ -7,11 +7,11 @@ from test.mockgpu.amd import call
 from test.mockgpu.amd.call import cfg_regions
 
 
-class TestCallClang(unittest.TestCase):
+class TestCallLLVM(unittest.TestCase):
   def test_static_functions_are_not_exported(self):
-    compiler = call.CallClangJIT(call.backend_renderer("CPU").target.arch.split(","))
-    compiler.compile_cached("__attribute__((noinline)) static void asm_fn_local(unsigned int *out) { *out = 42; }\n"
-                            "__attribute__((noinline)) void asm_fn_entry(unsigned int *out) { asm_fn_local(out); }")
+    compiler = call.CallLLVMJIT(call.backend_renderer("CPU").target.arch.split(","))
+    compiler.compile_cached("define internal void @asm_fn_local(ptr %out) noinline { store i32 42, ptr %out\n ret void }\n"
+                            "define void @asm_fn_entry(ptr %out) noinline { call void @asm_fn_local(ptr %out)\n ret void }")
     self.assertIn("asm_fn_entry", compiler.functions)
     self.assertNotIn("asm_fn_local", compiler.functions)
 
