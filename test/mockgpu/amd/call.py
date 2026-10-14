@@ -13,7 +13,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.ops_cpu import CPUExecutable
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
-from tinygrad.helpers import Context, TracingKey, unwrap, Target, cpu_profile, to_mv
+from tinygrad.helpers import Context, TracingKey, Target, cpu_profile, to_mv
 from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX,
@@ -120,24 +120,18 @@ instruction_cache:dict[tuple, list[tuple[int, int, InstructionCall]]] = {}
 
 # this is meant to replace the old emulator
 @uopfunc
-def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:sint, gy:sint, lx:sint, ly:sint, total_threads:sint, wave_size:int,
-              lds_size:int, scratch_size:int, rsrc2:int, arch:str="rdna3", user_data_count:int=0, accvgpr:UOp|None=None):
-  # define ranges inside a wave
-  li = UOp.range((wave.eq(0)).where(max(lds_size//4, 1), 0), 2, dtype=dtypes.int)
-  si = UOp.range(SGPR_COUNT, 3, dtype=dtypes.int)
-  vi = UOp.range(256*wave_size, 4, dtype=dtypes.int)
-  constants = {**{128+i:i for i in range(65)}, **{193+i:(-i-1)&0xFFFFFFFF for i in range(16)}, **F32_INLINE}
-  sgpr_init = UOp(Ops.BINARY, arg=struct.pack(f"<{SGPR_COUNT}I", *(constants.get(i, 0) for i in range(SGPR_COUNT)))).bitcast(dtypes.uint32)
-  # Initialize the register file from its reset image, including inline constants.
-  zero_lds = lds.index(li).store(0).end(li)
-  reset_sgpr = sgpr.after(zero_lds).index(si).store(sgpr_init[si]).end(si)
-  zero_vgpr = vgpr.after(reset_sgpr).index(vi).store(0)
-  zero_agpr = unwrap(accvgpr).after(reset_sgpr).index(vi).store(0) if wave_size == 64 else UOp(Ops.NOOP)
-  clear_vgpr = UOp.group(zero_vgpr, zero_agpr).end(vi)
-  # set RANGE registers
+def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:sint, gy:sint, lx:sint, ly:sint, total_threads:sint, wave_size:int,
+              scratch_size:int, rsrc2:int, arch:str="rdna3", user_data_count:int=0):
+  # Constant operand encodings are represented in the emulator's SGPR buffer, not writable architectural registers.
+  ci = UOp.range(81, 2, dtype=dtypes.int)
+  inline_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
+  fi = UOp.range(len(F32_INLINE), 3, dtype=dtypes.int)
+  floats = UOp(Ops.BINARY, arg=struct.pack(f"<{len(F32_INLINE)}I", *F32_INLINE.values())).bitcast(dtypes.uint32)
+  inline_floats = sgpr.index(fi+240).store(floats[fi]).end(fi)
+  # Only defined launch inputs are initialized; other registers and compute LDS have no initial value guarantee.
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
-  initial:list[tuple[int, sint]] = []
+  initial:list[tuple[int, sint]] = [(124, 0)] if wave_size == 32 else []  # NULL reads as zero on RDNA; CDNA uses this slot for M0.
   if user_data_count: initial += [(i, UOp.variable(f"user_data_{i}", 0, dtypes.uint32.max, dtypes.uint32)) for i in range(user_data_count)]
   else: initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
   if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
@@ -155,9 +149,10 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, lds:UOp, args_ptr:UOp, gx:si
                                      ((UOp.const(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
   lane = UOp.range(wave_size, 5, dtype=dtypes.int)
   tid = wave*wave_size+lane
-  init_vgpr = vgpr.after(clear_vgpr).index(lane.valid(tid<total_threads)).store(
+  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store(
       (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(clear_vgpr).index(i).store(UOp.const(v, dtypes.uint32)) for i,v in dict(initial).items()))
+  return UOp.sink(init_vgpr, *(sgpr.after(inline_ints, inline_floats).index(i).store(UOp.const(v, dtypes.uint32))
+                             for i,v in dict(initial).items()))
 
 def pc_index(idx:int) -> UPat:
   reg, null = UPat.const(idx).cast(), UPat.const(124).cast()
@@ -324,9 +319,8 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   buffers[routes] = (routes, 0)
-  init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), lds, args_ptr, *dims,
-                   wave_size, lds_size, scratch_size, rsrc2, arch, user_data_count,
-                   *([accvgpr.index(wave*256*wave_size)] if wave_size == 64 else []))
+  init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), args_ptr, *dims,
+                   wave_size, scratch_size, rsrc2, arch, user_data_count)
   user_vars = [u for u in init.body.toposort() if u.is_variable]
   init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
                                                  for i,u in enumerate(user_vars)}), *init.src[1:], *user_vars))
