@@ -14,10 +14,10 @@ from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
               scratch_size:int, rsrc2:int, arch:str="rdna3", user_data_count:int=0):
   ci = UOp.range(81, 2, dtype=dtypes.int)
-  inline_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
+  init_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
   fi = UOp.range(len(F32_INLINE), 3, dtype=dtypes.int)
   floats_buf = UOp(Ops.BINARY, arg=struct.pack(f"<{len(F32_INLINE)}I", *F32_INLINE.values())).bitcast(dtypes.uint32)
-  inline_floats = sgpr.index(fi+240).store(floats_buf[fi]).end(fi)
+  init_floats = sgpr.index(fi+240).store(floats_buf[fi]).end(fi)
   # set RANGE registers
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
@@ -41,7 +41,7 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int
   tid = wave*wave_size+lane
   init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store(
       (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(inline_ints, inline_floats).index(i).store(UOp.const(v, dtypes.uint32))
+  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32))
                              for i,v in dict(initial).items()))
 
 def pc_index(idx:int) -> UPat:
