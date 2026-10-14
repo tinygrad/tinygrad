@@ -1,6 +1,6 @@
 import itertools
 from typing import Callable
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
@@ -84,10 +84,10 @@ def reduce_unparented(red:UOp) -> UOp|None:
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
-  if red.arg[0] is Ops.ADD:
-    for r in reduce_unparented: ret = ret * r.src[0]
-  if red.arg[0] is Ops.MUL:
-    for r in reduce_unparented: ret = ret ** r.src[0]
+  for r in reduce_unparented:
+    # an idempotent op (MAX, and bool ADD/MUL which are OR/AND) applied N times is the op once, or the identity when N is 0
+    if red.arg[0] is Ops.MAX or red.dtype is dtypes.bool: ret = (r.src[0] > 0).where(ret, ret.const_like(identity_element(red.arg[0], red.dtype)))
+    else: ret = ret * r.src[0] if red.arg[0] is Ops.ADD else ret ** r.src[0]
   return ret
 
 pm_reduce_unparented = PatternMatcher([

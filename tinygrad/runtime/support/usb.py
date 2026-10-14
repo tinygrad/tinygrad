@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceild
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
 from tinygrad.device import Buffer, BufferSpec, Compiled
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, CDTYPE, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks, submits
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -289,7 +289,8 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp: # kernargs: poke on change
     stored = usb_store(b, idx.src[0], v.src[0])
     for i, w in zip(idx.src[1:], v.src[1:]): stored = usb_store(b.after(stored), i, w)
     return stored
-  link, addr, v = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype), v.bitcast(CDTYPE[v.dtype.itemsize])
+  link, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
+  v = v.bitcast({d.itemsize: d for d in dtypes.uints}[v.dtype.itemsize]) # bitcast to uint raw bits
   if str(unwrap_view(b)[0].tag).startswith("kernargs"):
     cache = UOp.alloc((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.device).rtag("usb_arg_cache")
     return usb_patch(link, addr, v, patch(cache, [], bytes(v.dtype.itemsize * cache.max_numel())).index(idx - idx.vmin))
@@ -417,9 +418,9 @@ def usb_transfer(dev:str, link:UOp, runs:list[tuple[bool, int, UOp, int]], n:int
 def usb_copy_rewriter(s:UOp, window:int|None=None,
                       commands:Callable[[str, UOp, int, UOp, int, bool], list[UOp]]=usb_copy_commands,
                       transfer:Callable[[str, UOp, list[tuple[bool, int, UOp, int]], int], UOp]=usb_transfer) -> UOp|None:
-  lins = [submit.without_after.src[1].without_after for submit in s.src]
+  lins = [c.body for c in submits(s)]
   if not (copies:=[call for lin in lins for call in lin.src if is_staged(call)]): return None
-  dev = lins[0].arg[0][0]
+  dev = submits(s)[0].src[1].device
 
   # a run: one direction, one table
   runs, nums, n = list[tuple[bool, int, UOp, int]](), list[tuple[int, int]](), 0
@@ -432,14 +433,14 @@ def usb_copy_rewriter(s:UOp, window:int|None=None,
 
   # gpu side
   chunks = (usb_chunks(call, *num, window, commands) for call, num in zip(copies, nums))
-  s = s.substitute({lin: lin.replace(src=tuple(flatten(next(chunks) if is_staged(c) else [c] for c in lin.src))) for lin in lins})
+  s = s.substitute({lin: lin.replace(src=tuple(flatten(next(chunks) if is_staged(c) else [c] for c in lin.src))) for lin in lins}, enter_calls=True)
 
   # host side, after the submits
   link = usb_link(dev).after(s.src[-1])
-  return s.replace(src=(*s.src, transfer(dev, link, runs, n)))
+  return s.replace(src=(transfer(dev, link, runs, n),))
 pm_usb_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), usb_copy_rewriter)])
 
-pm_usb_encode = PatternMatcher([
+Compiled.pm_encode += PatternMatcher([ # the usb host calls get their bodies
   (UPat(Ops.CALL, src=(UPat.custom_function("usb_begin"), UPat.var("link"), UPat.var("fence"), UPat.var("prev"))),
    lambda link, fence, prev: usb_begin(link, fence.getaddr("CPU"), prev)),
   (UPat(Ops.CALL, src=(UPat.custom_function("usb_drain"), UPat.var("link"), UPat.var("fence"), UPat.var("need"))),
@@ -469,7 +470,7 @@ def usb_reset(dev):
   for t in map(libusb.struct_libusb_transfer.from_address, _host_block(dev).host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 
 def setup_usb_rules(dev):
-  dev.pm_batch, dev.pm_lower, dev.pm_encode = dev.pm_batch + pm_usb_batch, dev.pm_lower + pm_usb_lower, dev.pm_encode + pm_usb_encode
+  dev.pm_batch, dev.pm_lower = dev.pm_batch + pm_usb_batch, dev.pm_lower + pm_usb_lower
   Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)), # placeholders the gpu owns
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_go"), name="b"), lambda b, d=dev: _words(d, b.max_numel())),
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])

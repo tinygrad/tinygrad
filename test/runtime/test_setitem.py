@@ -183,6 +183,14 @@ class TestSetitem(unittest.TestCase):
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
 
+  def test_setitem_older_state(self):
+    t = Tensor([1, 2, 3, 4]).realize()
+    old = Tensor(t.assign(t + 1).uop)
+    t.assign(t + 10)
+    t[:] = old
+    # TODO: broken now, raises: should be [2, 3, 4, 5]
+    with self.assertRaises(RuntimeError): t.tolist()
+
   # TODO: WEBGPU pipeline validation error. this generates (1==gidx0)|(2==gidx0)|(3==gidx0)|(4==gidx0)|(5==gidx0) ...
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU pipeline validation error")
   def test_setitem_big(self):

@@ -2,10 +2,10 @@ import inspect, functools, itertools
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Compiled, HostAllocator, MMIOInterface, Program, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, uopfunc
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, dedup, prod, panic, cpu_events, perf_counter_us, NULL_ALLOW_COPYOUT, PROFILE
-from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
+from tinygrad.engine.realize import get_call_kernel_args
 from tinygrad.runtime.support.hcq2 import HWQueue, layout_args, pack_args
 
 class NullRenderer(CStyleLanguage):
@@ -29,7 +29,7 @@ class NullQueue(HWQueue):
   def cmd(self, op, *args): self.q(*[a.getaddr(self.devs) if isinstance(a, UOp) else UOp.const(a, dtypes.uint64) for a in (op, *args, 0, 0, 0)][:4])
   def event(self, device:str, name:str, key:bytes|None=None) -> int: return null_events.setdefault((device, name, key), len(null_events))
   def exec(self, call:UOp, prg:UOp):
-    args = [a.getaddr(self.devs) for a in get_call_arg_uops(call)] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
+    args = get_call_kernel_args(call, prg, self.devs)
     kernargs = UOp(Ops.LINEAR, src=tuple(pack_args(layout_args(args), 8 * max(len(args), 1))), arg="kernargs")
     self.cmd(EXEC, kernargs, len(args), self.event(self.devs[0], prg.src[0].arg.function_name, prg.key))
   def copy(self, dst:UOp, src:UOp, sz:int): self.cmd(COPY, dst, src, self.event(f"{src.device}:SDMA:0", f"{src.device} -> {dst.device}"))
@@ -40,8 +40,8 @@ class NullQueue(HWQueue):
 
 class NullProgram(Program['NullDevice']):
   def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
-  def __call__(self, *bufs, **kwargs):
-    st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(bufs[i], n, fmt='Q')[:]]
+  def __call__(self, *args, **kwargs):
+    st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(args[i], n, fmt='Q')[:]]
     # timestamps are emulated: every exec and copy takes 1us
     for op, addr, done in zip(words[0::4], words[1::4], itertools.accumulate(op in (EXEC, COPY) for op in words[0::4])):
       if op == TIMESTAMP: MMIOInterface(addr, 8, fmt='Q')[0] = int((st + done) * 1000)
@@ -55,9 +55,12 @@ class NullAllocator(HostAllocator):
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
 
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("null_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NullQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("null_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NullQueue(s).encode()),
+])
+
 class NullDevice(Compiled):
-  pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function(f"submit_null_{q}"), UPat()), name="submit"),
-                               lambda submit: NullQueue(submit).encode()) for q in ("compute", "copy")])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))
   error_state = functools.cached_property(lambda self: self.link_buffer(1, dtypes.int64))

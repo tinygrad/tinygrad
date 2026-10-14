@@ -119,8 +119,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x_float = x.astype(np.float32)
     return (x_float / np.sqrt((x_float * x_float).mean(axis=-1, keepdims=True) + eps)) * weight.astype(np.float32)
 
-  def _normalize_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:
-    return x / np.maximum(np.sqrt((x * x).sum(axis=-1, keepdims=True)), eps)
+  def _l2norm_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:  # as in the FLA kernels
+    return x / np.sqrt((x * x).sum(axis=-1, keepdims=True) + eps)
 
   def _softplus_np(self, x:np.ndarray) -> np.ndarray:
     return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
@@ -155,8 +155,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       conv_window = np.concatenate([conv_state, self._linear_np(x_half, qkv_weight)], axis=1)
       conv_out = self._silu_np((conv_window * conv_weight).sum(axis=1))
       q, k, v = np.split(conv_out, [block.q_dim, 2 * block.q_dim], axis=-1)
-      q = self._normalize_np(q.reshape(B, block.num_k_heads, block.head_k_dim))
-      k = self._normalize_np(k.reshape(B, block.num_k_heads, block.head_k_dim))
+      q = self._l2norm_np(q.reshape(B, block.num_k_heads, block.head_k_dim))
+      k = self._l2norm_np(k.reshape(B, block.num_k_heads, block.head_k_dim))
       v = v.reshape(B, block.num_v_heads, block.head_v_dim)
       if block.num_v_heads != block.num_k_heads:
         k_repeat = block.num_v_heads // block.num_k_heads
@@ -214,6 +214,19 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
                                  err_msg=f"GatedDeltaNet reset conv cache mismatch at step {step}")
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
+
+  def test_kda_qk_l2norm(self):
+    # q/k are normalized as x/sqrt(sum(x²)+1e-6) like FLA: tiny vectors aren't scaled up to unit length
+    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True)
+    block = GatedDeltaNetBlock(self._make_config(dim=16, n_heads=2, ssm=ssm), ssm)
+    block.attn_qkv.weight = Tensor([1e-4]*32 + [1.0]*16).reshape(48, 1).expand(48, 16) / 16  # x of ones: q = k = 1e-4, v = 1
+    block.ssm_conv1d["weight"], block.ssm_beta.weight = Tensor.ones(48, 4), Tensor.zeros(2, 16)
+    x = Tensor.ones(1, 1, 16)
+    block._init_state(x)
+    block._attention(x, 0).realize()
+    # the first token's state is beta * v (x) l2norm(k), with beta = sigmoid(0) and v, k through the conv and silu
+    def silu(z): return z / (1 + np.exp(-z))
+    np.testing.assert_allclose(block.recurrent_state.numpy(), 0.5 * silu(1.0) * silu(1e-4) / np.sqrt(8 * silu(1e-4)**2 + 1e-6), rtol=1e-3)
 
   def test_kda_channel_decay(self):
     config = self._make_config(dim=4, hidden_dim=8, n_heads=2, head_dim=4, rope_dim=4, v_head_dim=4,
