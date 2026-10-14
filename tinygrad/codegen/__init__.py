@@ -270,6 +270,7 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+# TODO: handle inline CALL ranges, build CFG accounting for src_without_body range nesting
 def rewrite_range(sink:UOp):
   loop_ids = itertools.count(max((aid for u in sink.toposort() if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
   acc_slots = itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
@@ -390,7 +391,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
-  if not (isinstance(ren, ISARenderer) or getenv("ASM_CALL", 0)): sink = rewrite_range(sink)
+  if not (isinstance(ren, ISARenderer) or getenv("ASM_CALL", False)): sink = rewrite_range(sink)
 
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
