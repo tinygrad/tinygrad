@@ -270,8 +270,11 @@ pm_implicit_barriers = PatternMatcher([
 
 def do_range_to_backedge(sink:UOp):
   loop_ids = itertools.count()
-  ctx = {u:((acc:=UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)).after(acc[0].store(0)), UOp.loop(next(loop_ids))) for u in sink.toposort()
-    if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
+  enclosing: dict[UOp, tuple[UOp]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
+  def init(u:UOp):
+    acc = UOp.alloc((1,), u.dtype, addrspace=AddrSpace.REG)
+    return (acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)))
+  ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
   pm = PatternMatcher([
     (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x][0].after(ctx[x][1])[0].load() if x in ctx else None),
     (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
