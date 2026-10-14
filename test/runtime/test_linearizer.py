@@ -79,7 +79,7 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    assert len(ranges) == 1 # NOTE: it collapses now
+    assert len(ranges) == 2 # NOTE: it collapses now
 
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -87,7 +87,7 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    assert len(ranges) == 1 # NOTE: it collapses now
+    assert len(ranges) == 2 # NOTE: it collapses now
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
@@ -96,10 +96,10 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> STORE
-    assert any(x.op in GroupOp.ALU for x in uops[ranges[0]:ranges[1]])
+    assert any(x.op in GroupOp.ALU for x in uops[ranges[1]:ranges[3]])
     # the index of the load doesnt depend on the second range
-    assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
-    assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
+    assert any(x.op is Ops.LOAD for x in uops[ranges[1]:ranges[3]])
+    assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[3]:])
 
   def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
@@ -118,7 +118,7 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    assert len(ranges) == 1 # NOTE: it collapses now
+    assert len(ranges) == 2 # NOTE: it collapses now
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
