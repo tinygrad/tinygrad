@@ -1,4 +1,4 @@
-import ctypes, itertools, functools, struct, re, subprocess, tempfile, pathlib
+import ctypes, itertools, functools, struct
 from dataclasses import replace
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
@@ -9,32 +9,48 @@ from tinygrad.engine.realize import get_runtime, runtime_cache
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
+from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.support.c import DLL
+from tinygrad.runtime.ops_cpu import CPUExecutable
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
-from tinygrad.helpers import Context, getenv, TracingKey, unwrap, Target, cpu_profile
-from tinygrad.runtime.autogen import hsa
+from tinygrad.helpers import Context, TracingKey, unwrap, Target, cpu_profile
+from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX,
                                   SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE)
 
+class CallClangModule(CPUExecutable):
+  def __init__(self, lib:bytes, functions:dict[str, int]):
+    self.functions = functions
+    self.exports:dict[str, int] = {}
+    super().__init__(lib)
+
+  def _load(self, lib, base=0):
+    image = bytearray(super()._load(lib, base))
+    _, sections, _ = elf_loader(lib, link_libs=list(DLL._loaded_.values()))
+    for section in sections:
+      if section.header.sh_type != libc.SHT_SYMTAB: continue
+      strings = sections[section.header.sh_link].content
+      for symbol in (libc.Elf64_Sym * (section.header.sh_size // section.header.sh_entsize)).from_buffer_copy(section.content):
+        if not 0 < symbol.st_shndx < len(sections): continue
+        name = strings[symbol.st_name:strings.find(b'\0', symbol.st_name)].decode()
+        offset = sections[symbol.st_shndx].header.sh_addr + symbol.st_value
+        if name.endswith('_ptr'): struct.pack_into('<Q', image, offset, self.functions[name[:-4]])
+        elif symbol.st_info & 15 == libc.STT_FUNC: self.exports[name] = base + offset
+    self.functions.update(self.exports)
+    return bytes(image)
+
 class CallClangJIT(ClangCompiler):
   def __init__(self, arch:list[str]):
     super().__init__(arch)
-    self.cachekey = f"asm_call_jit_{self.cachekey}" if self.cachekey is not None else None
+    self.cachekey = f"asm_call_obj_{self.cachekey}" if self.cachekey is not None else None
+    self.args += ['-fno-zero-initialized-in-bss', '-fvisibility=hidden', '-fno-strict-aliasing']
     self.functions:dict[str, int] = {}
-    self.modules:list[ctypes.CDLL] = []
+    self.modules:list[CallClangModule] = []
 
   def compile_cached(self, src:str) -> bytes:
-    new_functions = re.findall(r"^__attribute__\(\([^\n]*\)\) void (\w+)\(", src, re.M)
     lib = super().compile_cached(src)
-    with tempfile.TemporaryDirectory() as directory:
-      path = f'{directory}/module.so'
-      pathlib.Path(path).write_bytes(lib)
-      module = ctypes.CDLL(path)
-    # Resolve process-local addresses after loading; the cached module contains only empty function-pointer slots.
-    for name in re.findall(r"^void \(\*(\w+)_ptr\)\(", src, re.M):
-      ctypes.c_void_p.in_dll(module, f"{name}_ptr").value = self.functions[name]
-    self.modules.append(module)
-    self.functions.update((name, unwrap(ctypes.cast(getattr(module, name), ctypes.c_void_p).value)) for name in new_functions)
+    self.modules.append(CallClangModule(lib, self.functions))
     return lib
 
   def trampoline(self, name:str) -> bytes:
@@ -44,11 +60,7 @@ class CallClangJIT(ClangCompiler):
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
 
   def compile(self, src:str) -> bytes:
-    with tempfile.TemporaryDirectory() as directory, cpu_profile('Clang JIT compile'):
-      path = f'{directory}/module.so'
-      subprocess.run([getenv('CC', 'clang'), '-shared', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno',
-                      '-fno-strict-aliasing', *self.args, '-', '-o', path, '-lm'], input=src.encode(), check=True, capture_output=True)
-      return pathlib.Path(path).read_bytes()
+    with cpu_profile('Clang JIT compile'): return super().compile(src)
 
 class CallClangRenderer(ClangRenderer):
   compiler: CallClangJIT
@@ -63,7 +75,7 @@ class CallClangRenderer(ClangRenderer):
       if body in local: continue
       name = self.fn_names[body]
       params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
-      declarations.append(f"void (*{name}_ptr)({params});\n#define {name} {name}_ptr")
+      declarations.append(f"void (*{name}_ptr)({params}) = 0;\n#define {name} {name}_ptr")
     return declarations
 
   def render(self, uops:list[UOp]) -> str:
@@ -76,7 +88,8 @@ class CallClangRenderer(ClangRenderer):
       _, lines, bufs = self._render(body_uops)
       params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
       attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
-      definition = f"__attribute__(({attrs})) void {name}({params}) {{\n"+'\n'.join(lines)+"\n}"
+      scope = 'static ' if body.arg == 'asm_block' else ''
+      definition = f"__attribute__(({attrs})) {scope}void {name}({params}) {{\n"+'\n'.join(lines)+"\n}"
       if body.arg == 'asm_block':
         definitions.append(definition)
         all_uops.extend(body_uops)
@@ -295,8 +308,8 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   n_waves = (total_threads+wave_size-1)//wave_size
   gx = UOp.variable("groups_x", 1, dtypes.uint32.max, dtypes.uint32)
   gy = UOp.variable("groups_y", 1, dtypes.uint32.max, dtypes.uint32)
-  wg = UOp.range(UOp.variable("groups", 0, dtypes.uint64.max, dtypes.uint64), 0)
-  wave = UOp.range(n_waves, 1)
+  wg = UOp.range(UOp.variable("groups", 0, dtypes.uint64.max, dtypes.uint64), 0, dtype=dtypes.uint64)
+  wave = UOp.range(n_waves, 1, dtype=dtypes.int)
   # alloc register and LDS buffers
   sgpr = UOp.alloc((SGPR_COUNT*n_waves,), dtypes.uint32, 0, AddrSpace.REG)
   vgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 1, AddrSpace.REG)
@@ -338,9 +351,15 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     return instructions, cond
 
   chunk_size = 128
+  block_info = {}
+  pending = list(regions)
+  while pending:
+    pc, body = pending.pop()
+    if body: pending.extend(body)
+    else: block_info[pc] = block_instructions(pc)
 
   def emit_block(block_pc:int, wave:UOp, scopes:tuple[UOp, ...]) -> UOp:
-    instructions, cond = block_instructions(block_pc)
+    instructions, cond = block_info[block_pc]
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
@@ -351,30 +370,29 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
       afters.update((b, afters[b].without_after.after(call, *scopes)) for b in bufs)
     return cond.substitute({b:(afters[b].shrink(((wave*s, (wave+1)*s),)) if (s:=buffers[b][1]) else afters[b])
                             for b in cond.toposort() if b in buffers}, walk=True)
-  def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...]):
+  def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:
-        loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(UOp.group(*afters.values())),))
-        emit_dispatch(body, scopes+(loop,))
+        loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
+        end = emit_dispatch(body, scopes+(loop,), loop)
         # Waves that exited keep their route while the remaining waves repeat the loop.
-        w = UOp.range(n_waves, next(axes))
+        w = UOp.range(n_waves, next(axes), dtype=dtypes.int)
         active = afters[routes].after(*scopes, loop)[w].load().eq(pc).cast(dtypes.uint32).reduce(w, arg=Ops.MAX)
-        end = UOp.group(*afters.values()).backedge(loop, active.ne(0))
+        end = end.backedge(loop, active.ne(0))
       else:
         # Complete the block for every participating wave before entering its successors, including barrier successors.
-        w = UOp.range(n_waves, next(axes))
-        gate = UOp.range(afters[routes][w].load().eq(pc).cast(dtypes.int).after(*scopes), next(axes))
-        deps = UOp.group(*afters.values())
-        afters.update((b, buf.after(deps, *scopes, w, gate)) for b,(buf,_) in buffers.items())
+        w = UOp.range(n_waves, next(axes), dtype=dtypes.int)
+        gate = UOp.range(afters[routes][w].load().eq(pc).cast(dtypes.int).after(*scopes), next(axes), dtype=dtypes.int)
+        afters.update((b, buf.after(end, *scopes, w, gate)) for b,(buf,_) in buffers.items())
         cond = emit_block(pc, w, scopes+(w, gate))
         dsts = {kind:dst for dst,kind in cfg["paths"][pc].items()}
         target = cond.where(dsts[COND_TAKEN], dsts[COND_NOT_TAKEN]).cast(dtypes.int) if len(dsts) == 2 \
           else UOp.const(next(iter(dsts.values()), -1), dtypes.int)
         end = routes.after(*afters.values()).after(*scopes, w, gate)[w].store(target).end(gate).end(w)
       afters.update((b, buf.after(end)) for b,(buf,_) in buffers.items())
+    return end
 
-  emit_dispatch(regions, (wg,))
-  body = UOp.group(*afters.values()).end(wg)
+  body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
   name = f"asm_call_{arch}_{body.key.hex()[:16]}"
   sink = UOp.sink(body, arg=KernelInfo(name=name)).rtag(1)

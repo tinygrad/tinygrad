@@ -1,13 +1,23 @@
-import unittest, io
+import unittest, io, ctypes
 from contextlib import redirect_stdout
 from tinygrad import Tensor, Device
-from tinygrad.helpers import Target
+from tinygrad.helpers import Target, Context
+from tinygrad.runtime.ops_cpu import CPUExecutable
+from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.codegen import to_program
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
+  def test_executable_without_device(self):
+    compiler = ClangCompiler(Device[Device.DEFAULT].renderer.target.arch.split(','))
+    result = ctypes.c_uint32()
+    with Context(ALLOW_DEVICE_USAGE=0):
+      executable = CPUExecutable(compiler.compile_cached('void test(unsigned int *out) { *out = 42; }'))
+      executable.fxn(ctypes.byref(result))
+    self.assertEqual(result.value, 42)
+
   def test_arch_feats(self):
     ast = (Tensor.empty(16) + Tensor.empty(16)).schedule_linear().src[-1].src[0]
     for ren in Device[Device.DEFAULT].renderers:

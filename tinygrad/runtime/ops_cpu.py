@@ -15,45 +15,55 @@ from tinygrad.runtime.autogen import libc
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
 
-class CPUProgram(Program['CPUDevice']):
+class CPUExecutable:
+  fxn: Any
   rt_lib, libm = DLL('rt', 'System' if OSX else 'kernel' if WIN else 'gcc_s'), DLL('m', 'ucrtbase' if WIN else 'm')
 
   def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
 
-  def __init__(self, dev:CPUDevice, obj:TinyELF):
-    self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
-    self.lvp = obj.target.renderer == "LVP"
-    if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
-    elif sys.platform == "win32": # mypy doesn't understand when WIN is used here
+  def __init__(self, lib:bytes, lvp:bool=False):
+    if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
-      self.addr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(obj.lib)), MEM_COMMIT | MEM_RESERVE,
+      self.addr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE,
                                                       PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(self.addr, (loaded:=self._load(obj.lib, self.addr)), len(loaded))
+      ctypes.memmove(self.addr, (loaded:=self._load(lib, self.addr)), len(loaded))
       ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
       proc = ctypes.windll.kernel32.GetCurrentProcess()
       ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.addr), ctypes.c_size_t(len(loaded)))
-      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
+      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if lvp else ctypes.CFUNCTYPE(None)(self.addr)
     else:
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
-      self.mem = mmap.mmap(-1, len(obj.lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
+      self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
       self.addr = mv_address(self.mem)
 
-      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      self.mem.write(loaded:=self._load(obj.lib, mv_address(self.mem)))
-      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
+      if OSX: unwrap(self.rt_lib).pthread_jit_write_protect_np(False)
+      self.mem.write(loaded:=self._load(lib, self.addr))
+      if OSX: unwrap(self.rt_lib).pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if 'rt' in DLL._loaded_: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(loaded)))
+      if 'rt' in DLL._loaded_: self.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(loaded)))
       else:
         # msync should be a universal POSIX way to do this
         libc.msync(ctypes.c_void_p(self.addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
+      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if lvp else ctypes.CFUNCTYPE(None)(self.addr)
+
+  @suppress_finalizing
+  def __del__(self):
+    if sys.platform == 'win32' and hasattr(self, 'addr'):
+      ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.addr), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
+
+class CPUProgram(CPUExecutable, Program['CPUDevice']):
+  def __init__(self, dev:CPUDevice, obj:TinyELF):
+    self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
+    self.lvp = obj.target.renderer == "LVP"
+    if dev.remote is not None: self.fxn = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
+    else: super().__init__(obj.lib, self.lvp)
 
   def __call__(self, *bufs:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
@@ -71,11 +81,6 @@ class CPUProgram(Program['CPUDevice']):
         self.fxn(addr)
       else: self.fxn(*[ctypes.c_uint64(x) for x in args])
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
-
-  @suppress_finalizing
-  def __del__(self):
-    if self.dev.remote is None and sys.platform == 'win32':
-      ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.addr), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUDevice(Compiled):
   wait_timeout_ms = 30000

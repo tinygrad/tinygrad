@@ -302,7 +302,7 @@ class TestAsmKernel(unittest.TestCase):
     self.assertTrue(functions.keys() < compiler.functions.keys())
     for name, address in functions.items():
       self.assertEqual(compiler.functions[name], address)
-      self.assertIsNone(getattr(compiler.modules[-1], name, None))
+      self.assertNotIn(name, compiler.modules[-1].exports)
 
   def test_variable(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
