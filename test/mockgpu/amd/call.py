@@ -36,7 +36,7 @@ class CallClangModule(CPUExecutable):
         name = strings[symbol.st_name:strings.find(b'\0', symbol.st_name)].decode()
         offset = sections[symbol.st_shndx].header.sh_addr + symbol.st_value
         if name.endswith('_ptr'): struct.pack_into('<Q', image, offset, self.functions[name[:-4]])
-        elif symbol.st_info & 15 == libc.STT_FUNC: self.exports[name] = base + offset
+        elif libc.ELF64_ST_BIND(symbol.st_info) == libc.STB_GLOBAL and symbol.st_info & 15 == libc.STT_FUNC: self.exports[name] = base + offset
     self.functions.update(self.exports)
     return bytes(image)
 

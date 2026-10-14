@@ -8,6 +8,13 @@ from test.mockgpu.amd.call import cfg_regions
 
 
 class TestCallClang(unittest.TestCase):
+  def test_static_functions_are_not_exported(self):
+    compiler = call.CallClangJIT(call.backend_renderer("CPU").target.arch.split(","))
+    compiler.compile_cached("__attribute__((noinline)) static void asm_fn_local(unsigned int *out) { *out = 42; }\n"
+                            "__attribute__((noinline)) void asm_fn_entry(unsigned int *out) { asm_fn_local(out); }")
+    self.assertIn("asm_fn_entry", compiler.functions)
+    self.assertNotIn("asm_fn_local", compiler.functions)
+
   def test_program_preserves_elf(self):
     out = UOp.param(0, dtypes.int, (1,))
     prg = to_program(out[0].store(7).sink(arg=KernelInfo(name="jit_store")), call.backend_renderer("CPU"))
