@@ -439,15 +439,14 @@ class NV_GSP(NV_IP):
     offsets = [sum(npages[:i]) * 0x1000 for i in range(4)]
     if self.nvdev.is_usb:
       table_off = round_up(0x2000 + len(self.booter_image), 0x1000)
-      metadata_size = table_off + offsets[-1]
-      ring_start = round_up(metadata_size, SLOT)
+      ring_start = round_up(table_off + offsets[-1], SLOT)
       ring_size = self.queue_offset - ring_start
-      self.boot_layout = ring_start, ring_size, metadata_size
+      self.boot_layout = ring_start, ring_size
       self._boot_sram = bytearray(ring_start) # image slots are filled by the streamer
       self._boot_sram[0x1000:0x1000+len(signature)] = signature
       self._boot_sram[0x2000:0x2000+len(self.booter_image)] = self.booter_image
       radix_view = MMIOInterface(mv_address(self._boot_sram) + table_off, offsets[-1])
-      self.gsp_radix3_addrs = list(range(0x200000 + table_off, 0x200000 + metadata_size, 0x1000))
+      self.gsp_radix3_addrs = [0x200000 + table_off + i for i in range(0, offsets[-1], 0x1000)]
       self.gsp_radix3_addrs += [0x200000 + ring_start + i * 0x1000 % ring_size for i in range(npages[3])]
       self.booter_bar1, self.gsp_signature_bar1 = 0x202000, 0x201000
     else:

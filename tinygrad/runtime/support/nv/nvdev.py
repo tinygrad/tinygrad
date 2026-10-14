@@ -22,32 +22,24 @@ class NVUSBPCIDevice(USBPCIDevice):
 
   def stream_gsp_boot(self, flcn:NV_FLCN, base:int) -> None:
     image = flcn.nvdev.gsp.gsp_image
-    ring_start, ring_size, metadata_size = flcn.nvdev.gsp.boot_layout
-    slots, total = ring_size // SLOT, ceildiv(len(image), SLOT)
-    util_ctrl, rx_bytes = 0xA44, 0xA4C # NV_XVE_PCIE_UTIL_CTRL / NV_XVE_PCIE_UTIL_RX_BYTES
-    mps = 128 << getbits(self.read_config(0x78 + pci.PCI_EXP_DEVCTL, 2), 5, 7)
-    tlp_header = 3 * 4 # configuration requests and completions have three-dword headers
-    host_bytes = 2 * tlp_header + 4 # start_cpu reads CPUCTL, then writes the start bit
-    sent, armed, consumed = 0, 0, 0
+    ring_start, slots, total = flcn.nvdev.gsp.boot_layout[0], flcn.nvdev.gsp.boot_layout[1] // SLOT, ceildiv(len(image), SLOT)
+    sent, armed = 0, 0
 
-    def upload(end:int):
-      nonlocal sent
-      while sent < end: self.usb.usb.bulk_write(image[sent*SLOT:(sent:=sent+1)*SLOT].ljust(SLOT, b'\x00'))
-
-    self.write_config(util_ctrl, 7, 4) # enable counting and reset TX/RX byte counters before starting SEC2
+    while armed < min(slots, total): self.usb.usb.control_write(0xF2, SLOT//512, (ring_start//SLOT + ((armed:=armed+1)-1) % slots) | (1<<8))
+    flcn.start_cpu(base)
     while sent < total:
-      while armed < min(total, slots + consumed // SLOT):
-        self.usb.usb.control_write(0xF2, value=SLOT // 512, index=(ring_start // SLOT + armed % slots) | (1 << 8))
-        armed += 1
-      if not sent: flcn.start_cpu(base)
-      upload((end:=armed if armed == total else armed - 2) - 1) # retain an active barrier and a spare
-      self.usb._f0_out(0x05, 0x0F, (self.gpu_bus << 24) | rx_bytes, 0) # queue counter read before releasing the active slot
-      host_bytes += tlp_header
-      if end > sent: upload(end)
-      elif sent + 1 < armed and not self.usb.read(0xB296, 1)[0] & 3: upload(sent + 1)
-      consumed = (((self.usb._f0_in()[0] & 0x7fffffff) * 1024 - host_bytes) * mps // (mps + tlp_header)) - metadata_size
+      while sent < (armed if armed == total else armed - 1): # retain one active slot gate
+        self.usb.usb.bulk_write(image[sent*SLOT:(sent:=sent+1)*SLOT].ljust(SLOT, b'\x00'))
+      if sent == total: break
+      while True:
+        self.usb._f0_out(0x05, 0x0F, self.gpu_bus << 24, 0) # a config read stalls when the GPU reaches the gate
+        if not self.usb.read(0xB296, 1)[0] & 3: break
+        self.usb._f0_in()
+      # Recycle preceding slots before releasing the gate.
+      while armed < min(total, slots + sent): self.usb.usb.control_write(0xF2, SLOT//512, (ring_start//SLOT + ((armed:=armed+1)-1) % slots) | (1<<8))
+      self.usb.usb.bulk_write(image[sent*SLOT:(sent:=sent+1)*SLOT].ljust(SLOT, b'\x00'))
+      self.usb._f0_in()
     flcn.wait_cpu_halted(base)
-    self.write_config_flush(util_ctrl, 0, 4)
 
 class NVReg:
   def __init__(self, nvdev, base, off, fields=None): self.nvdev, self.base, self.off, self.fields = nvdev, base, off, fields
