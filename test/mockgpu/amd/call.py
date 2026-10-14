@@ -76,7 +76,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   # decode
   lib_bytes = ctypes.string_at(lib, lib_sz)
   insts = amd_decode(lib_bytes, arch)
-  cfg = get_cfg(insts)["data"]
+  cfg = get_cfg(insts)
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
