@@ -396,7 +396,7 @@ class _Ctx:
     sign_bit = 1 << (width - 1)
     return (val.cast(dtypes.int) ^ _c(sign_bit, dtypes.int)) - _c(sign_bit, dtypes.int)
 
-  def canonical_mask(self, inst_bytes: bytes) -> tuple[int, int, int]:
+  def canonical_mask(self, inst_bytes: bytes|memoryview) -> tuple[int, int, int]:
     """Compute canonical (base, mask, size) for cache lookup.
     base = instruction bits with dynamic fields zeroed
     mask = bitmask with 1s for static bits, 0s for dynamic bits
@@ -1830,7 +1830,7 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 
 _canonical_runner_cache: list[tuple[type, int, int, int, tuple[UOp, object]]] = []  # [(inst_type, base, mask, size, (prg, runtime)), ...]
 
-def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes) -> tuple[int, int, int, str]:
+def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes|memoryview) -> tuple[int, int, int, str]:
   base, mask, size = ctx.canonical_mask(inst_bytes)
   return base, mask, size, f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
 
