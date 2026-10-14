@@ -15,14 +15,17 @@ def _forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs:UOp) -> UOp:
 
 @functools.cache
 def _backward_kernel(out:UOp, dq:UOp, dk:UOp, dv:UOp, freqs:UOp) -> UOp:
-  assert out.shape == (2, 8192, 5120) and dq.shape == (2, 64, 8192, 64) and dk.shape == dv.shape == (16, 8192, 8, 64)
+  assert out.shape == (2, 8192, 5120) and dq.shape == (2, 64, 8192, 64) and dk.shape == dv.shape
+  assert dk.shape[1:] == (8192, 8, 64) and dk.shape[0] in (2, 8)
+  partials = dk.shape[0] // 2
   sink = UOp.sink(out.base, dq.base, dk.base, dv.base, freqs.base,
                   UOp.special(256, "lidx0"), UOp.special(2, "gidx0"), UOp.special(128, "gidx1"), UOp.special(80, "gidx2"),
                   arg=KernelInfo("fused_qkv_rope_backward_gptoss"))
   src = (pathlib.Path(__file__).parent/"backward.cpp").read_text()
   include = pathlib.Path(__file__).parents[2]/"thunder"/"amd"/"include"
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=compile_hip(src, [f"-I{include}", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS"]))))
+                               UOp(Ops.BINARY, arg=compile_hip(src, [f"-I{include}", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
+                                                                  f"-DKV_PARTIALS={partials}"]))))
 
 def _backward(dq:UOp, dk:UOp, dv:UOp, call:UOp) -> tuple:
   from extra.thunder.amd.fa import _fa_native_grads
