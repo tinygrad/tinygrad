@@ -270,13 +270,13 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def rewrite_range(sink:UOp):
-  loop_ids = itertools.count(max((aid for u in sink.toposort() if u.op is Ops.RANGE for aid in u.axis_id), default=0))
+  loop_ids = itertools.count(max((aid for u in sink.toposort() if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
   acc_slots = itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
     acc = UOp.alloc((1,), u.dtype, slot=next(acc_slots), addrspace=AddrSpace.REG)
     acc = acc.replace(arg=replace(acc.arg, vmin_vmax=u._min_max))
-    enter = UOp(Ops.RANGE, src=((u.src[0] > 0).cast(dtypes.uint32),), arg=(AxisType.WEAK, next(loop_ids)))
+    enter = UOp(Ops.RANGE, src=((u.src[0] > 0).cast(u.dtype),), arg=(AxisType.WEAK, next(loop_ids)))
     return (acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), enter)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
@@ -286,7 +286,7 @@ def rewrite_range(sink:UOp):
 pm_end_to_backedge = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: (cur:=ctx[x][0].after(ctx[x][2], ctx[x][1])[0].load()).valid(cur < x.src[0]) if x in ctx else None),
   (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
-    body.backedge((l:=ctx[rng][1]), (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd).end(ctx[rng][2])
+    body.backedge(ctx[rng][1], (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd).end(ctx[rng][2])
     if rng in ctx else None),
 ])
 
@@ -385,14 +385,14 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
+  # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
+  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+
   # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
   sink = rewrite_range(sink)
 
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
-
-  # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")

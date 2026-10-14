@@ -34,8 +34,14 @@ class Estimates:
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
-    runtime_mults: dict[UOp, sint] = {u.src[1]:cast(sint, pred.src[1].ssimplify()) for u in uops if u.op is Ops.BACKEDGE
-      and (pred:=u.src[2]).op is Ops.CMPLT and pred.src[0].op is Ops.LOAD and pred.src[0].buf_uop.addrspace is AddrSpace.REG}
+    backedges = [u for u in uops if u.op is Ops.BACKEDGE and (pred:=u.src[2]).op is Ops.CMPLT
+      and pred.src[0].op is Ops.LOAD and pred.src[0].buf_uop.addrspace is AddrSpace.REG]
+    runtime_mults: dict[UOp, sint] = {u.src[1]:cast(sint, u.src[2].src[1].ssimplify()) for u in backedges}
+    loop_accs = {u.src[2].src[0].buf_uop for u in backedges}
+    excluded.update(u.src[2] for u in backedges)
+    excluded.update(u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].buf_uop in loop_accs)
+    entries = {u.src[1] for u in uops if u.op is Ops.END and u.src[0] in backedges}
+    excluded.update(x for u in entries for x in (u.src[0], u.src[0].src[0]))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u

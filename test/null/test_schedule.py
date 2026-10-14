@@ -722,7 +722,10 @@ class TestSchedule(unittest.TestCase):
       for call in linear.src:
         if call.src[0].op is not Ops.SINK: continue
         sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
-        reduce_kernels += any(u.op is Ops.STORE and u.addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
+        uops = sink.toposort()
+        loop_accs = {u.src[2].src[0].buf_uop for u in uops if u.op is Ops.BACKEDGE and u.src[2].op is Ops.CMPLT
+          and u.src[2].src[0].op is Ops.LOAD}
+        reduce_kernels += any(u.op is Ops.STORE and u.addrspace is AddrSpace.REG and u.ranges and u.src[0].buf_uop not in loop_accs for u in uops)
       self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):
