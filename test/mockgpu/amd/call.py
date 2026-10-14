@@ -1,15 +1,12 @@
-import ctypes, itertools
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
 from tinygrad.dtype import Invalid, AddrSpace, dtypes
-from tinygrad.helpers import Context, getenv, TracingKey, dedup, unwrap
+from tinygrad.helpers import Context, getenv, TracingKey, dedup, unwrap, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
-
-asm_call_counter = itertools.count(1)
 
 # this is meant to replace the old emulator
 @uopfunc
@@ -74,8 +71,8 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
          user_data_count:int=0, backend:str|None=None) -> UOp:
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
-  lib_bytes = ctypes.string_at(lib, lib_sz)
-  insts = amd_decode(lib_bytes, arch)
+  view = to_mv(lib, lib_sz)
+  insts = amd_decode(view, arch)
   cfg = get_cfg(insts)
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
@@ -110,12 +107,12 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
     branch_cond:UOp|None = None
     for off in block:
       inst = insts[off]
-      inst_st = str(inst)
+      inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
       ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=inst_addr)
       sink = _get_handler(inst)(inst, ctx)
-      *_, canonical_name = _canonical_info(inst, ctx, lib_bytes[off:])
+      *_, canonical_name = _canonical_info(inst, ctx, view[off:])
       bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
       args = [lib_addr+off if b is inst_addr else afters.get(b, b.after(loop) if loop is not None else b) for b in bufs]
       if ctx.branch_cond is not None and loop_path is not None:
@@ -130,7 +127,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
       afters = {b:arg.after(backedge) for b,arg in afters.items()}
     end = UOp.group(*afters.values()).end(wave)
-  sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"asm_call n{next(asm_call_counter)}", opts_to_apply=()))
+  sink = UOp.sink(end.end(wg), arg=KernelInfo(opts_to_apply=()))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+  with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device[backend].renderer)
