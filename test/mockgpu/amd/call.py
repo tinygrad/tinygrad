@@ -24,20 +24,15 @@ class CallClangJIT(ClangCompiler):
     self.modules:list[ctypes.CDLL] = []
 
   def compile_cached(self, src:str) -> bytes:
-    definitions = list(re.finditer(r"^__attribute__\(\([^\n]*\)\) void (\w+)\(([^\n]*)\) \{\n.*?^\}", src, re.M|re.S))
-    new_functions = [m[1] for m in definitions if m[1] not in self.functions]
-    for m in reversed(definitions):
-      if m[1] in self.functions:
-        declaration = f"void (*{m[1]}_ptr)({m[2]});\n#define {m[1]} {m[1]}_ptr"
-        src = src[:m.start()]+declaration+src[m.end():]
+    new_functions = re.findall(r"^__attribute__\(\([^\n]*\)\) void (\w+)\(", src, re.M)
     lib = super().compile_cached(src)
     with tempfile.TemporaryDirectory() as directory:
       path = f'{directory}/module.so'
       pathlib.Path(path).write_bytes(lib)
       module = ctypes.CDLL(path)
     # Resolve process-local addresses after loading; the cached module contains only empty function-pointer slots.
-    for m in definitions:
-      if m[1] in self.functions: ctypes.c_void_p.in_dll(module, f"{m[1]}_ptr").value = self.functions[m[1]]
+    for name in re.findall(r"^void \(\*(\w+)_ptr\)\(", src, re.M):
+      ctypes.c_void_p.in_dll(module, f"{name}_ptr").value = self.functions[name]
     self.modules.append(module)
     self.functions.update((name, unwrap(ctypes.cast(getattr(module, name), ctypes.c_void_p).value)) for name in new_functions)
     return lib
@@ -68,6 +63,10 @@ class CallClangRenderer(ClangRenderer):
     definitions = []
     all_uops = list(uops)
     for body, name in self.fn_names.items():
+      if name in self.compiler.functions:
+        params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
+        definitions.append(f"void (*{name}_ptr)({params});\n#define {name} {name}_ptr")
+        continue
       _, lines, bufs = self._render(list(body.src))
       params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
       attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
