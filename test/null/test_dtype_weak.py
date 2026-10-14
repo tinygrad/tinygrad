@@ -79,7 +79,7 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((out.src[1], out.src[2]), (UOp.const(5.0, dtypes.bfloat16), gate))
 
   def test_weak_srcs_commit_only_at_a_concrete_lub(self):
-    weak_lub = UOp(Ops.ADD, src=(UOp.const(1), UOp.const(1.0)))
+    weak_lub = UOp(Ops.ADD, src=(UOp.const(2.0), UOp.const(1.0)))
     self.assertIs(graph_rewrite(weak_lub, pm_commit_weak), weak_lub)
     concrete = UOp.const(2.0).cast(dtypes.float16)
     # the weak arm stays bare: its sibling states the width, so the WHERE already derives float16 for it

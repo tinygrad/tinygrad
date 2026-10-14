@@ -39,7 +39,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
     functions[prg.src[0].arg.function_name] = prg.src[2].arg
-    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + list(info.vars)
+    cargs = [p if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
     statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save

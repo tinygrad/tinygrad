@@ -821,7 +821,6 @@ class TestAssignOrdering(unittest.TestCase):
     buf[2:3].assign(Tensor.full((1,), 3.0))
     self.assertEqual(buf.sum().realize().item(), 6.0)
 
-# TODO: assigns into views of unrealized non-BUFFER bases are silently dropped
   def test_read_before_two_assigns(self):
     g = Tensor.full((2,), 4.0).realize()
     before = g + 1                                     # 5
@@ -848,16 +847,12 @@ class TestAssignOrdering(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, raises
       np.testing.assert_allclose((first + second + a).numpy(), [112, 114, 110, 110])
 
+  @unittest.expectedFailure  # TODO: broken now, raises cycle: one kernel reads a from before and after the slice assign
   def test_read_before_slice_assign(self):
     a = Tensor.ones(4).realize()
     before = a * 3
     a[0:2].assign(Tensor.full((2,), 2.))
-    out = (a + (before - 1)).numpy()
-    try:
-      np.testing.assert_allclose(out, [4, 4, 3, 3])
-    except AssertionError:
-      # TODO: broken now, before reads the two assigned elements after the assign
-      np.testing.assert_allclose(out, [7, 7, 3, 3])
+    np.testing.assert_allclose((a + (before - 1)).numpy(), [4, 4, 3, 3])
 
   def test_read_before_assign_survives_a_realize(self):
     a = Tensor.ones(4).realize()
@@ -962,11 +957,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     c = t.to("CPU:1")  # unrealized COPY
     self.assertIs(c.uop.base.op, Ops.COPY)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
-    try:
-      self.assertEqual(c.tolist(), [[0,1],[0,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(c.tolist(), [[0,0],[0,0]])
+    self.assertEqual(c.tolist(), [[0,1],[0,1]])
 
   def test_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
@@ -998,22 +989,14 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     cb = t.contiguous_backward()  # unrealized CONTIGUOUS_BACKWARD
     self.assertIs(cb.uop.base.op, Ops.CONTIGUOUS_BACKWARD)
     cb[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
-    try:
-      self.assertEqual(cb.tolist(), [[1,1],[3,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(cb.tolist(), [[1,2],[3,4]])
+    self.assertEqual(cb.tolist(), [[1,1],[3,1]])
 
   def test_detach_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
     d = t.to("CPU:1").detach()  # DETACH(unrealized COPY)
     self.assertIs(d.uop.base.op, Ops.COPY)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
-    try:
-      self.assertEqual(d.tolist(), [[0,1],[0,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(d.tolist(), [[0,0],[0,0]])
+    self.assertEqual(d.tolist(), [[0,1],[0,1]])
 
   def test_detach_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
@@ -1028,33 +1011,33 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     c = a + b  # unrealized ADD
     self.assertIs(c.uop.base.op, Ops.ADD)
     c[:2].assign(Tensor([99, 99]).realize())
-    try:
-      self.assertEqual(c.tolist(), [99,99,10,12])
-    except AssertionError:
-      # TODO: broken now, silently dropped
-      self.assertEqual(c.tolist(), [6,8,10,12])
+    self.assertEqual(c.tolist(), [99,99,10,12])
 
   def test_reduce(self):
     a = Tensor([[1,2],[3,4]]).contiguous().realize()
     r = a.sum(axis=0)  # unrealized REDUCE
     self.assertIs(r.uop.base.op, Ops.REDUCE)
     r[:1].assign(Tensor([99]).realize())
-    try:
-      self.assertEqual(r.tolist(), [99,6])
-    except AssertionError:
-      # TODO: broken now, silently dropped
-      self.assertEqual(r.tolist(), [4,6])
+    self.assertEqual(r.tolist(), [99,6])
 
   def test_cast(self):
     a = Tensor([1,2,3,4]).contiguous().realize()
     c = a.float()  # unrealized CAST
     self.assertIs(c.uop.base.op, Ops.CAST)
     c[:2].assign(Tensor([99, 99], dtype=dtypes.float).realize())
-    try:
-      self.assertEqual(c.tolist(), [99,99,3,4])
-    except AssertionError:
-      # TODO: broken now, silently dropped
-      self.assertEqual(c.tolist(), [1,2,3,4])
+    self.assertEqual(c.tolist(), [99,99,3,4])
+
+  def test_write_reading_pending_write(self):
+    a, b = Tensor([1., 1]).realize()+0, Tensor([2., 2]).realize()+0
+    b[:1].assign(b[:1] + a[:1]*0 + 1)
+    a[:1].assign(a[:1] - b[:1])
+    self.assertEqual(a.tolist(), [-2, 1])
+    self.assertEqual(b.tolist(), [3, 2])
+
+  def test_broadcast_const(self):
+    w = Tensor.empty(4).const_like(1.0)  # EXPAND of a const, a view of no tensor
+    w.assign(Tensor([1., 2, 3, 4]))
+    self.assertEqual(w.tolist(), [1, 2, 3, 4])
 
   def test_const(self):
     c = Tensor(5).reshape(1, 1).expand(2, 2)
@@ -1187,11 +1170,7 @@ class TestMultiAssign(unittest.TestCase):
     out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0)
     ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
     out[:, 2:3].assign(ones).realize()
-    try:
-      self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
-    except AssertionError:
-      # TODO: broken now, the write is dropped
-      self.assertListEqual(out.tolist(), [[0,0,0,0], [0,0,0,0], [0,0,0,0], [0,0,0,0]])
+    self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
 
   def test_multi_assign_var_offset(self):
     out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0).realize()

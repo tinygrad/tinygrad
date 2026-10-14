@@ -158,6 +158,14 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop3.vmin, ~6)
     self.assertEqual(uop3.vmax, ~(-5))
 
+  def test_vmin_vmax_xor_nonneg(self):
+    # non-negative operands stay below the wider operand's next power of two
+    self.assertEqual((UOp.variable('x', 0, 31) ^ 16)._min_max, (0, 31))
+    self.assertEqual((UOp.variable('x', 3, 10) ^ UOp.variable('y', 0, 40))._min_max, (0, 63))
+    self.assertEqual((UOp.variable('x', 0, 200, dtypes.uint8) ^ UOp.variable('y', 0, 3, dtypes.uint8))._min_max, (0, 255))
+    # a possibly-negative operand is not bounded
+    self.assertEqual((UOp.variable('x', -1, 10) ^ 16)._min_max, (dtypes.weakint.min, dtypes.weakint.max))
+
   def test_vmin_vmax_cast(self):
     x = UOp.variable('x', -10, 10, dtypes.int)
     x_float = x.cast(dtypes.float)

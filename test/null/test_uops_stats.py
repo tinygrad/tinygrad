@@ -137,6 +137,9 @@ class TestUOpsStats(unittest.TestCase):
     unequal = equal[:3] + [Tensor.empty(256, 129)]
     self.assertGreater(get_stats(Tensor.cat(*unequal, dim=1))[0], 0)
 
+  def test_xor_gather(self):
+    self.assertEqual(get_stats(Tensor.empty(32)[Tensor.arange(32) ^ 16])[0], 0)
+
   def test_simple_matmul(self, M=1024, N=1024, K=1024):
     a = Tensor.empty(M,N)
     b = Tensor.empty(N,K)
