@@ -555,12 +555,14 @@ class TestRangeShrink(unittest.TestCase):
   def get_ranges(self, sink):
     with Context(NOOPT=1, SPEC=0):
       result = full_rewrite(sink)
-    return [u for u in result.toposort() if u.op is Ops.RANGE]
+    # Bounded RANGE is lowered to a BACKEDGE over an integer register accumulator. Open ranges have no BACKEDGE yet,
+    # so read the optimized bound preserved on that accumulator.
+    uops = result.toposort()
+    return [u for u in uops if u.op is Ops.ALLOC and u.dtype is dtypes.int and u.arg.vmin_vmax is not None]
 
   def assert_range_end(self, ranges:list[UOp], end:int):
     self.assertEqual(len(ranges), 1)
-    with Context(NOOPT=1, SPEC=0): expected = full_rewrite(UOp.const(end, dtypes.int).sink()).src[0]
-    self.assertIs(ranges[0].src[0], expected)
+    self.assertEqual((ranges[0].vmin, ranges[0].vmax), (0, end))
 
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
