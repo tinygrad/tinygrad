@@ -14,7 +14,7 @@ U = TypeVar("U")
 def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX, WIN, WSL = sys.platform == "darwin", sys.platform == "win32", (sys.platform=="linux" and os.path.exists("/dev/dxg"))
+OSX, WIN = sys.platform == "darwin", sys.platform == "win32"
 BASEDIR = pathlib.Path(__file__).parent
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
