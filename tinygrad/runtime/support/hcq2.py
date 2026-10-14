@@ -5,7 +5,7 @@ from dataclasses import replace, dataclass, field
 from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
 from tinygrad.helpers import DEBUG, VIZ, ALL2ALL, PROFILE
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, ProfileProgramEvent
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
 from tinygrad.uop.ops import pm_renumber_slots
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_dtype
@@ -17,9 +17,6 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # 0. helpers
 
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
-HOST_DEVS = frozenset(("CPU", "PYTHON"))
-UVM_DEVS = frozenset(("QCOM", "METAL")) # the host maps their memory, so copies are host memcpys
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -64,11 +61,17 @@ def make_program(prg:UOp, size:int, device:str) -> UOp:
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
   return UOp.alloc((size,), dtypes.u8, slot, device=device).rtag("program")
 
-def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, fn:str|None=None, deps:tuple[UOp, ...]=()) -> UOp: # the order is on the arg
-  lin = UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)).after(*deps)
-  return UOp.custom_function(fn or to_name("submit", to_tuple(devs)[0].split(":")[0], queue.split(":")[0])).call(lin)
+def make_submit(*cmds, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
+  kind = to_name(dev.split(":")[0], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
+  q = UOp.param(0, dtypes.u8, 1, dev, name=queue) # the queue instance: its device and name
+  return UOp.sink(*cmds, arg=KernelInfo(kind)).call(q).after(*deps)
 
-def ins(name, *src) -> UOp: return UOp(Ops.INS, tuple(UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src), (name, dtypes.void))
+def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order: each is after the fence and the one before it
+  calls, s = list[UOp](), batch.src[0]
+  while s.op is Ops.AFTER: calls, s = [s.src[0]] + calls, s.src[-1]
+  return calls
+
+def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
 
 def chunks(nbytes:int, chunk_sz:int, dtype:DType=dtypes.i32) -> list[tuple[UOp|int, int]]: # (index, bytes): full chunks as one range, then the tail
   full, tail = divmod(nbytes, chunk_sz) # no one-trip loops
@@ -233,7 +236,7 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   return [ins("wait", ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in latest.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
-  return [ins("barrier")] + [ins("wait", timeline((d,)), timeline_value((d,))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+  return [ins("memory_barrier")] + [ins("wait", timeline((d,)), timeline_value((d,))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
@@ -247,7 +250,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     q += waits + ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
-    if tag in ctx.signal_tags: q += [ins("store", ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.u64))]
+    if tag in ctx.signal_tags: q += [ins("signal", ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.u64))]
 
   # one queue advances the device timeline after all other queues finish, and after the queues of the peers that touched the device
   for dev in ctx.queues:
@@ -255,7 +258,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     qdev, queue = touched[0] if dev.split(":")[0] in HOST_DEVS else (dev, ctx.epilogue_queue(dev)) # the host has no queues, a toucher closes it
     waits = [ins("wait", ctx.queue_signal((d,), q), UOp.const(ctx.last[(d, q)] + 1, dtypes.u64))
              for d, q in [(dev, q) for q in ctx.queues[dev]] + touched if (d, q) != (qdev, queue)]
-    bump = ins("store", timeline((dev,)), timeline_value((dev,)) + 1)
+    bump = ins("signal", timeline((dev,)), timeline_value((dev,)) + 1)
 
     # multiple copy queues may need a new compute stream. a peer without calls of its own starts like any queue
     if not (q:=queues.setdefault(((qdev,), queue), [])) and qdev not in {d for d, _ in ctx.last}: q += _start_ins(ctx, qdev, queue)
@@ -270,8 +273,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   timelines = [ctx.sched_timeline((dev,)) for dev in ctx.queues]
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
   fence = UOp.custom_function("hcq_fence").call(*timelines, *signals)
-  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue, deps=(fence, *submits[-1:])))
-  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
+  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, dev=devs[0], queue=queue, deps=(fence, *submits[-1:])))
+  sink = UOp.sink(submits[-1], arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
 
@@ -321,23 +324,20 @@ class HWQueue:
      lambda ctx, dst, src: ctx.copy(dst, src, src.max_numel() * src.dtype.itemsize)),
     (UPat(Ops.CALL, src=(UPat.custom_function("encdec", name="s"),), name="c", allow_any_len=True), lambda ctx, c, s: ctx.encdec(c, s)),
 
-    # ins
-    (UPat(Ops.INS, arg=("copy", dtypes.void), src=(UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
+    # ins: a custom function is the method of its name
+    (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
      lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
-    (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
-    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.INS, arg=("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
-    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
-    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
-    (UPat(Ops.INS, arg=("write", dtypes.void), name="u"), lambda ctx, u: ctx.write(*u.src)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("wait_eq"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="c"), lambda ctx, c,f: getattr(ctx, f.arg.name)(*c.src[1:])),
 
     # loop in cmdbufs
     (UPat(Ops.END, src=(UPat(Ops.LINEAR, name="body"), UPat(Ops.RANGE, name="r"))), lambda ctx, body, r: ctx.loop(body, r)),
   ])
 
-  def __init__(self, submit:UOp):
-    self.lin, self.deps = (lin:=submit.src[1]).without_after, lin.src[1:] if lin.op is Ops.AFTER else ()
-    self.devs, self.queue = self.lin.arg
+  def __init__(self, submit:UOp): # submit: sink(commands).call(queue).after(deps)
+    call, self.deps = submit.src[0], submit.src[1:]
+    self.lin, q = call.body, call.src[1]
+    self.devs, self.queue = (q.device,), q.arg.name
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
 
@@ -491,7 +491,7 @@ def lower_call(call:UOp) -> UOp|None:
   # encode bodies
   from tinygrad.runtime.ops_rdma import pm_rdma_encode
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
-  body = graph_rewrite(call.body, pm_rdma_encode + sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode,
+  body = graph_rewrite(call.body, pm_rdma_encode + Compiled.pm_encode + pm_hcq_encode,
                        ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs], PatternMatcher([])),
                        ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")

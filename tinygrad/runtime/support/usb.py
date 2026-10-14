@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceild
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
 from tinygrad.device import Buffer, BufferSpec, Compiled
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks, submits
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -383,19 +383,19 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
     n, va = (i:=UOp.const(r, dtypes.uint64)) + first, vram.getaddr(dev) + i * win
     if is_host(src): # copyin: wait sentinel, copy, release
       end = sram + (((n - run) & 1) + 1) * HALF
-      cmds = [ins("wait_eq", end - 4, usb_sentinel(n)), ins("copy", va, end - usb_wire(nb), nb), ins("store", end - 4, 0)]
+      cmds = [ins("wait_eq", end - 4, usb_sentinel(n)), ins("copy", va, end - usb_wire(nb), nb), ins("signal", end - 4, 0)]
     else: # copyout: wait go, fill, signal
-      cmds = [ins("wait", usb_go(dev), n + 1), ins("store", usb_go(dev), 0)]
+      cmds = [ins("wait", usb_go(dev), n + 1), ins("signal", usb_go(dev), 0)]
       cmds += [ins("copy", sram + wo, va + po, pb) for wo, po, pb in ((0, 0, min(nb, CHUNK)), (HALF, CHUNK, nb - CHUNK)) if pb > 0]
-      cmds += [ins("store", usb_cq(dev), 0)]
-    cmds += [ins("store", usb_fence(dev), n + 1)]
+      cmds += [ins("signal", usb_cq(dev), 0)]
+    cmds += [ins("signal", usb_fence(dev), n + 1)]
     ops += [UOp(Ops.LINEAR, src=tuple(cmds)).end(r)] if isinstance(r, UOp) else cmds # full chunks as one block
   return ops
 
 def usb_copy_rewriter(s:UOp) -> UOp|None:
-  lins = [submit.without_after.src[1].without_after for submit in s.src]
+  lins = [c.body for c in submits(s)]
   if not (copies:=[call for lin in lins for call in lin.src if is_staged(call)]): return None
-  dev = lins[0].arg[0][0]
+  dev = submits(s)[0].src[1].device
 
   # a run: one direction, one table
   runs, nums, n = list[tuple[bool, int, UOp, int]](), list[tuple[int, int]](), 0
@@ -406,7 +406,7 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
 
   # gpu side
   chunks = (usb_chunks(call, *num) for call, num in zip(copies, nums))
-  s = s.substitute({lin: lin.replace(src=tuple(flatten(next(chunks) if is_staged(c) else [c] for c in lin.src))) for lin in lins})
+  s = s.substitute({lin: lin.replace(src=tuple(flatten(next(chunks) if is_staged(c) else [c] for c in lin.src))) for lin in lins}, enter_calls=True)
 
   # host side, after the submits
   link = usb_link(dev).after(s.src[-1])
@@ -417,10 +417,10 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
     word = usb_fence(dev) if cin else usb_go(dev)
     live = UOp.range(link.after(done, i).index(5).load().eq(0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
     done = UOp.custom_function("usb_send" if cin else "usb_recv").call(link.after(live), table, i, UOp.const(run, dtypes.int), word).end(live, i)
-  return s.replace(src=(*s.src, link.after(done).index(2).store(UOp.const(n, dtypes.uint64))))
+  return s.replace(src=(link.after(done).index(2).store(UOp.const(n, dtypes.uint64)),))
 pm_usb_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), usb_copy_rewriter)])
 
-pm_usb_encode = PatternMatcher([
+Compiled.pm_encode += PatternMatcher([ # the usb host calls get their bodies
   (UPat(Ops.CALL, src=(UPat.custom_function("usb_begin"), UPat.var("link"), UPat.var("fence"), UPat.var("prev"))),
    lambda link, fence, prev: usb_begin(link, fence.getaddr("CPU"), prev)),
   (UPat(Ops.CALL, src=(UPat.custom_function("usb_drain"), UPat.var("link"), UPat.var("fence"), UPat.var("need"))),
@@ -450,7 +450,7 @@ def usb_reset(dev):
   for t in map(libusb.struct_libusb_transfer.from_address, _host_block(dev).host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 
 def setup_usb_rules(dev):
-  dev.pm_batch, dev.pm_lower, dev.pm_encode = dev.pm_batch + pm_usb_batch, dev.pm_lower + pm_usb_lower, dev.pm_encode + pm_usb_encode
+  dev.pm_batch, dev.pm_lower = dev.pm_batch + pm_usb_batch, dev.pm_lower + pm_usb_lower
   Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)), # placeholders the gpu owns
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_go")), lambda d=dev: _go(d)),
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])

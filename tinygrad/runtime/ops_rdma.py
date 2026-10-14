@@ -148,19 +148,18 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
               ins("write", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
 
     # and invalidate the gpu caches on recv
-    copies.append(ops + ([ins("barrier")] if is_recv else []))
+    copies.append(ops + ([ins("memory_barrier")] if is_recv else []))
   return copies
 
 # *****************
 # encode rewrite
 
-def rdma_submit(ctx, submit:UOp, arg:UOp) -> UOp|None:
-  lin = arg.without_after
+def rdma_submit(ctx, submit:UOp, lin:UOp, queue:UOp) -> UOp|None:
   if not (queues:={i: queue_of(u) for i, u in enumerate(lin.src) if is_rdma(u)}): return None
 
   ops = [[u] for u in lin.src]
   for q in dict.fromkeys(queues.values()):
     positions = [i for i in queues if queues[i] == q]
-    for i, copy_ops in zip(positions, rdma_copies(lin.arg[0], [lin.src[i] for i in positions])): ops[i] = copy_ops
-  return submit.replace(src=(submit.body, lin.replace(src=tuple(flatten(ops))).after(*arg.src[1:] if arg.op is Ops.AFTER else ())))
-pm_rdma_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION), UPat(Ops.LINEAR).or_after("arg")), name="submit"), rdma_submit)])
+    for i, copy_ops in zip(positions, rdma_copies((queue.device,), [lin.src[i] for i in positions])): ops[i] = copy_ops
+  return submit.replace(src=(lin.replace(src=tuple(flatten(ops))), queue))
+pm_rdma_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="lin"), UPat(name="queue")), name="submit"), rdma_submit)])

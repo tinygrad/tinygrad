@@ -47,8 +47,9 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   return batches
 
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
-  return {(lin.arg[0][0], lin.arg[1]): list(lin.src) for lin in (s.src[1].without_after for s in batch.body.src)}
-def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL]
+  return {(q.device, q.arg.name): list(c.body.src) for c in hcq2.submits(batch.body) for q in [c.src[1]]}
+def ins_name(c:UOp) -> str|None: return c.body.arg.name if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION else None
+def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL and ins_name(c) is None]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
 
 def word(u:UOp) -> tuple[UOp, int]:
@@ -70,13 +71,13 @@ def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[
     for q in (list(qs) if prio is None else prio):
       if not (cmds:=qs[q]): continue
       c = cmds[0]
-      if c.op is Ops.INS and c.arg[0].startswith("wait"):
-        sig, target = mem[word(c.src[0])], val(c.src[1])
-        if sig != target if c.arg[0] == "wait_eq" else sig < target: continue
-      elif c.op is Ops.INS and c.arg[0] == "store":
-        mem[w:=word(c.src[0])] = val(c.src[1])
+      if (name:=ins_name(c)) is not None and name.startswith("wait"):
+        sig, target = mem[word(c.src[1])], val(c.src[2])
+        if sig != target if name == "wait_eq" else sig < target: continue
+      elif name == "signal":
+        mem[w:=word(c.src[1])] = val(c.src[2])
         if w[0].tag == "timeline": log.append(w[0].device)
-      elif c.op is Ops.CALL: log.append(cs.index(c))
+      elif c in cs: log.append(cs.index(c))
       cmds.pop(0)
       break
     else: return log, {q: len(cmds) for q, cmds in qs.items()}, {d: mem[word(hcq2.timeline((d,)))] for d in batch.arg.aux.device}
