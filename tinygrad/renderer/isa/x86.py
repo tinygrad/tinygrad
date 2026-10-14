@@ -1,7 +1,7 @@
 from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-import sys, struct, functools
+import sys, struct, functools, itertools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
@@ -189,7 +189,7 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
-stack_pointer = UOp.alloc((1,), dtypes.uint64, slot=-1, addrspace=AddrSpace.REG).replace(tag=(RSP,))
+stack_pointer = UOp.placeholder((1,), dtypes.uint64, slot=-1, addrspace=AddrSpace.REG).replace(tag=(RSP,))
 
 # ***** X86 instruction selection *****
 def alloc_reg(ctx:IselContext, dt:DType, pin:Register|tuple[Register, ...]|None=None):
@@ -467,15 +467,12 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
-  # register allocations dont live on stack
-  if x.addrspace is AddrSpace.REG: return None
-  sp = stack_pointer.replace(op=Ops.BUFFER)
-  nx = UOp(Ops.INS, fold_address(sp.index(imm(dtypes.uint32, ctx.stack_size))), (X86Ops.LEA, x.dtype), x.tag)
+  nx = UOp(Ops.INS, fold_address(stack_pointer.index(imm(dtypes.uint32, ctx.stack_size))), (X86Ops.LEA, x.dtype), x.tag)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
-  return nx, [sp, nx]
+  return nx, [stack_pointer, nx]
 
 pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.BUFFER, name="x"), alloc_buffer),
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
   (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
@@ -694,16 +691,18 @@ class X86LinearContext(LinearContext):
 
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
-    before, after = [], []
-    used = {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
+    before, after, used = [], [], {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
+    buf_ids = itertools.count(max((u.arg.slot+1 for u in uops if u.op in GroupOp.Defines), default=0))
     for r in CALLEE_SAVED:
       if r.name in used:
-        a = UOp(Ops.BUFFER, arg=ParamArg(-1-r.index, dtypes.uint64, addrspace=AddrSpace.REG)).replace(tag=(r,))
+        a = UOp(Ops.BUFFER, arg=ParamArg(next(buf_ids), dtypes.uint64, addrspace=AddrSpace.REG)).replace(tag=(r,))
         slot = self.assign_spill_slot(r,a)
         before.append(self.ren.spill(slot,a))
         after.append(self.ren.fill(slot,a,r))
-    before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
-    after.append(stack_pointer.ins(X86Ops.ADDi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+
+    if self.stack_size > 0:
+      before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+      after.append(stack_pointer.ins(X86Ops.ADDi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
