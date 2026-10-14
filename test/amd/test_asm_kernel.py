@@ -234,7 +234,6 @@ class TestAsmKernel(unittest.TestCase):
       run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
-  @unittest.expectedFailure
   def test_lds_sync(self):
     if self.arch not in ("rdna3", "rdna4"): self.skipTest("only rdna3/rdna4")
     a = Tensor.empty(128, dtype=dtypes.int32).contiguous().realize()
