@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
@@ -134,8 +134,13 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
   # FIXME: CMPLT of nan is undefined
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
+@dataclass(frozen=True)
+class FloatDecompCtx:
+  fr: DType
+  to: DType
+
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
-  storage_idx = graph_rewrite(x.src[0], pm_float_decomp, ctx=(fr, to), bottom_up=True)
+  storage_idx = graph_rewrite(x.src[0], pm_float_decomp, ctx=FloatDecompCtx(fr, to), bottom_up=True)
   if (n:=x.max_numel()) == 1: return f2f(storage_idx.load(*x.src[1:]), fr, to)
   return UOp(Ops.STACK, src=tuple(f2f(reindex(storage_idx, i, 1).load(*x.src[1:]), fr, to) for i in range(n)))
 
@@ -143,7 +148,7 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
-def f2f_rewrite(ctx:tuple, x:UOp) -> UOp: return graph_rewrite(x, pm_float_decomp, ctx=ctx, bottom_up=True)
+def f2f_rewrite(ctx:FloatDecompCtx, x:UOp) -> UOp: return graph_rewrite(x, pm_float_decomp, ctx=ctx, bottom_up=True)
 
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp: PatternMatcher = PatternMatcher([
@@ -178,48 +183,53 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
    reindex(l2i_rewrite_idx(ctx, idx), x.tag[0]).replace(tag=None).load() if x.tag is not None else None)
 ])
 
-# float decomposition patterns - ctx is (fr, to) tuple
+# float decomposition patterns
 pm_float_decomp: PatternMatcher = PatternMatcher([
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x:
-   UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx[0]]), tag=ctx[0]) if x.dtype == ctx[0] else None),
+   UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx.fr]), tag=ctx.fr) if x.dtype == ctx.fr else None),
   # INDEX into a LOAD/STACK selects a lane of an already converted value, the load rules below own those
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(GroupOp.All-{Ops.LOAD, Ops.STACK}),), allow_any_len=True, name="x"), lambda ctx,x:
-   UOp(x.op, src=(f2f_rewrite(ctx, x.src[0]), *x.src[1:]), arg=x.arg, tag=ctx[0])
-   if x.dtype == ctx[0] else None),
-  (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype == ctx[0] else None),
+   UOp(x.op, src=(f2f_rewrite(ctx, x.src[0]), *x.src[1:]), arg=x.arg, tag=ctx.fr)
+   if x.dtype == ctx.fr else None),
+  (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, ctx.fr, ctx.to) if x.dtype == ctx.fr else None),
   # bitcasted load should just replace load
   (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
-   f2f_rewrite(ctx, ld.src[0]).load(*ld.src[1:]).bitcast(bc.dtype) if ld.dtype == ctx[0] else None),
+   f2f_rewrite(ctx, ld.src[0]).load(*ld.src[1:]).bitcast(bc.dtype) if ld.dtype == ctx.fr else None),
   # bitcast from
   (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
-   bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
+   bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx.to]), ctx.to, ctx.fr),)) if x.dtype == ctx.to and bc.dtype.bitsize == ctx.fr.bitsize else None),
   # bitcast to
   (UPat(Ops.BITCAST, src=(UPat.var("x"),), name="bc"), lambda ctx,bc,x:
-   f2f(x.bitcast(f2f_dt[ctx[0]]), ctx[0], ctx[1]) if bc.dtype == ctx[0] else None),
+   f2f(x.bitcast(f2f_dt[ctx.fr]), ctx.fr, ctx.to) if bc.dtype == ctx.fr else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
-   f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype == ctx[0] else None),
+   f2f_clamp(val.cast(ctx.to), ctx.fr) if x.dtype == ctx.fr else None),
   (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, dtypes.floats, name="x"), lambda ctx,x:
-   UOp(x.op, src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src), arg=x.arg, tag=x.tag) if x.dtype == ctx[0] else None),
+   UOp(x.op, src=tuple(s.cast(ctx.to) if s.dtype == ctx.fr else s for s in x.src), arg=x.arg, tag=x.tag) if x.dtype == ctx.fr else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
-   st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
+   st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx.fr]))) if val.dtype == ctx.fr and idx.tag == ctx.fr else None),
   (UPat(Ops.STORE, src=(UPat.var("idx").or_casted(), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
-   f2f_store(st, idx, val, *ctx) if val.dtype == ctx[1] and idx.tag == ctx[0] else None),
+   f2f_store(st, idx, val, ctx.fr, ctx.to) if val.dtype == ctx.to and idx.tag == ctx.fr else None),
 ])
 
-def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
-  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
-  for fr in sorted(filter(_should_emulate, ctx[0])):
+@dataclass
+class DTypeDecompCtx:
+  renderer: Renderer
+  dtypes: set[DType] = field(default_factory=set)
+
+def do_dtype_decomps(sink:UOp, ctx:DTypeDecompCtx) -> UOp:
+  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx.renderer.supported_dtypes()
+  for fr in sorted(filter(_should_emulate, ctx.dtypes)):
     to = dtypes.int if fr == dtypes.long else dtypes.float
     if DEBUG >= 2: print(f"emulating {fr} as {to}")
     pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
-    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx={} if pm is pm_long_decomp else (fr, to), bottom_up=True)
-  ctx[0].clear()
+    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx={} if pm is pm_long_decomp else FloatDecompCtx(fr, to), bottom_up=True)
+  ctx.dtypes.clear()
   return sink
 
 pm_dtype_decomps = PatternMatcher([
   # detect dtypes to decompose
   (UPat(GroupOp.All, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong), name="x"), lambda x,ctx:
-   ctx[0].add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype, dt))),
+   ctx.dtypes.add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype, dt))),
   # do the rewrites
   (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
 ])
