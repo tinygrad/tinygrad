@@ -13,7 +13,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.ops_cpu import CPUExecutable
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
-from tinygrad.helpers import Context, TracingKey, unwrap, Target, cpu_profile
+from tinygrad.helpers import Context, TracingKey, unwrap, Target, cpu_profile, to_mv
 from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX,
@@ -287,7 +287,9 @@ def decode_cfg(lib_bytes:bytes, arch:str):
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
                   user_data_count:int, backend:str) -> UOp:
-  lib_bytes = ctypes.string_at(lib, lib_sz)
+  view = to_mv(lib, lib_sz)
+  insts = amd_decode(view, arch)
+  lib_bytes = bytes(view[:max((pc+inst.size() for pc,inst in insts.items()), default=0)])
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
   key = (lib_bytes, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_config))
