@@ -1005,6 +1005,18 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     c[:2].assign(Tensor([99, 99], dtype=dtypes.float).realize())
     self.assertEqual(c.tolist(), [99,99,3,4])
 
+  def test_write_reading_pending_write(self):
+    a, b = Tensor([1., 1]).realize()+0, Tensor([2., 2]).realize()+0
+    b[:1].assign(b[:1] + a[:1]*0 + 1)
+    a[:1].assign(a[:1] - b[:1])
+    self.assertEqual(a.tolist(), [-2, 1])
+    self.assertEqual(b.tolist(), [3, 2])
+
+  def test_broadcast_const(self):
+    w = Tensor.empty(4).const_like(1.0)  # EXPAND of a const, a view of no tensor
+    w.assign(Tensor([1., 2, 3, 4]))
+    self.assertEqual(w.tolist(), [1, 2, 3, 4])
+
   @unittest.expectedFailure  # TODO: broken now, silently dropped
   def test_const(self):
     c = Tensor(5).reshape(1, 1).expand(2, 2)

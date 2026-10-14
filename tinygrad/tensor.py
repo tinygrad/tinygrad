@@ -252,8 +252,9 @@ class Tensor(RandMixin):
     assigned_to = self.uop.storage_base
     views = [self.uop]
     while views[-1].op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: views.append(views[-1].src[0])
-    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
-    if not assigned_to.has_buffer_identity() and len(views) == 1:
+    # assigning to a pending value that views no other live tensor is initialization, not a write: the whole tensor is
+    # overwritten, so the pending value is dead. (a broadcast const like `const_like` is EXPAND(CONST) but views nothing)
+    if not assigned_to.has_buffer_identity() and not any(_tensor_holds(u) for u in views[1:]):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.STAGE else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
@@ -262,9 +263,7 @@ class Tensor(RandMixin):
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
-      if target is not ib:
-        assign = assign.substitute({ib: target}, walk=True)
-        store = assign.src[1]
+      if target is not ib: store = self.uop.substitute({ib: target}, walk=True).store(x.uop)
       # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
       # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       for t in [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.storage_base is assigned_to]:
