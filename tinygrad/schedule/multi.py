@@ -126,7 +126,7 @@ def reshape_multi(root:UOp, multi:UOp):
   # map every sharded axis through the reshape: the axis boundary must survive intact and stay divisible by its shard count
   arg_acc:list[sint] = [1]
   for s in new_shape: arg_acc.append(ssimplify(arg_acc[-1]*s))
-  new_shardings = []
+  new_shardings, new_counts = [], {}
   for ax, rng in multi.sharding:
     count = int(rng.vmax)+1
     target = ssimplify(prod(multi.shape[:ax]))
@@ -134,8 +134,8 @@ def reshape_multi(root:UOp, multi:UOp):
     new_ax = len(arg_acc) - arg_acc[::-1].index(target) - 1
     if new_shape[new_ax] % count != 0: raise RuntimeError(f"reshape {multi.shape} -> {new_shape} moved items between shards")
     new_shardings.append((new_ax, rng))
-  new_axs = {a for a, _ in new_shardings}
-  new_shape = tuple(s//(int(rng.vmax)+1) if a in new_axs else s for a,s in enumerate(new_shape))
+    new_counts[new_ax] = count
+  new_shape = tuple(s//new_counts.get(a, 1) for a,s in enumerate(new_shape))
   return multi.src[0].reshape(new_shape).unshard(tuple(a for a,_ in new_shardings), tuple(r for _,r in new_shardings))
 
 def expand_multi(root:UOp, multi:UOp):
@@ -178,11 +178,6 @@ def shrink_multi(root:UOp, multi:UOp):
       return multi.src[0].copy_to_device(multi.device, arg=part_bounds.index((s, l)))._mop(Ops.SHRINK, non_shard_shrink)
   val = multi.src[0]._mop(Ops.SHRINK, tuple(local_marg))
   return val if not remaining else val.unshard(tuple(a for a,_ in remaining), tuple(r for _,r in remaining))
-
-def flip_multi(root:UOp, multi:UOp):
-  for ax, _ in multi.sharding:
-    if root.marg[ax]: raise RuntimeError(f"flipping not supported on sharded axis {ax}")
-  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).unshard(multi.arg, multi.src[1:])
 
 def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
@@ -284,7 +279,6 @@ multi_pm = PatternMatcher([
   (UPat(Ops.PAD, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), pad_multi),
   (UPat(Ops.SHRINK, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
   (UPat(Ops.PERMUTE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), permute_multi),
-  (UPat(Ops.FLIP, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),

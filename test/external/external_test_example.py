@@ -8,7 +8,7 @@ def multidevice_test(fxn):
   def ret(self):
     for device in Device._devices:
       # broken on OSX USB AMD, why?
-      if device in ["DISK", "NPY", "FAKE", "DSP", "NULL"] or (OSX and device in ["AMD"]): continue
+      if device in ["DISK", "NPY", "FAKE", "DSP", "NULL", "RDMA"] or (OSX and device in ["AMD"]): continue
       if sys.stdout.isatty(): print(device)
       if device in exclude_devices:
         if sys.stdout.isatty(): print(f"WARNING: {device} test is excluded")

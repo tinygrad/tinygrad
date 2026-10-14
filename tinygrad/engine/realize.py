@@ -32,7 +32,7 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
     return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
-  return [(d, call, None) for d in to_tuple(call.src[1].device)]
+  return [(d, call, None) for d in to_tuple(call.device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -130,8 +130,10 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
     # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
-    has_dnum = any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
-                   for x in call.body.toposort())
+    # on archs like x86, stack args (after the 6th) aren't PARAMs in the body, so also check the PROGRAM's vars
+    has_dnum = ((isinstance(call.body.arg, ProgramInfo) and any(v.arg.name == '_device_num' for v in call.body.arg.vars)) or
+                any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
+                    for x in call.body.toposort()))
     lanes = max(len(b.bufs) for b in bufs if isinstance(b, MultiBuffer)) # a single buffer is shared by every lane
     per_lane = [b.bufs if isinstance(b, MultiBuffer) else (b,)*lanes for b in bufs]
     for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j} if has_dnum else {}
@@ -182,10 +184,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   info = call.arg.aux
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
+  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
+  for d in {d for devs, _, _, prof, *_ in info.kernels for d in devs if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   if not (ctx.wait or PROFILE): return ets
 
-  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   for devs, name, _, prof, pkey, *_ in info.kernels:
     for d in (devs if prof else ()): cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
   if ctx.wait:
@@ -287,7 +290,7 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
   linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), allow_cache=ctx.cache)
   while True:
     if clear_l2:
-      if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
+      if hasattr(dev:=Device[call.device], 'invalidate_caches'): dev.invalidate_caches()
       else:
         from tinygrad.tensor import Tensor
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)

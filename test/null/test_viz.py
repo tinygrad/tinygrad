@@ -758,6 +758,20 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(layout[:2], ["USER","TINY"])
     self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
+  def test_node_overlap(self):
+    prof = [ProfileRangeEvent(device='NV', name='E_1', st=decimal.Decimal('1000.633'), en=decimal.Decimal('1045.753')),
+            ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal('1045.953'), en=decimal.Decimal('1090.473')),
+            ProfileRangeEvent(device='NV', name='E_3', st=decimal.Decimal('1091.1'), en=decimal.Decimal('1091.3')),
+            ProfileRangeEvent(device='NV', name='E_4', st=decimal.Decimal('1092.5'), en=decimal.Decimal(1092)),
+            ProfilePointEvent(device='NV', name='marker', key=0, arg={"name":"point"}, ts=decimal.Decimal(93)),
+            ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000))]
+    profile = load_profile(prof)
+    events = profile['layout']['NV']['events']
+    self.assertLessEqual(events[0]['st'] + events[0]['dur'], events[1]['st'])
+    self.assertEqual(events[2]['dur'], 1)
+    self.assertEqual(events[3]['dur'], 1)
+    self.assertEqual(events[3]['st'] + events[3]['dur'], profile['dur'])
+
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char).realize()
   a.uop.buffer.allocate()
@@ -853,7 +867,7 @@ class TestVizMemoryLayout(unittest.TestCase):
       for _ in range(n:=4): a.add(1).realize()
     profile = load_profile(cpu_events+Buffer.profile_events)
     programs = profile["layout"][a.device]["events"]
-    users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
+    users = max((e["arg"].get("users", []) for e in profile["layout"][f"{a.device} Memory"]["events"]), key=len)
     self.assertEqual(len(programs), len(set(users)), n)
 
 from tinygrad.uop.ops import KernelInfo
@@ -1081,6 +1095,22 @@ class TestCfg(unittest.TestCase):
     self.assertEqual([t["st"] for t in read_tok[1:3]], ["v0", "a0"])
     self.assertEqual([t["st"] for t in mfma_tok[1:5]], ["a[0:3]", "v[4:7]", "v[8:11]", "a[0:3]"])
     self.assertTrue(set(read_tok[1]["keys"]).isdisjoint(read_tok[2]["keys"]))
+
+  def test_endpgm(self):
+    k = Kernel()
+    k.emit(s_mov_b32(s[1], 2))
+    k.label("cmp")
+    k.emit(s_cmp_eq_i32(s[1], 1))
+    k.emit(s_cbranch_scc1(), target="loop")
+    k.emit(s_endpgm())
+    k.emit(s_mov_b32(s[1], 1))
+    k.label("loop")
+    k.emit(s_branch(), target="cmp")
+    ret = self.get_cfg("endpgm", k)
+    self.assertEqual(len(ret["data"]["blocks"]), 5)
+    # the endpgm block has no path out
+    endpc = next(pc for pc,s in ret["data"]["pc_tokens"].items() if s[0]["st"].startswith("s_endpgm"))
+    self.assertEqual(len(ret["data"]["paths"][endpc]), 0)
 
 # launch viz cli without subprocess
 def run_cli(*cli_args, json_fmt=True) -> list[dict]:

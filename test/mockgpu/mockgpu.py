@@ -16,7 +16,7 @@ tracked_fds: dict[int, typing.Any] = {}
 @ctypes.CFUNCTYPE(None, ctypes.c_uint64)
 def mockgpu_doorbell(addr:int): # compiled stores aren't tracked, so the submits report their doorbells
   for st,en,_,wcb in [x for d in drivers for x in d.tracked_addresses]:
-    if st <= addr <= en: wcb(None, addr - st)
+    if st <= addr < en: wcb(None, addr - st)
 setattr(libc.dll, "mockgpu_doorbell", mockgpu_doorbell)
 
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
@@ -54,7 +54,7 @@ def _memoryview(cls, mem):
     addr = ctypes.addressof(mem) if isinstance(mem, ctypes.Array) else mem
     for d in drivers:
       for st,en,rcb,wcb in d.tracked_addresses:
-        if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
+        if st <= addr < en: return TrackedMemoryView(mem, rcb, wcb)
   return original_memoryview(mem)
 class _MockMemoryviewMeta(type):
   def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))

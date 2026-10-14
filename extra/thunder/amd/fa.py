@@ -201,12 +201,15 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
 @functools.cache
 def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True, window:int=0):
-  code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
+  w4 = bool(getenv("GPTOSS_FA_FWD_W4", 0) and arch == "gfx950" and has_sink and (B, N, H, H_KV, D, window) == (2, 8192, 64, 8, 64, 128))
+  full_w4 = bool(getenv("GPTOSS_FA_FULL_FWD_W4", 0) and arch == "gfx950" and has_sink and (B, N, H, H_KV, D, window) == (2, 8192, 64, 8, 64, 0))
+  source_name = "fa_fwd_causal_d64.cpp" if full_w4 else "fa_fwd_causal_d64_window.cpp" if w4 else "fa_fwd_causal.cpp"
+  code = (pathlib.Path(__file__).parent / source_name).read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
                   f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DATTN_SINK={int(has_sink)}", f"-DWINDOW={window}"]
 
   Q_BLOCK_SIZE = 32
-  NUM_WARPS = 8
+  NUM_WARPS = 4 if w4 or full_w4 else 8
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (H, (math.ceil((N // Q_BLOCK_SIZE) / NUM_WARPS)), B)
   lsz = (NUM_THREADS, 1, 1)
@@ -217,15 +220,16 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
   mem = (2*B*N*H*D + 2*B*N*H_KV*D) * el + B*H*N * l_vec.dtype.itemsize
   estimates = Estimates(ops=2*B*H*N*N*D, lds=mem, mem=mem)
   buf_inputs = (o.base, l_vec.base, q.base, k.base, v.base) + ((sinks.base,) if has_sink else ())
+  name = "custom_fa_forward_d64_full_w4" if full_w4 else "custom_fa_forward_d64_window_w4" if w4 else "custom_fa_forward"
   sink = UOp.sink(*buf_inputs,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_forward", estimates=estimates))
+                  arg=KernelInfo(name=name, estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   if not getenv("NO_HIPCC"):
     lib = bytearray(lib)
     rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
-    struct.pack_into('<I', lib, rodata_off, 160000)
+    struct.pack_into('<I', lib, rodata_off, 32768 if w4 or full_w4 else 160000)
     lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,

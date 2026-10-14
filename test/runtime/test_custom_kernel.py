@@ -492,34 +492,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)) and Device.DEFAULT == "CPU",
-                       "calls in kernels render on CPU")
-  def test_call_in_kernel(self):
-    def call_add(C:UOp, A:UOp) -> UOp:
-      i = UOp.range(A.numel(), 0)
-      return C[i].store(A[i] + 1).end(i)
-
-    def call_sum(C:UOp, A:UOp) -> UOp:
-      i = UOp.range(A.numel(), 0)
-      return C[0].store(A[i].reduce(i, arg=Ops.ADD))
-
-    def call_add_sum(C:UOp, A:UOp) -> UOp:
-      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
-      add_call = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG), A.param_like(1)).sink().call(tmp, A, name="add")
-      tmp2 = UOp.alloc_like(A, addrspace=AddrSpace.REG)
-      add_call2 = call_add(UOp.param(0, A.dtype, (N,), addrspace=AddrSpace.REG),
-                           UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(tmp2, tmp.after(add_call), name="add2")
-      sum_call = call_sum(C.param_like(0), UOp.param(1, A.dtype, (N,), addrspace=AddrSpace.REG)).sink().call(C, tmp2.after(add_call2), name="sum")
-      return sum_call.sink(arg=KernelInfo(name="call_in_kernel"))
-
-    N = getenv("N", 4)
-    a = Tensor.arange(N).clone().realize()
-    out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=lambda C,A: call_add(C, A).sink(arg=KernelInfo(name="add")))[0]
-    out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), out, fxn=lambda C,A: call_sum(C, A).sink(arg=KernelInfo(name="sum")))[0]
-    self.assertEqual(out.tolist(), [N*(N+1)//2])
-    out = Tensor.custom_kernel(Tensor.empty(1, dtype=a.dtype), a, fxn=call_add_sum)[0]
-    self.assertEqual(out.tolist(), [N*(N+3)//2])
-
   @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
                        Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
   def test_binary(self):
@@ -533,6 +505,33 @@ class TestCustomKernel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)),
                      "calls in kernels render on CPU")
 class TestCallInKernel(unittest.TestCase):
+  def test_simple(self):
+    N = getenv("N", 4)
+
+    @uopfunc
+    def add(out:UOp, x:UOp) -> UOp:
+      i = UOp.range(x.numel(), 0)
+      return out[i].store(x[i] + 1).end(i).sink()
+
+    @uopfunc
+    def sum_fn(out:UOp, x:UOp) -> UOp:
+      i = UOp.range(x.numel(), 0)
+      return out[0].store(x[i].reduce(i, arg=Ops.ADD)).sink()
+
+    def main(out:UOp, x:UOp) -> UOp:
+      tmp0, tmp1 = (UOp.alloc_like(x, addrspace=AddrSpace.REG) for _ in range(2))
+      call0 = add(tmp0, x)
+      call1 = add(tmp1, tmp0.after(call0))
+      return sum_fn(out, tmp1.after(call1)).sink(arg=KernelInfo(name="test_simple"))
+
+    x = Tensor.arange(N).clone().realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=lambda out,x: add(out, x).sink(arg=KernelInfo(name="add_kernel")))[0]
+    out = Tensor.custom_kernel(Tensor.empty(1, dtype=x.dtype), out,
+                               fxn=lambda out,x: sum_fn(out, x).sink(arg=KernelInfo(name="sum_kernel")))[0]
+    self.assertEqual(out.tolist(), [N*(N+1)//2])
+    out2 = Tensor.custom_kernel(Tensor.empty(1, dtype=x.dtype), x, fxn=main)[0]
+    self.assertEqual(out2.tolist(), [N*(N+3)//2])
+
   def test_nested_call(self):
     @uopfunc
     def incr(out:UOp, A:UOp):
@@ -801,6 +800,19 @@ class TestUnshardStore(unittest.TestCase):
     a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
     out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
     np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_unshard_value_2axis_reshape(self):
+    # the reshape keeps both sharded axes, each with its own shard count (4 and 2)
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(4, 0, AxisType.LOCAL)
+      tx = UOp.range(2, 1, AxisType.LOCAL)
+      frag = UOp.placeholder((2, 1, 1, 2), dtypes.float32, 0, AddrSpace.REG).unshard((1, 2), (ty, tx))
+      v = (frag.after(frag.store(0.0)) + A).reshape(2, 4, 2, 2, 1)
+      return C.store(v).end(tx, ty).sink(arg=KernelInfo(name="store_unshard_2axis_reshape", opts_to_apply=()))
+    a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
+    out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2, 1), inputs=(a,))
+    np.testing.assert_allclose(out, a.numpy().reshape(2, 4, 2, 2, 1), atol=1e-4)
 
   def _test_store_load_fragment(self, addrspace:AddrSpace):
     # thread ty stores A[ty*8:ty*8+8] into its fragment, then reads it back into the same slice of C

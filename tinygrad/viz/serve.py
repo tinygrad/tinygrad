@@ -282,7 +282,7 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
       if mem > peak: peak = mem
     if e.name == "exec" and e.arg["bufs"]:
       for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
-    if e.name == "free":
+    if e.name == "free" and e.key in temp:
       events.append(encode_mem_free(e.key, rel_ts(e.ts, start_ts, f"free on {e.device}"), buf_ei.pop(e.key, []), scache))
       mem -= temp.pop(e.key)
   for t in temp: events.append(encode_mem_free(t, rel_ts(end_ts, start_ts, f"end_ts for {k}"), buf_ei.pop(t, []), scache))
@@ -483,7 +483,7 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   for ts,en,e in flatten_events(profile, device_ts_diffs):
     if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
     else:
-      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
+      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en) if isinstance(e,ProfilePointEvent) else max(st+1,int(en)), float(et-st),e))
       if start_ts is None or st < start_ts: start_ts = st
       if end_ts is None or et > end_ts: end_ts = et
       if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
@@ -552,18 +552,18 @@ def amd_decode(buf:bytes, arch:str, off:int=0) -> dict[int, Inst]:
   from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
   code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
   addr_table:dict[int, Inst] = {}
-  offset = 0
+  offset, view = 0, memoryview(buf)
   while offset < len(buf):
-    remaining = buf[offset:]
-    if code_end is not None and remaining.startswith(code_end): break
+    if code_end is not None and buf.startswith(code_end, offset): break
+    remaining = view[offset:]
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
     offset += decoded.size()
   return addr_table
 
-def parse_branch(inst) -> int|None:
-  if "branch" in getattr(inst, "op_name", "").lower():
+def parse_branch(inst, op:str) -> int|None:
+  if "branch" in op:
     x = inst.simm16 & 0xffff
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
@@ -582,7 +582,9 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
-    if (offset:=parse_branch(inst)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
+    op = getattr(inst, "op_name", "").lower()
+    if (offset:=parse_branch(inst, op)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
+    elif op in {"s_endpgm", "s_barrier", "s_barrier_wait"}: leaders.add(pc+inst.size())
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
@@ -595,10 +597,10 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
     blocks[curr].append(pc)
     # otherwise a basic block can have exactly one or two paths
     nx = pc+inst.size()
-    if (offset:=parse_branch(inst)) is not None:
-      if inst.op_name == "S_BRANCH": paths[curr][nx+offset] = UNCOND
+    if (offset:=parse_branch(inst, op:=getattr(inst, "op_name", "").lower())) is not None:
+      if op == "s_branch": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
-    elif nx in leaders: paths[curr][nx] = UNCOND
+    elif nx in leaders and op != "s_endpgm": paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []

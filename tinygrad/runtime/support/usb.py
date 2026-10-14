@@ -4,7 +4,7 @@ from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceild
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
 from tinygrad.device import Buffer, BufferSpec, Compiled
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, CDTYPE, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, chunks
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -222,9 +222,8 @@ def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
 # *****************
 # 2. transfers
 
-def usb_word(v:UOp|int, dt:DType) -> UOp: return v.cast(dt) if isinstance(v, UOp) else UOp.const(v, dt)
 def usb_stack(dt:DType, *vals:UOp|int) -> UOp:
-  return (r:=UOp.placeholder((len(vals) or 1,), dt, addrspace=AddrSpace.REG)).after(*[r.index(i).store(usb_word(v, dt)) for i, v in enumerate(vals)])
+  return (r:=UOp.placeholder((len(vals) or 1,), dt, addrspace=AddrSpace.REG)).after(*[r.index(i).store(UOp.const(v, dt)) for i, v in enumerate(vals)])
 
 def usb_fail(link:UOp, code:UOp) -> UOp: return link.index(UOp.const(5).valid(link.after(code).index(5).load().eq(0))).store(code.cast(dtypes.uint64))
 def usb_ctrl(link:UOp, rtype:int, req:int, val:UOp|int, idx:UOp|int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp:
@@ -283,15 +282,17 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp: # kernargs: poke on change
     stored = usb_store(b, idx.src[0], v.src[0])
     for i, w in zip(idx.src[1:], v.src[1:]): stored = usb_store(b.after(stored), i, w)
     return stored
-  link, addr, v = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype), v.bitcast(CDTYPE[v.dtype.itemsize])
+  link, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
+  v = v.bitcast({d.itemsize: d for d in dtypes.uints}[v.dtype.itemsize]) # bitcast to uint raw bits
   if str(unwrap_view(b)[0].tag).startswith("kernargs"):
     cache = UOp.alloc((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.device).rtag("usb_arg_cache")
     return usb_patch(link, addr, v, patch(cache, [], bytes(v.dtype.itemsize * cache.max_numel())).index(idx - idx.vmin))
   return usb_poke_word(link, addr, v)
 
-def usb_load(b:UOp, idx:UOp, ld:UOp) -> UOp:
-  slot, n = usb_stack(ld.dtype), UOp.const(ld.dtype.itemsize, dtypes.int)
-  return slot.after(usb_stream(usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, ld.dtype), slot.index(0), n, False)).index(0).load()
+def usb_load(b:UOp, idx:UOp, ld:UOp) -> UOp: # all ones once the link failed, like a dead pcie device, so polls end
+  link, slot, n = usb_link(b.device).after(*usb_deps(b)), usb_stack(ld.dtype), UOp.const(ld.dtype.itemsize, dtypes.int)
+  read = usb_stream(link, usb_addr(b, idx, ld.dtype), slot.index(0), n, False)
+  return link.after(read).index(5).load().ne(0).where(UOp.const(ld.dtype.max, ld.dtype), slot.after(read).index(0).load())
 
 pm_usb_lower = PatternMatcher([
   (UPat.var("dst").index(UPat.var("di")).store(UPat.var("v")).end(UPat(Ops.RANGE, name="r")), usb_copy),
@@ -370,7 +371,7 @@ def usb_hostaddr(host:UOp, dev:str) -> UOp:
 
 def usb_table(hosts:list[tuple[UOp, int]], n:int, win:int, dev:str) -> UOp: # [address, bytes] per chunk
   rows = [(16 * (k + r) + o, w) for host, k in hosts for r, nb in chunks(host.nbytes(), win)
-          for o, w in ((0, usb_hostaddr(host, dev) + usb_word(r, dtypes.uint64) * win), (8, UOp.const(nb, dtypes.uint64)))]
+          for o, w in ((0, usb_hostaddr(host, dev) + UOp.const(r, dtypes.uint64) * win), (8, UOp.const(nb, dtypes.uint64)))]
   return patch(UOp.alloc((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.device).rtag("usb_table"), rows)
 
 def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: chunk id of the copy and of its run
@@ -379,7 +380,7 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
   sram = usb_sram(dev:=vram.device).getaddr(dev)
 
   for r, nb in chunks(host.nbytes(), win):
-    n, va = (i:=usb_word(r, dtypes.uint64)) + first, vram.getaddr(dev) + i * win
+    n, va = (i:=UOp.const(r, dtypes.uint64)) + first, vram.getaddr(dev) + i * win
     if is_host(src): # copyin: wait sentinel, copy, release
       end = sram + (((n - run) & 1) + 1) * HALF
       cmds = [ins("wait_eq", end - 4, usb_sentinel(n)), ins("copy", va, end - usb_wire(nb), nb), ins("store", end - 4, 0)]

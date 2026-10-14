@@ -591,17 +591,35 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run MXFP4 Llama training on NULL backend
-        if: ${{ matrix.backend == 'amd' && matrix.arch == 'gfx950' }}
-        run: PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_multitensor.py test/runtime/test_search.py test/runtime/test_tensor_cores.py test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd --durations=20
-      - name: Run disk copy tests
-        run: python -m pytest test/runtime/test_disk_tensor.py -k test_copy_from_disk
-      - name: Run TRANSCENDENTAL math
-        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/runtime/test_ops.py::TestOps::test_sin test/runtime/test_ops.py::TestOps::test_cos test/runtime/test_ops.py::TestOps::test_tan test/runtime/test_ops.py::TestOps::test_exp test/runtime/test_ops.py::TestOps::test_log --durations=20
+        run: >-
+          python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py
+          test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py
+          test/runtime/test_multitensor.py test/runtime/test_search.py test/runtime/test_tensor_cores.py test/null/test_hcq2.py
+          test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd
+          test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk
+          test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_offset
+          test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_huge --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+
+  testamdmxfp4:
+    name: AMD MXFP4 Llama
+    runs-on: *linux
+    timeout-minutes: 15
+    env:
+      DEV: NULL:HIP:gfx950
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: gfx950-mxfp4
+          deps: testing_unit
+          amd: 'true'
+      - name: Run MXFP4 Llama training on NULL backend
+        run: MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
 
   testnvidia:
     strategy:

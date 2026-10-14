@@ -202,19 +202,13 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
   # return if dt1 preserves value of dt0
   # similar to https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
-  match dt1:
-    case dtypes.weakint: return dt0 in dtypes.ints
-    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
-      dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
-    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
-    case dtypes.half: return dt0 in (*dtypes.fp8s, dtypes.uint8, dtypes.int8)
-    case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
-    case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
-    case dtypes.uint16: return dt0 in (dtypes.uint8,)
-    case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
-    case dtypes.int32: return dt0 in (dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
-    case dtypes.int16: return dt0 in (dtypes.uint8, dtypes.int8)
-    case _: return False
+  if dtypes.is_int(dt1): return dtypes.is_int(dt0) and dt1.min <= dt0.min and dt0.max <= dt1.max
+  if dt1 not in dtypes.floats: return False
+  e1, m1 = dtypes.finfo(dt1)
+  if dtypes.is_int(dt0): return dt0.bitsize - (dt0 in dtypes.sints) <= m1 + 1
+  if dt0 not in dtypes.floats: return False
+  e0, m0 = dtypes.finfo(dt0)
+  return e0 <= e1 and m0 <= m1 and (e0, m0) != (e1, m1)
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum

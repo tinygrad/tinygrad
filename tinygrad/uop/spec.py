@@ -1,7 +1,7 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
   CustomFunction
 from tinygrad.uop.render import render_uir
-from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid
+from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
 from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
 from tinygrad.device import is_disk_device
 
@@ -31,7 +31,7 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
   rng = src[0]
   return rng.op is Ops.RANGE and rng.axis_type is AxisType.DEVICE and int(rng.vmax)+1 == len(device)
 
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=False):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
 
   with Context(TRACK_MATCH_STATS=0):
@@ -58,20 +58,20 @@ spec_shared = PatternMatcher([
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
   (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
-   lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) or x.dtype in dtypes.weaks for x in s.src)),
+   lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) or x.dtype == weak_dtype(s.dtype) for x in s.src)),
 
   # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count
-  # a weak dtype matches any dtype until lowering commits its operand
+  # a weak dtype matches any dtype of its kind until lowering commits its operand
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(), UPat())),
-   lambda w: all(matches_dtype(s, w.dtype) or s.dtype in dtypes.weaks for s in w.src[1:])),
+   lambda w: all(matches_dtype(s, w.dtype) or s.dtype == weak_dtype(w.dtype) for s in w.src[1:])),
   (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
-   lambda x,y: matches_dtype(x, y.dtype) or matches_dtype(y, x.dtype) or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
+   lambda x,y: matches_dtype(x, y.dtype) or matches_dtype(y, x.dtype) or x.dtype == weak_dtype(y.dtype) or y.dtype == weak_dtype(x.dtype)),
   (UPat((Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR), name="x"), lambda x: False if any(dtypes.is_float(s.dtype) for s in x.src) else None),
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("c")), name="a"), lambda a,x,c:
    matches_dtype(c, a.dtype) or c.dtype in (dtypes.uint, dtypes.weakint) or x.base.is_invalid),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"),
    lambda x: None if dtypes.is_int(x.dtype) or any(s.base.is_invalid for s in x.src) else False),
-  (UPat(GroupOp.ALU, name="x"), lambda x: all(matches_dtype(y, x.dtype) or y.dtype in dtypes.weaks for y in x.src)),
+  (UPat(GroupOp.ALU, name="x"), lambda x: all(matches_dtype(y, x.dtype) or y.dtype == weak_dtype(x.dtype) for y in x.src)),
 
   # CAST
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
@@ -121,7 +121,9 @@ spec_shared = PatternMatcher([
   # assembly instruction
   (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[1], DType)),
 
-  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE; a STORE's value matches its target's dtype
+  (UPat(Ops.STORE, src=(UPat(name="t"), UPat(name="v")), allow_any_len=True),
+   lambda t,v: None if matches_dtype(v, t.dtype) or v.dtype == weak_dtype(t.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
@@ -161,9 +163,9 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
 
   # movement ops
-  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.ints+(dtypes.weakint, dtypes.void)))), lambda: True),
   (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(), UPat()), name="x"), lambda x: x.src[1].shape == x.src[2].shape),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
+  (UPat(Ops.PERMUTE, name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # REDUCE has arg=(op, num_axes), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
@@ -179,7 +181,7 @@ spec_tensor = PatternMatcher([
   # UNSHARD/MSELECT/MSTACK
   # an UNSHARD carries the value and one sharding range per sharded axis (usually a DEVICE RANGE, but can be a derived expression)
   (UPat(Ops.UNSHARD, name="multi"), lambda multi: len(multi.src) == 1+len(multi.arg)
-    and all(isinstance(a, int) for a in multi.arg) and all(r.dtype in dtypes.weaks for r in multi.src[1:])),
+    and all(isinstance(a, int) for a in multi.arg) and all(r.dtype == dtypes.weakint for r in multi.src[1:])),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 
