@@ -57,28 +57,39 @@ class CallClangRenderer(ClangRenderer):
     super().__init__(target)
     self.compiler = CallClangJIT(target.arch.split(','))
 
+  def declarations(self, uops:list[UOp], local:set[UOp]) -> list[str]:
+    declarations = []
+    for body in dict.fromkeys(u.body for u in uops if u.op is Ops.CALL):
+      if body in local: continue
+      name = self.fn_names[body]
+      params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
+      declarations.append(f"void (*{name}_ptr)({params});\n#define {name} {name}_ptr")
+    return declarations
+
   def render(self, uops:list[UOp]) -> str:
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     self.fn_names = {b:'asm_fn_'+b.key.hex() for b in topo if b.op is Ops.LINEAR}
-    definitions = []
-    all_uops = list(uops)
+    definitions, all_uops, local = [], list(uops), set()
     for body, name in self.fn_names.items():
-      if name in self.compiler.functions:
-        params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
-        definitions.append(f"void (*{name}_ptr)({params});\n#define {name} {name}_ptr")
-        continue
-      _, lines, bufs = self._render(list(body.src))
+      if name in self.compiler.functions: continue
+      body_uops = list(body.src)
+      _, lines, bufs = self._render(body_uops)
       params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
       attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
-      definitions.append(f"__attribute__(({attrs})) void {name}({params}) {{\n"+'\n'.join(lines)+"\n}")
-      all_uops.extend(body.src)
+      definition = f"__attribute__(({attrs})) void {name}({params}) {{\n"+'\n'.join(lines)+"\n}"
+      if body.arg == 'asm_block':
+        definitions.append(definition)
+        all_uops.extend(body_uops)
+        local.add(body)
+      else:
+        self.compiler.compile_cached('\n'.join(self._render_defines(body_uops)+self.declarations(body_uops, set())+[definition]))
     name, lines, bufs = self._render(uops)
     # CPUProgram passes every scalar as uint64. Native arm64 macOS packs narrower stack arguments, so widen only the entry ABI.
     lines = [f"  {self.param_type(p)} {n} = ({self.param_type(p)}){n}_arg;" for n,(p,_) in bufs if p.addrspace == AddrSpace.ALU]+lines
     bufs = [(n+"_arg", (p.replace(arg=replace(p.arg, dtype=dtypes.uint64)), mutable)) if p.addrspace == AddrSpace.ALU else (n, (p, mutable))
             for n,(p,mutable) in bufs]
     entry = super().render_kernel(name, lines, bufs, [], None)
-    return '\n'.join(self._render_defines(all_uops)+definitions+[entry])
+    return '\n'.join(self._render_defines(all_uops)+self.declarations(all_uops, local)+definitions+[entry])
 
 @functools.cache
 def clang_renderer(arch:str):

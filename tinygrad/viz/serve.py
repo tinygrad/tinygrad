@@ -169,12 +169,19 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
-  if depth is None and a in data.all_uops: return data.all_uops[a]
+  if depth is None:
+    stack = [(a, False)]
+    while stack:
+      node, visited = stack.pop()
+      if node in data.all_uops: continue
+      op, src, arg, *rest = data.trace.uop_fields[node]
+      if visited: data.all_uops[node] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+      else:
+        stack.append((node, True))
+        stack.extend((s, False) for s in reversed(src))
+    return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
-  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
-  if depth is None: data.all_uops[a] = ret
-  return ret
+  return UOp(op, tuple(_reconstruct(data, s, depth-1) for s in src) if depth > 0 else (), arg, *rest)
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
