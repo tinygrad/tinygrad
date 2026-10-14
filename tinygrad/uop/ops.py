@@ -1318,7 +1318,8 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
   def outlined(*args, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
-    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots, ctx=itertools.count(), walk=True)
+    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots,
+                      init_ctx=CountCtx, walk=True)
     with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values(), name=fn.__name__)
   return functools.wraps(fn)(outlined)
 
@@ -1759,6 +1760,12 @@ if TRACK_MATCH_STATS or PROFILE:
 # A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
+@dataclass(init=False, repr=False, eq=False)
+class CountCtx(itertools.count): pass
+
+@dataclass(init=False, repr=False, eq=False)
+class MapCtx(dict): pass
+
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm
@@ -1874,7 +1881,11 @@ class RewriteContext:
     return self.replace[root]
 
 @rewrite_group(new_ctx=False)
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False,
+                  init_ctx:type|None=None) -> UOp:
+  if init_ctx is not None:
+    assert ctx is None
+    ctx = init_ctx()
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 

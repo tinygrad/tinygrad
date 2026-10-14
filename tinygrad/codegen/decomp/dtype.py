@@ -2,7 +2,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, shape_to_shape_arg
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, MapCtx, shape_to_shape_arg
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
@@ -212,7 +212,8 @@ def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
     to = dtypes.int if fr == dtypes.long else dtypes.float
     if DEBUG >= 2: print(f"emulating {fr} as {to}")
     pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
-    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx={} if pm is pm_long_decomp else (fr, to), bottom_up=True)
+    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=None if pm is pm_long_decomp else (fr, to),
+                         init_ctx=MapCtx if pm is pm_long_decomp else None, bottom_up=True)
   ctx[0].clear()
   return sink
 
