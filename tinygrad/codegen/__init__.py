@@ -268,7 +268,9 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
-def do_range_to_backedge(sink:UOp):
+from tinygrad.uop.symbolic import pm_data_invalid, pm_remove_invalid
+from tinygrad.codegen.late.gater import pm_move_gates_from_index
+def rewrite_range(sink:UOp):
   loop_ids, acc_slots = itertools.count(), itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
@@ -277,12 +279,14 @@ def do_range_to_backedge(sink:UOp):
     enter = UOp(Ops.RANGE, src=((u.src[0] > 0).cast(dtypes.uint32),), arg=(AxisType.WEAK, next(loop_ids)))
     return (acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), enter)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
-  pm = PatternMatcher([
-    (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x][0].after(ctx[x][2], ctx[x][1])[0].load() if x in ctx else None),
-    (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
-      body.backedge((l:=ctx[rng][1]), (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd).end(ctx[rng][2]) if rng in ctx else None),
-  ])
-  return graph_rewrite(sink, pm+pm_cast_const, ctx=ctx, bottom_up=True)
+  cleanups = pm_data_invalid+pm_move_gates_from_index+pm_remove_invalid
+  return graph_rewrite(sink, pm_end_to_backedge+cleanups, ctx=ctx, bottom_up=True)
+
+pm_end_to_backedge = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: (cur:=ctx[x][0].after(ctx[x][2], ctx[x][1])[0].load()).valid(cur < x.src[0]) if x in ctx else None),
+  (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"), lambda x,ctx,rng,body,bnd:
+    body.backedge((l:=ctx[rng][1]), (acc:=ctx[rng][0]).after(acc[0].store(acc.after(body)[0].load() + 1))[0].load() < bnd).end(ctx[rng][2]) if rng in ctx else None),
+])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
@@ -379,6 +383,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
+  # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
+  sink = rewrite_range(sink)
+
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
 
@@ -387,9 +394,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
-
-  # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
-  sink = do_range_to_backedge(sink)
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
