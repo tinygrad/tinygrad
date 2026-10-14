@@ -270,7 +270,7 @@ pm_implicit_barriers = PatternMatcher([
 
 def do_range_to_backedge(sink:UOp):
   loop_ids = itertools.count()
-  enclosing: dict[UOp, tuple[UOp]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
+  enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
     acc = UOp.alloc((1,), u.dtype, addrspace=AddrSpace.REG)
     return (acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)))
@@ -386,7 +386,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
 
-  # test
+  # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
   sink = do_range_to_backedge(sink)
 
   # this was the linearizer
