@@ -396,7 +396,7 @@ class _Ctx:
     sign_bit = 1 << (width - 1)
     return (val.cast(dtypes.int) ^ _c(sign_bit, dtypes.int)) - _c(sign_bit, dtypes.int)
 
-  def canonical_mask(self, inst_bytes: bytes) -> tuple[int, int, int]:
+  def canonical_mask(self, inst_bytes: bytes|memoryview) -> tuple[int, int, int]:
     """Compute canonical (base, mask, size) for cache lookup.
     base = instruction bits with dynamic fields zeroed
     mask = bitmask with 1s for static bits, 0s for dynamic bits
@@ -1827,7 +1827,7 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 
 _canonical_runner_cache: list[tuple[type, int, int, int, tuple[UOp, object]]] = []  # [(inst_type, base, mask, size, (prg, runtime)), ...]
 
-def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes) -> tuple[int, int, int, str]:
+def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes|memoryview) -> tuple[int, int, int, str]:
   base, mask, size = ctx.canonical_mask(inst_bytes)
   return base, mask, size, f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
 
@@ -1970,10 +1970,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   if ASM_CALL:
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, user_data, ASM_CALL_BACKEND)
+    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND)
+    vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_runtime(ASM_CALL_BACKEND, prg)(*[0]*len(prg.arg.globals),
-        vals=tuple({"lib":lib, "args_ptr":args_ptr}[v.arg.name] for v in prg.arg.vars))
+      get_runtime(ASM_CALL_BACKEND, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
