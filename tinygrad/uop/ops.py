@@ -1760,6 +1760,9 @@ if TRACK_MATCH_STATS or PROFILE:
 # A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
+
+# common graph rewrite ctx constructors
+
 @dataclass(init=False, repr=False, eq=False)
 class CountCtx(itertools.count): pass
 
