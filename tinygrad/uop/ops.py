@@ -1763,10 +1763,8 @@ class BottomUpGate(Exception): pass
 
 # common graph rewrite ctx constructors
 
-@dataclass(init=False, repr=False, eq=False)
 class CountCtx(itertools.count): pass
 
-@dataclass(init=False, repr=False, eq=False)
 class MapCtx(dict): pass
 
 class RewriteContext:
