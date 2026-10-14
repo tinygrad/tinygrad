@@ -5,7 +5,7 @@ from tinygrad.codegen.late.coalesce import indexing_simplify, pm_simplify_add_im
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.weak import pm_commit_weak
-from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
+from tinygrad.uop.symbolic import simplify_valid, uop_given_valid, sym, pm_move_where_on_load
 from tinygrad.helpers import Context
 from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
@@ -60,6 +60,13 @@ class TestValidIdxSimplification(unittest.TestCase):
     alu0 = gidx0+ridx0
     valid = (alu0 < 57) & (alu0 >= 1)
     self.assertIsNone(simplify_valid(valid))
+
+  def test_simplex_const_term_keeps_lanes_aligned(self):
+    # the 1 in the valid is not a simplex variable, lane +1 must simplify like the other lanes
+    a, b, c, d = Variable("a", 0, 7), Variable("b", 0, 7), Variable("c", 0, 3), Variable("d", 0, 1)
+    valid = ((a+b+1)<1).ne(True) & ((c+d)<1).ne(True)
+    base = ((a*8+b+c*128+d*64+1000)%1024)*4
+    self.assertTrue(all(uop_given_valid(valid, base+k).src[0] is uop_given_valid(valid, base+0).src[0] for k in range(1, 4)))
 
   def test_bitwise_and_is_not_a_valid(self):
     ridx0 = Range(0, 16)

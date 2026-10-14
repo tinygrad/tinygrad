@@ -1,7 +1,7 @@
 from dataclasses import replace
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp
-from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
+from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
@@ -277,6 +277,6 @@ def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
   tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
-  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
+  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink

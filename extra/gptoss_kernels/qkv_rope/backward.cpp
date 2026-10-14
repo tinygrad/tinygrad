@@ -23,8 +23,10 @@ using namespace kittens;
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV;
 constexpr int HALF_D = ATTN_D / 2;
 constexpr int PACKED_H = ATTN_H_KV * (GROUP_SIZE + 2);
-// The current D=64 FA emits one dK/dV partial per query head in each GQA group.
-constexpr int KV_PARTIALS = GROUP_SIZE;
+// Full-causal FA groups two query heads; sliding-window FA groups all eight.
+#ifndef KV_PARTIALS
+#define KV_PARTIALS 4
+#endif
 constexpr int Q_HEADS_PER_WG = 1;
 constexpr int Q_FIELDS = ATTN_H / Q_HEADS_PER_WG;
 constexpr int NUM_WARPS = 4;
