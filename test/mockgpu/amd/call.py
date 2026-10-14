@@ -57,28 +57,32 @@ class CallClangRenderer(ClangRenderer):
     super().__init__(target)
     self.compiler = CallClangJIT(target.arch.split(','))
 
+  def declarations(self, uops:list[UOp]) -> list[str]:
+    declarations = []
+    for body in dict.fromkeys(u.body for u in uops if u.op is Ops.CALL):
+      name = self.fn_names[body]
+      params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
+      declarations.append(f"void (*{name}_ptr)({params});\n#define {name} {name}_ptr")
+    return declarations
+
   def render(self, uops:list[UOp]) -> str:
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     self.fn_names = {b:'asm_fn_'+b.key.hex() for b in topo if b.op is Ops.LINEAR}
-    definitions = []
-    all_uops = list(uops)
     for body, name in self.fn_names.items():
-      if name in self.compiler.functions:
-        params = ', '.join(self.param_type(p) for p in body.src if p.op is Ops.PARAM)
-        definitions.append(f"void (*{name}_ptr)({params});\n#define {name} {name}_ptr")
-        continue
-      _, lines, bufs = self._render(list(body.src))
+      if name in self.compiler.functions: continue
+      body_uops = list(body.src)
+      _, lines, bufs = self._render(body_uops)
       params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
       attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
-      definitions.append(f"__attribute__(({attrs})) void {name}({params}) {{\n"+'\n'.join(lines)+"\n}")
-      all_uops.extend(body.src)
+      definition = f"__attribute__(({attrs})) void {name}({params}) {{\n"+'\n'.join(lines)+"\n}"
+      self.compiler.compile_cached('\n'.join(self._render_defines(body_uops)+self.declarations(body_uops)+[definition]))
     name, lines, bufs = self._render(uops)
     # CPUProgram passes every scalar as uint64. Native arm64 macOS packs narrower stack arguments, so widen only the entry ABI.
     lines = [f"  {self.param_type(p)} {n} = ({self.param_type(p)}){n}_arg;" for n,(p,_) in bufs if p.addrspace == AddrSpace.ALU]+lines
     bufs = [(n+"_arg", (p.replace(arg=replace(p.arg, dtype=dtypes.uint64)), mutable)) if p.addrspace == AddrSpace.ALU else (n, (p, mutable))
             for n,(p,mutable) in bufs]
     entry = super().render_kernel(name, lines, bufs, [], None)
-    return '\n'.join(self._render_defines(all_uops)+definitions+[entry])
+    return '\n'.join(self._render_defines(uops)+self.declarations(uops)+[entry])
 
 @functools.cache
 def clang_renderer(arch:str):
@@ -147,8 +151,9 @@ pm_asm_call = PatternMatcher([
    lambda buf: UOp(Ops.NOOP) if buf.arg.name == "sgpr" else None),
 ])
 
-def instruction_call(inst:Inst, arch:str) -> InstructionCall:
-  entries = instruction_cache.setdefault((arch, type(inst), inst.size()), [])
+def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> InstructionCall:
+  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
+                                          *(x.value for x in to_program_config)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
@@ -161,7 +166,7 @@ def instruction_call(inst:Inst, arch:str) -> InstructionCall:
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
   call = graph_rewrite(body.call(*bufs, name=name), pm_asm_call,
                        name="instruction call", bottom_up=True, enter_calls=True)
-  ret = call, bufs, ctx.branch_cond
+  ret = lower_call(renderer, call) if has_effects(call.body) else call, bufs, ctx.branch_cond
   entries.append((base, mask, ret))
   return ret
 
@@ -169,14 +174,14 @@ def instruction_call(inst:Inst, arch:str) -> InstructionCall:
 def has_effects(body:UOp) -> bool:
   return any(u.op in (Ops.STORE, Ops.CALL) for u in body.toposort())
 
-def instruction_block(instructions:list[tuple[int, InstructionCall]], renderer:Renderer) -> tuple[UOp, list[UOp]]:
+def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({b for _,(_,bs,_) in instructions for b in bs if b.arg.slot != -1}, key=lambda b:b.arg.slot)
   base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   inst = None
   for off,(template,bs,_) in instructions:
     args = [base+UOp.const(off, dtypes.uint64) if b.arg.slot == -1 else params[b] for b in bs]
-    invoke = template.replace(src=(lower_call(renderer, template).body, *args))
+    invoke = template.replace(src=(template.body, *args))
     if inst is not None:
       invoke = invoke.replace(src=(*invoke.src[:-1], invoke.src[-1].after(inst)))
     inst = invoke
@@ -258,6 +263,7 @@ def decode_cfg(lib_bytes:bytes, arch:str):
   merge_branches(insts, cfg["blocks"], cfg["paths"])
   return insts, cfg, cfg_regions(cfg["paths"], 0)
 
+@Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0)
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
                   user_data_count:int, backend:str) -> UOp:
@@ -271,7 +277,6 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
 
 dispatch_cache:dict[tuple, UOp] = {}
 
-@Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0)
 def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
   renderer = backend_renderer(backend)
   lib_sz = len(lib_bytes)
@@ -319,7 +324,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
       inst_st = str(inst)
       if inst_st.startswith("s_code_end"): continue
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
-      template, bufs, branch_cond = instruction_call(inst, arch)
+      template, bufs, branch_cond = instruction_call(inst, arch, renderer)
       if branch_cond is not None: cond = branch_cond
       if not has_effects(template.body): continue
       instructions.append((off, (template, bufs, branch_cond)))
@@ -332,7 +337,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
-      body, bufs = instruction_block([(pc-off, info) for pc,info in chunk], renderer)
+      body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
       args = [afters[b].index(wave*buffers[b][1]).after(*scopes) for b in bufs]
       call = body.call(*args, code_addr+off, name="asm_block")
       # CALL consumes argument ranges; restore the enclosing control-flow scopes.

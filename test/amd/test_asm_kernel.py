@@ -234,6 +234,8 @@ class TestAsmKernel(unittest.TestCase):
       self.assertIs(prg, programs.setdefault(value, prg))
     # Operands are read from the current code allocation, so these share the compiled graph too.
     self.assertIs(programs[4], programs[5])
+    with Context(NOOPT=1, EMULATED_DTYPES="float16"):
+      self.assertTrue(prg is call.lift(ctypes.addressof(other), len(other), 1, 1, 1, 0x19c, 0, "rdna3", 0, getenv("ASM_CALL_BACKEND", "CPU")))
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
@@ -292,14 +294,11 @@ class TestAsmKernel(unittest.TestCase):
       ]) + [s_endpgm()]
       sink = UOp.sink(out.base, UOp.special(32, "lidx0"), UOp.special(1, "gidx0"), arg=KernelInfo(f"external_call_reuse_{second}"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
-    modules = len(compiler.modules)
     a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
     self.assertEqual(a.tolist(), [15]*32)
-    self.assertEqual(len(compiler.modules), modules+1)
     functions = dict(compiler.functions)
     b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=lambda out: kernel(out, second=True))[0]
     self.assertEqual(b.tolist(), [23]*32)
-    self.assertEqual(len(compiler.modules), modules+2)
     self.assertTrue(functions.keys() < compiler.functions.keys())
     for name, address in functions.items():
       self.assertEqual(compiler.functions[name], address)
