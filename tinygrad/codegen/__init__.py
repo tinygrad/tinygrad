@@ -367,7 +367,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+  if any(_is_local_store(u) for u in sink.toposort()):
+    sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
@@ -416,7 +417,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 call_cache: dict[tuple, UOp] = {}
 def lower_call(ctx:Renderer, call:UOp) -> UOp:
-  if (body:=call_cache.get(key:=(to_program_key(call.body, ctx), call.arg.name, TUPLE_ORDER.value))) is None:
+  if (body:=call_cache.get(key:=(to_program_key(call.body, ctx, optimize=False), call.arg.name, TUPLE_ORDER.value))) is None:
     body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
     body = full_rewrite_to_sink(body, ctx, optimize=False)
     body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)),
@@ -507,11 +508,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 # config affects generated programs and cache keys; context also carries compile-only behavior to workers
-to_program_config = (NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
-                     DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
+to_program_lower_config = (EMULATED_DTYPES, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, DEFAULT_FLOAT, DEFAULT_INT)
+to_program_config = (*to_program_lower_config, NOOPT, USE_TC, ALLOW_TF32, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
 to_program_context = (*to_program_config, SPEC, DEBUG)
-def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
-  return (ast.key, type(renderer), renderer.target, *[x.value for x in to_program_config])
+def to_program_key(ast:UOp, renderer:Renderer, optimize:bool=True) -> tuple:
+  config = to_program_config if optimize and ast.tag is None else to_program_lower_config
+  return (ast.key, type(renderer), renderer.target, *[x.value for x in config])
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:

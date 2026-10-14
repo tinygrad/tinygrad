@@ -555,13 +555,16 @@ def get_elf_section(lib:bytes, name:str):
 
 def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
 
-def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
+def amd_code_end(arch:str) -> bytes:
   from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
-  code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
+  return s_code_end().to_bytes()*5 if arch.startswith("rdna") else b""
+
+def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
+  code_end = amd_code_end(arch)
   addr_table:dict[int, Inst] = {}
   offset, view = 0, memoryview(buf)
   while offset < len(buf):
-    if code_end is not None and view[offset:offset+len(code_end)] == code_end: break
+    if code_end and view[offset:offset+len(code_end)] == code_end: break
     remaining = view[offset:]
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)

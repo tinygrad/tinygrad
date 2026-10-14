@@ -1,8 +1,8 @@
 import itertools, functools, struct
 from dataclasses import replace
-from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
+from tinygrad.viz.serve import amd_code_end, amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
-from tinygrad.codegen import to_program, to_program_config, lower_call
+from tinygrad.codegen import to_program, to_program_lower_config, lower_call
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runtime, runtime_cache
@@ -166,7 +166,7 @@ pm_asm_call = PatternMatcher([
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> InstructionCall:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
-                                          *(x.value for x in to_program_config)), [])
+                                          *(x.value for x in to_program_lower_config)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
@@ -201,8 +201,8 @@ def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[U
   # The block only sequences lowered calls and typed instruction addresses; it is ready for linearization.
   return UOp(Ops.LINEAR, src=tuple(linearize(UOp.sink(inst))), arg="asm_block"), bufs
 
-def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
-  # Thread jump-only blocks, then share identical conditional branches with the same destinations.
+def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
+  # Thread jump-only blocks.
   targets:dict[int, int] = {}
   def target(pc:int) -> int:
     seen:set[int] = set()
@@ -213,6 +213,8 @@ def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int,
     targets.update((src, pc) for src in seen)
     return pc
   for pc, dsts in list(paths.items()): paths[pc] = {target(dst):kind for dst,kind in dsts.items()}
+
+def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   groups:dict[tuple, list[int]] = {}
   opposite = {"S_CBRANCH_SCC1":"S_CBRANCH_SCC0", "S_CBRANCH_VCCNZ":"S_CBRANCH_VCCZ", "S_CBRANCH_EXECNZ":"S_CBRANCH_EXECZ"}
   for pc, pcs in blocks.items():
@@ -234,6 +236,7 @@ def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int,
 
 # A block has an empty body; a loop contains its header block and the rest of its iteration.
 CFGRegion = tuple[int, list["CFGRegion"]]
+class IrreducibleCFG(RuntimeError): pass
 
 def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
   # Number the reachable blocks in DFS postorder, without recursion on long instruction streams.
@@ -262,7 +265,8 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
         todo.extend(preds[dst])
       body:list[CFGRegion] = []
       if len(component) > 1 or pc in paths[pc]:
-        assert all(preds[dst] <= component for dst in component if dst != pc), "irreducible control flow is not supported in ASM_CALL"
+        if any(preds[dst] - component for dst in component if dst != pc):
+          raise IrreducibleCFG("irreducible control flow is not supported in ASM_CALL")
         # Removing the single entry exposes nested loops; the original DFS order still applies.
         body = [(pc, [])] + build(component - {pc})
       regions.append((pc, body))
@@ -271,7 +275,11 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 
 def decode_cfg(insts:dict[int, Inst]):
   cfg = get_cfg(insts)
-  merge_branches(insts, cfg["blocks"], cfg["paths"])
+  thread_branches(insts, cfg["blocks"], cfg["paths"])
+  try: return cfg, cfg_regions(cfg["paths"], 0)
+  except IrreducibleCFG:
+    # Sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
+    merge_branches(insts, cfg["blocks"], cfg["paths"])
   return cfg, cfg_regions(cfg["paths"], 0)
 
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0)
@@ -279,16 +287,21 @@ def decode_cfg(insts:dict[int, Inst]):
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
                   user_data_count:int, backend:str) -> UOp:
   view = to_mv(lib, lib_sz)
-  insts = amd_decode(view, arch)
-  lib_bytes = bytes(view[:max((pc+inst.size() for pc,inst in insts.items()), default=0)])
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
-  key = (lib_bytes, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_config))
-  if key not in dispatch_cache:
-    dispatch_cache[key] = _lift(insts, arch, backend, dispatch)
-  return dispatch_cache[key]
+  key = (lib_sz, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_lower_config))
+  entries = dispatch_cache.setdefault(key, [])
+  for code, prg in entries:
+    if bytes(view[:len(code)]) == code: return prg
+  insts = amd_decode(view, arch)
+  end = max((pc+inst.size() for pc,inst in insts.items()), default=0)
+  # Include the stop marker: an extended instruction stream must not match a shorter cached program.
+  code = bytes(view[:end+len(amd_code_end(arch))])
+  prg = _lift(insts, arch, backend, dispatch)
+  entries.append((code, prg))
+  return prg
 
-dispatch_cache:dict[tuple, UOp] = {}
+dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
 
 def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
   renderer = backend_renderer(backend)
@@ -349,18 +362,20 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
     if body: pending.extend(body)
     else: block_info[pc] = block_instructions(pc)
 
-  def emit_block(block_pc:int, wave:UOp, scopes:tuple[UOp, ...]) -> UOp:
+  def emit_block(block_pc:int, wave:UOp, gate:UOp) -> tuple[UOp, list[UOp]]:
     instructions, cond = block_info[block_pc]
+    calls = []
     for i in range(0, len(instructions), chunk_size):
       chunk = instructions[i:i+chunk_size]
       off = chunk[0][0]
       body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
-      args = [afters[b].index(wave*buffers[b][1]).after(*scopes) for b in bufs]
+      args = [afters[b].index(wave*buffers[b][1]) for b in bufs]
       call = body.call(*args, code_addr+off, name="asm_block")
-      # CALL consumes argument ranges; restore the enclosing control-flow scopes.
-      afters.update((b, afters[b].without_after.after(call, *scopes)) for b in bufs)
+      calls.append(call)
+      # CALL consumes argument ranges; the gate restores its wave and enclosing loop scopes.
+      afters.update((b, afters[b].without_after.after(call, gate)) for b in bufs)
     return cond.substitute({b:(afters[b].shrink(((wave*s, (wave+1)*s),)) if (s:=buffers[b][1]) else afters[b])
-                            for b in cond.toposort() if b in buffers}, walk=True)
+                            for b in cond.toposort() if b in buffers}, walk=True), calls
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:
@@ -374,12 +389,12 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
         # Complete the block for every participating wave before entering its successors, including barrier successors.
         w = UOp.range(n_waves, next(axes), dtype=dtypes.int)
         gate = UOp.range(afters[routes][w].load().eq(pc).cast(dtypes.int).after(*scopes), next(axes), dtype=dtypes.int)
-        afters.update((b, buf.after(end, *scopes, w, gate)) for b,(buf,_) in buffers.items())
-        cond = emit_block(pc, w, scopes+(w, gate))
+        afters.update((b, buf.after(end, gate)) for b,(buf,_) in buffers.items())
+        cond, calls = emit_block(pc, w, gate)
         dsts = {kind:dst for dst,kind in cfg["paths"][pc].items()}
         target = cond.where(dsts[COND_TAKEN], dsts[COND_NOT_TAKEN]).cast(dtypes.int) if len(dsts) == 2 \
           else UOp.const(next(iter(dsts.values()), -1), dtypes.int)
-        end = routes.after(*afters.values()).after(*scopes, w, gate)[w].store(target).end(gate).end(w)
+        end = routes.after(*calls, gate)[w].store(target).end(gate).end(w)
       afters.update((b, buf.after(end)) for b,(buf,_) in buffers.items())
     return end
 

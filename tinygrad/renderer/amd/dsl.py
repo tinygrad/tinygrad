@@ -430,7 +430,7 @@ class Inst:
       if hasattr(self, name) and any(x in getattr(self, name).name for x in ('FMAMK', 'FMAAK')): return '_LIT'
     for name, field in self._fields:
       if isinstance(field, SrcField):
-        off = getattr(self, name).offset
+        off = field.decode((self._raw >> field.lo) & field.mask).offset
         if off == 255: return '_LIT'
         if off == 249: return '_SDWA' if self._is_cdna() else '_DPP8'
         if off == 250: return '_DPP16'

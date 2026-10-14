@@ -225,12 +225,13 @@ class CPULLVMRenderer(LLVMRenderer):
     defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
     return "\n".join((k:=self._render_kernel(uops, fns=fns))[0] + (k[1], *defs, self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
+    topo = UOp.sink(*uops).toposort(enter_calls=True)
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
-             for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+             for x in topo if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
-             for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.BINARY}
+             for x in topo if x.op is Ops.BINARY}
     decls.update({f"llvm.sqrt.f{x.dtype.itemsize*8}":f"declare {ldt(x.dtype)} @llvm.sqrt.f{x.dtype.itemsize*8}({ldt(x.dtype)})"
-                  for x in UOp.sink(*uops).toposort(enter_calls=True) if x.op is Ops.SQRT})
+                  for x in topo if x.op is Ops.SQRT})
     return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
