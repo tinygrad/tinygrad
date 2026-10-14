@@ -258,19 +258,18 @@ class Tensor(RandMixin):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.STAGE else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    assign = self.uop.after(store := self.uop.store(x.uop))
     ib = next((u for u in reversed(views) if u.has_buffer_identity() and (u is self.uop or _tensor_holds(u))), views[-1])
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
-      if target is not ib: store = self.uop.substitute({ib: target}, walk=True).store(x.uop)
+      store = self.uop.substitute({ib: target}, walk=True).store(x.uop)
       # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
       # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       for t in [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.storage_base is assigned_to]:
         t.uop = t.uop.substitute({ib: target.after(store)}, walk=True)
     else:
       # simple assign
-      self.uop = assign
+      self.uop = self.uop.after(self.uop.store(x.uop))
     return self
 
   def _buffer(self) -> Buffer:
@@ -525,9 +524,7 @@ class Tensor(RandMixin):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
     else: # basic setitem
-      view = self[indices]
-      if isinstance(v, Tensor) and v.uop.op is Ops.AFTER and v.uop in view.uop.base.src: return
-      view.assign(v)
+      self[indices].assign(v)
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
