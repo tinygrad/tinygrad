@@ -274,8 +274,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+    stack, seen = [self], set()
+    while stack:
+      node = stack.pop()
+      if node.op in ops: return True
+      if node in seen: continue
+      seen.add(node)
+      stack.extend(node.src_without_body)
+    return False
 
   @recursive_property
   def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])

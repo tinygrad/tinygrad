@@ -1,6 +1,6 @@
 import ctypes, itertools, functools, struct, re, subprocess, tempfile, pathlib
 from dataclasses import replace
-from tinygrad.viz.serve import amd_decode, get_cfg, COND_NOT_TAKEN, UNCOND
+from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_config, lower_call
 from tinygrad.codegen.late.linearizer import linearize
@@ -367,10 +367,9 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
         deps = UOp.group(*afters.values())
         afters.update((b, buf.after(deps, *scopes, w, gate)) for b,(buf,_) in buffers.items())
         cond = emit_block(pc, w, scopes+(w, gate))
-        dsts = cfg["paths"][pc]
-        target = UOp.const(-1, dtypes.int)
-        for dst, kind in dsts.items():
-          target = UOp.const(dst, dtypes.int) if len(dsts) == 1 else (cond.logical_not() if kind == COND_NOT_TAKEN else cond).where(dst, target)
+        dsts = {kind:dst for dst,kind in cfg["paths"][pc].items()}
+        target = cond.where(dsts[COND_TAKEN], dsts[COND_NOT_TAKEN]).cast(dtypes.int) if len(dsts) == 2 \
+          else UOp.const(next(iter(dsts.values()), -1), dtypes.int)
         end = routes.after(*afters.values()).after(*scopes, w, gate)[w].store(target).end(gate).end(w)
       afters.update((b, buf.after(end)) for b,(buf,_) in buffers.items())
 
