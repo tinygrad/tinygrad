@@ -47,7 +47,6 @@ class NVUSBPCIDevice(USBPCIDevice):
       elif sent + 1 < armed and not self.usb.read(0xB296, 1)[0] & 3: upload(sent + 1)
       consumed = (((self.usb._f0_in()[0] & 0x7fffffff) * 1024 - host_bytes) * mps // (mps + tlp_header)) - metadata_size
     flcn.wait_cpu_halted(base)
-    flcn.nvdev.gsp.sync_queues() # Restore host-owned queues after SEC2 halts; the GSP owns the status queue.
     self.write_config_flush(util_ctrl, 0, 4)
 
 class NVReg:
@@ -218,8 +217,7 @@ class NVDev:
     else:
       paddr = self.mm.palloc_cpu_visible(sz) if self.is_usb else self.mm.palloc(sz, boot=False)
       view = self.vram.view(paddr, sz)
-      base = paddr if self.is_usb else self.pci_dev.bar_info(1)[0] + paddr
-      sysaddr = [base + i * 0x1000 for i in range(sz // 0x1000)]
+      sysaddr = [self.pci_dev.bar_info(1)[0] + paddr + i * 0x1000 for i in range(sz // 0x1000)]
     if data is not None: view[:size] = data
     return view, paddr, sysaddr
 

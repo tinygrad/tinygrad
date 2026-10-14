@@ -5,12 +5,12 @@ from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
 from tinygrad.runtime.support.hcq2 import layout_args, make_program, ins
-from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator, AddrSpace
+from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
-from tinygrad.dtype import dtypes, DType, AddrSpace as UOpAddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ
 from tinygrad.helpers import ProfileEvent, unwrap
 from tinygrad.renderer.ptx import PTXRenderer
@@ -19,7 +19,7 @@ from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager, NVUSBPCIDevice
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED
-from tinygrad.runtime.support.usb import USB3, SLOT, setup_usb_rules
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_ctrl_buffer
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -273,7 +273,7 @@ class NVProgramData:
       self.cbuf_0 = [0] * max(cbuf0_size // 4, min_cbuf0_entries)
 
     # the arguments follow the driver params in constant buffer 0 in the kernel's order: buffers as 64 bit addresses, vars packed by their width
-    self.mock, nvars = mock, sum(a is UOpAddrSpace.ALU for _,a,_,_ in signature)
+    self.mock, nvars = mock, sum(a is AddrSpace.ALU for _,a,_,_ in signature)
     if mock: self.cbuf_0[80:82] = [len(signature) - nvars, nvars] # mockgpu reads the arg counts out of cbuf0
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
@@ -558,8 +558,6 @@ class PCIIface(PCIIfaceBase):
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
 class USBIface(PCIIface):
-  TRANSFER_OFFSET, TRANSFER_HALF = 5 * SLOT, 12 * SLOT # two staging halves after the GSP queues
-
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     visible = filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "NV")
     self.dev, self.pci_dev, self.vram_bar, self.count = dev, NVUSBPCIDevice(*visible[dev_id]), 1, len(visible)
@@ -567,14 +565,7 @@ class USBIface(PCIIface):
     self._init_nvd()
 
   @functools.cached_property
-  def ctrl(self) -> Buffer:
-    vaddr = self.dev_impl.mm.alloc_vaddr(size=0x85000)
-    pieces = [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, 0x80000)]
-    for off, paddr, n in pieces: self.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=AddrSpace.SYS, uncached=True)
-    self.pci_dev.usb.write(0xa800, bytes(4))
-    self.pci_dev.usb.scsi_write(bytes(2 * self.TRANSFER_HALF), slot_start=self.TRANSFER_OFFSET // SLOT)
-    return Buffer(self.dev.device, 0x85000, options=BufferSpec(external_ptr=vaddr),
-                  opaque=BufferStorage(vaddr, host=self.pci_dev.dma_view(0xa000, 0x85000)))
+  def ctrl(self) -> Buffer: return usb_ctrl_buffer(self, self.dev_impl.gsp.queue_offset // 2)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
@@ -642,7 +633,7 @@ class NVDevice(Compiled):
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
 
-    if self.is_usb: setup_usb_rules(self, self.iface.TRANSFER_OFFSET, self.iface.TRANSFER_HALF)
+    if self.is_usb: setup_usb_rules(self, self.iface.dev_impl.gsp.queue_offset // 2)
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 

@@ -382,8 +382,11 @@ class NV_GSP(NV_IP):
     pte_cnt = ((queue_pte_cnt:=(queue_size * 2) // 0x1000)) + round_up(queue_pte_cnt * 8, 0x1000) // 0x1000
     pt_size = round_up(pte_cnt * 8, 0x1000)
     if self.nvdev.is_usb:
-      self.gsp_queues = bytearray(0x3000 + (size:=pt_size + queue_size * 2)) # CPU shadow: page table, command queue, status queue
-      queues_view, queues_sysmem = MMIOInterface(mv_address(self.gsp_queues) + 0x3000, size), list(range(0x203000, 0x203000 + size, 0x1000))
+      self.gsp_queues = bytearray(size:=pt_size + queue_size * 2) # CPU shadow: page table, command queue, status queue
+      self.queue_offset = 0x80000 - round_up(size, 2 * SLOT) # leave two slot-aligned staging halves
+      queues_view = MMIOInterface(mv_address(self.gsp_queues), size)
+      queues_sysmem = [0x200000 + self.queue_offset + i for i in range(0, size, 0x1000)]
+      self.nvdev.pci_dev.usb.scsi_write(bytes(self.gsp_queues), slot_start=self.queue_offset // SLOT)
     else: queues_view, _, queues_sysmem = self.nvdev._alloc_boot_mem(pt_size + queue_size * 2, sysmem=True)
 
     # Fill up ptes
@@ -405,19 +408,20 @@ class NV_GSP(NV_IP):
   def sync_queues(self, read:bool=False):
     if not self.nvdev.is_usb: return System.memory_barrier()
     usb, queues = self.nvdev.pci_dev.usb, self.gsp_queues
-    off, size = self.stat_q_view.addr - mv_address(queues), len(queues)
-    if not read: return usb.scsi_write(bytes(queues[:off]))
+    off, size = self.stat_q_view.addr - mv_address(queues), self.queue_offset + len(queues)
+    if not read: return usb.scsi_write(bytes(queues[:off]), slot_start=self.queue_offset // SLOT)
     usb.usb.control_write(0xF2, value=0x8000 | (size // 512), index=ceildiv(size, SLOT) << 8)
     self.nvdev.wreg(0xb81640, 129) # CPU interrupt doorbell: MSI writes the bridge's CQ notification.
-    self.stat_q_view[:] = usb.usb.bulk_read(size)[off:]
+    self.stat_q_view[:] = usb.usb.bulk_read(size)[self.queue_offset + off:]
     self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_LEAF[4].write(2)
     self.nvdev.wreg(0x88704, 0) # NV_PCFG + NV_XVE_CYA_2: re-arm MSI.
 
   def init_libos_args(self):
-    _, _, logbuf_addrs = self.nvdev._alloc_boot_mem(2 << 20)
+    _, logbuf_paddr, logbuf_addrs = self.nvdev._alloc_boot_mem(2 << 20)
+    logbuf_addr = cast(int, logbuf_paddr) if self.nvdev.is_usb else logbuf_addrs[0]
     log_loc = nv.LIBOS_MEMORY_REGION_LOC_FB if self.nvdev.is_usb else nv.LIBOS_MEMORY_REGION_LOC_SYSMEM
     libos_structs = [nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=log_loc, size=0x10000,
-        id8=int.from_bytes(bytes(f"LOG{name}", 'utf-8'), 'big'), pa=logbuf_addrs[0] + 0x10000 * i)
+        id8=int.from_bytes(bytes(f"LOG{name}", 'utf-8'), 'big'), pa=logbuf_addr + 0x10000 * i)
         for i, name in enumerate(["INIT", "INTR", "RM", "MNOC", "KRNL"])]
     libos_structs.append(nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x1000,
         id8=int.from_bytes(bytes("RMARGS", 'utf-8'), 'big'), pa=self.rm_args_sysmem))
@@ -437,7 +441,7 @@ class NV_GSP(NV_IP):
       table_off = round_up(0x2000 + len(self.booter_image), 0x1000)
       metadata_size = table_off + offsets[-1]
       ring_start = round_up(metadata_size, SLOT)
-      ring_size = 0x80000 - ring_start
+      ring_size = self.queue_offset - ring_start
       self.boot_layout = ring_start, ring_size, metadata_size
       self._boot_sram = bytearray(ring_start) # image slots are filled by the streamer
       self._boot_sram[0x1000:0x1000+len(signature)] = signature

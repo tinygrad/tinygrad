@@ -21,7 +21,7 @@ from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset, usb_ctrl_buffer
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -794,14 +794,7 @@ class USBIface(PCIIface):
     self._compute_props()
 
   @functools.cached_property
-  def ctrl(self) -> Buffer:
-    # the controller's memory the queue and the host share, one range (usb.py slices it): the sys page at 0, the cq page at 0x1000, the sram at
-    # 0x5000. the host's view starts at the sys page's controller address 0xa000, which puts the sram on its scsi window 0xf000
-    vaddr, pieces = self.dev_impl.mm.alloc_vaddr(size=0x85000), [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, 0x80000)]
-    for off, paddr, n in pieces: self.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=AddrSpace.SYS, uncached=True)
-    view = self.pci_dev.dma_view(0xa000, 0x85000)
-    for off, n in ((0x800, 4), (0x5000, 0x80000)): view.view(off, n)[:] = bytes(n) # no stale fence or sentinel
-    return Buffer(self.dev.device, 0x85000, options=BufferSpec(external_ptr=vaddr), opaque=BufferStorage(vaddr, host=view))
+  def ctrl(self) -> Buffer: return usb_ctrl_buffer(self)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
