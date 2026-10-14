@@ -1,4 +1,4 @@
-import ctypes, itertools, functools, struct
+import itertools, functools, struct
 from dataclasses import replace
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
@@ -276,12 +276,10 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     return regions
   return build(set(order))
 
-@functools.cache
-def decode_cfg(lib_bytes:bytes, arch:str):
-  insts = amd_decode(lib_bytes, arch)
+def decode_cfg(insts:dict[int, Inst]):
   cfg = get_cfg(insts)
   merge_branches(insts, cfg["blocks"], cfg["paths"])
-  return insts, cfg, cfg_regions(cfg["paths"], 0)
+  return cfg, cfg_regions(cfg["paths"], 0)
 
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0)
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
@@ -294,16 +292,15 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
   renderer = backend_renderer(backend)
   key = (lib_bytes, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_config))
   if key not in dispatch_cache:
-    dispatch_cache[key] = _lift(lib_bytes, arch, backend, dispatch)
+    dispatch_cache[key] = _lift(insts, arch, backend, dispatch)
   return dispatch_cache[key]
 
 dispatch_cache:dict[tuple, UOp] = {}
 
-def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
+def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
   renderer = backend_renderer(backend)
-  lib_sz = len(lib_bytes)
-  insts, cfg, regions = decode_cfg(lib_bytes, arch)
-  axes = itertools.count(lib_sz)
+  cfg, regions = decode_cfg(insts)
+  axes = itertools.count(sum(inst.size() for inst in insts.values()))
   lx, ly, lz, rsrc2, scratch_size, user_data_count = dispatch
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
@@ -343,7 +340,7 @@ def _lift(lib_bytes:bytes, arch:str, backend:str, dispatch:tuple) -> UOp:
     instructions = []
     for off in cfg["blocks"][block_pc]:
       inst = insts[off]
-      inst_st = str(inst)
+      inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
       template, bufs, branch_cond = instruction_call(inst, arch, renderer)
