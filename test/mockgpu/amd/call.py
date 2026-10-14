@@ -259,7 +259,7 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 @functools.cache
 def decode_cfg(lib_bytes:bytes, arch:str):
   insts = amd_decode(lib_bytes, arch)
-  cfg = get_cfg(insts, render=False)["data"]
+  cfg = get_cfg(insts)
   merge_branches(insts, cfg["blocks"], cfg["paths"])
   return insts, cfg, cfg_regions(cfg["paths"], 0)
 
