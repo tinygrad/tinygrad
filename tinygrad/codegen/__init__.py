@@ -6,6 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewr
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
+from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
@@ -389,7 +390,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
-  sink = rewrite_range(sink)
+  if not isinstance(ren, ISARenderer): sink = rewrite_range(sink)
 
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts")

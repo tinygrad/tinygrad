@@ -36,7 +36,7 @@ class Estimates:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
     backedges = [u for u in uops if u.op is Ops.BACKEDGE and (pred:=u.src[2]).op is Ops.CMPLT
       and pred.src[0].op is Ops.LOAD and pred.src[0].buf_uop.addrspace is AddrSpace.REG]
-    runtime_mults: dict[UOp, sint] = {u.src[1]:cast(sint, u.src[2].src[1].ssimplify()) for u in backedges}
+    runtime_mults: dict[UOp, sint] = {u.src[1]:u.src[2].src[1] for u in backedges}
     loop_accs = {u.src[2].src[0].buf_uop for u in backedges}
     excluded.update(u.src[2] for u in backedges)
     excluded.update(u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].buf_uop in loop_accs)
@@ -52,11 +52,10 @@ class Estimates:
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
-        if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          mults *= cast(sint, u.src[0].ssimplify())
+        if u in runtime_mults or u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
+          mults *= cast(sint, runtime_mults.get(u, u.src[0]).ssimplify())
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
-        elif u in runtime_mults: mults *= runtime_mults[u]
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
