@@ -383,12 +383,12 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
     n, va = (i:=UOp.const(r, dtypes.uint64)) + first, vram.getaddr(dev) + i * win
     if is_host(src): # copyin: wait sentinel, copy, release
       end = sram + (((n - run) & 1) + 1) * HALF
-      cmds = [ins("wait_eq", end - 4, usb_sentinel(n)), ins("copy", va, end - usb_wire(nb), nb), ins("signal", end - 4, 0)]
+      cmds = [ins("wait_eq", end - 4, usb_sentinel(n)), ins("copy", va, end - usb_wire(nb), nb), ins("store", end - 4, 0)]
     else: # copyout: wait go, fill, signal
-      cmds = [ins("wait", usb_go(dev), n + 1), ins("signal", usb_go(dev), 0)]
+      cmds = [ins("wait", usb_go(dev), n + 1), ins("store", usb_go(dev), 0)]
       cmds += [ins("copy", sram + wo, va + po, pb) for wo, po, pb in ((0, 0, min(nb, CHUNK)), (HALF, CHUNK, nb - CHUNK)) if pb > 0]
-      cmds += [ins("signal", usb_cq(dev), 0)]
-    cmds += [ins("signal", usb_fence(dev), n + 1)]
+      cmds += [ins("store", usb_cq(dev), 0)]
+    cmds += [ins("store", usb_fence(dev), n + 1)]
     ops += [UOp(Ops.LINEAR, src=tuple(cmds)).end(r)] if isinstance(r, UOp) else cmds # full chunks as one block
   return ops
 

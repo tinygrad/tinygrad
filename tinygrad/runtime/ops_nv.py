@@ -105,8 +105,11 @@ def nv_submit(cmdbuf:UOp, ring:UOp, gpput:UOp, doorbell:UOp, put:UOp, token:int)
 
 class NVQueue(HWQueue):
   dev:NVDevice
+  q_rewrite = HWQueue.q_rewrite + PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat.custom_function("nv"),), allow_any_len=True, name="u"), lambda ctx, u: ctx.q(*u.src[1:])),
+  ])
+
   def nvm(self, subc:int, mthd:int|UOp, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
-  def nv(self, words:UOp): self.q(words)
 
   def sem(self, addr:UOp, value:UOp, **flags:str):
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, value.ccast(dtypes.uint64), nv_flags("NVC56F_SEM_EXECUTE", payload_size="64bit", **flags))
@@ -671,7 +674,7 @@ class NVDevice(Compiled):
   def _submit_cmds(self, queue:str, *cmds:int): # channel setup uses the same runtime submit as kernels
     tl = timeline(devs:=(self.device,))
     value = tl.index(1).load()
-    submit = make_submit(ins("wait", tl, value), ins("nv", UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes())), ins("signal", tl, value + 1),
+    submit = make_submit(ins("wait", tl, value), ins("nv", UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes())), ins("store", tl, value + 1),
                          dev=self.device, queue=queue, deps=(tl,))
     call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))

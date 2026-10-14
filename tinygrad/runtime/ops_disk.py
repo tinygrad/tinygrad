@@ -145,7 +145,7 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
     offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
     for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
       n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
-      gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("signal", counts[dev][1:], n + 1)]
+      gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
   gpu = {lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins}
   return s.replace(src=(done,)).substitute(gpu, enter_calls=True)
 Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"), disk_copy_rewriter)])

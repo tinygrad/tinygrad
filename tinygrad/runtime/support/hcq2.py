@@ -236,7 +236,7 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   return [ins("wait", ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in latest.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
-  return [ins("memory_barrier")] + [ins("wait", timeline((d,)), timeline_value((d,))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+  return [ins("barrier")] + [ins("wait", timeline((d,)), timeline_value((d,))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
@@ -250,7 +250,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     q += waits + ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
-    if tag in ctx.signal_tags: q += [ins("signal", ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.u64))]
+    if tag in ctx.signal_tags: q += [ins("store", ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.u64))]
 
   # one queue advances the device timeline after all other queues finish, and after the queues of the peers that touched the device
   for dev in ctx.queues:
@@ -258,7 +258,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     qdev, queue = touched[0] if dev.split(":")[0] in HOST_DEVS else (dev, ctx.epilogue_queue(dev)) # the host has no queues, a toucher closes it
     waits = [ins("wait", ctx.queue_signal((d,), q), UOp.const(ctx.last[(d, q)] + 1, dtypes.u64))
              for d, q in [(dev, q) for q in ctx.queues[dev]] + touched if (d, q) != (qdev, queue)]
-    bump = ins("signal", timeline((dev,)), timeline_value((dev,)) + 1)
+    bump = ins("store", timeline((dev,)), timeline_value((dev,)) + 1)
 
     # multiple copy queues may need a new compute stream. a peer without calls of its own starts like any queue
     if not (q:=queues.setdefault(((qdev,), queue), [])) and qdev not in {d for d, _ in ctx.last}: q += _start_ins(ctx, qdev, queue)
@@ -324,11 +324,15 @@ class HWQueue:
      lambda ctx, dst, src: ctx.copy(dst, src, src.max_numel() * src.dtype.itemsize)),
     (UPat(Ops.CALL, src=(UPat.custom_function("encdec", name="s"),), name="c", allow_any_len=True), lambda ctx, c, s: ctx.encdec(c, s)),
 
-    # ins: a custom function is the method of its name
+    # ins
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
      lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("barrier"),)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait_eq"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="c"), lambda ctx, c,f: getattr(ctx, f.arg.name)(*c.src[1:])),
+    (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="dst"))), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("write"),), allow_any_len=True, name="u"), lambda ctx, u: ctx.write(*u.src[1:])),
 
     # loop in cmdbufs
     (UPat(Ops.END, src=(UPat(Ops.LINEAR, name="body"), UPat(Ops.RANGE, name="r"))), lambda ctx, body, r: ctx.loop(body, r)),

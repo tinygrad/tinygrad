@@ -74,7 +74,7 @@ def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[
       if (name:=ins_name(c)) is not None and name.startswith("wait"):
         sig, target = mem[word(c.src[1])], val(c.src[2])
         if sig != target if name == "wait_eq" else sig < target: continue
-      elif name == "signal":
+      elif name == "store":
         mem[w:=word(c.src[1])] = val(c.src[2])
         if w[0].tag == "timeline": log.append(w[0].device)
       elif c in cs: log.append(cs.index(c))
