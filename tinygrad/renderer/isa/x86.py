@@ -246,8 +246,7 @@ def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
   cnt = alloc_reg(ctx, x.src[1].dtype, RCX)[0].set(x.src[1])
   return x.ins(op, src=(val, cnt))
 
-# a memory address operand is (base, index, displacement, size). the size is the element size, it scales the index in the
-# SIB byte and is the memory operand width. it is materialized as an immediate so it survives regalloc
+# a memory address operand is (base, index, displacement, size)
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
@@ -476,7 +475,7 @@ pre_regalloc_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
-# ***** post rgister allocation *****
+# ***** post register allocation *****
 # TODO: control flow should be overhauled so that this isn't necessary
 def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.axis_id)
