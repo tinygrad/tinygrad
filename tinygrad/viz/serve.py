@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
+from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip, merge_dicts
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
 from tinygrad.runtime.autogen.amd.common import OpType
@@ -601,6 +601,9 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
       if op == "s_branch": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders and op != "s_endpgm": paths[curr][nx] = UNCOND
+  return {"blocks":blocks, "paths":paths}
+
+def tokenize_asm(pc_table:dict[int, Inst]) -> dict:
   pc_tokens:dict[int, list[dict]] = {}
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
@@ -612,12 +615,9 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default:
         tokens.append({"st":repr(val - (1 << 32) if name == "literal" and val >= (1 << 31) else val), "keys":[repr(val)], "kind":1})
-  lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
-  for pcs in blocks.values():
-    for pc in pcs: lines.append(f"{disasm[pc]:<{asm_width}}  # {pc:012X}")
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python"}
+  return {"data":{"pc_tokens":pc_tokens}, "src":"\n".join([f"{disasm[pc]:<{asm_width}}  # {pc:012X}" for pc in pc_table]), "lang":"python"}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -643,7 +643,8 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     lib:bytes = sink.src[3].arg
     if (target:=renderer.target.arch).startswith("gfx"):
       with soft_err(lambda err: ret.update(err)):
-        ret.update(get_cfg(amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
+        ret.update(tokenize_asm(pc_table:=amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
+        ret["data"].update(get_cfg(pc_table))
       with soft_err(lambda err: ret.update(err)):
         from tinygrad.runtime.autogen import amdgpu_kd
         kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
