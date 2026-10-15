@@ -3,11 +3,13 @@ from dataclasses import replace
 from tinygrad.viz.serve import amd_code_end, amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_lower_config, lower_call
-from tinygrad.device import Device
+from tinygrad.device import Device, Compiler
 from tinygrad.engine.realize import get_runtime, runtime_cache
 from tinygrad.renderer.llvmir import CPULLVMRenderer, ldt
+from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
+from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.ops_cpu import CPUExecutable
@@ -17,7 +19,7 @@ from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
-class CallLLVMModule(CPUExecutable):
+class CallModule(CPUExecutable):
   def __init__(self, lib:bytes, functions:dict[str, int]):
     self.functions = functions
     self.exports:dict[str, int] = {}
@@ -38,16 +40,16 @@ class CallLLVMModule(CPUExecutable):
     self.functions.update(self.exports)
     return bytes(image)
 
-class CallLLVMJIT(CPULLVMCompiler):
-  def __init__(self, arch:list[str]):
-    super().__init__(arch)
-    self.cachekey = f"asm_call_obj_{self.cachekey}" if self.cachekey is not None else None
+class CallJIT(Compiler):
+  def __init__(self, compiler:CPULLVMCompiler|ClangCompiler):
+    self.compiler, self.arch = compiler, compiler.arch
+    super().__init__(f"asm_call_obj_{compiler.cachekey}" if compiler.cachekey is not None else None)
     self.functions:dict[str, int] = {}
-    self.modules:dict[bytes, CallLLVMModule] = {}
+    self.modules:dict[bytes, CallModule] = {}
 
   def compile_cached(self, src:str) -> bytes:
     lib = super().compile_cached(src)
-    if lib not in self.modules: self.modules[lib] = CallLLVMModule(lib, self.functions)
+    if lib not in self.modules: self.modules[lib] = CallModule(lib, self.functions)
     return lib
 
   def trampoline(self, lib:bytes, name:str) -> bytes:
@@ -57,10 +59,17 @@ class CallLLVMJIT(CPULLVMCompiler):
     raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
 
   def compile(self, src:str) -> bytes:
-    with cpu_profile('LLVM JIT compile'): return super().compile(src)
+    with cpu_profile(f'{type(self.compiler).__name__} JIT compile'): return self.compiler.compile(src)
+
+  def disassemble(self, lib:bytes): self.compiler.disassemble(lib)
+
+def call_bodies(uops:list[UOp], compiler:CallJIT) -> dict[UOp, str]:
+  def fn_name(b:UOp): return ("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex()
+  topo = UOp.sink(*uops).toposort(lambda u:u.op is not Ops.LINEAR or fn_name(u) not in compiler.functions, enter_calls=True)
+  return {u.body:fn_name(u.body) for u in topo if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
 
 class CallLLVMRenderer(CPULLVMRenderer):
-  compiler: CallLLVMJIT
+  compiler: CallJIT
   extra_matcher = PatternMatcher([
     # ISA multiply-adds must stay fused even when the host has no FMA instruction.
     (UPat.var("a", dtype=dtypes.floats)*UPat.var("b")+UPat.var("c"), lambda a,b,c:
@@ -74,7 +83,7 @@ class CallLLVMRenderer(CPULLVMRenderer):
 
   def __init__(self, target:Target):
     super().__init__(target)
-    self.compiler = CallLLVMJIT(target.arch.split(','))
+    self.compiler = CallJIT(CPULLVMCompiler(target.arch.split(',')))
 
   def _render_fn(self, name, args, kernel, prefix=None):
     if name == self.entry_name:
@@ -86,9 +95,7 @@ class CallLLVMRenderer(CPULLVMRenderer):
 
   def render(self, uops:list[UOp]) -> str:
     self.entry_name = next(u.arg.function_name for u in uops if u.op is Ops.SINK)
-    def fn_name(b:UOp): return ("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex()
-    topo = UOp.sink(*uops).toposort(lambda u:u.op is not Ops.LINEAR or fn_name(u) not in self.compiler.functions, enter_calls=True)
-    fns = {u.body:fn_name(u.body) for u in topo if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
+    fns = call_bodies(uops, self.compiler)
     def module(us, definition):
       declarations = [f"@{fns[b]}_ptr = hidden global ptr null, section \".data\"" for b in
                       dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.op is Ops.LINEAR)]
@@ -101,19 +108,67 @@ class CallLLVMRenderer(CPULLVMRenderer):
     entry = self._render_kernel(uops, fns=fns)
     return module(uops, "\n".join([*entry[0], entry[1]]))
 
+class CallClangRenderer(ClangRenderer):
+  compiler: CallJIT
+  kernel_typedef = "__attribute__((noinline, optnone)) void"
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
+     f"{f.arg.name}({', '.join(ctx[y] for y in x.src[1:])})" if f.arg.name.startswith("__builtin_") else None),
+  ]) + ClangRenderer.string_rewrite
+  extra_matcher = PatternMatcher([
+    (UPat.var("a", dtype=dtypes.floats)*UPat.var("b")+UPat.var("c"), lambda a,b,c:
+     UOp.custom_function("__builtin_fma" + ("f" if a.dtype == dtypes.float32 else ""), dtype=a.dtype).call(a, b, c)
+     if a.dtype == b.dtype == c.dtype and a.dtype in (dtypes.float32, dtypes.float64) else None),
+  ]) + ClangRenderer.extra_matcher
+
+  def __init__(self, target:Target):
+    super().__init__(target)
+    compiler = ClangCompiler(target.arch.split(','))
+    compiler.args += ['-fno-zero-initialized-in-bss', '-fvisibility=hidden', '-fno-strict-aliasing']
+    self.compiler = CallJIT(compiler)
+
+  def render_vector_prefix(self, dt, count):
+    # Register-file slices only guarantee scalar alignment.
+    return f"typedef {self.render_dtype(dt)} {self._render_dtype(dt, count, AddrSpace.REG)} " \
+      f"__attribute__((aligned({dt.itemsize}),ext_vector_type({count})));"
+
+  def render(self, uops:list[UOp]) -> str:
+    self.fn_names = call_bodies(uops, self.compiler)
+    def module(us, definition):
+      declarations = []
+      for body in dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
+        name = self.fn_names[body]
+        params = ', '.join(self.param_type(p) for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u:u.arg.slot))
+        declarations.append(f"void (*{name}_ptr)({params}) = 0;\n#define {name} {name}_ptr")
+      return '\n'.join(self._render_defines(us) + declarations + [definition])
+    for body, name in self.fn_names.items():
+      if name in self.compiler.functions: continue
+      _, lines, bufs = self._render(list(body.src))
+      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
+      attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
+      definition = f"__attribute__(({attrs})) void {name}({params}) {{\n" + '\n'.join(lines) + "\n}"
+      self.compiler.compile_cached(module(body.src, definition))
+    name, lines, bufs = self._render(uops)
+    # CPUProgram passes scalar arguments as uint64, including stack arguments on arm64.
+    lines = [f"  {self.param_type(p)} {n} = ({self.param_type(p)}){n}_arg;" for n,(p,_) in bufs if p.addrspace == AddrSpace.ALU] + lines
+    bufs = [(n+"_arg", (p.replace(arg=replace(p.arg, dtype=dtypes.uint64)), mutable)) if p.addrspace == AddrSpace.ALU else (n, (p, mutable))
+            for n,(p,mutable) in bufs]
+    return module(uops, super().render_kernel(name, lines, bufs, []))
+
 @functools.cache
-def llvm_renderer(arch:str):
-  return CallLLVMRenderer(Target("CPU", "LLVM", arch))
+def cpu_renderer(arch:str, renderer:str="LLVM"):
+  return {"LLVM":CallLLVMRenderer, "CLANG":CallClangRenderer}[renderer](Target("CPU", renderer, arch))
 
 def backend_renderer(backend:str):
-  return llvm_renderer(Device["CPU"].renderer.target.arch) if backend == "CPU" else Device[backend].renderer
+  return cpu_renderer(Device["CPU"].renderer.target.arch, backend.partition(':')[2] or "LLVM") \
+    if backend.split(':')[0] == "CPU" else Device[backend].renderer
 
 def get_call_runtime(backend:str, prg:UOp):
-  if backend != "CPU": return get_runtime(backend, prg)
+  if backend.split(':')[0] != "CPU": return get_runtime(backend, prg)
   if (runtime:=runtime_cache.get(key:=(prg.key, backend))) is None:
     obj = prg.to_elf()
-    lib = llvm_renderer(Device["CPU"].renderer.target.arch).compiler.trampoline(obj.lib, obj.name)
-    runtime_cache[key] = runtime = Device[backend].runtime(replace(obj, lib=lib))
+    lib = backend_renderer(backend).compiler.trampoline(obj.lib, obj.name)
+    runtime_cache[key] = runtime = Device["CPU"].runtime(replace(obj, lib=lib))
   return runtime
 
 InstructionCall = tuple[UOp, list[UOp]]
