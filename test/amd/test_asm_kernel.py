@@ -269,7 +269,7 @@ class TestAsmKernel(unittest.TestCase):
     prg = to_program(sink, call.backend_renderer("CPU"))
     result = (ctypes.c_uint64*len(values))()
     vals = dict(zip((v.arg.name for v in variables), values))
-    call.get_call_runtime("CPU", prg)(ctypes.addressof(result), vals=tuple(vals[v.arg.name] for v in prg.arg.vars))
+    call.get_call_runtime("CPU", prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else ctypes.addressof(result) for p in prg.kernel_params])
     self.assertEqual(list(result), values)
 
   def test_jit_call_reuse(self):

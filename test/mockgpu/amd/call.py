@@ -87,7 +87,7 @@ class CallLLVMRenderer(CPULLVMRenderer):
     def module(us, definition):
       declarations = [f"@{fns[b]}_ptr = hidden global ptr null, section \".data\"" for b in
                       dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.op is Ops.LINEAR)]
-      footer = self._render_footer(us, enter_calls=False).replace("alwaysinline", "noinline")
+      footer = self._render_footer(us).replace("alwaysinline", "noinline")
       return "\n".join([*declarations, definition, footer, "attributes #1 = { noinline optnone nounwind }"])
     for body, name in fns.items():
       if name in self.compiler.functions: continue

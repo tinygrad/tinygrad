@@ -124,7 +124,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
     if u.op in {*GroupOp.Binary, *GroupOp.Ternary} and all(s.op in {Ops.CONST, Ops.PARAM} for s in u.src): excluded.update(u.src)
   for u in toposort:
-    argst = codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
+    argst = u.arg if u.op is Ops.SOURCE else codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
     with soft_err():
       if u.op in GroupOp.Movement and u.marg: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"

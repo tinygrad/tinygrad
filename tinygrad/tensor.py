@@ -27,8 +27,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
     new_sink = sink.substitute(applied_map, name=f"substitute {name}", walk=True)
 
     # set the relevant uop to the realized UOps
-    for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
-      if s is ns: continue
+    for t,ns in zip(scope_tensors, new_sink.src):
       t.uop = ns
 
 def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
@@ -201,8 +200,8 @@ class Tensor(RandMixin):
     sink = tensor_map.get(sink, sink)
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
-    becomes_map = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape)
-                   for u in sink.toposort() if is_store_after(u)}
+    storage = graph_rewrite(stores:=UOp.sink(*(u for u in sink.toposort() if is_store_after(u))), pm_drop_after, bottom_up=True, name="drop after")
+    becomes_map = {u:s.shrink_to(u.shape) for u,s in zip(stores.src, storage.src)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
@@ -250,28 +249,26 @@ class Tensor(RandMixin):
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.nbytes, opaque=x._data()))
       return self
     assigned_to = self.uop.storage_base
-    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
-    # a pending CONTIGUOUS counts only if it's the whole target: writes through views of it store into its storage
-    if not assigned_to.has_buffer_identity() and (assigned_to.op is not Ops.STAGE or self.uop is assigned_to):
+    views = [self.uop]
+    while views[-1].op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: views.append(views[-1].src[0])
+    # assigning to a pending value that views no other live tensor is initialization, not a write: the whole tensor is
+    # overwritten, so the pending value is dead. (a broadcast const like `const_like` is EXPAND(CONST) but views nothing)
+    if not assigned_to.has_buffer_identity() and not any(_tensor_holds(u) for u in views[1:]):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.STAGE else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    assign = self.uop.after(store := self.uop.store(x.uop))
-    views = [self.uop]
-    while views[-1].op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: views.append(views[-1].src[0])
     ib = next((u for u in reversed(views) if u.has_buffer_identity() and (u is self.uop or _tensor_holds(u))), views[-1])
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
-      if target is not ib:
-        assign = assign.substitute({ib: target}, walk=True)
-        store = assign.src[1]
+      store = self.uop.substitute({ib: target}, walk=True).store(x.uop)
       # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
       # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: target.after(store)}, name="Embed View Assign")
+      for t in [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.storage_base is assigned_to]:
+        t.uop = t.uop.substitute({ib: target.after(store)}, walk=True)
     else:
       # simple assign
-      self.uop = assign
+      self.uop = self.uop.after(self.uop.store(x.uop))
     return self
 
   def _buffer(self) -> Buffer:
@@ -526,9 +523,7 @@ class Tensor(RandMixin):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
     else: # basic setitem
-      view = self[indices]
-      if isinstance(v, Tensor) and v.uop.op is Ops.AFTER and v.uop in view.uop.base.src: return
-      view.assign(v)
+      self[indices].assign(v)
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
