@@ -772,11 +772,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self
 
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
+  @recursive_property
+  def _storage_base(self) -> UOp|None:
+    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: return self.src[0].storage_base
+    return None
   @property
-  def storage_base(self) -> UOp:
-    b = self.unsharded_base
-    while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
-    return b
+  def storage_base(self) -> UOp: return self if (base:=self._storage_base) is None else base
 
   # cached property here makes external_uop_gc fail, why?
   @property
