@@ -1471,7 +1471,8 @@ class TestOps(TensorTestCase):
         helper_test_op([a,b], lambda x,y: x@y, forward_only=True, atol=1e-5, rtol=1e-4)
     out = Tensor.eye(2).matmul(Tensor([3., 4.]), dtype=dtypes.float32)
     self.assertEqual(out.dtype, dtypes.float32)
-    self.assertEqual(out.tolist(), [3., 4.])
+    self.assertEqual(out.shape, (2,))
+    if not COMPILE_ONLY: self.assertEqual(out.tolist(), [3., 4.])
   @slow_test
   def test_big_gemm(self):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), atol=1e-4)
