@@ -1881,8 +1881,7 @@ class RewriteContext:
             new_src_n = UOp(new_n.op, new_src, new_n.arg, new_n.tag)
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
-          # Rebuilt nodes already have rewritten children; only a bottom-up matcher can change them before the top-down match.
-          stack.append((new_src_n, 1 if self.bpm is None and new_src != new_n.src else 0, new_src_n))
+          stack.append((new_src_n, 0, new_src_n))
       else:
         # in stage 2, we link the result of new_n to the result of n
         if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
