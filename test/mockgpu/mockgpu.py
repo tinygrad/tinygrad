@@ -32,7 +32,7 @@ def hook_doorbells(s:UOp) -> UOp|None:
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 def hook_ioctl(f:UOp) -> UOp|None:
   return f.replace(arg=CustomFunction("mockgpu_ioctl", f.arg.dtype)) if f.arg.name == "ioctl" and "QCOM" in mocked else None
-Compiled.pm_lower = PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells), (UPat(Ops.CUSTOM_FUNCTION, name="f"), hook_ioctl)])
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells), (UPat(Ops.CUSTOM_FUNCTION, name="f"), hook_ioctl)])
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:
@@ -52,6 +52,7 @@ class TrackedMemoryView:
     self.mv = self.mv.cast('B').cast(new_type, **kwargs)
     return self
 
+  def __buffer__(self, flags): return self.mv.__buffer__(flags)
   @property
   def nbytes(self): return self.mv.nbytes
   def __len__(self): return len(self.mv)

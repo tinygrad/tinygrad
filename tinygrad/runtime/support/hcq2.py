@@ -6,9 +6,9 @@ from collections import defaultdict
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, to_name
 from tinygrad.helpers import DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc, sym_infer
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx
-from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_dtype
+from tinygrad.dtype import dtypes, AddrSpace, truncate, to_dtype
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
 
@@ -65,22 +65,13 @@ def make_submit(*cmds, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a sub
   q = UOp.param(0, dtypes.u8, 1, dev, name=queue) # the queue instance: its device and name
   return UOp.sink(*cmds, arg=KernelInfo(kind)).call(q).after(*deps)
 
-def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order: each is after the fence and the one before it
-  calls, s = list[UOp](), batch.src[0]
-  while s.op is Ops.AFTER: calls, s = [s.src[0]] + calls, s.src[-1]
-  return calls
-
 def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
-
-def chunks(nbytes:int, chunk_sz:int, dtype:DType=dtypes.i32) -> list[tuple[UOp|int, int]]: # (index, bytes): full chunks as one range, then the tail
-  full, tail = divmod(nbytes, chunk_sz) # no one-trip loops
-  return ([(UOp.range(full, next(UOp.unique_num), dtype=dtype) if full > 1 else 0, chunk_sz)] if full else []) + ([(full, tail)] if tail else [])
 
 def _is_link_patch(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not ((base:=unwrap_lane(w.src[0])[0]).op is Ops.PARAM and base.tag is None) # an input's is runtime
   if w.op is Ops.PARAM: return w.tag is not None
   if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
-  if w.op in {Ops.LOAD, Ops.AFTER}: return False
+  if w.op in {Ops.LOAD, Ops.CALL}: return False
   return all(_is_link_patch(s) for s in w.src)
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
@@ -111,13 +102,6 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
 def ccall(fn:Any, *args:UOp|int) -> UOp:
   ret = {None: dtypes.void, ctypes.c_void_p: dtypes.u64}.get(fn.restype) or to_dtype(fn.restype.__name__[2:]) # void, void*, c_int -> int
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.i32) if isinstance(a, int) else a for a in args])
-
-@uopfunc
-def do_get_time_ms(ms:UOp) -> UOp:
-  ts = UOp.placeholder((2,), dtypes.u64, addrspace=AddrSpace.REG)
-  ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.i32).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.i32), ts.index(0)))
-  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
-def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
 
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
   flds = {n: (o, {d.itemsize: d for d in dtypes.uints}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)}
@@ -284,9 +268,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
   fence = UOp.custom_function("hcq_fence").call(*timelines, *signals)
   for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, dev=devs[0], queue=queue, deps=(fence, *submits[-1:])))
-  sink = UOp.sink(submits[-1], arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
-  for pm in [Device[d].pm_batch for d in ctx.queues]: # a device adds its own work to the batch
-    if (r:=pm.rewrite(sink)) is not None: sink = r
+  sink = UOp.sink(submits[-1], arg=KernelInfo("hcq_submit", estimates=Estimates(), optimized=True))
 
   # per call metadata
   names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
@@ -380,6 +362,13 @@ class HWQueue:
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
 @uopfunc
+def do_get_time_ms(ms:UOp) -> UOp:
+  ts = UOp.placeholder((2,), dtypes.u64, addrspace=AddrSpace.REG)
+  ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.i32).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.i32), ts.index(0)))
+  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
+def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
+
+@uopfunc
 def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
   tl = tl.replace(arg=replace(tl.arg, volatile=True)) # make it volatile, since it's polled
 
@@ -401,19 +390,18 @@ def encode_fence(f:UOp) -> UOp:
   # re-arm the signals
   for slots, off in map(unwrap_view, sigs): last = (slots.after(*last).index(off // slots.dtype.itemsize).store(0),)
   return last[0].barrier()
-pm_hcq_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence)])
 
 def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|tuple[str, ...]|None=None) -> UOp:
   for u in lin.src if lin is not None else (): hq.q_rewrite.rewrite(u, ctx=hq) # the commands of the linear go to the stream
-  stream, patches = bytes(hq.blob), hq.patches
+  stream = bytes(hq.blob)
 
   # loop over pathes with the same value
-  rt = [(o, w) for o, w in patches if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w)]
+  rt = [(o, w) for o, w in hq.patches if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w)]
   uses = {w: [o for o, _ in grp] for w, grp in itertools.groupby(sorted(rt, key=lambda p: p[1].key), key=lambda p: p[1])}
-  looped = {w: (at, [*w.ranges][0] if w.ranges else UOp.range(len(at), next(UOp.unique_num))) for w, at in uses.items() if len(at) > 1 or w.ranges}
+  looped = {w: (at, UOp.range(len(at), next(UOp.unique_num))) for w, at in uses.items() if len(at) > 1}
   dwords = [(UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.u32).index(r).load() + 4 * k, (w >> 32 * k).cast(dtypes.u32))
             for w, (at, r) in looped.items() for k in range(w.dtype.itemsize // 4)]
-  patches = [(o, w) for o, w in patches if w not in looped] + dwords
+  patches = [(o, w) for o, w in hq.patches if w not in looped] + dwords
   nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
@@ -431,7 +419,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
 # **** lower: cmdbufs become a host program
 
 def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
-  links, rest = partition(a.src[1:], lambda s: (s.src[0] if s.op is Ops.END else s).op is Ops.STORE and _is_link_patch(s)) # a store or its loop
+  links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
   if not links: return None
   ctx.extend(links)
   return a.src[0].after(*rest)
@@ -470,28 +458,25 @@ pm_lift = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lift), # lift allocs and getaddrs
 ])
 
+Compiled.pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat.custom_function("hcq_fence"),), allow_any_len=True, name="f"), encode_fence)])
+Compiled.pm_lower = PatternMatcher([])
+
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo): return None
 
   # encode bodies
-  from tinygrad.runtime.ops_rdma import pm_rdma_encode
-  devs = [Device[d] for d in dedup([d.split(":")[0] for d in call.arg.aux.device])]
-  body = graph_rewrite(call.body, pm_rdma_encode + Compiled.pm_encode + pm_hcq_encode,
-                       ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
-  body = graph_rewrite(body, sum([d.pm_lower for d in devs], PatternMatcher([])),
-                       ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")
+  body = graph_rewrite(call.body, Compiled.pm_encode, ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
+  body = graph_rewrite(body, Compiled.pm_lower, ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")
   body = graph_rewrite(body, pm_lift, walk=True, enter_calls=True, name="lift")
 
   if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")
 
   # batch args, link patches wait after the call
   return lift(call.replace(src=(body, *call.src[1:])), root=True).after(*dedup(lt_patches))
-
-pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
+pm_lower_call = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
 # **** link: allocs to buffers, addresses to consts
 
-Compiled.pm_batch = Compiled.pm_encode = Compiled.pm_lower = PatternMatcher([]) # a device adds its own rules
 Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.ALLOC, tag="timeline", name="b"), lambda b: Device[b.device].timeline)])
 
 @dataclass
@@ -521,13 +506,6 @@ def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
 def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
 
-def fold_ranged(buf:UOp, offs:UOp, ws:UOp, e:UOp) -> UOp: # the words of every trip
-  vs = {r: UOp.variable(f"r{i}", 0, r.vmax) for i, r in enumerate(e.src[1:])}
-  ows = list(zip(offs.substitute(vs).src, ws.substitute(vs).src))
-  trips = [dict(zip([v.expr for v in vs.values()], t)) for t in itertools.product(*[range(int(r.vmax) + 1) for r in vs])]
-  data = [(sym_infer(o, t) * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](sym_infer(w, t)))) for t in trips for o, w in ows]
-  return _write_host(buf, data)
-
 pm_link = PatternMatcher([
   # collapse committed const conversions
   (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
@@ -542,7 +520,6 @@ pm_link = PatternMatcher([
   (UPat(name="buf").store(UPat(Ops.BINARY, name="blob").or_bitcasted()), lambda buf, blob: _write_host(buf, [(0, blob.arg)])),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
   (UPat(name="buf").index(UPat.cvar("off")).store(UPat.cvar().or_casted("w")), lambda buf, off, w: fold_words(buf, UOp.stack(off), UOp.stack(w))),
-  (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(allow_any_len=True, name="e"), fold_ranged),
   # a call keeps the deps that are not written yet
   (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"), lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.without_after.op is Ops.CALL else
@@ -563,7 +540,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
   linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
-  lin = graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode")
+  lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear

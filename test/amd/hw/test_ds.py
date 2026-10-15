@@ -812,7 +812,7 @@ class TestDsPermute(unittest.TestCase):
   def test_ds_bpermute_b32_identity(self):
     """DS_BPERMUTE_B32 with identity permutation (each lane reads from itself)."""
     instructions = [
-      v_mov_b32_e32(v[0], 0),  # addr = 0 (read from lane 0)
+      v_mov_b32_e32(v[0], 128),  # addr = 128 / 4 % 32 = 0 (read from lane 0)
       v_mov_b32_e32(v[1], 0xCAFEBABE),  # data in lane 0
       ds_bpermute_b32(v[2], v[0], v[1]),
       s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
