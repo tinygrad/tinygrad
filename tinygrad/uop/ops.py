@@ -52,7 +52,7 @@ axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l",
 axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
                AxisType.WEAK: "red", AxisType.LOOP: "red", AxisType.UPCAST: "yellow"}
 
-range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
+range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.END: 1, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
