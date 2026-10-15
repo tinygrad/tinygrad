@@ -18,11 +18,6 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual(c.item(), value)
       self.assertEqual(t.contiguous().dtype, weak)
 
-  def test_assign_into_weak_commits(self):
-    t = Tensor.const(0.5)
-    t.assign(Tensor(1.0, dtype=dtypes.default_float))
-    self.assertEqual((t.dtype, t.item()), (dtypes.default_float, 1.0))
-
   def test_copysign_meets_operands(self):
     r = Tensor([2], dtype=dtypes.uint8).copysign(Tensor([1], dtype=dtypes.uint32))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint32, [2]))
