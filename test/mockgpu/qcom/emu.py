@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.helpers import Context, getbits, to_mv
 from tinygrad.runtime.autogen import mesa
 from tinygrad.uop.ops import UOp, KernelInfo
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
@@ -476,9 +476,9 @@ def lane_params() -> tuple[UOp, UOp, UOp]:
 def cpu_kernel(body:UOp, name:str) -> Callable[..., None]:
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(UOp.sink(body, arg=KernelInfo(name=name)), Device['CPU'].renderer)
-  runtime, globals_, var_names = get_runtime('CPU', prg), prg.arg.globals, [v.expr for v in prg.arg.params if v.is_variable]
-  runtime.fxn.argtypes = [ctypes.c_uint64] * (len(globals_) + len(var_names))
-  return lambda *bufs, **vals: runtime.fxn(*[bufs[g] for g in globals_], *[vals[v] for v in var_names])
+  runtime, keys = get_runtime('CPU', prg), [p.arg.name if p.addrspace is AddrSpace.ALU else p.arg.slot for p in prg.kernel_params]
+  runtime.fxn.argtypes = [ctypes.c_uint64] * len(keys)
+  return lambda *bufs, **vals: runtime.fxn(*[vals[k] if isinstance(k, str) else bufs[k] for k in keys])
 
 def blend(active:UOp, new:UOp, old:UOp) -> UOp: # bitwise, since a where becomes a masked store, which is microcoded on x86
   keep = active.cast(new.dtype) * new.dtype.max
