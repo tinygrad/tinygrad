@@ -537,6 +537,8 @@ class TestVizIntegration(unittest.TestCase):
     profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
     events = [e for e in profile["layout"]["NULL"]["events"] if e["name"] == kernel_name]
     self.assertEqual({e["ref"] for e in events}, kernels)
+    events = [e for e in profile["layout"]["TINY"]["events"] if e["name"] == f"do_to_program for {kernel_name}"]
+    self.assertEqual({e["ref"] for e in events}, kernels)
 
   @needs_tracked_pm
   def test_index_label(self):
