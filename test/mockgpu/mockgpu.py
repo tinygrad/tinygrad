@@ -44,6 +44,7 @@ class TrackedMemoryView:
     self.mv = self.mv.cast('B').cast(new_type, **kwargs)
     return self
 
+  def __buffer__(self, flags): return self.mv.__buffer__(flags)
   @property
   def nbytes(self): return self.mv.nbytes
   def __len__(self): return len(self.mv)
