@@ -93,15 +93,15 @@ base_rewrite = PatternMatcher([
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
    f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
    f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
    f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:

@@ -8,6 +8,7 @@ from tinygrad.helpers import Context
 from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 
+@Context(ASM_CALL=0)
 def _run_kernel(instructions: list, lx=1, ly=1, lz=1, gx=1, gy=1, gz=1, args_ptr=0) -> bytes:
   """Assemble instructions, run on emulator with PROFILE=1, return the SQTT blob."""
   from test.mockgpu.amd.emu import run_asm, sqtt_traces
