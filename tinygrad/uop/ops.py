@@ -492,7 +492,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     if self.op is Ops.CONST: return self
-    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
+    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src)) for s in self.src): return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
@@ -772,11 +772,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self
 
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
+  @recursive_property
+  def _storage_base(self) -> UOp|None:
+    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: return self.src[0].storage_base
+    return None
   @property
-  def storage_base(self) -> UOp:
-    b = self.unsharded_base
-    while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
-    return b
+  def storage_base(self) -> UOp: return self if (base:=self._storage_base) is None else base
 
   # cached property here makes external_uop_gc fail, why?
   @property
