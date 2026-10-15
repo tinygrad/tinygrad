@@ -270,13 +270,12 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
 def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   queues = _build_queues(ctx)
 
-  # re-arm the batch signals before submitting queues in first-use order, copy queues last
+  # re-arm the batch signals before submitting queues in first-use order
   submits:list[UOp] = []
   timelines = [ctx.sched_timeline((dev,)) for dev in ctx.queues]
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
   fence = UOp.custom_function("hcq_fence").call(*timelines, *signals)
-  for (devs, queue), cmds in sorted(queues.items(), key=lambda kv: kv[0][1].startswith("COPY")):
-    submits.append(make_submit(*cmds, dev=devs[0], queue=queue, deps=(fence, *submits[-1:])))
+  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, dev=devs[0], queue=queue, deps=(fence, *submits[-1:])))
   sink = UOp.sink(submits[-1], arg=KernelInfo("hcq_submit", estimates=Estimates(), optimized=True))
 
   # per call metadata
