@@ -119,7 +119,7 @@ def is_disk_read(c:UOp) -> bool:
     and not getattr(Device[dev], "is_usb", False)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
-  lin = s.src[0].body
+  lin = s.without_after.body
   if not (copies:=[c for c in lin.src if is_disk_read(c)]): return None
   rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
   sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
@@ -130,7 +130,7 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
   srcs = patch(table, [(8 * i, w) for i, w in enumerate(words)]).bitcast(dtypes.uint64)
 
   # [chunks read, chunks copied] at the start of the gpu's stage
-  dev = s.src[0].src[1].device
+  dev = s.without_after.src[1].device
   counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev).rtag("disk_stage")[:16].bitcast(dtypes.uint64)
 
   # cpu part

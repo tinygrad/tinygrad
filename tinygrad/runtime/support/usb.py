@@ -384,7 +384,7 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
   return ops
 
 def usb_copy_rewriter(s:UOp) -> UOp|None:
-  call, lin = s.src[0], s.src[0].body
+  call, lin = s.without_after, s.without_after.body
   if not is_usb(dev:=call.src[1].device) or not (copies:=[c for c in lin.src if is_staged(c)]): return None
 
   # a run: one direction, one table
