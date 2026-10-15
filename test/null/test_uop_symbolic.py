@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, pickle, functools, math
+import unittest, pickle, functools, math, itertools
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
@@ -1512,6 +1512,25 @@ class TestGatedUopGivenValid(unittest.TestCase):
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
+  def test_multiple_moduli(self):
+    from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
+    for size, divisors in [(64, (2, 8, 32)), (12, (4, 6))]:
+      with self.subTest(size=size, divisors=divisors):
+        r = UOp.range(uconst(size), 0)
+        val = usum([(r % d) * 100**i for i, d in enumerate(divisors)])
+        sink = UOp.param(0, dtypes.int, size).index(r).store(val.cast(dtypes.int)).end(r).sink(arg=KernelInfo())
+        result = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={})
+        self.assertFalse(result.ranges)
+        if size == 64: self.assertFalse(any(u.op is Ops.FLOORMOD for u in result.toposort()))
+        store = next(u for u in result.toposort() if u.op is Ops.STORE)
+        ranges = [u for u in result.toposort() if u.op is Ops.RANGE]
+        actual = []
+        for values in itertools.product(*(range(u.src[0].val) for u in ranges)):
+          replacements = {u:u.const_like(v) for u,v in zip(ranges, values)}
+          actual.append((store.src[0].src[1].substitute(replacements).simplify().val,
+                         store.src[1].substitute(replacements).simplify().val))
+        self.assertEqual(sorted(actual), [(i, sum(i % d * 100**j for j,d in enumerate(divisors))) for i in range(size)])
+
   def test_backedge_preserves_constant_condition(self):
     loop, cond = UOp.loop(0), UOp.const(False)
     end = graph_rewrite(UOp(Ops.NOOP).backedge(loop, cond), sym)
