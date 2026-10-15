@@ -37,7 +37,7 @@ class QCOMGPU:
           for k in range(cnt): self.regs[reg + k] = words[1 + k]
         elif hdr >> 28 == mesa.CP_TYPE7_PKT >> 28:
           cnt, op = hdr & 0x3FFF, (hdr >> 16) & 0x7F
-          if not self.draining or op not in (mesa.CP_EXEC_CS, mesa.CP_LOAD_STATE6_FRAG):
+          if not self.draining or op not in (mesa.CP_EXEC_CS, mesa.CP_RUN_OPENCL, mesa.CP_LOAD_STATE6_FRAG):
             try:
               if not self._exec_pkt7(op, words[1:1+cnt]): return
             except Exception as e:
