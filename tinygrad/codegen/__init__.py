@@ -8,6 +8,7 @@ from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext
+from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -389,7 +390,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # rewrite non hardware RANGE/END to explicit register acc and BACKEDGE
-  if not isinstance(ren, ISARenderer): sink = rewrite_range(sink)
+  if not isinstance(ren, (ISARenderer, WGSLRenderer)): sink = rewrite_range(sink)
 
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
