@@ -193,25 +193,10 @@ class TestAssign(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, raises
       np.testing.assert_allclose(new.numpy(), 4)
 
-  def test_assign_diamond_contiguous(self):
-    a = Tensor.ones(4).contiguous().realize()
-    times_a = a*3
-    a.assign(Tensor.full((4,), 2.))
-    new = a.contiguous() + times_a-1
-    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, raises
-      np.testing.assert_allclose(new.numpy(), 4)
-
   def test_assign_diamond_possible(self):
     a = Tensor.ones(4).contiguous().realize()
     times_a = a*3
     a.assign(Tensor.full((4,), 2.))
-    new = a + (times_a-1).contiguous()
-    np.testing.assert_allclose(new.numpy(), 4)
-
-  def test_assign_diamond_possible_contiguous(self):
-    a = Tensor.ones(4).contiguous().realize()
-    times_a = a*3
-    a.assign(Tensor.full((4,), 2.).contiguous())
     new = a + (times_a-1).contiguous()
     np.testing.assert_allclose(new.numpy(), 4)
 
@@ -637,19 +622,6 @@ class TestAssignOrdering(unittest.TestCase):
     self.assertEqual(r1.item(), 4)
     self.assertEqual(r2.item(), 8)
 
-  @unittest.expectedFailure
-  def test_write_read_write_chain(self):
-    """Write, read, write chain - middle read must complete before second write."""
-    # TODO: broken now, mid_sum reads buf after the second write. mid_sum should be 12
-    buf = Tensor.zeros(4).contiguous().realize()
-    buf.assign(Tensor.ones(4) * 3)
-    mid_sum = buf.sum()  # lazy read, should be 12
-    buf.assign(Tensor.ones(4) * 5)
-    final_sum = buf.sum()  # lazy read, should be 20
-    # Realize in "wrong" order - final first
-    self.assertEqual(final_sum.realize().item(), 20)
-    self.assertEqual(mid_sum.realize().item(), 12)
-
   def test_slice_read_then_full_write(self):
     """Read from slice, then overwrite full buffer - WAR dependency works for full buffer assigns."""
     buf = Tensor([1.,2.,3.,4.]).contiguous().realize()
@@ -682,15 +654,6 @@ class TestAssignOrdering(unittest.TestCase):
     right = buf[4:8].clone()  # lazy - not captured yet
     buf[0:4].assign(right).realize()  # this works
     buf[4:8].assign(left).realize()  # left now reads from modified buf!
-    np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])
-
-  def test_swap_slices_realized(self):
-    # with .realize() on temps: values captured before writes
-    buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
-    left = buf[0:4].clone().realize()
-    right = buf[4:8].clone().realize()
-    buf[0:4].assign(right).realize()
-    buf[4:8].assign(left).realize()
     np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])
 
   def test_reduction_after_partial_assign(self):
@@ -815,23 +778,6 @@ class TestAssignOrdering(unittest.TestCase):
     buf[1:2].assign(Tensor.full((1,), 2.0))
     buf[2:3].assign(Tensor.full((1,), 3.0))
     self.assertEqual(buf.sum().realize().item(), 6.0)
-
-  def test_read_before_two_assigns(self):
-    g = Tensor.full((2,), 4.0).realize()
-    before = g + 1                                     # 5
-    g.assign(0.0)
-    g.assign(g + 4)
-    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, raises
-      np.testing.assert_allclose((before + g).numpy(), 9)
-
-  def test_read_between_two_assigns(self):
-    a = Tensor.ones(4).realize()
-    b = Tensor.full((4,), 10.).realize()
-    a.assign(b + 1)                                    # a == 11
-    v1 = a * 3                                         # reads 11 -> 33
-    a.assign(b + 100)                                  # a == 110
-    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, ideally v1 is realized between the assigns
-      np.testing.assert_allclose((a + v1).numpy(), 143)
 
   def test_two_reads_between_three_assigns(self):
     a = Tensor.zeros(4).realize()

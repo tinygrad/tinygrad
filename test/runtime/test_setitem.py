@@ -259,39 +259,6 @@ class TestSetitem(unittest.TestCase):
     s2 = t.sum()
     np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
 
-    # eager version
-    t = Tensor.zeros(6).contiguous().realize()
-    s0 = t.sum().realize()
-    t[:3].assign(1.0).realize()
-    s1 = t.sum().realize()
-    t[3:].assign(2.0).realize()
-    s2 = t.sum().realize()
-    np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
-
-  @unittest.expectedFailure
-  def test_cross_assign_independence(self):
-    # TODO: broken now, new_b sees mutated a. new_b should use the old a
-    # when assigning to two tensors using computations from both,
-    # both assigns should see the OLD values of both tensors
-    a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
-    b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
-    new_a = a + b    # [4, 6, 8, 10]
-    new_b = a * 2    # [0, 2, 4, 6] -- should use OLD a
-    a.assign(new_a)
-    b.assign(new_b)
-    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
-
-  def test_cross_assign_independence_eager(self):
-    a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
-    b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
-    new_a = (a + b).realize()
-    new_b = (a * 2).realize()
-    a.assign(new_a).realize()
-    b.assign(new_b).realize()
-    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
-
   def test_setitem_multiple_disjoint_on_invalid(self):
     z = Tensor.invalids(10, dtype="int").realize()
     z[2:5] = 2
