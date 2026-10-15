@@ -87,10 +87,8 @@ class TestAsmCFG(unittest.TestCase):
     from tinygrad.renderer.amd.dsl import s
     code = b"".join((s_mov_b32(s[2], 0).to_bytes(), s_add_u32(s[2], s[2], 1).to_bytes(), s_cmp_lt_i32(s[2], 4).to_bytes(),
                      s_cbranch_scc1(simm16=-3).to_bytes(), s_endpgm().to_bytes()))
-    dispatch = (32, 1, 1, 0x19c, 0, 0)
-    insts = call.amd_decode(code, "rdna3")
-    first = call._lift(insts, "rdna3", "PYTHON", dispatch)
-    second = call._lift(insts, "rdna3", "PYTHON", dispatch)
+    buffers = [ctypes.create_string_buffer(code) for _ in range(2)]
+    first, second = [call.lift(ctypes.addressof(buf), len(code), 32, 1, 1, 0x19c, 0, "rdna3", 0, "PYTHON") for buf in buffers]
     self.assertEqual(first.src[0].key, second.src[0].key)
 
 

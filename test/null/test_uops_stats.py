@@ -106,14 +106,14 @@ class TestUOpsStats(unittest.TestCase):
     bound = buf.index(0).load().cast(dtypes.int).after(buf.index(0).store(True))
     r = UOp.range(bound, 0)
     add = UOp.const(1, dtypes.int) + UOp.const(2, dtypes.int)
-    est = Estimates.from_uops((r, add, add.end(r)))
+    est = Estimates.from_uops((r, add, add.sink().end(r)))
     self.assertEqual(est, Estimates(ops=1))
 
   def test_ordered_symbolic_range(self):
     n = UOp.variable("n", 1, 32)
     r = UOp.range((n*2).after(UOp.param(0, dtypes.int, 1).index(0).store(1)), 0)
     add = UOp.const(1, dtypes.int) + UOp.const(2, dtypes.int)
-    est = Estimates.from_uops((r, add, add.end(r)))
+    est = Estimates.from_uops((r, add, add.sink().end(r)))
     self.assertEqual(sym_infer(est.ops, {"n":3}), 6)
 
   def test_isa_store_estimate(self):

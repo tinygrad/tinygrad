@@ -199,9 +199,10 @@ class PM4Executor(AMDQueue):
       try: user_data.append(self.gpu.regs[regCOMPUTE_USER_DATA_0 + i])
       except KeyError: user_data.append(0)
 
+    # Kernels can span adjacent page mappings.
     prg_sz = 0
-    for st,sz in self.gpu.mapped_ranges:
-      if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
+    for st,sz in sorted(self.gpu.mapped_ranges):
+      if st <= prg_addr+prg_sz < st+sz: prg_sz = st+sz-prg_addr
 
     # Get scratch size from COMPUTE_TMPRING_SIZE register
     # WAVESIZE = ceildiv(lanes * size_per_thread, mem_alignment_size)
