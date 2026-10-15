@@ -111,23 +111,18 @@ def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   new_ranges = list(ctx.range_map[x][0][:x.arg[1]])
   return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
 
-def _stack_select(r0:UOp, srcs:list[UOp], lo:int, hi:int) -> UOp:
-  # Bound lookup depth for large constant tables, rather than building a linear chain of thousands of WHEREs.
-  if hi-lo <= 8:
-    ret = srcs[hi-1]
-    for k in range(hi-2, lo-1, -1): ret = r0.eq(k).where(srcs[k], ret)
-    return ret
-  mid = (lo+hi)//2
-  return (r0 < mid).where(_stack_select(r0, srcs, lo, mid), _stack_select(r0, srcs, mid, hi))
+def _stack_select(r0:UOp, srcs:list[UOp]) -> UOp:
+  # MSB-first bit tree
+  if len(srcs) == 1: return srcs[0]
+  half = 1 << ((len(srcs)-1).bit_length()-1)
+  return (r0 % (2*half) < half).where(_stack_select(r0, srcs[:half]), _stack_select(r0, srcs[half:]))
 
 def convert_stack_to_where(ctx:IndexingContext, x:UOp):
   # only data STACKs: shape tuple STACKs aren't in range_map
   if x not in ctx.range_map: return None
   # use the src list directly, a transient STACK of mid-rangeify srcs violates the spec shape rule
   srcs = create_bufferize_and_index_srcs(ctx, x)
-  r0 = ctx.range_map[x][1][0]
-  ret = _stack_select(r0, srcs, 0, len(srcs))
-  return (r0 < 0).where(srcs[-1], ret) if len(srcs) > 8 else ret
+  return _stack_select(ctx.range_map[x][1][0], srcs)
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
@@ -179,7 +174,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
-      sub_array = {r:r.replace(src=r.src[:1], arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
+      sub_array = {r:r.replace(arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs

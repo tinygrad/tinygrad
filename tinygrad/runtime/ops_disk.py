@@ -5,7 +5,7 @@ from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
 from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
-from tinygrad.runtime.support.hcq2 import ccall, ins, patch
+from tinygrad.runtime.support.hcq2 import ccall, ins, patch, submits
 with contextlib.suppress(ImportError):
   import _posixshmem
   from tinygrad.runtime.autogen import io_uring, libc
@@ -118,7 +118,7 @@ def is_disk_read(c:UOp) -> bool:
   return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring())
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
-  lins = [submit.without_after.src[1].without_after for submit in s.src]
+  lins = [c.body for c in submits(s)]
   if not (copies:=[c for lin in lins for c in lin.src if is_disk_read(c)]): return None
   rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
   sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
@@ -146,7 +146,8 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
     for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
       n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
       gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
-  return s.replace(src=(*s.src, done)).substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins})
+  gpu = {lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins}
+  return s.replace(src=(done,)).substitute(gpu, enter_calls=True)
 Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"), disk_copy_rewriter)])
 
 # *****************
@@ -158,7 +159,7 @@ def shared(fd:int, at:int, n:int) -> Buffer: # n bytes of memory the kernel shar
 @functools.cache
 def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None: # fd, offsets, the rings (heads, tails, cqes), the sqes
   if sys.platform != "linux" or hasattr(sys, "getandroidapilevel"): return None
-  p = io_uring.struct_io_uring_params(flags=io_uring.IORING_SETUP_NO_SQARRAY)
+  p = io_uring.struct_io_uring_params(flags=io_uring.IORING_SETUP_NO_SQARRAY)  # type: ignore[unreachable]
   if (fd:=libc.syscall(io_uring.NR_io_uring_setup, RING_ENTRIES, ctypes.byref(p))) < 0: return None
   return fd, p, shared(fd, io_uring.IORING_OFF_SQ_RING, p.cq_off.cqes + 16 * p.cq_entries), shared(fd, io_uring.IORING_OFF_SQES, 64 * RING_ENTRIES)
 

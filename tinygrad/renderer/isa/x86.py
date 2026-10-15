@@ -319,7 +319,7 @@ def copy_op(dt:DType) -> X86Ops:
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
-  (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
+  (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),))),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
@@ -497,7 +497,7 @@ def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   if x.dtype is dtypes.void: return (label, [label])
   else:
     # an AFTER-wrapped bound carries the loop's ordering deps, they keep the acc unique per loop (hash-consing)
-    bound, deps = ((b:=x.src[0]).src[0], b.src[1:]) if (b:=x.src[0]).op is Ops.AFTER else (x.src[0], x.src[1:])
+    bound, deps = ((b:=x.src[0]).src[0], b.src[1:]) if (b:=x.src[0]).op is Ops.AFTER else (x.src[0], ())
     acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + tuple(deps))
     cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if bound.op is Ops.CAST else X86Ops.CMP, dtypes.void), src=(acc, bound))
     jump_out = UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(cmp,), tag=f".LOOP_OUT_{loop_label}")

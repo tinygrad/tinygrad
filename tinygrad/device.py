@@ -2,12 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
+import importlib, inspect, functools, itertools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV
-from tinygrad.dtype import dtypes, DType
+from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV, to_tuple
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 # **************** Device ****************
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
+HOST_DEVS = frozenset(("CPU", "PYTHON"))
+UVM_DEVS = frozenset(("QCOM", "METAL")) # the host maps their memory, so copies are host memcpys
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -64,7 +67,7 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
 def is_disk_device(device:str|tuple[str, ...]) -> bool:
-  return any(d.split(":", 1)[0].upper() == "DISK" for d in ((device,) if isinstance(device, str) else device))
+  return any(d.split(":", 1)[0].upper() == "DISK" for d in to_tuple(device))
 
 # **************** Profile ****************
 
@@ -339,20 +342,20 @@ class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
-  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
+  signature: tuple[tuple[str|None, AddrSpace, DType, tuple], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
+  def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+    for _,a,dt,_ in signature:
+      if a is not AddrSpace.ALU: dt = dtypes.uint64 # a buffer is passed by its address
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
-               wait=False) -> float|None: pass
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False) -> float|None: pass
 
 class Compiled:
   ifaces:list[Callable] = []
@@ -474,14 +477,13 @@ class Compiled:
   # profiling
 
   def collect_prof(self):
-    if PROFILE:
-      es = list(self.prof_ents.items())
-      sigs = [buf.host.view(fmt='Q')[i]/decimal.Decimal(self.timestamp_divider) for (buf, _), e in es for i in (e.st_id, e.en_id)]
-      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_, e) in enumerate(es)], [], sigs))
+    div = decimal.Decimal(self.timestamp_divider)
+    for buf, g in itertools.groupby(self.prof_ents.items(), key=lambda x: x[0][0]) if PROFILE else []:
+      Compiled.profile_events.append(ProfileGraphEvent([e for _, e in g], [], [t/div for t in buf.host.view(fmt='Q')[:]]))
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
-    if not self.pm_encode.patterns: return
+    if self.device.split(":")[0] not in HCQ_DEVS: return
     from tinygrad.tensor import Tensor
     tdiffs = []
     for _ in range(5):

@@ -1,5 +1,5 @@
 # pylint: disable=possibly-unused-variable
-from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
+from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, Callable
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, is_numpy_ndarray
@@ -146,46 +146,31 @@ class OnnxPBParser:
     start_pos = self.reader.tell()
     return start_pos + str_len
 
+  def _parse_fields(self, obj:dict[str, Any], fields:dict[int, tuple[str, Callable[[], Any]]], end_pos:int|None=None) -> dict[str, Any]:
+    repeated = {k for k,v in obj.items() if isinstance(v, list)}
+    for fid, wire_type in self._parse_message(self._decode_end_pos() if end_pos is None else end_pos):
+      if (f := fields.get(fid)) is None: self.reader.skip_field(wire_type)
+      elif f[0] in repeated: obj[f[0]].append(f[1]())
+      else: obj[f[0]] = f[1]()
+    return obj
+
   def _parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
-    obj: dict[str, Any] = {"opset_import": []}
-    for fid, wire_type in self._parse_message(self.reader.len):
-      if fid == 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
-      else: self.reader.skip_field(wire_type)
+    obj = self._parse_fields({"opset_import": []}, {8: ("opset_import", self._parse_OperatorSetIdProto)}, self.reader.len)
     self.opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
     self.reader.seek(0)
-    for fid, wire_type in self._parse_message(self.reader.len):
-      match fid:
-        case 4: obj["domain"] = self.reader.read_string()
-        case 5: obj["model_version"] = self.reader.read_int64()
-        case 7: obj["graph"] = self._parse_GraphProto()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields(obj, {4: ("domain", self.reader.read_string), 5: ("model_version", self.reader.read_int64),
+                                    7: ("graph", self._parse_GraphProto)}, self.reader.len)
 
   def _parse_GraphProto(self) -> dict:
-    obj: dict[str, Any] = {"node": [], "initializer": [], "input": [], "output": []}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["node"].append(self._parse_NodeProto())
-        case 2: obj["name"] = self.reader.read_string()
-        case 5: obj["initializer"].append(self._parse_TensorProto())
-        case 11: obj["input"].append(self._parse_ValueInfoProto())
-        case 12: obj["output"].append(self._parse_ValueInfoProto())
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({"node": [], "initializer": [], "input": [], "output": []}, {1: ("node", self._parse_NodeProto),
+      2: ("name", self.reader.read_string), 5: ("initializer", self._parse_TensorProto), 11: ("input", self._parse_ValueInfoProto),
+      12: ("output", self._parse_ValueInfoProto)})
 
   def _parse_NodeProto(self) -> dict:
-    obj: dict[str, Any] = {"input": [], "output": [], "attribute": [], "domain": None}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["input"].append(self.reader.read_string())
-        case 2: obj["output"].append(self.reader.read_string())
-        case 3: obj["name"] = self.reader.read_string()
-        case 4: obj["op_type"] = self.reader.read_string()
-        case 5: obj["attribute"].append(self._parse_AttributeProto())
-        case 6: obj["doc_string"] = self.reader.read_string()
-        case 7: obj["domain"] = self.reader.read_string()
-        case _: self.reader.skip_field(wire_type)
+    obj = self._parse_fields({"input": [], "output": [], "attribute": [], "domain": None}, {1: ("input", self.reader.read_string),
+      2: ("output", self.reader.read_string), 3: ("name", self.reader.read_string), 4: ("op_type", self.reader.read_string),
+      5: ("attribute", self._parse_AttributeProto), 6: ("doc_string", self.reader.read_string), 7: ("domain", self.reader.read_string)})
 
     # parse node
     attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in obj["attribute"]}
@@ -194,25 +179,15 @@ class OnnxPBParser:
     return obj
 
   def _parse_TensorProto(self) -> dict:
-    obj: dict[str, Any] = {"dims": []}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["dims"].append(self.reader.read_int64())
-        case 2: obj["data_type"] = self.reader.read_int64()
-        case 4: obj["float_data"] = self.reader.read_packed_floats()
-        case 5: obj["int32_data"] = self.reader.read_packed_int64s()
-        case 7: obj["int64_data"] = self.reader.read_packed_int64s()
-        case 8: obj["name"] = self.reader.read_string()
-        case 9: obj["raw_data"] = self.reader.read_bytes()
-        case 10: obj["double_data"] = self.reader.read_packed_floats()
-        case 11: obj["uint64_data"] = self.reader.read_packed_int64s()
-        case 13: obj.setdefault("external_data", []).append(self._parse_StringStringEntryProto())
-        case 14: obj["data_location"] = self.reader.read_int64()
-        case _: self.reader.skip_field(wire_type)
+    obj = self._parse_fields({"dims": [], "external_data": []}, {1: ("dims", self.reader.read_int64), 2: ("data_type", self.reader.read_int64),
+      4: ("float_data", self.reader.read_packed_floats), 5: ("int32_data", self.reader.read_packed_int64s),
+      7: ("int64_data", self.reader.read_packed_int64s), 8: ("name", self.reader.read_string), 9: ("raw_data", self.reader.read_bytes),
+      10: ("double_data", self.reader.read_packed_floats), 11: ("uint64_data", self.reader.read_packed_int64s),
+      13: ("external_data", self._parse_StringStringEntryProto), 14: ("data_location", self.reader.read_int64)})
 
     # load external data
     if self.load_external_data and obj.get("data_location", 0) == 1:
-      if "external_data" not in obj: raise ValueError("no external_data")
+      if not obj["external_data"]: raise ValueError("no external_data")
       location, length, offset = None, None, 0
       for kv in obj["external_data"]:
         if kv["key"] == "location": location = kv["value"]
@@ -250,30 +225,15 @@ class OnnxPBParser:
     return obj
 
   def _parse_AttributeProto(self) -> dict:
-    obj: dict[str, Any] = {"floats": [], "ints": [], "strings": []}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["name"] = self.reader.read_string()
-        case 2: obj["f"] = self.reader.read_float()
-        case 3: obj["i"] = self.reader.read_int64()
-        case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
-        case 5: obj["t"] = self._parse_TensorProto()['parsed_tensor']
-        case 6: obj["g"] = OnnxRunner._from_subgraph(self._parse_GraphProto())
-        case 7: obj["floats"].append(self.reader.read_float())
-        case 8: obj["ints"].append(self.reader.read_int64())
-        case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
-        case 20: obj["type"] = self.reader.read_int64()
-        case _: self.reader.skip_field(wire_type)
+    obj = self._parse_fields({"floats": [], "ints": [], "strings": []}, {1: ("name", self.reader.read_string), 2: ("f", self.reader.read_float),
+      3: ("i", self.reader.read_int64), 4: ("s", self.reader.read_string), 5: ("t", lambda: self._parse_TensorProto()['parsed_tensor']),
+      6: ("g", lambda: OnnxRunner._from_subgraph(self._parse_GraphProto())), 7: ("floats", self.reader.read_float),
+      8: ("ints", self.reader.read_int64), 9: ("strings", self.reader.read_string), 20: ("type", self.reader.read_int64)})
     obj["floats"], obj["ints"], obj["strings"] = tuple(obj["floats"]), tuple(obj["ints"]), tuple(obj["strings"])
     return obj
 
   def _parse_ValueInfoProto(self) -> dict:
-    obj: dict[str, Any] = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["name"] = self.reader.read_string()
-        case 2: obj["type"] = self._parse_TypeProto()
-        case _: self.reader.skip_field(wire_type)
+    obj = self._parse_fields({}, {1: ("name", self.reader.read_string), 2: ("type", self._parse_TypeProto)})
 
     # parse type
     if "type" not in obj: return {**obj, "parsed_type": None}
@@ -287,66 +247,26 @@ class OnnxPBParser:
     return obj
 
   def _parse_TypeProto(self) -> dict:
-    obj: dict[str, Any] = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["tensor_type"] = self._parse_TypeProtoTensor()
-        case 4: obj["sequence_type"] = self._parse_TypeProtoWrapper()
-        case 9: obj["optional_type"] = self._parse_TypeProtoWrapper()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({}, {1: ("tensor_type", self._parse_TypeProtoTensor), 4: ("sequence_type", self._parse_TypeProtoWrapper),
+                                   9: ("optional_type", self._parse_TypeProtoWrapper)})
 
   def _parse_TypeProtoTensor(self) -> dict:
-    obj: dict[str, Any] = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["elem_type"] = self.reader.read_int64()
-        case 2: obj["shape"] = self._parse_TensorShapeProto()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({}, {1: ("elem_type", self.reader.read_int64), 2: ("shape", self._parse_TensorShapeProto)})
 
   def _parse_TypeProtoWrapper(self) -> dict:
-    obj = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["elem_type"] = self._parse_TypeProto()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({}, {1: ("elem_type", self._parse_TypeProto)})
 
   def _parse_TensorShapeProto(self) -> dict:
-    obj: dict[str, Any] = {"dim": []}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["dim"].append(self._parse_TensorShapeProtoDimension())
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({"dim": []}, {1: ("dim", self._parse_TensorShapeProtoDimension)})
 
   def _parse_TensorShapeProtoDimension(self) -> dict:
-    obj: dict[str, Any] = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["dim_value"] = self.reader.read_int64()
-        case 2: obj["dim_param"] = self.reader.read_string()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({}, {1: ("dim_value", self.reader.read_int64), 2: ("dim_param", self.reader.read_string)})
 
   def _parse_StringStringEntryProto(self) -> dict:
-    obj: dict[str, Any] = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["key"] = self.reader.read_string()
-        case 2: obj["value"] = self.reader.read_string()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({}, {1: ("key", self.reader.read_string), 2: ("value", self.reader.read_string)})
 
   def _parse_OperatorSetIdProto(self) -> dict:
-    obj: dict[str, Any] = {}
-    for fid, wire_type in self._parse_message(self._decode_end_pos()):
-      match fid:
-        case 1: obj["domain"] = self.reader.read_string()
-        case 2: obj["version"] = self.reader.read_int64()
-        case _: self.reader.skip_field(wire_type)
-    return obj
+    return self._parse_fields({}, {1: ("domain", self.reader.read_string), 2: ("version", self.reader.read_int64)})
 
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
@@ -683,9 +603,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd).where(x+bias, (x > lambd).where(x-bias, 0)).cast(x.dtype)
   def Transpose(x:Tensor, perm:tuple[int, ...]|None=None): return x.permute(order=perm or list(range(x.ndim)[::-1]))
 
-  def Squeeze(data:Tensor, axes:Sequence[int]|None=None):
-    if axes is None: return data.squeeze()
-    return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(map(data._resolve_dim, axes), reverse=True), data)
+  def Squeeze(data:Tensor, axes:Sequence[int]|None=None): return data.squeeze(axes)
   def Unsqueeze(data:Tensor, axes:Sequence[int]):
     return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(data._resolve_dim(a, extra=len(axes)) for a in axes), data)
 
