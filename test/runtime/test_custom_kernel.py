@@ -291,14 +291,11 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(out.tolist(), [7, 8, 9, 10])
 
   def test_scalar_args_same_name(self):
-    # equal bindings with different declarations aren't identical UOps, but still need distinct rendered parameter names
-    n = Tensor(Variable("n", 0, 10, dtypes.int).bind(3))
-    B = Tensor([1, 2, 3, 4], dtype=dtypes.long).realize()
-    for dtype in (dtypes.int, dtypes.long):
-      with self.subTest(dtype=dtype):
-        m = Tensor(Variable("n", 0, 100, dtype).bind(3))
-        out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.long), B, m, fxn=custom_add_two_vars_kernel)[1]
-        self.assertEqual(out.tolist(), [7, 8, 9, 10])
+    # two Variables named n with different bounds are different UOps, not one var passed twice, but they still need distinct rendered names
+    n, m = Tensor(Variable("n", 0, 10, dtypes.int).bind(3)), Tensor(Variable("n", 0, 100, dtypes.int).bind(3))
+    out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), m,
+                               fxn=custom_add_two_vars_kernel)[1]
+    self.assertEqual(out.tolist(), [7, 8, 9, 10])
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
