@@ -364,7 +364,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # commit every const still bare so no renderer reads one
-  sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
+  sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
