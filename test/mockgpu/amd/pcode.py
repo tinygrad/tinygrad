@@ -572,7 +572,6 @@ class Parser:
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/', '%'), ('**',)]
 
-
   def binop(self, prec: int) -> UOp:
     if prec >= len(self._PREC): return self.unary()
     left = self.binop(prec + 1)
