@@ -13,7 +13,6 @@ from tinygrad.dtype import dtypes, AddrSpace
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_group_gpudims, pm_range_to_special
 from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid, invalid_gate
-from tinygrad.uop.symbolic import pm_data_invalid
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import DTypeDecompCtx, pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
@@ -287,12 +286,7 @@ def remove_range(sink:UOp):
     return RangeCtx(acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), gate)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
-  cleanups = pm_data_invalid+pm_move_gates_from_index+pm_remove_invalid
-  return graph_rewrite(graph_rewrite(sink, pm_end_to_backedge, ctx=ctx, bottom_up=True), cleanups)
-
-def cur_acc(ctx:RangeCtx, x:UOp):
-  acc = ctx.acc.after(*((ctx.loop, ctx.gate) if ctx.gate is not None else (ctx.loop,)))[0].load()
-  return acc.valid(acc < x.src[0])
+  return graph_rewrite(sink, pm_end_to_backedge, ctx=ctx, bottom_up=True)
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
@@ -300,7 +294,8 @@ def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate,)).after(end)
 
 pm_end_to_backedge = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: cur_acc(ctx[x],x) if x in ctx else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: (cur:=ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
+    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load()).valid(cur < x.src[0]) if x in ctx else None),
   (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"),
     lambda body,bnd,rng,x,ctx: close_range(ctx[rng], x, rng, bnd, body) if rng in ctx else None)
 ])
