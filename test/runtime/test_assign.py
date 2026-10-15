@@ -1042,12 +1042,8 @@ class TestAssignToUnrealizedView(unittest.TestCase):
   def test_const(self):
     c = Tensor(5).reshape(1, 1).expand(2, 2)
     self.assertIs(c.uop.base.op, Ops.CONST)
-    c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
-    try:
-      self.assertEqual(c.tolist(), [[5,1],[5,1]])
-    except AssertionError:
-      # TODO: broken now, silently dropped
-      self.assertEqual(c.tolist(), [[5,5],[5,5]])
+    with self.assertRaises(RuntimeError):
+      c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
 
   def test_detach_assignment_preserves_earlier_update(self):
     x = Tensor([1., 2.]).detach()
