@@ -48,8 +48,6 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
   if sel.op is not Ops.MSELECT: return sel, None, off
   return (inner:=unwrap_view(sel.src[0]))[0], sel.arg, off + inner[1]
 
-def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTACK else u.mselect(lane) if len(to_tuple(u.device)) > 1 else u
-
 # **** commands
 
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.alloc((2,), dtypes.u64, 0, device=devs[0]).rtag("timeline")
@@ -121,8 +119,8 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b:
 def unwrap_call(call:UOp) -> UOp|None:
   if not get_enqueue_devs(call) or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
   dnum = UOp.variable("_device_num", 0, n - 1, dtypes.i32)
-  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
-                                   for i in range(n)))
+  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a.src[i] if a.op is Ops.MSTACK else a.mselect(i) if len(to_tuple(a.device)) > 1
+                                                                   else a for a in call.src[1:]], dnum.bind(i))) for i in range(n)))
 pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
