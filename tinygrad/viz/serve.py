@@ -566,7 +566,8 @@ def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
   while offset < len(buf):
     if code_end and view[offset:offset+len(code_end)] == code_end: break
     remaining = view[offset:]
-    fmt = detect_format(remaining, arch)
+    try: fmt = detect_format(remaining, arch)
+    except ValueError: break
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
     offset += decoded.size()
