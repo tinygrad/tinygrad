@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, MapCtx, shape_to_shape_arg
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, shape_to_shape_arg
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
@@ -21,7 +21,6 @@ def reindex(idx:UOp, off:int, mul=2) -> UOp:
 def l2i(op: Ops, dt: DType, *uops:UOp):
   zero = UOp.const(0, dt)
   if len(uops) == 2: a0, a1 = uops
-  elif len(uops) == 3: a0, a1, b0 = uops  # a shift's count is a single word
   elif len(uops) == 4: a0, a1, b0, b1 = uops
   match op:
     case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
@@ -86,13 +85,10 @@ def l2i_define(x:UOp) -> UOp:
   size = shape_to_shape_arg((x.max_numel()*2,)) if x.shape else x.src[0]
   return x.replace(arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(size, *x.src[1:]))
 
-def split_l2i(ctx:dict, op: Ops, dt: DType, *uops:UOp):
-  # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself.
-  # both word halves of a node ask for the same split, so ctx memos it for the pass
-  if (key:=(op, dt, uops)) not in ctx: ctx[key] = l2i(op, dt, *graph_rewrite(UOp.sink(*uops), pm_long_decomp, ctx=ctx, bottom_up=True).src)
-  return ctx[key]
-
-def l2i_rewrite_idx(ctx:dict, idx:UOp) -> UOp: return graph_rewrite(idx, pm_long_decomp, ctx=ctx, bottom_up=True)
+# the pair of a long is the long bitcast to two words, its words are the pair's lanes
+def l2i_pair(x:UPat) -> UPat: return UPat(Ops.BITCAST, src=(UPat(Ops.STACK, src=(x,)),), name='p')
+def l2i_words(*uops:UOp) -> list[UOp]:
+  return flatten(((p:=UOp(Ops.STACK, src=(u,)).bitcast(l2i_dt[u.dtype])).index(0), p.index(1)) if u.dtype in l2i_dt else (u,) for u in uops)
 
 # ***** floats *****
 f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
@@ -150,47 +146,36 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 
 def f2f_rewrite(ctx:FloatDecompCtx, x:UOp) -> UOp: return graph_rewrite(x, pm_float_decomp, ctx=ctx, bottom_up=True)
 
-# tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp: PatternMatcher = PatternMatcher([
   # the decomp's own bottom-up rewrite can mint bare consts mid-flight: word splitting commits them at the long sibling's dtype
   (UPat(GroupOp.All, name='x'), lambda x: commit_weak_consts(x, next((s.dtype for s in x.src if s.dtype in l2i_dt), None))),
   (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), name="x"), l2i_define),
-  (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
-   reindex(x, x.tag[0]).replace(tag=None) if x.tag is not None else None),
-  (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:
-   st.replace(src=(idx.rtag((0, dt:=l2i_dt[idx.dtype])), val.rtag((0, dt)))).group(
-     st.replace(src=(idx.rtag((1, dt)), val.rtag((1, dt))))) if val.tag is None else None),
-  (UPat(GroupOp.Comparison, src=[UPat.var('a', tuple(l2i_dt.keys())), UPat()], name="x"), lambda ctx,a,x:
-   split_l2i(ctx, x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
-  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
-   split_l2i(ctx, Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
-  # a const splits by value; the general CAST arm below would drop its high word
-  (UPat(Ops.CAST, src=(UPat(Ops.CONST, name='c'),), tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'),
-   lambda x,c: UOp.const(truncate[x.tag[1]](c.val >> (32*x.tag[0])), x.tag[1])),
-  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda ctx,a,x:
-   split_l2i(ctx, x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
-  (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
-   split_l2i(ctx, x.op, x.dtype, a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt))) if x.dtype not in l2i_dt and a.tag is None else None),
-  (UPat((Ops.SHL, Ops.SHR), tuple(l2i_dt.keys()), src=(UPat.var('a'), UPat.var('b')), name="x"), lambda ctx,a,b,x:
-   split_l2i(ctx, x.op, dt:=l2i_dt[x.dtype], a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)))[x.tag[0]] if x.tag is not None else None),
-  (UPat(Ops.WHERE, tuple(l2i_dt.keys()), src=(UPat.var('c'), UPat.var('a'), UPat.var('b')), name="x"), lambda ctx,a,b,c,x:
-   split_l2i(ctx, x.op, dt:=l2i_dt[x.dtype], c, a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)), b.rtag((1, dt)))[x.tag[0]]
-   if x.tag is not None else None),
-  (UPat((*(GroupOp.ALU - GroupOp.Comparison - {Ops.SHL, Ops.SHR, Ops.WHERE}), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda ctx,x:
-   split_l2i(ctx, x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
-   if x.tag is not None else None),
-  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda ctx,x,idx:
-   reindex(l2i_rewrite_idx(ctx, idx), x.tag[0]).replace(tag=None).load() if x.tag is not None else None)
+  # long stores, comparisons and casts out of long consume the words of their long srcs, a stored word is no longer long
+  (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
+   UOp.group(*(st.replace(src=(reindex(idx, w), v)) for w,v in enumerate(l2i_words(val))))),
+  (UPat(GroupOp.Comparison, src=[UPat.var('a', tuple(l2i_dt.keys())), UPat()], name="x"), lambda a,x: l2i(x.op, l2i_dt[a.dtype], *l2i_words(*x.src))),
+  (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
+   l2i(x.op, x.dtype, *l2i_words(a)) if x.dtype not in l2i_dt else None),
+  # a pair becomes the STACK of the long's two words
+  (l2i_pair(UPat(Ops.LOAD, src=(UPat.var('idx'),))), lambda p,idx: UOp(Ops.STACK, src=tuple(reindex(idx, w).load() for w in (0, 1)))),
+  # a const splits by value, the general CAST below would drop its high word
+  (l2i_pair(UPat(Ops.CAST, src=(UPat(Ops.CONST, name='c'),))), lambda p,c:
+   UOp(Ops.STACK, src=tuple(UOp.const(truncate[p.dtype](c.val >> (32*w)), p.dtype) for w in (0, 1)))),
+  (l2i_pair(UPat(Ops.CAST, src=(UPat.var('a'),), name='x')), lambda p,a,x:
+   UOp(Ops.STACK, src=l2i(x.op, x.dtype, a)) if a.dtype not in l2i_dt else None),
+  # a cast between long dtypes reinterprets the words, a bare const src commits at the long dtype
+  (l2i_pair(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='x')), lambda p,x:
+   UOp(Ops.STACK, src=l2i(Ops.BITCAST if x.op is Ops.CAST else x.op, p.dtype, *l2i_words(*commit_weak_consts(x, x.dtype).src)))),
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name='s'), UPat.cvar('w'))), lambda s,w: s.src[w.arg]),
 ])
 
 # float decomposition patterns
 pm_float_decomp: PatternMatcher = PatternMatcher([
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x:
-   UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx.fr]), tag=ctx.fr) if x.dtype == ctx.fr else None),
+   x.replace(arg=replace(x.arg, dtype=f2f_dt[ctx.fr])) if x.dtype == ctx.fr else None),
   # INDEX into a LOAD/STACK selects a lane of an already converted value, the load rules below own those
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(GroupOp.All-{Ops.LOAD, Ops.STACK}),), allow_any_len=True, name="x"), lambda ctx,x:
-   UOp(x.op, src=(f2f_rewrite(ctx, x.src[0]), *x.src[1:]), arg=x.arg, tag=ctx.fr)
-   if x.dtype == ctx.fr else None),
+   x.replace(src=(f2f_rewrite(ctx, x.src[0]), *x.src[1:])) if x.dtype == ctx.fr else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, ctx.fr, ctx.to) if x.dtype == ctx.fr else None),
   # bitcasted load should just replace load
   (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
@@ -204,11 +189,11 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
    f2f_clamp(val.cast(ctx.to), ctx.fr) if x.dtype == ctx.fr else None),
   (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, dtypes.floats, name="x"), lambda ctx,x:
-   UOp(x.op, src=tuple(s.cast(ctx.to) if s.dtype == ctx.fr else s for s in x.src), arg=x.arg, tag=x.tag) if x.dtype == ctx.fr else None),
+   x.replace(src=tuple(s.cast(ctx.to) if s.dtype == ctx.fr else s for s in x.src)) if x.dtype == ctx.fr else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
-   st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx.fr]))) if val.dtype == ctx.fr and idx.tag == ctx.fr else None),
+   st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx.fr]))) if val.dtype == ctx.fr and idx.dtype == f2f_dt[ctx.fr] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx").or_casted(), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
-   f2f_store(st, idx, val, ctx.fr, ctx.to) if val.dtype == ctx.to and idx.tag == ctx.fr else None),
+   f2f_store(st, idx, val, ctx.fr, ctx.to) if val.dtype == ctx.to and idx.dtype == f2f_dt[ctx.fr] else None),
 ])
 
 @dataclass
@@ -222,8 +207,7 @@ def do_dtype_decomps(sink:UOp, ctx:DTypeDecompCtx) -> UOp:
     to = dtypes.int if fr == dtypes.long else dtypes.float
     if DEBUG >= 2: print(f"emulating {fr} as {to}")
     pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
-    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=None if pm is pm_long_decomp else FloatDecompCtx(fr, to),
-                         init_ctx=MapCtx if pm is pm_long_decomp else None, bottom_up=True)
+    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=FloatDecompCtx(fr, to), bottom_up=True)
   ctx.dtypes.clear()
   return sink
 

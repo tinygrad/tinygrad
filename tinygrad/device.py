@@ -369,7 +369,6 @@ class Compiled:
   var_vals: dict[str, int] = {}
 
   # hcq2
-  pm_batch:Any = None
   pm_encode:Any = None
   pm_lower:Any = None
   pm_bufferize:Any = None # one for all devices: each adds the rules of the placeholders it owns, its tags start with its name

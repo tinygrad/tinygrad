@@ -267,9 +267,8 @@ class NV_FLCN(NV_IP):
       self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
 
     if stream_gsp and self.nvdev.is_usb: self.nvdev.pci_dev.stream_gsp_boot(self, base)
-    else:
-      self.start_cpu(base)
-      self.wait_cpu_halted(base)
+    else: self.start_cpu(base)
+    self.wait_cpu_halted(base)
 
     if mailbox is not None:
       return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
@@ -356,8 +355,8 @@ class NV_FLCN_COT(NV_IP):
 class NV_GSP(NV_IP):
   def _stage_args(self, data:bytes, offset:int) -> int:
     if not self.nvdev.is_usb: return self.nvdev._alloc_boot_mem(len(data), data=data)[2][0]
-    self.nvdev.pci_dev.usb.write(0xB800 + offset, data + bytes(0x100 - len(data)))
-    return 0x822000 + offset
+    self.gsp_queues[offset:offset+len(data)] = data # unused space in the queue page table
+    return 0x200000 + self.queue_offset + offset
 
   def init_sw(self):
     self.handle_gen, self.chan_runlists = itertools.count(0xcf000000), {}

@@ -39,7 +39,6 @@ class NVUSBPCIDevice(USBPCIDevice):
       while armed < min(total, slots + sent): self.usb.usb.control_write(0xF2, SLOT//512, (ring_start//SLOT + ((armed:=armed+1)-1) % slots) | (1<<8))
       self.usb.usb.bulk_write(image[sent*SLOT:(sent:=sent+1)*SLOT].ljust(SLOT, b'\x00'))
       self.usb._f0_in()
-    flcn.wait_cpu_halted(base)
 
 class NVReg:
   def __init__(self, nvdev, base, off, fields=None): self.nvdev, self.base, self.off, self.fields = nvdev, base, off, fields
@@ -143,7 +142,7 @@ class NVDev:
 
   def fini(self):
     if self.finalized: return
-    self.gsp.fini_hw()
+    for ip in [self.gsp, self.flcn]: ip.fini_hw()
     self.finalized = True
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]

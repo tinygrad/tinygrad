@@ -154,12 +154,13 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
 # *****************
 # encode rewrite
 
-def rdma_submit(ctx, submit:UOp, lin:UOp, queue:UOp) -> UOp|None:
+def rdma_submit(s:UOp) -> UOp|None:
+  lin, queue = s.without_after.body, s.without_after.src[1]
   if not (queues:={i: queue_of(u) for i, u in enumerate(lin.src) if is_rdma(u)}): return None
 
   ops = [[u] for u in lin.src]
   for q in dict.fromkeys(queues.values()):
     positions = [i for i in queues if queues[i] == q]
     for i, copy_ops in zip(positions, rdma_copies((queue.device,), [lin.src[i] for i in positions])): ops[i] = copy_ops
-  return submit.replace(src=(lin.replace(src=tuple(flatten(ops))), queue))
-pm_rdma_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="lin"), UPat(name="queue")), name="submit"), rdma_submit)])
+  return s.without_after.replace(src=(lin.replace(src=tuple(flatten(ops))), queue)).after(*s.src[1:])
+Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"), rdma_submit)]) + Compiled.pm_encode
