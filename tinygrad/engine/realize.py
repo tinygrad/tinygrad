@@ -20,11 +20,12 @@ def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
   return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
           call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
-def _resolve_call_vars(call:UOp, *vs:sint) -> tuple[sint, ...]:
+def _resolve_call_vars(call:UOp, *vals:sint) -> tuple[sint, ...]:
   # launch dims and estimates get the call's bound values the same way, so two calls of one PROGRAM can bind a var differently
   # the PROGRAM keeps the var: changing it would change its key and upload the same program again for every value
-  if not (b:={s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}): return vs
-  return tuple(v.substitute({u:u.const_like(b[u.expr]) for u in v.variables() if u.expr in b}).ssimplify() if isinstance(v, UOp) else v for v in vs)
+  if not (bound:={s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}): return vals
+  return tuple(v.substitute({u:u.const_like(bound[u.expr]) for u in v.variables() if u.expr in bound}).ssimplify() if isinstance(v, UOp) else v
+               for v in vals)
 def get_call_launch_dims(call:UOp, prg:UOp) -> tuple[tuple[sint, ...], tuple[sint, ...]]:
   return _resolve_call_vars(call, *prg.arg.global_size), _resolve_call_vars(call, *prg.arg.local_size)
 

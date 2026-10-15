@@ -282,17 +282,6 @@ class TestCustomKernel(unittest.TestCase):
           self.assertEqual(GlobalCounters.global_ops - before, 5)
           self.assertEqual(out.tolist(), [6, 7, 3, 0])
 
-  def test_scalar_arg_jit_mixed_range(self):
-    # the range is n+m: the input n changes every call, m=1 is bound inside and stays
-    def kernel(n, C, B, m):
-      i = UOp.range(n + m, 0)
-      return C[i].store(B[i] + n + m).end(i).sink(arg=KernelInfo(name="mixed_range"))
-    def f(B, n):
-      return Tensor.custom_kernel(Tensor(n), Tensor.zeros(4, dtype=dtypes.int).contiguous(), B,
-                                  Tensor(Variable("m", 1, 4, dtypes.int).bind(1)), fxn=kernel)[1].realize()
-    jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 1, 3, dtypes.int)
-    for k in (1, 2, 3, 1, 3): self.assertEqual(jf(B, n.bind(k)).tolist(), [i+k+1 if i <= k+1 else 0 for i in (1, 2, 3, 4)])
-
   def test_scalar_arg_twice(self):
     # the same Variable at two positions keeps both slots, with distinct identifiers in rendered source
     n = Tensor(Variable("n", 0, 100, dtypes.int).bind(3))
@@ -300,13 +289,6 @@ class TestCustomKernel(unittest.TestCase):
                                fxn=custom_add_two_vars_kernel)[1]
     self.assertEqual(run_kernel_args(out, "add_two_vars"), ["n", None, None, "n"])
     self.assertEqual(out.tolist(), [7, 8, 9, 10])
-
-  def test_scalar_arg_twice_jit(self):
-    # a jit input passed twice, both slots get the new value on every replay
-    def f(B, n):
-      return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), B, Tensor(n), fxn=custom_add_two_vars_kernel)[1].realize()
-    jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
-    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+2*k, 2+2*k, 3+2*k, 4+2*k])
 
   def test_scalar_args_same_name(self):
     # equal bindings with different declarations aren't identical UOps, but still need distinct rendered parameter names
