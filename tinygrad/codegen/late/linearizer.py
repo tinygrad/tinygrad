@@ -64,8 +64,8 @@ class CFGContext:
       deps[u] = {}
       for s in u.src_without_body: deps[u] |= deps[s]
 
-      if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
-        nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
+      if u.op in (Ops.END, Ops.BACKEDGE) or u is sink:
+        nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u is sink or u.src[1] in deps[x]) and x not in nesting}
       if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
@@ -74,7 +74,7 @@ class CFGContext:
     for k,v in siblings.items():
       # ranges that have dependencies on other siblings need to be scheduled after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
-      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
+      zipped = zip(order, order[1:]) if k is sink else zip([k.src[1]] + order, order)
       for x,y in zipped:
         # TODO: this can happen! it causes infinite loop in shufflenet
         assert y.src[1] not in x.backward_slice_with_self
