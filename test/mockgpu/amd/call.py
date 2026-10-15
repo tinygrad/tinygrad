@@ -366,13 +366,22 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
       instructions.append((branch_pc, lower_body(route[0].store(target).sink(), renderer, "asm_branch")))
     return instructions, values
 
-  def emit_block(block_pc:int, wave:UOp, end:UOp, scopes:tuple[UOp, ...]) -> list[UOp]:
+  def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     instructions, values = block_instructions(block_pc)
-    if not instructions: return []
+    if not instructions: return end
     off = instructions[0][0]
     body, bufs = instruction_block([(pc-off, info) for pc,info in instructions])
-    args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0].after(end, *scopes).index(wave*buffers[b][1]) for b in bufs]
-    return [body.call(*args, code_addr, UOp.const(off, dtypes.uint64), name="asm_block")]
+    args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
+    args += [code_addr.after(end, *scopes), UOp.const(off, dtypes.uint64), UOp.const(block_pc, dtypes.int)]
+    params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
+                        else AddrSpace.GLOBAL) for i,a in enumerate(args)]
+    # Lower the wave loop with the block, so repeated blocks share its indexing and route check too.
+    w = UOp.range(n_waves, 0, dtype=dtypes.int)
+    gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
+                                                          1, dtype=dtypes.int),)
+    call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*buffers[b][1]) for b,p in zip(bufs, params)]
+    block = UOp.group(body.call(*call_args, *params[-3:-1], name="asm_block"), *gates, w).end(*gates).end(w).sink()
+    return lower_call(renderer, block.call(*args, name="asm_waves"))
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:
@@ -384,11 +393,7 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # Complete the block for every participating wave before entering its successors, including barrier successors.
-        w = UOp.range(n_waves, next(axes), dtype=dtypes.int)
-        gates = () if pc in unconditional else (UOp.range(routes.after(end)[w].load().eq(pc).cast(dtypes.int).after(*scopes),
-                                                      next(axes), dtype=dtypes.int),)
-        block_scopes = gates or (*scopes, w)
-        end = UOp.group(end, *emit_block(pc, w, end, block_scopes), *block_scopes).end(*gates).end(w)
+        end = emit_block(pc, end, scopes)
     return end
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
