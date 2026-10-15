@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from tinygrad.helpers import getenv
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite
 from tinygrad.device import Compiled
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.autogen import hip
@@ -27,13 +27,14 @@ def hipify(c:UOp, f:UOp) -> UOp|None:
   return ccall(fn, *args)
 pm_hipify = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="c"), hipify)])
 
+def hip_encode(s:UOp) -> UOp: return graph_rewrite(CUDAQueue(s).encode(), pm_hipify, enter_calls=True) # the cuda queues encode hip calls
 Compiled.pm_encode += PatternMatcher([
-  (UPat.sink(arg=KernelInfo("hip_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
-  (UPat.sink(arg=KernelInfo("hip_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("hip_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), hip_encode),
+  (UPat.sink(arg=KernelInfo("hip_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), hip_encode),
 ])
 
 class HIPDevice(CUDADevice):
-  api, launch_end, renderers, pm_lower = SimpleNamespace(**HIPIFY), 3, [HIPRenderer], pm_hipify # the cuda queues encode hip calls
+  api, launch_end, renderers = SimpleNamespace(**HIPIFY), 3, [HIPRenderer]
 
   def get_arch(self, device_id:int) -> str:
     return init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, device_id))).gcnArchName.decode().split(":")[0]

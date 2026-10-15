@@ -184,14 +184,14 @@ class MetalAllocator(Allocator['MetalDevice']):
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("metal_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: MetalQueue(s).encode()),
+  # the fence polls the shared event, not the timeline's memory
+  (UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(),
+   lambda p, t: None if p.arg.name != "tl" or not str(p.device).startswith("METAL") else \
+   (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(mtl_handle(p.device, "event").after(t), "signaledValue", out=r))[0]),
 ])
 
 class MetalDevice(Compiled):
   has_copy_queue = False
-  pm_lower = PatternMatcher([
-    (UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), lambda p, t: None if p.arg.name != "tl" else \
-     (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(mtl_handle(p.device, "event").after(t), "signaledValue", out=r))[0])
-  ])
 
   def __init__(self, device:str=""):
     self.sysdevice = metal.MTLCreateSystemDefaultDevice()

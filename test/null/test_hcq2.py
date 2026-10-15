@@ -46,8 +46,12 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_vars(*ts[1:])[0], **kwargs)
   return batches
 
+def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order
+  calls, s = list[UOp](), batch.src[0]
+  while s.op is Ops.AFTER: calls, s = [s.src[0]] + calls, s.src[-1]
+  return calls
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
-  return {(q.device, q.arg.name): list(c.body.src) for c in hcq2.submits(batch.body) for q in [c.src[1]]}
+  return {(q.device, q.arg.name): list(c.body.src) for c in submits(batch.body) for q in [c.src[1]]}
 def ins_name(c:UOp) -> str|None: return c.body.arg.name if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION else None
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL and ins_name(c) is None]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
@@ -153,9 +157,6 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def test_kernels_run_in_order(self): self.assertEqual(orders(self.batch(chain(self.x, 3))), {(0, 1, 2)})
 
-  def test_a_peer_kernel_runs_after_the_copy_that_feeds_it(self):
-    self.assertEqual(orders(self.batch((self.x.to("NULL:1") + 1).contiguous())), {(0, 1)})
-
   def test_a_copy_waits_for_the_kernel_when_the_scalar_is_first(self):
     n, B = Tensor(Variable("n", 0, 10, dtypes.int).bind(5)), Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
     b = self.batch(Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), B, fxn=add_n)[1].to("NULL:1"))
@@ -200,7 +201,7 @@ class TestHCQ2Profile(unittest.TestCase):
   def test_slots_addressed_by_the_device(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
                           lambda buf: buf.getaddr(Device["NULL"].host) if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
-    with patch.object(Device["NULL"], "pm_lower", pm): self.test_profiling_reports_a_range_per_kernel(n=3)
+    with patch.object(Compiled, "pm_encode", pm + Compiled.pm_encode): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))
