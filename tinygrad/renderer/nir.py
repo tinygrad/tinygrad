@@ -203,16 +203,10 @@ class NIRRenderer(Renderer):
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.max_numel()*u.dtype.itemsize
       elif u.op == Ops.RANGE:
-        if u.dtype == dtypes.void:
-          # a RANGE with no bound is a loop header: just open the loop, BACKEDGE supplies its condition
-          ranges.append(None)
-          mesa.nir_push_loop(self.b)
-        else:
-          ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
-          nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
-          mesa.nir_push_loop(self.b)
-          self.r[u] = nload(self.b, AddrSpace.REG, i, u)
-          nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        assert u.dtype == dtypes.void
+        # a RANGE with no bound is a loop header: just open the loop, BACKEDGE supplies its condition
+        ranges.append(None)
+        mesa.nir_push_loop(self.b)
       elif u.op == Ops.BACKEDGE:
         nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
         ranges.pop()

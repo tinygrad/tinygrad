@@ -119,10 +119,6 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx, l: f"WAITLOOP_{ctx.uops.index(l)}:"),
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
     f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"),
-  (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
-    f"mov.u32 {ctx.r[r]}, -1;",
-    f"bra END_{ctx.r[r][1:]};",
-    "LOOP_" + f"{ctx.r[r][1:]}:"]),
   (UPat(Ops.END, name="x", src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda ctx, x, r: [
     "END_" + f"{ctx.r[r][1:]}:",
     ctx.code_for_op[Ops.ADD](ctx.r[r], ctx.r[r], "1", dtypes.int, ctx.types[dtypes.int]),

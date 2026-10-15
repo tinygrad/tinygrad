@@ -16,8 +16,6 @@ base_rewrite = PatternMatcher([
   # range/loop/if/endif
   (UPat(Ops.RANGE, src=(UPat(Ops.CAST, src=(UPat(dtype=dtypes.bool),), name="pred").or_after(),)), lambda ctx,pred: f"if ({ctx[pred]} != 0) {{"),
   (UPat(Ops.RANGE, dtypes.void), lambda ctx: "for (;;) {"),
-  (UPat(Ops.RANGE, name="x"),
-   lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE), UPat(name="c", dtype=dtypes.bool))), lambda ctx,c: f"  if (!({ctx[c]})) {{ break; }}\n}}"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
