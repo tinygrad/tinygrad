@@ -492,7 +492,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     if self.op is Ops.CONST: return self
-    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
+    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src)) for s in self.src): return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
@@ -772,11 +772,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self
 
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
+  @recursive_property
+  def _storage_base(self) -> UOp|None:
+    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: return self.src[0].storage_base
+    return None
   @property
-  def storage_base(self) -> UOp:
-    b = self.unsharded_base
-    while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
-    return b
+  def storage_base(self) -> UOp: return self if (base:=self._storage_base) is None else base
 
   # cached property here makes external_uop_gc fail, why?
   @property
@@ -1320,7 +1321,8 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
   def outlined(*args, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
-    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots, ctx=itertools.count(), walk=True)
+    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots,
+                      init_ctx=CountCtx, walk=True)
     with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values(), name=fn.__name__)
   return functools.wraps(fn)(outlined)
 
@@ -1497,7 +1499,7 @@ class UPat(RandMixin):
 
   # copied from UOp
   def sink(*srcs:UPat|None, **kwargs):  # pylint: disable=no-self-argument
-    return UPat(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
+    return UPat(Ops.SINK, src=tuple([x for x in srcs if x is not None]) or None, **kwargs)
   def index(self, *srcs:UPat|None, **kwargs):
     return UPat(Ops.INDEX, src=(self,)+tuple(x for x in srcs if x is not None), **kwargs)
   def cast(self, dtype=None, **kwargs):
@@ -1512,6 +1514,7 @@ class UPat(RandMixin):
     return UPat(Ops.REDUCE, self.match_dtype, src=(self,)+src, arg=arg, **kwargs)
   def broadcast(self, **kwargs): return UPat(Ops.STACK, self.match_dtype, src=self, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
+  def call(self, *src:UPat, **kwargs): return UPat(Ops.CALL, src=(self,)+src, **kwargs)
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, src=(self,)+src, **kwargs)
   def backedge(self, loop:UPat, cond:UPat, **kwargs): return UPat(Ops.BACKEDGE, src=(self, loop, cond), **kwargs)
 
@@ -1758,6 +1761,13 @@ if TRACK_MATCH_STATS or PROFILE:
 # A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
+
+# common graph rewrite ctx constructors
+
+class CountCtx(itertools.count): pass
+
+class MapCtx(dict): pass
+
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm
@@ -1873,7 +1883,11 @@ class RewriteContext:
     return self.replace[root]
 
 @rewrite_group(new_ctx=False)
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False,
+                  init_ctx:type|None=None) -> UOp:
+  if init_ctx is not None:
+    assert ctx is None
+    ctx = init_ctx()
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 

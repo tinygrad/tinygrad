@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
-from tinygrad.runtime.support.hcq2 import layout_args, make_program
+from tinygrad.runtime.support.hcq2 import layout_args, make_program, ins
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
@@ -106,7 +106,7 @@ def nv_submit(cmdbuf:UOp, ring:UOp, gpput:UOp, doorbell:UOp, put:UOp, token:int)
 class NVQueue(HWQueue):
   dev:NVDevice
   q_rewrite = HWQueue.q_rewrite + PatternMatcher([
-    (UPat(Ops.INS, arg=("nv", dtypes.void), name="u"), lambda ctx, u: ctx.q(*u.src)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("nv"),), allow_any_len=True, name="u"), lambda ctx, u: ctx.q(*u.src[1:])),
   ])
 
   def nvm(self, subc:int, mthd:int|UOp, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
@@ -132,7 +132,7 @@ class NVComputeQueue(NVQueue):
   def __init__(self, submit):
     super().__init__(submit)
 
-    progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
+    progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL and u.body.op is Ops.PROGRAM]
     self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
     self.qmd_buf = UOp.alloc((len(progs) * self.stride,), dtypes.uint8, device=self.devs[0]).rtag(to_name("qmd", self.queue))
@@ -553,15 +553,15 @@ class PCIIface(PCIIfaceBase):
 
 class MOCKIface(NVKIface): count = 1
 
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("nv_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NVComputeQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("nv_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NVCopyQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("nv_encdec_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NVEncDecQueue(s).encode()),
+])
+
 class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
-  pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_compute"), UPat()), name="s"), lambda s: NVComputeQueue(s).encode()),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_copy"), UPat()), name="s"), lambda s: NVCopyQueue(s).encode()),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_encdec"), UPat()), name="s"), lambda s: NVEncDecQueue(s).encode()),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_nv_raw"), UPat()), name="s"), lambda s: NVQueue(s).encode()),
-  ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
@@ -674,10 +674,8 @@ class NVDevice(Compiled):
   def _submit_cmds(self, queue:str, *cmds:int): # channel setup uses the same runtime submit as kernels
     tl = timeline(devs:=(self.device,))
     value = tl.index(1).load()
-    submit = make_submit(
-      UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
-      UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
-      UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue, fn="submit_nv_raw")
+    submit = make_submit(ins("wait", tl, value), ins("nv", UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes())), ins("store", tl, value + 1),
+                         dev=self.device, queue=queue, deps=(tl,))
     call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)

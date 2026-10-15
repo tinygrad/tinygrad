@@ -4,7 +4,7 @@ from typing import Any
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
@@ -81,19 +81,21 @@ class CUDAAllocator(Allocator['CUDADevice']):
     check((api:=self.dev.api).cuCtxSetCurrent(self.dev.context))
     if (status:=api.cuMemHostRegister_v2(host.addr, buf.nbytes, 0)) != cuda.CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:
       check(status) # another device pinned it already
-    return BufferStorage(host.addr, status == cuda.CUDA_SUCCESS)
+    addr = init_c_var(api.CUdeviceptr, lambda x: check(api.cuMemHostGetDevicePointer_v2(ctypes.byref(x), host.addr, 0))).value
+    return BufferStorage(addr, host.addr if status == cuda.CUDA_SUCCESS else None)
   def _unmap(self, mapping:BufferStorage):
-    if mapping.meta: check(self.dev.api.cuMemHostUnregister(mapping.buf))
+    if mapping.meta: check(self.dev.api.cuMemHostUnregister(mapping.meta))
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
+
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("cuda_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
+])
 
 class CUDADevice(Compiled):
   api:Any = cuda
   launch_end = 0 # CU_LAUNCH_PARAM_END
   renderers = [CUDARenderer, PTXRenderer, NVCCRenderer]
-  pm_encode = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_cuda_compute"), UPat()), name="s"), lambda s: CUDAQueue(s).encode()),
-    (UPat(Ops.CALL, src=(UPat.custom_function("submit_cuda_copy"), UPat()), name="s"), lambda s: CUDAQueue(s).encode()),
-  ])
 
   def __init__(self, device:str=""):
     device_id = int(device.split(":")[1]) if ":" in device else 0
