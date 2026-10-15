@@ -286,7 +286,7 @@ def remove_range(sink:UOp):
     return RangeCtx(acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), gate)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
-  return graph_rewrite(sink, pm_end_to_backedge, ctx=ctx, bottom_up=True)
+  return graph_rewrite(sink, pm_end_to_backedge, ctx=ctx, bottom_up=True, name="remove range")
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
@@ -428,11 +428,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
 pm_linearize_cleanups = PatternMatcher([
-  # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate,)), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 
 pm_alloc_to_buf = PatternMatcher([(UPat(Ops.ALLOC, name="x"), lambda x: ((buf:=x.replace(op=Ops.BUFFER)), [buf])),])

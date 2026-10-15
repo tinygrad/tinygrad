@@ -218,8 +218,8 @@ spec_program = PatternMatcher([
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
-  # if has a <gate, index_for_dedup>
-  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
+  # if has a gate
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
   # SPECIAL is int32 after index lowering
