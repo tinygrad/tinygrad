@@ -50,6 +50,14 @@ def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
   run_linear(linear, var_vals)
   return [nm for nm, *_ in sig]
 
+def custom_range_var_kernel(n:UOp, C:UOp, B:UOp) -> UOp:
+  i = UOp.range(n, 0)
+  return C[i].store(B[i] + n).end(i).sink(arg=KernelInfo(name="range_var"))
+
+def custom_add_two_vars_kernel(n:UOp, C:UOp, B:UOp, m:UOp) -> UOp:
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(B[i] + n.cast(C.dtype) + m.cast(C.dtype)).end(i).sink(arg=KernelInfo(name="add_two_vars"))
+
 def custom_ignore_first_var_kernel(C:UOp, A:UOp, B:UOp, n:UOp) -> UOp:
   C, B = C.flatten(), B.flatten()
   k = UOp.variable("k", 0, 100, dtype=dtypes.int)
@@ -248,13 +256,67 @@ class TestCustomKernel(unittest.TestCase):
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
   def test_scalar_arg_jit_fixed_bind(self):
-    # m is bound inside the jitted function so it's not an input, a replay keeps m=10 while the input n changes
+    # m and r are bound inside the jitted function so they're not inputs, a replay keeps m=10 and r=4 while the input n changes
+    # r is also a range, so the launch size and the estimates need it
     kernel = functools.partial(custom_add_var_kernel, n_slot=0)
     def f(B, n):
       Bm = Tensor.custom_kernel(Tensor(Variable("m", 0, 100, dtypes.int).bind(10)), Tensor.empty(4, dtype=dtypes.int), B, fxn=kernel)[1]
-      return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), Bm, fxn=kernel)[1].realize()
+      Br = Tensor.custom_kernel(Tensor(Variable("r", 1, 4, dtypes.int).bind(4)), Tensor.empty(4, dtype=dtypes.int), Bm,
+                                fxn=custom_range_var_kernel)[1]
+      return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), Br, fxn=kernel)[1].realize()
     jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
-    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [11+k, 12+k, 13+k, 14+k])
+    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [15+k, 16+k, 17+k, 18+k])
+
+  def test_scalar_arg_jit_fixed_bind_two_values(self):
+    # r is bound to 2 for one kernel and to 3 for another, each realized on its own inside the jit: every call keeps its own r as a range
+    def range_r(r, B):
+      return Tensor.custom_kernel(Tensor(Variable("r", 1, 4, dtypes.int).bind(r)), Tensor.zeros(4, dtype=dtypes.int).contiguous(), B,
+                                  fxn=custom_range_var_kernel)[1].realize()
+    B = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    for prune in (False, True):
+      with self.subTest(prune=prune):
+        jf = TinyJit(lambda B: range_r(3, range_r(2, B)), prune=prune)
+        for _ in range(4):
+          before = GlobalCounters.global_ops
+          out = jf(B)
+          self.assertEqual(GlobalCounters.global_ops - before, 5)
+          self.assertEqual(out.tolist(), [6, 7, 3, 0])
+
+  def test_scalar_arg_jit_mixed_range(self):
+    # the range is n+m: the input n changes every call, m=1 is bound inside and stays
+    def kernel(n, C, B, m):
+      i = UOp.range(n + m, 0)
+      return C[i].store(B[i] + n + m).end(i).sink(arg=KernelInfo(name="mixed_range"))
+    def f(B, n):
+      return Tensor.custom_kernel(Tensor(n), Tensor.zeros(4, dtype=dtypes.int).contiguous(), B,
+                                  Tensor(Variable("m", 1, 4, dtypes.int).bind(1)), fxn=kernel)[1].realize()
+    jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 1, 3, dtypes.int)
+    for k in (1, 2, 3, 1, 3): self.assertEqual(jf(B, n.bind(k)).tolist(), [i+k+1 if i <= k+1 else 0 for i in (1, 2, 3, 4)])
+
+  def test_scalar_arg_twice(self):
+    # the same Variable at two positions keeps both slots, with distinct identifiers in rendered source
+    n = Tensor(Variable("n", 0, 100, dtypes.int).bind(3))
+    out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), n,
+                               fxn=custom_add_two_vars_kernel)[1]
+    self.assertEqual(run_kernel_args(out, "add_two_vars"), ["n", None, None, "n"])
+    self.assertEqual(out.tolist(), [7, 8, 9, 10])
+
+  def test_scalar_arg_twice_jit(self):
+    # a jit input passed twice, both slots get the new value on every replay
+    def f(B, n):
+      return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), B, Tensor(n), fxn=custom_add_two_vars_kernel)[1].realize()
+    jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
+    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+2*k, 2+2*k, 3+2*k, 4+2*k])
+
+  def test_scalar_args_same_name(self):
+    # equal bindings with different declarations aren't identical UOps, but still need distinct rendered parameter names
+    n = Tensor(Variable("n", 0, 10, dtypes.int).bind(3))
+    B = Tensor([1, 2, 3, 4], dtype=dtypes.long).realize()
+    for dtype in (dtypes.int, dtypes.long):
+      with self.subTest(dtype=dtype):
+        m = Tensor(Variable("n", 0, 100, dtype).bind(3))
+        out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.long), B, m, fxn=custom_add_two_vars_kernel)[1]
+        self.assertEqual(out.tolist(), [7, 8, 9, 10])
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])

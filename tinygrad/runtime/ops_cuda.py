@@ -1,11 +1,11 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
 from typing import Any
-from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
+from tinygrad.helpers import DEBUG, DEV, getenv, unwrap, flatten
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
-from tinygrad.engine.realize import get_call_kernel_args
+from tinygrad.engine.realize import get_call_kernel_args, get_call_launch_dims
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -46,7 +46,7 @@ class CUDAQueue(HWQueue):
     size = max([o + w.dtype.itemsize for o, w in rows], default=8) - 8
     addr = UOp(Ops.LINEAR, src=tuple(pack_args([(0, UOp.const(size, dtypes.uint64))] + rows, 8 + size)), arg="kernargs").getaddr(self.devs)
     # extra: [buffer pointer, &args, buffer size, &size, end]
-    self.call(cuda.cuLaunchKernel, self.extern((self.dev.tag("function"), obj.lib, obj.name)), *prg.arg.global_size, *prg.arg.local_size, 0, None, 0,
+    self.call(cuda.cuLaunchKernel, self.extern((self.dev.tag("function"), obj.lib, obj.name)), *flatten(get_call_launch_dims(call, prg)), 0, None, 0,
               (self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr + 8, 2, addr, self.dev.launch_end)]) - 40,))
 
   def copy(self, dst:UOp, src:UOp, sz:int): self.call(cuda.cuMemcpyAsync, dst.getaddr(self.devs), src.getaddr(self.devs), sz, None)

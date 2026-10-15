@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq2 import layout_args, make_program, ins
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
-from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, lower_and_compile, run_linear
+from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, get_call_launch_dims, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ
@@ -161,7 +161,7 @@ class NVComputeQueue(NVQueue):
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = nv_build_program(self.dev, prg, self.devs)
-    global_size, local_size = prg.arg.global_size, prg.arg.local_size
+    global_size, local_size = get_call_launch_dims(call, prg)
     if prod(local_size) > 1024 or data.max_threads < prod(local_size):
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {data.max_threads=}")
     if any(g > mx for g,mx in zip(global_size, [2147483647, 65535, 65535]) if isinstance(g, int)) or \

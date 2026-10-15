@@ -231,6 +231,7 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.PARAM:
         r[u] = (u.arg.name.replace(":", "_") if u.arg.name is not None else f"data{u.arg.slot}") + \
           "_" + '_'.join([str(x) for x in u.shape])
+        while r[u] in [nm for nm,_ in bufs.values()]: r[u] += "_"  # the same name passed twice needs two identifiers
         bufs[u] = (r[u], (u, u in writable_params))
         continue
 

@@ -4,7 +4,7 @@ import decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
-from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
+from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo, sint
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
@@ -20,6 +20,13 @@ def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
   return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
           call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
+def _resolve_call_vars(call:UOp, *vs:sint) -> tuple[sint, ...]:
+  # launch dims and estimates get the call's bound values the same way, so two calls of one PROGRAM can bind a var differently
+  # the PROGRAM keeps the var: changing it would change its key and upload the same program again for every value
+  if not (b:={s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}): return vs
+  return tuple(v.substitute({u:u.const_like(b[u.expr]) for u in v.variables() if u.expr in b}).ssimplify() if isinstance(v, UOp) else v for v in vs)
+def get_call_launch_dims(call:UOp, prg:UOp) -> tuple[tuple[sint, ...], tuple[sint, ...]]:
+  return _resolve_call_vars(call, *prg.arg.global_size), _resolve_call_vars(call, *prg.arg.local_size)
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -52,7 +59,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
   if isinstance(call.arg.aux, HCQInfo): return call.arg.aux.estimates
-  if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
+  if (ast:=call.body).op is Ops.PROGRAM: return Estimates(*_resolve_call_vars(call, (e:=ast.src[0].arg.estimates or Estimates()).ops, e.lds, e.mem))
   if ast.op is Ops.STORE or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
   return Estimates()
