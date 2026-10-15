@@ -363,12 +363,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
-  # Commit bare const edges once; the inserted CAST(CONST) nodes are already committed.
-  sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
+  # commit every const still bare so no renderer reads one
+  sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  if any(_is_local_store(u) for u in sink.toposort()):
-    sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")
