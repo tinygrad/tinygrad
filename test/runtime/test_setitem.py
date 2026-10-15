@@ -257,11 +257,7 @@ class TestSetitem(unittest.TestCase):
     s1 = t.sum()
     t[3:].assign(2.0)
     s2 = t.sum()
-    try:
-      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
-    except AssertionError:
-      # TODO: broken now, lazy sums all see final buffer state
-      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [9.0, 9.0, 9.0])
+    np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
 
     # eager version
     t = Tensor.zeros(6).contiguous().realize()
@@ -272,7 +268,9 @@ class TestSetitem(unittest.TestCase):
     s2 = t.sum().realize()
     np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
 
+  @unittest.expectedFailure
   def test_cross_assign_independence(self):
+    # TODO: broken now, new_b sees mutated a. new_b should use the old a
     # when assigning to two tensors using computations from both,
     # both assigns should see the OLD values of both tensors
     a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
@@ -282,13 +280,9 @@ class TestSetitem(unittest.TestCase):
     a.assign(new_a)
     b.assign(new_b)
     np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    try:
-      np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
-    except AssertionError:
-      # TODO: broken now, new_b sees mutated a
-      np.testing.assert_allclose(b.numpy(), [8, 12, 16, 20])
+    np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
-    # eager version
+  def test_cross_assign_independence_eager(self):
     a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
     b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
     new_a = (a + b).realize()

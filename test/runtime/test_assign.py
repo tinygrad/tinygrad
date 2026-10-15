@@ -637,8 +637,10 @@ class TestAssignOrdering(unittest.TestCase):
     self.assertEqual(r1.item(), 4)
     self.assertEqual(r2.item(), 8)
 
+  @unittest.expectedFailure
   def test_write_read_write_chain(self):
     """Write, read, write chain - middle read must complete before second write."""
+    # TODO: broken now, mid_sum reads buf after the second write. mid_sum should be 12
     buf = Tensor.zeros(4).contiguous().realize()
     buf.assign(Tensor.ones(4) * 3)
     mid_sum = buf.sum()  # lazy read, should be 12
@@ -646,11 +648,7 @@ class TestAssignOrdering(unittest.TestCase):
     final_sum = buf.sum()  # lazy read, should be 20
     # Realize in "wrong" order - final first
     self.assertEqual(final_sum.realize().item(), 20)
-    try:
-      self.assertEqual(mid_sum.realize().item(), 12)
-    except AssertionError:
-      # TODO: this is wrong
-      self.assertEqual(mid_sum.realize().item(), 20)
+    self.assertEqual(mid_sum.realize().item(), 12)
 
   def test_slice_read_then_full_write(self):
     """Read from slice, then overwrite full buffer - WAR dependency works for full buffer assigns."""
@@ -674,20 +672,19 @@ class TestAssignOrdering(unittest.TestCase):
     buf[4:8].assign(buf[0:4].contiguous())
     np.testing.assert_equal(buf.numpy(), [1, 2, 3, 4, 1, 2, 3, 4])
 
+  @unittest.expectedFailure
   def test_swap_slices(self):
     """Swap two non-overlapping slices - requires reading both before writing."""
+    # TODO: broken now, left reads buf after the first slice write. left should be the original [1, 2, 3, 4]
     # without .realize() on temps: values not captured before overwriting
     buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
     left = buf[0:4].clone()  # lazy - not captured yet
     right = buf[4:8].clone()  # lazy - not captured yet
     buf[0:4].assign(right).realize()  # this works
     buf[4:8].assign(left).realize()  # left now reads from modified buf!
-    try:
-      np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])
-    except AssertionError:
-      # TODO: broken now
-      np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 5, 6, 7, 8])
+    np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])
 
+  def test_swap_slices_realized(self):
     # with .realize() on temps: values captured before writes
     buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
     left = buf[0:4].clone().realize()
@@ -789,7 +786,9 @@ class TestAssignOrdering(unittest.TestCase):
       b_np *= 0.9
     np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
 
+  @unittest.expectedFailure
   def test_war_reader_already_depends_on_write(self):
+    # TODO: broken now, x_expr reads x after the assign. z should be 15
     x = Tensor([1.0]).contiguous().realize()
     y = Tensor([2.0]).contiguous().realize()
     x_expr = x + 10          # 11, x is read here, before the assign
@@ -797,11 +796,7 @@ class TestAssignOrdering(unittest.TestCase):
     y.assign(y + x)
     z = y + x_expr
     Tensor.realize(x, y, z)
-    try:
-      np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 15.0])
-    except AssertionError:
-      # TODO: broken now, x_expr reads x after the assign
-      np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
+    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 15.0])
 
   def test_war_multi_read_then_assign(self):
     devices = ("CPU:0", "CPU:1")
@@ -847,26 +842,25 @@ class TestAssignOrdering(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, raises
       np.testing.assert_allclose((first + second + a).numpy(), [112, 114, 110, 110])
 
-  @unittest.expectedFailure  # TODO: broken now, raises cycle: one kernel reads a from before and after the slice assign
   def test_read_before_slice_assign(self):
     a = Tensor.ones(4).realize()
     before = a * 3
     a[0:2].assign(Tensor.full((2,), 2.))
-    np.testing.assert_allclose((a + (before - 1)).numpy(), [4, 4, 3, 3])
+    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, raises: one kernel reads a from before and after the slice assign
+      np.testing.assert_allclose((a + (before - 1)).numpy(), [4, 4, 3, 3])
 
+  @unittest.expectedFailure
   def test_read_before_assign_survives_a_realize(self):
+    # TODO: broken now, before is computed again from the assigned value. before should be 3
     a = Tensor.ones(4).realize()
     before = a * 3
     a.assign(Tensor.full((4,), 5.))
     a.realize()
-    out = before.numpy()
-    try:
-      np.testing.assert_allclose(out, 3)
-    except AssertionError:
-      # TODO: broken now, before is computed again from the assigned value
-      np.testing.assert_allclose(out, 15)
+    np.testing.assert_allclose(before.numpy(), 3)
 
+  @unittest.expectedFailure
   def test_loss_read_after_step_is_the_pre_step_loss(self):
+    # TODO: broken now, loss is computed again from the updated weight. loss should be the pre-step 6.0
     from tinygrad import nn
     w = Tensor([2.]).contiguous().realize()
     x = Tensor([3.]).realize()
@@ -875,49 +869,37 @@ class TestAssignOrdering(unittest.TestCase):
       loss = (w*x).sum()                               # 6.0
       loss.backward()
       opt.step()                                       # w becomes 1.7
-    out = loss.item()
-    try:
-      self.assertAlmostEqual(out, 6.0, places=5)
-    except AssertionError:
-      # TODO: broken now, loss is computed again from the updated weight
-      self.assertAlmostEqual(out, 5.1, places=5)
+    self.assertAlmostEqual(loss.item(), 6.0, places=5)
 
+  @unittest.expectedFailure
   def test_rand_realized_out_of_order(self):
+    # TODO: broken now, r[0] returns the fourth set of numbers. r[0] should be the first set
     Tensor.manual_seed(1)
     r = [Tensor.rand(4) for _ in range(4)]
     r[3].realize()
     out_of_order = r[0].numpy()
     Tensor.manual_seed(1)
     in_order = [Tensor.rand(4).numpy() for _ in range(4)]
-    try:
-      np.testing.assert_equal(out_of_order, in_order[0])
-    except AssertionError:
-      # TODO: broken now, r[0] returns the fourth set of numbers
-      np.testing.assert_equal(out_of_order, in_order[3])
+    np.testing.assert_equal(out_of_order, in_order[0])
 
+  @unittest.expectedFailure
   def test_batchnorm_stats_are_realized(self):
+    # TODO: broken now, the stat update is never run because nothing reads it. running_mean should be realized
     from tinygrad import nn
     bn, x = nn.BatchNorm(4), Tensor.randn(2, 4, 3, 3).realize()
     with Context(TRAINING=1): bn(x).realize()
-    try:
-      self.assertTrue(bn.running_mean.uop.base.is_realized)
-    except AssertionError:
-      # TODO: broken now, the stat update is never run because nothing reads it
-      self.assertFalse(bn.running_mean.uop.base.is_realized)
+    self.assertTrue(bn.running_mean.uop.base.is_realized)
 
+  @unittest.expectedFailure
   def test_batchnorm_under_jit_counts_every_call(self):
+    # TODO: broken now, only the calls whose stat update happened to be captured are counted. every call should count
     from tinygrad import nn
     bn, x = nn.BatchNorm(4), Tensor.randn(8, 4, 2, 2).realize()
     @TinyJit
     def step(t):
       with Context(TRAINING=1): return bn(t).sum().realize()
     for _ in range(4): step(x)
-    out = bn.num_batches_tracked.item()
-    try:
-      self.assertEqual(out, 4)
-    except AssertionError:
-      # TODO: broken now, only the calls whose stat update happened to be captured are counted
-      self.assertEqual(out, 2)
+    self.assertEqual(bn.num_batches_tracked.item(), 4)
 
   def test_assign_from_unrealized_tensor_does_not_alias(self):
     a = Tensor.full((4,), 7.).realize()
