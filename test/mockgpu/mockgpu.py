@@ -24,7 +24,7 @@ def hook_doorbells(s:UOp) -> UOp|None:
   hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr("CPU")) for c in s.toposort() if c.op is Ops.CALL
                 for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.tag) and to_tuple(b.device)[0].split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
-Compiled.pm_lower = PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:
@@ -44,6 +44,7 @@ class TrackedMemoryView:
     self.mv = self.mv.cast('B').cast(new_type, **kwargs)
     return self
 
+  def __buffer__(self, flags): return self.mv.__buffer__(flags)
   @property
   def nbytes(self): return self.mv.nbytes
   def __len__(self): return len(self.mv)
