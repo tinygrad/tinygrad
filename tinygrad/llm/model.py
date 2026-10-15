@@ -139,9 +139,8 @@ class HyperConnection:
 
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor]) -> Tensor:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
-    base, scale = self.base["weight"], self.scale["weight"]
-    mix = self.fn(xs.flatten(2).rmsnorm(eps=self.norm_eps))
-    pre = (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps
+    base, scale, mix = self.base["weight"], self.scale["weight"], self.fn(xs.flatten(2).rmsnorm(eps=self.norm_eps))
+    pre  = (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps
     post = (mix[..., self.count:2*self.count] * scale[1] + base[self.count:2*self.count]).sigmoid() * 2
     comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
     # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
@@ -294,30 +293,29 @@ class TransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
 
 class Indexer:
-  def __init__(self, config:TransformerConfig, idx:IndexerConfig):
-    self.idx, self.max_context = idx, config.max_context
+  def __init__(self, config:TransformerConfig):
+    self.idx, self.max_context = (idx:=unwrap(config.indexer)), config.max_context
     self.attn_q_b, self.attn_k = Linear(config.q_lora_rank, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
     self.proj, self.k_norm = Linear(config.dim, idx.n_heads, bias=False), nn.LayerNorm(idx.head_dim, eps=idx.norm_eps)
     self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kg"):
-      self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), 2, self.idx.head_dim, device=x.device)
+      self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), 2, self.idx.head_dim, dtype=dtypes.half, device=x.device)
 
   def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp) -> Tensor:
     (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
-    # cache an indexer key and a pooling gate per token. a pool's key is the gate softmax weighted sum of its keys
-    kg = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2)  # (B, T, 2, head_dim)
-    kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg.float().uop))).reshape(B, -1, idx.kpool, 2, idx.head_dim)
-    pool_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)    # (B, pools, head_dim)
-    iq = self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
-    scores = ((iq @ pool_k.transpose(-1, -2).unsqueeze(1)).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
-    # the query sees the top_k/kpool best complete pools, and the tokens of its own pool while that's incomplete (the tail)
-    tpos, pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
-    _, sel = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= tpos + 1).where(scores, -math.inf).topk(idx.top_k // idx.kpool)
-    # incomplete selections add only tail/future tokens, handled by the final tail and causal mask
-    picked = (scores.zeros_like().scatter(-1, sel, 1.0) > 0).repeat_interleave(idx.kpool, dim=-1)[..., :S]
-    return ((picked | (pos >= (tpos + 1) // idx.kpool * idx.kpool)) & (pos <= tpos)).where(0.0, -math.inf).reshape(B, 1, T, S).cast(x.dtype)
+    # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
+    kg, iq = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
+    kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg.half().uop))).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
+    pooled_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2).transpose(-1, -2).unsqueeze(1)  # (B, 1, D, pools)
+    scores = ((iq @ pooled_k).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
+    # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
+    q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
+    _, sel = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf).topk(idx.top_k // idx.kpool)
+    # selected incomplete pools add only tail/future tokens, handled by the final tail and causal mask
+    picked = scores.zeros_like(dtype=dtypes.bool).scatter(-1, sel, True).repeat_interleave(idx.kpool, dim=-1)[..., :S]
+    return ((picked | (k_pos >= (q_pos + 1) // idx.kpool * idx.kpool)) & (k_pos <= q_pos)).where(0.0, -math.inf).reshape(B, 1, T, S).cast(x.dtype)
 
 
 class MLATransformerBlock(FFNBlock):
@@ -335,7 +333,7 @@ class MLATransformerBlock(FFNBlock):
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
-    self.indexer = Indexer(config, config.indexer) if config.indexer else None
+    self.indexer = Indexer(config) if config.indexer else None
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
@@ -409,7 +407,7 @@ class GatedDeltaNetBlock(FFNBlock):
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
     g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
-    # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(-g * A) * lb
+    # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(g * -A) * lb
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0

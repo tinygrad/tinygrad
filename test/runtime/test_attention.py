@@ -81,16 +81,14 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
 
   def test_indexer(self):
-    indexer = Indexer(self._make_config(dim=2, q_lora_rank=2), IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6))
+    indexer = Indexer(self._make_config(dim=2, q_lora_rank=2, indexer=IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)))
     indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
     indexer.proj.weight, indexer.compressor_gate.weight = Tensor.ones(1, 2), Tensor.zeros(2, 2)
-    x, q = Tensor([[[2., 0.], [2., 0.], [0., 2.], [0., 2.]]]), Tensor([[[1., -1.]]]).expand(1, 4, 2)
+    x, q = Tensor([[[2., 0.], [2., 0.], [0., 2.], [0., 2.]]]), Tensor([[[1., -1.], [1., -1.], [1., -1.], [-1., 1.]]])
     indexer._init_state(x)
-    # the first pool scores higher, the second is visible only while incomplete
-    expected = np.where([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [1, 1, 0, 0]], 0., -np.inf)
-    for start, end in ((0, 3), (3, 4)):
-      mask = indexer(x[:, start:end], q[:, start:end], start).numpy()
-      np.testing.assert_array_equal(mask, expected[None, None, start:end, :end])
+    # the first three queries prefer the first pool, the final query selects the completed second pool
+    expected = np.where([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]], 0., -np.inf)
+    np.testing.assert_array_equal(indexer(x, q, 0).numpy(), expected[None, None])
 
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
