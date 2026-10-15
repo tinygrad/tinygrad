@@ -184,6 +184,8 @@ class MetalAllocator(Allocator['MetalDevice']):
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("metal_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: MetalQueue(s).encode()),
+])
+Compiled.pm_lower += PatternMatcher([
   # the fence polls the shared event, not the timeline's memory
   (UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(),
    lambda p, t: None if p.arg.name != "tl" or not str(p.device).startswith("METAL") else \

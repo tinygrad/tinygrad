@@ -115,7 +115,8 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
 
 def is_disk_read(c:UOp) -> bool:
   dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
-  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring())
+  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring()) \
+    and not getattr(Device[dev], "is_usb", False)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lin = s.src[0].body
@@ -128,24 +129,23 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
   table = UOp.alloc((8 * len(words),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device)
   srcs = patch(table, [(8 * i, w) for i, w in enumerate(words)]).bitcast(dtypes.uint64)
 
-  # per gpu: [chunks read, chunks copied] at the start of its stage
-  devs = [to_tuple(c.src[1].device)[0] for c in copies]
-  counts = {d: UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=d).rtag("disk_stage")[:16].bitcast(dtypes.uint64) for d in devs}
+  # [chunks read, chunks copied] at the start of the gpu's stage
+  dev = s.src[0].src[1].device
+  counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev).rtag("disk_stage")[:16].bitcast(dtypes.uint64)
 
   # cpu part
-  runs = [(key, list(ks)) for key, ks in itertools.groupby(range(len(copies)), lambda k: (devs[k], to_tuple(copies[k].src[2].device)[0]))]
-  done, offs, gpu_ops = s, collections.Counter[str](), collections.defaultdict[UOp, list[UOp]](list)
-  for (dev, disk), ks in runs:
-    file = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info")
-    done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts[dev].after(done), rings, sqes)
+  done, off, gpu_ops = s, 0, collections.defaultdict[UOp, list[UOp]](list)
+  for disk, grp in itertools.groupby(range(len(copies)), lambda k: to_tuple(copies[k].src[2].device)[0]):
+    file, ks = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info"), list(grp)
+    done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts.after(done), rings, sqes)
 
   # gpu part
-  for k, (c, dev) in enumerate(zip(copies, devs)):
-    first, slots = counts[dev].index(0).load() + offs[dev], counts[dev].getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
-    offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
+  for k, c in enumerate(copies):
+    first, slots = counts.index(0).load() + off, counts.getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
+    off += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
     for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
       n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
-      gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
+      gpu_ops[c] += [ins("wait", counts, n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[1:], n + 1)]
   return done.substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src)))}, enter_calls=True)
 Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"),
   disk_copy_rewriter)]) + Compiled.pm_encode

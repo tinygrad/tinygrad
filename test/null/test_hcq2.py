@@ -201,7 +201,7 @@ class TestHCQ2Profile(unittest.TestCase):
   def test_slots_addressed_by_the_device(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
                           lambda buf: buf.getaddr(Device["NULL"].host) if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
-    with patch.object(Compiled, "pm_encode", pm + Compiled.pm_encode): self.test_profiling_reports_a_range_per_kernel(n=3)
+    with patch.object(Compiled, "pm_lower", pm + Compiled.pm_lower): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))

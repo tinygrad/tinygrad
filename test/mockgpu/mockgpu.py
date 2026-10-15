@@ -1,8 +1,7 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple
 from tinygrad.device import Compiled
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, KernelInfo
-from tinygrad.renderer import Estimates
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
@@ -25,7 +24,7 @@ def hook_doorbells(s:UOp) -> UOp|None:
   hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr("CPU")) for c in s.toposort() if c.op is Ops.CALL
                 for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.tag) and to_tuple(b.device)[0].split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
-Compiled.pm_encode += PatternMatcher([(UPat.sink(arg=KernelInfo("hcq_submit", estimates=Estimates()), name="s"), hook_doorbells)])
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:

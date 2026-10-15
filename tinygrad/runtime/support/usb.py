@@ -385,7 +385,7 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
 
 def usb_copy_rewriter(s:UOp) -> UOp|None:
   call, lin = s.src[0], s.src[0].body
-  if not (copies:=[c for c in lin.src if is_staged(c)]) or not is_usb(dev:=call.src[1].device): return None
+  if not is_usb(dev:=call.src[1].device) or not (copies:=[c for c in lin.src if is_staged(c)]): return None
 
   # a run: one direction, one table
   runs, nums, n = list[tuple[bool, int, UOp, int]](), list[tuple[int, int]](), 0
@@ -410,8 +410,9 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
     done = at.after(sent).index(0).store(i + 1).backedge(loop, (i + 1 < k) & link.after(sent).index(5).load().eq(0)).end(live)
   return link.after(done).index(2).store(UOp.const(n, dtypes.uint64))
 
-Compiled.pm_encode = PatternMatcher([
-  (UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"), usb_copy_rewriter), # the copies of a submit go through the sram window
+Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"),
+  usb_copy_rewriter)]) + Compiled.pm_encode # the copies of a submit go through the sram window
+Compiled.pm_lower += PatternMatcher([
   # the gpu's memory is reached over usb
   (UPat.custom_function("memcpy", dtypes.uint64).call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
   (UPat.custom_function("memset", dtypes.uint64).call(UPat.var("dst"), UPat.const(0), UPat.var("n")),
@@ -427,7 +428,7 @@ Compiled.pm_encode = PatternMatcher([
    lambda link, table, i, run, fence: usb_send(link, table, i, run, fence.getaddr("CPU"), usb_stage(fence.device))),
   (UPat(Ops.CALL, src=(UPat.custom_function("usb_recv"), UPat.var("link"), UPat.var("table"), UPat.var("i"), UPat.var("run"), UPat.var("go"))),
    lambda link, table, i, run, go: usb_recv(link, table, i, run, go.getaddr("CPU"), usb_stage(go.device))),
-]) + Compiled.pm_encode
+])
 
 # *****************
 # 6. bufferize

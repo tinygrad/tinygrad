@@ -154,14 +154,13 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
 # *****************
 # encode rewrite
 
-def rdma_submit(submit:UOp) -> UOp|None:
-  lin, queue = submit.body, submit.src[1]
+def rdma_submit(s:UOp) -> UOp|None:
+  lin, queue = s.src[0].body, s.src[0].src[1]
   if not (queues:={i: queue_of(u) for i, u in enumerate(lin.src) if is_rdma(u)}): return None
 
   ops = [[u] for u in lin.src]
   for q in dict.fromkeys(queues.values()):
     positions = [i for i in queues if queues[i] == q]
     for i, copy_ops in zip(positions, rdma_copies((queue.device,), [lin.src[i] for i in positions])): ops[i] = copy_ops
-  return submit.replace(src=(lin.replace(src=tuple(flatten(ops))), queue))
-Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"),
-  lambda s: None if (r:=rdma_submit(s.src[0])) is None else s.replace(src=(r, *s.src[1:])))]) + Compiled.pm_encode
+  return s.replace(src=(s.src[0].replace(src=(lin.replace(src=tuple(flatten(ops))), queue)), *s.src[1:]))
+Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"), rdma_submit)]) + Compiled.pm_encode

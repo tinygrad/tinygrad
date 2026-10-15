@@ -370,6 +370,7 @@ class Compiled:
 
   # hcq2
   pm_encode:Any = None
+  pm_lower:Any = None
   pm_bufferize:Any = None # one for all devices: each adds the rules of the placeholders it owns, its tags start with its name
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
