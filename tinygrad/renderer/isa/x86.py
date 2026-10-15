@@ -183,6 +183,7 @@ pre_isel_matcher = PatternMatcher([
   # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
    lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
+   # alu register constraints/validation
   ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
   (UPat((Ops.SHL, Ops.SHR), dtype=dtypes.ints, name="x"), shift),
 ])
