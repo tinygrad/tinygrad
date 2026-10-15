@@ -359,8 +359,8 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.ALLOC]
   paramarg_start: int = max([-1]+slots) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
-  tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
+  tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_views, name="remove views from the kernel graph")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
