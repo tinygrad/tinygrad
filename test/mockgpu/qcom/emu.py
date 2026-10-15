@@ -476,7 +476,7 @@ def lane_params() -> tuple[UOp, UOp, UOp]:
 def cpu_kernel(body:UOp, name:str) -> Callable[..., None]:
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(UOp.sink(body, arg=KernelInfo(name=name)), Device['CPU'].renderer)
-  runtime, globals_, var_names = get_runtime('CPU', prg), prg.arg.globals, [v.expr for v in prg.arg.vars]
+  runtime, globals_, var_names = get_runtime('CPU', prg), prg.arg.globals, [v.expr for v in prg.arg.params if v.is_variable]
   runtime.fxn.argtypes = [ctypes.c_uint64] * (len(globals_) + len(var_names))
   return lambda *bufs, **vals: runtime.fxn(*[bufs[g] for g in globals_], *[vals[v] for v in var_names])
 
