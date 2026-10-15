@@ -329,12 +329,30 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
   def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
+    self._server_args = (cmd, arch, *args)
     argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
     return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
   def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
-    unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
-    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
-    raise CompileError("Compilation Error")
+    try:
+      unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
+      # the pipe is unbuffered (bufsize=0), so a single read() can return short: read until all n bytes arrived
+      def read_exact(n:int) -> bytes:
+        buf = b''
+        while len(buf) < n and (chunk:=unwrap(proc.stdout).read(n - len(buf))): buf += chunk
+        return buf
+      if not ((hdr:=read_exact(4)) and len(hdr) == 4 and (lib:=read_exact(sz:=struct.unpack("I", hdr)[0])) and len(lib) == sz):
+        raise CompileError("Compilation Error")
+      # the reply must be for this kernel: a stale reply means the request/response stream is out of step
+      if (m:=re.search(r'__global__ void (?:__launch_bounds__\(\d+\) )?(\w+)\(', src)) is not None and \
+         (f".text.{m.group(1)}\0".encode() if lib[:4] == b'\x7fELF' else f".entry {m.group(1)}(".encode()) not in lib:
+        raise CompileError(f"compile server returned a binary for a different kernel than {m.group(1)}")
+      return lib
+    except BaseException:
+      # an interrupted or failed exchange (e.g. the beam search alarm firing mid-read) leaves a reply in the pipe that the next
+      # compile would read as its own, so restart the server instead of reusing it
+      proc.kill()
+      if getattr(self, "compiler_process", None) is proc: self.compiler_process = self.server(*self._server_args)
+      raise
 
 
 @dataclass
