@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools
 from dataclasses import replace
 from typing import cast
