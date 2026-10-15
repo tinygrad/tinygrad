@@ -559,10 +559,10 @@ def amd_code_end(arch:str) -> bytes:
   from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
   return s_code_end().to_bytes()*5 if arch.startswith("rdna") else b""
 
-def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
+def amd_decode(buf:bytes|memoryview, arch:str, off:int=0, stop_at_end:bool=False) -> dict[int, Inst]:
   code_end = amd_code_end(arch)
   addr_table:dict[int, Inst] = {}
-  offset, view = 0, memoryview(buf)
+  offset, branch_end, view = 0, 0, memoryview(buf)
   while offset < len(buf):
     if code_end and view[offset:offset+len(code_end)] == code_end: break
     remaining = view[offset:]
@@ -573,6 +573,10 @@ def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
     offset += decoded.size()
+    if stop_at_end:
+      op = getattr(decoded, "op_name", "").lower()
+      if (branch:=parse_branch(decoded, op)) is not None: branch_end = max(branch_end, offset+branch)
+      if op == "s_endpgm" and offset > branch_end: break
   return addr_table
 
 def parse_branch(inst, op:str) -> int|None:

@@ -292,7 +292,7 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
   entries = dispatch_cache.setdefault(key, [])
   for code, prg in entries:
     if bytes(view[:len(code)]) == code: return prg
-  insts = amd_decode(view, arch)
+  insts = amd_decode(view, arch, stop_at_end=True)
   end = max((pc+inst.size() for pc,inst in insts.items()), default=0)
   # Include the stop marker: an extended instruction stream must not match a shorter cached program.
   code = bytes(view[:end+len(amd_code_end(arch))])

@@ -17,6 +17,12 @@ def _srcs():
 class TestBasicParsing(unittest.TestCase):
   """Test basic pcode parsing for common instruction patterns."""
 
+  def test_lane_modulo(self):
+    for addr in (0, 124, 128, 132, -4):
+      with self.subTest(addr=addr):
+        result, _ = parse_pcode('lane = addr / 4 % 32;', {'addr': UOp.const(addr, dtypes.int32)})
+        self.assertEqual(result['lane'].simplify().val, (addr // 4) % 32)
+
   def test_c_style_blocks_and_array_access(self):
     code = """
       for (i = 0; i < 4; i+=2) {
