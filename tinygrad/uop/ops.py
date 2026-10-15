@@ -775,7 +775,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def _storage_base(self) -> UOp|None:
     if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: return self.src[0].storage_base
-    return self
+    return None
   @property
   def storage_base(self) -> UOp: return self if (base:=self._storage_base) is None else base
 
