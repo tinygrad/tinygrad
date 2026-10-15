@@ -103,13 +103,6 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
   ret = {None: dtypes.void, ctypes.c_void_p: dtypes.u64}.get(fn.restype) or to_dtype(fn.restype.__name__[2:]) # void, void*, c_int -> int
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.i32) if isinstance(a, int) else a for a in args])
 
-@uopfunc
-def do_get_time_ms(ms:UOp) -> UOp:
-  ts = UOp.placeholder((2,), dtypes.u64, addrspace=AddrSpace.REG)
-  ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.i32).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.i32), ts.index(0)))
-  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
-def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
-
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
   flds = {n: (o, {d.itemsize: d for d in dtypes.uints}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)}
   rows = [(flds[n][0], UOp.const(v, flds[n][1])) for n, v in fields.items()]
@@ -367,6 +360,13 @@ class HWQueue:
   def memory_barrier(self): pass # a copy queue has nothing to flush
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
+
+@uopfunc
+def do_get_time_ms(ms:UOp) -> UOp:
+  ts = UOp.placeholder((2,), dtypes.u64, addrspace=AddrSpace.REG)
+  ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.i32).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.i32), ts.index(0)))
+  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
+def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
 
 @uopfunc
 def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
