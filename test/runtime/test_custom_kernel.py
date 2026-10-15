@@ -96,6 +96,13 @@ def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
 # **** tests ****
 
 class TestCustomKernel(unittest.TestCase):
+  def test_constant_after_store(self):
+    def kernel(out:UOp):
+      index = UOp.const(1).after(out[0].store(7))
+      return out[index].store(9).sink(arg=KernelInfo(opts_to_apply=()))
+    out = Tensor.zeros(2, dtype=dtypes.int).contiguous().realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [7, 9])
+
   def test_empty(self):
     a = Tensor.empty(1)
     a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink(arg=KernelInfo()))[0]

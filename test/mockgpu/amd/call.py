@@ -1,9 +1,8 @@
 import itertools, functools, struct
 from dataclasses import replace
 from tinygrad.viz.serve import amd_code_end, amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_lower_config, lower_call
-from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.device import Device
 from tinygrad.engine.realize import get_runtime, runtime_cache
 from tinygrad.renderer.llvmir import CPULLVMRenderer, ldt
@@ -12,12 +11,11 @@ from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.ops_cpu import CPUExecutable
-from tinygrad.dtype import AddrSpace, Invalid, dtypes
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import Context, TracingKey, Target, cpu_profile, to_mv
 from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
-from test.mockgpu.amd.emu import (_Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX,
-                                  SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE)
+from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
 class CallLLVMModule(CPUExecutable):
   def __init__(self, lib:bytes, functions:dict[str, int]):
@@ -66,8 +64,7 @@ class CallLLVMRenderer(CPULLVMRenderer):
   string_rewrite = PatternMatcher([
     (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
      f"  {ctx[x]} = load ptr, ptr @{ctx[body]}_ptr\n  call void {ctx[x]}(" +
-     ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"
-     if body.arg != "asm_block" else None),
+     ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
   ]) + CPULLVMRenderer.string_rewrite
 
   def __init__(self, target:Target):
@@ -84,22 +81,20 @@ class CallLLVMRenderer(CPULLVMRenderer):
 
   def render(self, uops:list[UOp]) -> str:
     self.entry_name = next(u.arg.function_name for u in uops if u.op is Ops.SINK)
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
-    fns = {b:("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex() for b in topo if b.op is Ops.LINEAR}
-    definitions = []
+    def fn_name(b:UOp): return ("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex()
+    topo = UOp.sink(*uops).toposort(lambda u:u.op is not Ops.LINEAR or fn_name(u) not in self.compiler.functions, enter_calls=True)
+    fns = {u.body:fn_name(u.body) for u in topo if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
     def module(us, definition):
       declarations = [f"@{fns[b]}_ptr = hidden global ptr null, section \".data\"" for b in
-                      dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.arg != "asm_block")]
-      footer = self._render_footer(us).replace("alwaysinline", "noinline")
+                      dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.op is Ops.LINEAR)]
+      footer = self._render_footer(us, enter_calls=False).replace("alwaysinline", "noinline")
       return "\n".join([*declarations, definition, footer, "attributes #1 = { noinline optnone nounwind }"])
     for body, name in fns.items():
       if name in self.compiler.functions: continue
       definition = self._render_kernel(list(body.src), name=name, fns=fns)[1]
-      if body.arg == "asm_block": definitions.append(definition.replace("define ", "define internal ", 1))
-      else: self.compiler.compile_cached(module(body.src, definition))
+      self.compiler.compile_cached(module(body.src, definition))
     entry = self._render_kernel(uops, fns=fns)
-    all_uops = [*uops, *(u for b in fns if b.arg == "asm_block" for u in b.src)]
-    return module(all_uops, "\n".join([*entry[0], entry[1], *definitions]))
+    return module(uops, "\n".join([*entry[0], entry[1]]))
 
 @functools.cache
 def llvm_renderer(arch:str):
@@ -116,8 +111,8 @@ def get_call_runtime(backend:str, prg:UOp):
     runtime_cache[key] = runtime = Device[backend].runtime(replace(obj, lib=lib))
   return runtime
 
-InstructionCall = tuple[UOp, list[UOp], UOp|None]
-instruction_cache:dict[tuple, list[tuple[int, int, InstructionCall]]] = {}
+InstructionCall = tuple[UOp, list[UOp]]
+instruction_cache:dict[tuple, list[tuple[int, int, tuple[InstructionCall|None, UOp|None]]]] = {}
 
 # this is meant to replace the old emulator
 @uopfunc
@@ -155,17 +150,17 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:sint, gy:si
   return UOp.sink(init_vgpr, *(sgpr.after(inline_ints, inline_floats).index(i).store(UOp.const(v, dtypes.uint32))
                              for i,v in dict(initial).items()))
 
-def pc_index(idx:int) -> UPat:
-  reg, null = UPat.const(idx).cast(), UPat.const(124).cast()
-  return UPat.any(reg, reg.ne(null).where(reg, UPat.const(Invalid)))
+@uopfunc
+def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
+  w = UOp.range(waves, 0, dtype=dtypes.int)
+  return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
-pm_asm_call = PatternMatcher([
-  # remove PC from CALL body
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.PARAM, name="buf").index(UPat.any(pc_index(PC_LO_IDX), pc_index(PC_HI_IDX))),), allow_any_len=True),
-   lambda buf: UOp(Ops.NOOP) if buf.arg.name == "sgpr" else None),
-])
+def lower_body(sink:UOp, renderer:Renderer, name:str) -> tuple[UOp, list[UOp]]:
+  bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
+  body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
+  return lower_call(renderer, body.call(*bufs, name=name)), bufs
 
-def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> InstructionCall:
+def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[InstructionCall|None, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
                                           *(x.value for x in to_program_lower_config)), [])
   inst_bytes = inst.to_bytes()
@@ -176,31 +171,27 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> InstructionCall:
   ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU))
   sink = _get_handler(inst)(inst, ctx)
   base, mask, _, name = _canonical_info(inst, ctx, inst_bytes)
-  bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
-  body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
-  call = graph_rewrite(body.call(*bufs, name=name), pm_asm_call,
-                       name="instruction call", bottom_up=True, enter_calls=True)
-  ret = lower_call(renderer, call) if has_effects(call.body) else call, bufs, ctx.branch_cond
+  ret = lower_body(sink, renderer, name) if sink.src else None, ctx.branch_cond
   entries.append((base, mask, ret))
   return ret
 
-@functools.cache
-def has_effects(body:UOp) -> bool:
-  return any(u.op in (Ops.STORE, Ops.CALL) for u in body.toposort())
-
 def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({b for _,(_,bs,_) in instructions for b in bs if b.arg.slot != -1}, key=lambda b:b.arg.slot)
-  base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU)
+  bufs = sorted({b for _,(_,bs) in instructions for b in bs if b.arg.slot != -1}, key=lambda b:b.arg.slot)
+  base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU) + \
+         UOp.param(len(bufs)+1, dtypes.uint64, name="block_offset", addrspace=AddrSpace.ALU)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
-  inst = None
-  for off,(template,bs,_) in instructions:
+  linear:list[UOp] = []
+  seen:set[UOp] = set()
+  for off,(template,bs) in instructions:
     args = [base+UOp.const(off, dtypes.uint64) if b.arg.slot == -1 else params[b] for b in bs]
-    invoke = template.replace(src=(template.body, *args))
-    if inst is not None:
-      invoke = invoke.replace(src=(*invoke.src[:-1], invoke.src[-1].after(inst)))
-    inst = invoke
-  # The block only sequences lowered calls and typed instruction addresses; it is ready for linearization.
-  return UOp(Ops.LINEAR, src=tuple(linearize(UOp.sink(inst))), arg="asm_block"), bufs
+    inputs = UOp.sink(*args)
+    nodes = inputs.toposort(lambda u:u not in seen)
+    nodes.pop(inputs)
+    seen.update(nodes)
+    linear.extend(nodes)
+    linear.append(template.replace(src=(template.body, *args)))
+  # The assembly is already linear: keep calls in instruction order and compute their addresses immediately before use.
+  return UOp(Ops.LINEAR, src=tuple(linear), arg="asm_block"), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # Thread jump-only blocks.
@@ -283,7 +274,9 @@ def decode_cfg(insts:dict[int, Inst]):
     merge_branches(insts, cfg["blocks"], cfg["paths"])
   return cfg, cfg_regions(cfg["paths"], 0)
 
-@Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0)
+# ISA operand types and operations are independent of tensor construction and GPU lowering settings.
+@Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
+         DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
                   user_data_count:int, backend:str) -> UOp:
@@ -307,6 +300,15 @@ dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
 def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
   renderer = backend_renderer(backend)
   cfg, regions = decode_cfg(insts)
+  # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
+  unconditional:set[int] = set()
+  possible:set[int]|None = {0}
+  for pc, body in regions:
+    if body: possible = None
+    elif possible is not None:
+      if possible == {pc}: unconditional.add(pc)
+      possible = (possible-{pc}) | (set(cfg["paths"][pc]) or {-1})
+  routed = len(unconditional) != len(regions)
   axes = itertools.count(sum(inst.size() for inst in insts.values()))
   lx, ly, lz, rsrc2, scratch_size, user_data_count = dispatch
   # construct CALL graph
@@ -332,71 +334,61 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
-  buffers[routes] = (routes, 0)
+  active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
+  route = UOp.param(6, dtypes.int, (1,), name="route")
+  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU)
+                        for i,name in enumerate(("taken", "fallthrough"), 7)]
+  buffers[route] = (routes, 1)
   init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), args_ptr, *dims,
                    wave_size, scratch_size, rsrc2, arch, user_data_count)
   user_vars = [u for u in init.body.toposort() if u.is_variable]
   init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
-                                                 for i,u in enumerate(user_vars)}), *init.src[1:], *user_vars))
-  initialized = routes.after(init).index(wave).store(0).end(wave)
-  afters = {b:buf.after(initialized) for b,(buf,_) in buffers.items()}
-
+                                                 for i,u in enumerate(user_vars)}, walk=True), *init.src[1:], *user_vars))
+  initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def block_instructions(block_pc:int):
     cond = UOp.const(True)
+    branch_pc = block_pc
     instructions = []
     for off in cfg["blocks"][block_pc]:
       inst = insts[off]
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       if inst_st.startswith(("s_getpc", "s_setpc")): raise AssertionError("getpc and setpc are not allowed in ASM_CALL")
-      template, bufs, branch_cond = instruction_call(inst, arch, renderer)
-      if branch_cond is not None: cond = branch_cond
-      if not has_effects(template.body): continue
-      instructions.append((off, (template, bufs, branch_cond)))
-    return instructions, cond
+      call, branch_cond = instruction_call(inst, arch, renderer)
+      if branch_cond is not None: cond, branch_pc = branch_cond, off
+      if call is not None: instructions.append((off, call))
+    values = {}
+    if routed:
+      dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
+      target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
+      values = {taken:UOp.const(dsts[COND_TAKEN], dtypes.int), fallthrough:UOp.const(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
+        else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
+      instructions.append((branch_pc, lower_body(route[0].store(target).sink(), renderer, "asm_branch")))
+    return instructions, values
 
-  chunk_size = 128
-  block_info = {}
-  pending = list(regions)
-  while pending:
-    pc, body = pending.pop()
-    if body: pending.extend(body)
-    else: block_info[pc] = block_instructions(pc)
-
-  def emit_block(block_pc:int, wave:UOp, gate:UOp) -> tuple[UOp, list[UOp]]:
-    instructions, cond = block_info[block_pc]
-    calls = []
-    for i in range(0, len(instructions), chunk_size):
-      chunk = instructions[i:i+chunk_size]
-      off = chunk[0][0]
-      body, bufs = instruction_block([(pc-off, info) for pc,info in chunk])
-      args = [afters[b].index(wave*buffers[b][1]) for b in bufs]
-      call = body.call(*args, code_addr+off, name="asm_block")
-      calls.append(call)
-      # CALL consumes argument ranges; the gate restores its wave and enclosing loop scopes.
-      afters.update((b, afters[b].without_after.after(call, gate)) for b in bufs)
-    return cond.substitute({b:(afters[b].shrink(((wave*s, (wave+1)*s),)) if (s:=buffers[b][1]) else afters[b])
-                            for b in cond.toposort() if b in buffers}, walk=True), calls
+  def emit_block(block_pc:int, wave:UOp, end:UOp, scopes:tuple[UOp, ...]) -> list[UOp]:
+    instructions, values = block_instructions(block_pc)
+    if not instructions: return []
+    off = instructions[0][0]
+    body, bufs = instruction_block([(pc-off, info) for pc,info in instructions])
+    args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0].after(end, *scopes).index(wave*buffers[b][1]) for b in bufs]
+    return [body.call(*args, code_addr, UOp.const(off, dtypes.uint64), name="asm_block")]
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # Waves that exited keep their route while the remaining waves repeat the loop.
-        w = UOp.range(n_waves, next(axes), dtype=dtypes.int)
-        active = afters[routes].after(*scopes, loop)[w].load().eq(pc).cast(dtypes.uint32).reduce(w, arg=Ops.MAX)
-        end = end.backedge(loop, active.ne(0))
+        check = loop_active(routes.after(end, *scopes, loop).index(0), active,
+                            UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
+        end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # Complete the block for every participating wave before entering its successors, including barrier successors.
         w = UOp.range(n_waves, next(axes), dtype=dtypes.int)
-        gate = UOp.range(afters[routes][w].load().eq(pc).cast(dtypes.int).after(*scopes), next(axes), dtype=dtypes.int)
-        afters.update((b, buf.after(end, gate)) for b,(buf,_) in buffers.items())
-        cond, calls = emit_block(pc, w, gate)
-        dsts = {kind:dst for dst,kind in cfg["paths"][pc].items()}
-        target = cond.where(dsts[COND_TAKEN], dsts[COND_NOT_TAKEN]).cast(dtypes.int) if len(dsts) == 2 \
-          else UOp.const(next(iter(dsts.values()), -1), dtypes.int)
-        end = routes.after(*calls, gate)[w].store(target).end(gate).end(w)
-      afters.update((b, buf.after(end)) for b,(buf,_) in buffers.items())
+        gates = () if pc in unconditional else (UOp.range(routes.after(end)[w].load().eq(pc).cast(dtypes.int).after(*scopes),
+                                                      next(axes), dtype=dtypes.int),)
+        block_scopes = gates or (*scopes, w)
+        end = UOp.group(end, *emit_block(pc, w, end, block_scopes), *block_scopes).end(*gates).end(w)
     return end
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)

@@ -9,12 +9,14 @@ from tinygrad.helpers import prod, Target, OSX
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
+dtype_to_llvm = {dtypes.void: "void", dtypes.bool: "i1", dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
+                dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", **{d: "i8" for d in dtypes.fp8s},
+                dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}
+
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
   if count > 1: return f"<{count} x {ldt(dt, 1, ptr)}>"
-  return {dtypes.void: "void", dtypes.bool: "i1", dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
-          dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", **{d: "i8" for d in dtypes.fp8s},
-          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
+  return dtype_to_llvm[dt]
 
 def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, AddrSpace.ALU)) # an external function's arg, an index is its address
 
@@ -224,8 +226,8 @@ class CPULLVMRenderer(LLVMRenderer):
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in UOp.sink(*uops).toposort(enter_calls=True) if b.op is Ops.LINEAR)}
     defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
     return "\n".join((k:=self._render_kernel(uops, fns=fns))[0] + (k[1], *defs, self._render_footer(uops)))
-  def _render_footer(self, uops: list[UOp]) -> str:
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
+  def _render_footer(self, uops: list[UOp], enter_calls=True) -> str:
+    topo = UOp.sink(*uops).toposort(enter_calls=enter_calls)
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in topo if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'

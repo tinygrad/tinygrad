@@ -138,6 +138,7 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
     isa.v_cndmask_b32_e32(v[5], v[4], v[3]),
     isa.v_lshlrev_b32_e32(v[6], 2, v[0]),
     *global_store,
+    *barrier,
     isa.s_endpgm(),
   ]
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
@@ -416,6 +417,26 @@ class TestAsmKernel(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
+
+  def test_cfg_wave_early_exit(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(v_readfirstlane_b32_e32(s[2], v[0]))
+      k.emit(s_cmp_ge_u32(s[2], 32))
+      k.emit(s_cbranch_scc1(), target="store")
+      k.emit(s_endpgm())
+      k.label("store")
+      k.emit(v_lshlrev_b32_e32(v[1], 2, v[0]))
+      k.emit(v_mov_b32_e32(v[2], 7))
+      k.emit(global_store_b32(addr=v[1], data=v[2], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      sink = UOp.sink(out.base, UOp.special(64, "lidx0"), arg=KernelInfo())
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in k.finalize()))))
+    out = Tensor.zeros(64, dtype=dtypes.uint32).contiguous().realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [0]*32 + [7]*32)
 
   def test_cfg_loop(self):
     def cfg_kernel(out:UOp):

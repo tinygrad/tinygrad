@@ -61,12 +61,12 @@ class TestAsmCFG(unittest.TestCase):
     self.assertEqual(cfg_regions({0:{0:0, 1:1}, 1:{}}, 0), [(0, [(0, [])]), (1, [])])
 
   def test_irreducible_loop(self):
-    with self.assertRaisesRegex(AssertionError, "irreducible"):
+    with self.assertRaisesRegex(call.IrreducibleCFG, "irreducible"):
       cfg_regions({0:{1:0, 2:1}, 1:{2:0}, 2:{1:0, 3:1}, 3:{}}, 0)
 
   def test_irreducible_inside_loop(self):
     # The outer SCC has one entry, but its nested cycle has two.
-    with self.assertRaisesRegex(AssertionError, "irreducible"):
+    with self.assertRaisesRegex(call.IrreducibleCFG, "irreducible"):
       cfg_regions({0:{1:0}, 1:{2:0, 3:1}, 2:{3:0}, 3:{2:0, 1:1}}, 0)
 
   def test_nested_loop_exits(self):

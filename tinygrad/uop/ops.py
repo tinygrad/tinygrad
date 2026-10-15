@@ -212,7 +212,15 @@ class recursive_property:
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
+    stack = [x]
+    while stack:
+      node = stack[-1]
+      if self.nm not in node.__dict__:
+        if missing:=[s for s in node.src if self.nm not in s.__dict__]:
+          stack.extend(reversed(missing))
+          continue
+        node.__dict__[self.nm] = self.fxn(node)
+      stack.pop()
     return x.__dict__[self.nm]
 
 class _UOpTuple(tuple):
@@ -1864,7 +1872,8 @@ class RewriteContext:
             new_src_n = UOp(new_n.op, new_src, new_n.arg, new_n.tag)
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
-          stack.append((new_src_n, 0, new_src_n))
+          # Rebuilt nodes already have rewritten children; only a bottom-up matcher can change them before the top-down match.
+          stack.append((new_src_n, 1 if self.bpm is None and new_src != new_n.src else 0, new_src_n))
       else:
         # in stage 2, we link the result of new_n to the result of n
         if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:

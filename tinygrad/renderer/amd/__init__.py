@@ -27,9 +27,9 @@ def _matches(data: bytes|memoryview, cls: type[Inst], word0:int) -> bool:
   return True
 
 # Lazy-load instruction format tables to avoid circular imports (ins.py imports dsl.py which is in this package)
-_FORMATS: dict[str, list[type[Inst]]] | None = None
+_FORMATS: dict[str, list[list[type[Inst]]]] | None = None
 
-def _load_formats() -> dict[str, list[type[Inst]]]:
+def _load_formats() -> dict[str, list[list[type[Inst]]]]:
   global _FORMATS
   if _FORMATS is not None: return _FORMATS
   from tinygrad.runtime.autogen.amd.rdna3.ins import (VOP1, VOP1_SDST, VOP1_DPP16, VOP1_LIT, VOP2, VOP2_DPP16, VOP2_LIT, VOP3, VOP3_SDST,
@@ -50,7 +50,7 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
     FLAT as C_FLAT, GLOBAL as C_GLOBAL, SCRATCH as C_SCRATCH, MUBUF as C_MUBUF)
   # Order matters: more specific encodings first, catch-alls (SOP2, VOP2) last
   # Order: base before _LIT (base matches regular ops, _LIT catches lit-only ops excluded from base)
-  _FORMATS = {
+  formats = {
     "rdna3": [VOPD, VOP3P, VINTERP, VOP3SD, VOP3_SDST, VOP3, DS, GLOBAL, SCRATCH, FLAT, SMEM,
               SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, VOPC_DPP16, VOPC, VOP1_SDST, VOP1_DPP16, VOP1, VOP1_LIT,
               VOP2_DPP16, VOP2, VOP2_LIT],
@@ -61,13 +61,17 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
               C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_SOPK_LIT, C_VOPC_SDWA_SDST, C_VOPC,
               C_VOP1_DPP16, C_VOP1_SDWA, C_VOP1, C_VOP2_DPP16, C_VOP2_SDWA, C_SOP2, C_VOP2, C_VOP2_LIT],
   }
+  # Dispatch on the high byte, preserving priority among formats whose fixed bits can match it.
+  _FORMATS = {arch: [[cls for cls in classes if all(
+    ((prefix << 24) ^ (field.default << field.lo)) & (field.mask << field.lo) & 0xff000000 == 0
+    for _, field in cls._fields if isinstance(field, FixedBitField))] for prefix in range(256)] for arch, classes in formats.items()}
   return _FORMATS
 
 def detect_format(data: bytes|memoryview, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   word0 = int.from_bytes(data[:4], 'little')
-  for cls in _load_formats()[arch]:
+  for cls in _load_formats()[arch][word0 >> 24]:
     if _matches(data, cls, word0): return cls
   raise ValueError(f"unknown {arch} format word={word0:#010x}")
 
