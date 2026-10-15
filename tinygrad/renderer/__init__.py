@@ -75,6 +75,10 @@ class Renderer:
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
+  # Native floating MAX must propagate quiet NaNs for the advertised dtype.
+  native_nan_max_dtypes: tuple[DType, ...] = ()
+  # Optional post-autograd REDUCE(MAX) uint-key realization.
+  encoded_nan_max_reduce_dtypes: tuple[DType, ...] = ()
 
   compiler: Compiler = Compiler()
 

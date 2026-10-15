@@ -164,6 +164,8 @@ class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonRenderer(Renderer):
+  # The Python interpreter and constant folding share qNaN-aware MAX.
+  native_nan_max_dtypes = (dtypes.float16, dtypes.float32, dtypes.float64)
   code_for_op = python_alu
   compiler = PythonCompiler()
 

@@ -268,6 +268,30 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+def _f32_nan_reduce_to_uint(red:UOp) -> UOp|None:
+  if red.arg[0] is not Ops.MAX or len(red.src) == 1: return None
+  # Encode float32 REDUCE(MAX) after differentiation to propagate quiet NaNs.
+  # Its zero-tie representation is not a requirement of Contract A.
+  x = red.src[0]
+  u = x.bitcast(dtypes.uint32)
+  sign_mask = u.const_like(0) - (u >> 31)
+  key = u ^ (sign_mask | u.const_like(0x80000000))
+  nan_mask = ((u & u.const_like(0x7fffffff)) > u.const_like(0x7f800000)).cast(dtypes.uint32)
+  # Identity-compatible encoding: -infinity is key 0, the identity of uint32 MAX.
+  # A NaN remains the all-ones key. It is repaired only at the final decode.
+  key = (key - u.const_like(0x007fffff)) | (u.const_like(0) - nan_mask)
+  imax = red.replace(src=(key, *red.src[1:]))
+  unshifted = imax + imax.const_like(0x007fffff)
+  restored = unshifted ^ (((unshifted >> 31)-1) | unshifted.const_like(0x80000000))
+  restored = imax.eq(imax.const_like(0xffffffff)).where(imax.const_like(0x7fc00000), restored)
+  return restored.bitcast(dtypes.float32)
+
+
+pm_nan_f32_reduce_encoding = PatternMatcher([
+  (UPat(Ops.REDUCE, dtype=dtypes.float32, name="red"), _f32_nan_reduce_to_uint),
+])
+
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -298,6 +322,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # ** expander (expand_rewrite) **
   # reduce_unparented: a REDUCE whose src folded to a CONST (e.g. x*0) has no parented ranges, collapse it before the expander
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented+pm_reduce_identity, name="postopt symbolic")
+
+  # Optional dtype-scoped fast reduction for supported CPU targets.
+  if dtypes.float32 in ren.encoded_nan_max_reduce_dtypes:
+    sink = graph_rewrite(sink, pm_nan_f32_reduce_encoding, name="qNaN f32 encoded max reduce")
 
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")

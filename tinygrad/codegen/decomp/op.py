@@ -77,11 +77,20 @@ def get_simplifying_rewrite_patterns(ops:tuple[Ops, ...]) -> PatternMatcher:
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   return PatternMatcher(pat)
 
+def nan_propagating_max(m:UOp) -> UOp:
+  a, b = m.src
+  numeric = (a < b).where(b, a)  # preserve original non-NaN comparison/selection
+  return a.ne(a).where(a, b.ne(b).where(b, numeric))
+
 @functools.cache
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> PatternMatcher:
   pat: list[tuple[UPat, Callable]] = []
-  # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends). late: WHERE loses the bound MAX carries
-  if Ops.MAX not in ops and Ops.CMPLT in ops: pat += [(UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]))]
+  # Native floating MAX is valid only where it propagates quiet NaNs.
+  pat.append((UPat(Ops.MAX, dtype=dtypes.floats, name="m"),
+              lambda ctx,m: None if m.dtype in ctx.native_nan_max_dtypes and Ops.MAX in ctx.code_for_op else nan_propagating_max(m)))
+  # Integer MAX requires no floating NaN handling.
+  if Ops.MAX not in ops and Ops.CMPLT in ops:
+    pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
     lambda x,y: (x | y).logical_not())]
   # rewrite MUL/CDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)

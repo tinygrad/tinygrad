@@ -141,6 +141,11 @@ class PTXRenderer(Renderer):
   extra_matcher = ptx_matcher
   def __init__(self, target:Target):
     super().__init__(target)
+    # PTX max.NaN.f32 is a native qNaN-propagating maximum on SM80+.
+    cc = int(target.arch[3:])
+    self.native_nan_max_dtypes = (dtypes.float32,) if cc >= 80 else ()
+    self.code_for_op = {**asm_for_op, Ops.MAX: lambda d,a,b,dt,name:
+      f"max{'.NaN' if dt == dtypes.float32 and cc >= 80 else ''}.{name} {d}, {a}, {b};"}
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
     self.compiler = (PTXCompiler if target.interface.startswith("MOCK") or target.device == "CUDA" else NVPTXCompiler)(target.arch)
     self.tensor_cores = [x for x in tc.get_cuda(target.arch) if x.dtype_in in (dtypes.half, dtypes.float)]

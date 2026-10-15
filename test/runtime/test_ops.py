@@ -1560,6 +1560,20 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[True, False]])
 
+  def test_max_nan_contract(self):
+    for vals in ([float('nan'), 1., 3.], [1., float('nan'), 3.], [1., 3., float('nan')], [float('nan'), float('nan')]):
+      with self.subTest(vals=vals):
+        self.assertTrue(np.isnan(Tensor(np.array(vals, dtype=np.float32)).max().numpy()).all())
+    matrix = Tensor(np.array([[1., np.nan, 3.], [4., 5., 2.]], dtype=np.float32))
+    self.assertTrue(np.isnan(matrix.max(axis=1).numpy()[0]))
+    self.assertEqual(float(matrix.max(axis=1).numpy()[1]), 5.)
+    self.assertEqual(matrix.max(axis=1, keepdim=True).shape, (2, 1))
+    self.assertTrue(np.isnan(matrix.max(axis=(0, 1)).numpy()).all())
+    self.assertEqual(int(Tensor([-3, 1, 5], dtype=dtypes.int32).max().item()), 5)
+    x = Tensor([1., -2., 3.])
+    x.max().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [0., 0., 1.])
+
   def test_const_reduce(self):
     helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).sum(), lambda x: (x.full_like(2)).sum(), forward_only=True)
     helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).prod(), lambda x: (x.full_like(2)).prod(), forward_only=True)

@@ -57,6 +57,8 @@ class Ops(FastEnum):
   SQRT = auto(); RECIPROCAL = auto(); NEG = auto(); TRUNC = auto()
 
   # BinaryOps
+  # Floating MAX propagates quiet NaNs; zero ties and NaN payload are unspecified.
+  # Integer MAX is unchanged.
   ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); CDIV = auto(); MAX = auto(); CMOD = auto()
   CMPLT = auto(); CMPNE = auto(); CMPEQ = auto()
   XOR = auto(); OR = auto(); AND = auto()

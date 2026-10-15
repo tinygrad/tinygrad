@@ -253,6 +253,36 @@ class NAKRenderer(NIRRenderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if (d != dtypes.half or int(self.target.arch[3:]) >= 53)}
 
 class LVPRenderer(NIRRenderer):
+  # Keep the verified encoded path by default. A custom tinymesa_cpu build
+  # may advertise a distinct qNaN-propagating f32 NIR opcode. NIR fmax alone
+  # is numeric-only, and must NEVER be advertised as qNaN-propagating.
+  encoded_nan_max_reduce_dtypes: tuple[DType, ...] = (dtypes.float32,)
+
+  @staticmethod
+  def _strict_fmax(ctx, x:UOp):
+    assert ctx._strict_fmax_opcode is not None
+    return mesa.nir_build_alu2(ctx.b, ctx._strict_fmax_opcode, ctx.r[x.src[0]], ctx.r[x.src[1]]).contents
+
+  def __init__(self, target:Target):
+    super().__init__(target)
+    self._strict_fmax_opcode: int|None = None
+    # The marker is exported only by the separately built patched
+    # tinymesa_cpu library; autogen's existing opcode IDs remain unchanged.
+    try: abi = mesa.dll.tinymesa_strict_fmax_nan_abi_v1
+    except AttributeError: abi = None
+    if abi is not None and target.arch.startswith("x86_64,"):
+      abi.argtypes, abi.restype = (), ctypes.c_uint32
+      opcode_id = int(abi())
+      # Append-only opcode ABI. Anything else is incompatible: never invoke
+      # an unknown operation ID from a mismatched external compiler library.
+      if opcode_id == mesa.nir_num_opcodes:
+        self._strict_fmax_opcode = opcode_id
+        self.native_nan_max_dtypes = (dtypes.float32,)
+        self.encoded_nan_max_reduce_dtypes = ()
+        self.def_rewrite = PatternMatcher([
+          (UPat(Ops.MAX, dtype=dtypes.float32, name="x"), LVPRenderer._strict_fmax),
+        ]) + NIRRenderer.def_rewrite
+
   has_local = False
   has_shared = False
   global_max = (1, 0, 0)

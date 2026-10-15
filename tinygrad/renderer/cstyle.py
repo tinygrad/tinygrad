@@ -321,6 +321,7 @@ class ClangRenderer(CStyleLanguage):
 
   def __init__(self, target:Target):
     super().__init__(target)
+    self.encoded_nan_max_reduce_dtypes = (dtypes.float32,) if target.arch.startswith('x86_64,') else ()
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
 
