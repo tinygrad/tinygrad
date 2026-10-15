@@ -150,18 +150,22 @@ def gated_store(ctx, addr:UOp, gate:UOp, val:UOp):
 def flag_gate(m:UOp) -> UOp|None:
   return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
 
+def pinned_reg(ctx:IselContext, dt:DType, pin:Register|tuple[Register, ...], val:UOp) -> UOp:
+  reg = alloc_reg(ctx, dt, pin)
+  return reg.after(reg[0].store(val))[0].load().replace(tag=reg.tag)
+
 def idiv(ctx:IselContext, x:UOp) -> UOp:
   val = UOp.cconst(0, x.dtype) if x.dtype in dtypes.uints else x.src[0] >> UOp.cconst(x.dtype.itemsize*8-1, x.dtype)
-  ext = [] if x.dtype in dtypes.int8s else [alloc_reg(ctx, x.dtype, RDX)[0].set(val)]
+  ext = [] if x.dtype in dtypes.int8s else [pinned_reg(ctx, x.dtype, RDX, val)]
   dividend_dtype = dtypes.int16 if x.dtype in dtypes.int8s else x.dtype
-  dividend = alloc_reg(ctx, dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
-  divisor = alloc_reg(ctx, x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
+  dividend = pinned_reg(ctx, dividend_dtype, RAX, x.src[0].cast(dividend_dtype))
+  divisor = pinned_reg(ctx, x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)), x.src[1])
   return x.replace(src=(dividend,divisor) + tuple(ext))
 
 # a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
 def shift(ctx:IselContext, x:UOp) -> UOp:
-  val = alloc_reg(ctx, x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
-  cnt = alloc_reg(ctx, x.src[1].dtype, RCX)[0].set(x.src[1])
+  val = pinned_reg(ctx, x.src[0].dtype, tuple(r for r in WGPR if r is not RCX), x.src[0])
+  cnt = pinned_reg(ctx, x.src[1].dtype, RCX, x.src[1])
   return x.replace(src=(val,cnt))
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
