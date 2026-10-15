@@ -25,15 +25,15 @@ def hipify(c:UOp, f:UOp) -> UOp|None:
   if fn is hip.hipMemcpyAsync: args.insert(3, UOp.const(hip.hipMemcpyDefault, dtypes.int))
   if fn is hip.hipStreamWaitValue64: args.append(UOp.const((1<<64)-1, dtypes.uint64))
   return ccall(fn, *args)
-pm_hipify = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="c"), hipify)])
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("hip_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
   (UPat.sink(arg=KernelInfo("hip_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
 ])
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="c"), hipify)])
 
 class HIPDevice(CUDADevice):
-  api, launch_end, renderers, pm_lower = SimpleNamespace(**HIPIFY), 3, [HIPRenderer], pm_hipify # the cuda queues encode hip calls
+  api, launch_end, renderers = SimpleNamespace(**HIPIFY), 3, [HIPRenderer]
 
   def get_arch(self, device_id:int) -> str:
     return init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, device_id))).gcnArchName.decode().split(":")[0]
