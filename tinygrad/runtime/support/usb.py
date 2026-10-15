@@ -210,15 +210,16 @@ HOST_SIZE = 64 + 2 * HALF + STREAM # link, staging, zeros
 
 def usb_host(dev:str) -> UOp: return UOp.alloc((HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.device).rtag(to_name(dev, "usb_host"))
 def usb_link(dev:str) -> UOp: return usb_host(dev)[:48].bitcast(dtypes.uint64) # handle, context, prev chunks, two transfers, error state
-def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + getattr(Device[dev], "usb_stage_size")]
+def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + usb_sram(dev).max_numel()]
 def usb_zeros(dev:str) -> UOp: return usb_host(dev)[64 + 2 * HALF:]
 
 def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev).rtag(to_name(dev, "usb_go")) # chunk + 1: read armed
 
-def usb_asm24(dev:str) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=dev).rtag(to_name(dev, "usb_asm24")) # sys, cq, sram
+def usb_asm24(dev:str) -> UOp:
+  return UOp.alloc((getattr(Device[dev], "iface").ctrl.nbytes,), dtypes.uint8, 0, device=dev).rtag(to_name(dev, "usb_asm24")) # sys, cq, sram
 def usb_fence(dev:str) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # gpu chunks done
 def usb_cq(dev:str) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue
-def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
+def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:]
 
 # *****************
 # 2. transfers
@@ -440,15 +441,15 @@ Compiled.pm_lower += PatternMatcher([
 # *****************
 # 6. bufferize
 
-def usb_ctrl_buffer(iface, half:int=HALF) -> Buffer:
+def usb_ctrl_buffer(iface, size:int=2 * HALF) -> Buffer:
   # the controller's memory the queue and the host share: sys at 0, cq at 0x1000, sram at 0x5000.
   # the host view starts at the sys page's controller address 0xa000, putting sram on its scsi window 0xf000.
-  vaddr, pieces = iface.dev_impl.mm.alloc_vaddr(size=0x85000), [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, 0x80000)]
+  vaddr, pieces = iface.dev_impl.mm.alloc_vaddr(size=0x5000 + size), [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, size)]
   for off, paddr, n in pieces: iface.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=MemoryAddrSpace.SYS, uncached=True)
   iface.pci_dev.usb.write(0xa800, bytes(4))
-  iface.pci_dev.usb.scsi_write(bytes(2 * half)) # no stale fence or sentinel
-  return Buffer(iface.dev.device, 0x85000, options=BufferSpec(external_ptr=vaddr),
-                opaque=BufferStorage(vaddr, host=iface.pci_dev.dma_view(0xa000, 0x85000)))
+  iface.pci_dev.usb.scsi_write(bytes(size)) # no stale fence or sentinel
+  return Buffer(iface.dev.device, 0x5000 + size, options=BufferSpec(external_ptr=vaddr),
+                opaque=BufferStorage(vaddr, host=iface.pci_dev.dma_view(0xa000, 0x5000 + size)))
 
 @functools.cache
 def _host_block(dev) -> Buffer:
@@ -462,11 +463,11 @@ def _go(dev) -> Buffer:
   return Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
 
 def usb_reset(dev):
-  for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
+  ctrl = dev.iface.ctrl
+  for buf, off, n in ((ctrl, 0x800, 4), (ctrl, 0x5000, ctrl.nbytes - 0x5000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
   for t in map(libusb.struct_libusb_transfer.from_address, _host_block(dev).host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 
-def setup_usb_rules(dev, half:int=HALF):
-  dev.usb_stage_size = 2 * half
+def setup_usb_rules(dev):
   Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)), # placeholders the gpu owns
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_go")), lambda d=dev: _go(d)),
                                            (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])

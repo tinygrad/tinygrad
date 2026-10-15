@@ -565,7 +565,7 @@ class USBIface(PCIIface):
     self._init_nvd()
 
   @functools.cached_property
-  def ctrl(self) -> Buffer: return usb_ctrl_buffer(self, self.dev_impl.gsp.queue_offset // 2)
+  def ctrl(self) -> Buffer: return usb_ctrl_buffer(self, self.dev_impl.gsp.queue_offset)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
@@ -633,7 +633,7 @@ class NVDevice(Compiled):
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
 
-    if self.is_usb: setup_usb_rules(self, self.iface.dev_impl.gsp.queue_offset // 2)
+    if self.is_usb: setup_usb_rules(self)
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
