@@ -178,16 +178,15 @@ instruction_cache:dict[tuple, list[tuple[int, int, tuple[InstructionCall|None, U
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:sint, gy:sint, lx:sint, ly:sint, total_threads:sint, wave_size:int,
               scratch_size:int, rsrc2:int, arch:str="rdna3", user_data_count:int=0):
-  # Constant operand encodings are represented in the emulator's SGPR buffer, not writable architectural registers.
   ci = UOp.range(81, 2, dtype=dtypes.int)
-  inline_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
+  init_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
   fi = UOp.range(len(F32_INLINE), 3, dtype=dtypes.int)
-  floats = UOp(Ops.BINARY, arg=struct.pack(f"<{len(F32_INLINE)}I", *F32_INLINE.values())).bitcast(dtypes.uint32)
-  inline_floats = sgpr.index(fi+240).store(floats[fi]).end(fi)
-  # Only defined launch inputs are initialized; other registers and compute LDS have no initial value guarantee.
+  floats_buf = UOp(Ops.BINARY, arg=struct.pack(f"<{len(F32_INLINE)}I", *F32_INLINE.values())).bitcast(dtypes.uint32)
+  init_floats = sgpr.index(fi+240).store(floats_buf[fi]).end(fi)
+  # set RANGE registers
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
-  initial:list[tuple[int, sint]] = [(124, 0)] if wave_size == 32 else []  # NULL reads as zero on RDNA; CDNA uses this slot for M0.
+  initial:list[tuple[int, sint]] = [(124, 0)] if wave_size == 32 else []
   if user_data_count: initial += [(i, UOp.variable(f"user_data_{i}", 0, dtypes.uint32.max, dtypes.uint32)) for i in range(user_data_count)]
   else: initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
   if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
@@ -207,7 +206,7 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:sint, gy:si
   tid = wave*wave_size+lane
   init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store(
       (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(inline_ints, inline_floats).index(i).store(UOp.const(v, dtypes.uint32))
+  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32))
                              for i,v in dict(initial).items()))
 
 @uopfunc
