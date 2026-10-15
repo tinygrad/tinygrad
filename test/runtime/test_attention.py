@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, attn_mask,
 )
 from test.helpers import slow
 
@@ -18,6 +18,12 @@ class TestAttention(unittest.TestCase):
     return TransformerConfig(**({"num_blocks":1, "dim":4, "hidden_dim":4, "n_heads":2, "n_kv_heads":1,
                                  "norm_eps":1e-5, "vocab_size":32, "head_dim":2, "rope_theta":10000.0,
                                  "rope_dim":2, "v_head_dim":2, "max_context":4} | kwargs))
+
+  def test_attn_mask_matches_triu(self):
+    for start_pos, T, window in ((0, 8, 0), (5, 8, 0), (37, 3, 0), (20, 6, 4), (3, 4, 10)):
+      ref = Tensor.full((1, 1, T, start_pos+T), float("-inf"))
+      ref = ref.triu(start_pos+1) + ref.tril(start_pos-window) if window else ref.triu(start_pos+1)
+      np.testing.assert_equal(attn_mask(T, start_pos, 64, dtypes.float32, window).numpy(), ref.numpy())
 
   def test_apply_rope(self):
     x = Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32)

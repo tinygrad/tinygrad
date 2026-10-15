@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes, TinyJit, UOp
 from tinygrad.llm.kernels.amd import Linear
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.llm.model import apply_rope as apply_rope_new, precompute_freqs_cis
+from tinygrad.llm.model import apply_rope as apply_rope_new, precompute_freqs_cis, attn_mask
 from test.helpers import assert_jit_cache_len, check_schedule
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -20,6 +20,12 @@ class TestAttention(unittest.TestCase):
     attn = q.scaled_dot_product_attention(k, v)
     # attention has 4 kernels now
     check_schedule(attn, 4)
+
+  def test_symbolic_attn_mask_no_arange_kernel(self):
+    # with a symbolic start_pos, a triu/tril mask adds an arange reduce over the whole context (quadratic in context length)
+    start_pos = UOp.variable("start_pos", 0, 4095).bind(100)
+    scores = Tensor.empty(1, 1, 8, 4096, dtype=dtypes.half)[:, :, :, :start_pos+8]
+    for window in (0, 16): check_schedule((scores + attn_mask(8, start_pos, 4096, dtypes.half, window)).softmax(-1), 3)
 
   def test_apply_rope_jit_prune(self):
     def rope_fn(x_in, pos): return apply_rope(x_in, pos)
