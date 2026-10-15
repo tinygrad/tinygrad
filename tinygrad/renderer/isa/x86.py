@@ -132,17 +132,15 @@ extra_matcher = PatternMatcher([
 ])
 
 # ***** X86 pre instruction selection *****
-def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp: return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
-
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
+  local = UOp.placeholder((x.max_numel(),), addr.src[0].dtype, next(ctx.alloc_n), AddrSpace.LOCAL)
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
   sel = gate.where(addr, local_idx)
   return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
-def gated_store(addr:UOp, gate:UOp, val:UOp):
-  local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
+def gated_store(ctx, addr:UOp, gate:UOp, val:UOp):
+  local = UOp.placeholder((val.max_numel(),), addr.src[0].dtype, next(ctx.alloc_n), AddrSpace.LOCAL)
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return UOp(Ops.AFTER, src=(sel,)).store(val)
 
@@ -151,6 +149,20 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
 # different kernels)
 def flag_gate(m:UOp) -> UOp|None:
   return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
+
+def idiv(ctx:IselContext, x:UOp) -> UOp:
+  val = UOp.cconst(0, x.dtype) if x.dtype in dtypes.uints else x.src[0] >> UOp.cconst(x.dtype.itemsize*8-1, x.dtype)
+  ext = [] if x.dtype in dtypes.int8s else [alloc_reg(ctx, x.dtype, RDX)[0].set(val)]
+  dividend_dtype = dtypes.int16 if x.dtype in dtypes.int8s else x.dtype
+  dividend = alloc_reg(ctx, dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
+  divisor = alloc_reg(ctx, x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
+  return x.replace(src=(dividend,divisor) + tuple(ext))
+
+# a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
+def shift(ctx:IselContext, x:UOp) -> UOp:
+  val = alloc_reg(ctx, x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
+  cnt = alloc_reg(ctx, x.src[1].dtype, RCX)[0].set(x.src[1])
+  return x.replace(src=(val,cnt))
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
@@ -167,6 +179,8 @@ pre_isel_matcher = PatternMatcher([
   # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
    lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
+  ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
+  (UPat((Ops.SHL, Ops.SHR), dtype=dtypes.ints, name="x"), shift),
 ])
 
 # ***** X86 registers *****
@@ -227,24 +241,6 @@ def vinsertps(x:UOp) -> UOp:
 def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
   op = {2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD}[x.dtype.itemsize]
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, srcs[i], imm(dtypes.uint8, i))), range(len(srcs)), UOp(Ops.NOOP))
-
-def idiv(ctx:IselContext, x:UOp) -> UOp:
-  op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
-  val = UOp.cconst(0, x.dtype) if x.dtype in dtypes.uints else x.src[0] >> UOp.cconst(x.dtype.itemsize*8-1, x.dtype)
-  ext = [] if x.dtype in dtypes.int8s else [alloc_reg(ctx, x.dtype, RDX)[0].set(val)]
-  dividend_dtype = dtypes.int16 if x.dtype in dtypes.int8s else x.dtype
-  dividend = alloc_reg(ctx, dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
-  defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][:1+(x.dtype not in dtypes.int8s)]
-  divisor = alloc_reg(ctx, x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
-  idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=tuple(defs))
-  # this move "cleanses" the register constraints (rax/rdx) of idiv
-  return x.ins(X86Ops.MOV, src=(idiv,))
-
-# a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
-def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
-  val = alloc_reg(ctx, x.src[0].dtype, tuple(r for r in WGPR if r is not RCX))[0].set(x.src[0])
-  cnt = alloc_reg(ctx, x.src[1].dtype, RCX)[0].set(x.src[1])
-  return x.ins(op, src=(val, cnt))
 
 # a memory address operand is (base, index, displacement, size)
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
@@ -310,6 +306,11 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
 def copy_op(dt:DType) -> X86Ops:
   return {dtypes.float16:X86Ops.VMOVSS, dtypes.float32:X86Ops.VMOVSS, dtypes.float64:X86Ops.VMOVSD, dtypes.bool:X86Ops.MOVZX}.get(dt, X86Ops.MOV)
 
+def lower_idiv(ctx:IselContext, x:UOp) -> UOp:
+  defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][:1+(x.dtype not in dtypes.int8s)]
+  out = x.ins(X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV).replace(tag=tuple(defs))
+  return x.ins(X86Ops.MOV, src=(out,)) # clear register constraints
+
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
@@ -370,7 +371,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.floats).index(UPat.cvar("c").cast(), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, c.val * x.dtype.itemsize))) if _is_vec_xmm(y) else None),
   # int binary
-  ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
+  (UPat(Ops.CDIV, dtype=dtypes.ints, name="x"), lower_idiv),
   # int binary with immediate
   (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.val)))),
   (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.val)))),
@@ -386,9 +387,9 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SUB, dtypes.ints, (UPat.var("a"), UPat.cvar().cast(name="c"))),
    lambda a,c: a.ins(X86Ops.SUBi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   # int binary with register
-  ((UPat(dtype=dtypes.ints) << UPat()).named("x"), lambda ctx,x: shift(ctx, x, X86Ops.SHL)),
-  ((UPat(dtype=dtypes.uints) >> UPat()).named("x"), lambda ctx,x: shift(ctx, x, X86Ops.SHR)),
-  ((UPat(dtype=dtypes.sints) >> UPat()).named("x"), lambda ctx,x: shift(ctx, x, X86Ops.SAR)),
+  ((UPat(dtype=dtypes.ints) << UPat()).named("x"), lambda ctx,x: x.ins(X86Ops.SHL)),
+  ((UPat(dtype=dtypes.uints) >> UPat()).named("x"), lambda ctx,x: x.ins(X86Ops.SHR)),
+  ((UPat(dtype=dtypes.sints) >> UPat()).named("x"), lambda ctx,x: x.ins(X86Ops.SAR)),
   (UPat.var("a", dtypes.ints) + UPat.var("b"), lambda a,b: a.ins(X86Ops.ADD, src=(a, b))),
   (UPat.var("a", dtypes.ints) * UPat.var("b"), lambda a,b: a.ins(X86Ops.IMUL, src=(a, b))),
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.var("b"), lambda a,b: a.ins(X86Ops.AND, src=(a, b))),
