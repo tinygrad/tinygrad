@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
@@ -13,6 +13,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_group_gpudims, pm_range_to_special
 from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid, invalid_gate
+from tinygrad.uop.symbolic import pm_data_invalid
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import DTypeDecompCtx, pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
@@ -268,6 +269,42 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+@dataclass(frozen=True)
+class RangeCtx:
+  acc: UOp
+  loop: UOp
+  gate: UOp|None
+
+def remove_range(sink:UOp):
+  sink = graph_rewrite(sink, pm_split_ends)
+  loop_ids = itertools.count(max((aid for u in sink.toposort() if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
+  acc_slots = itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
+  enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
+  def init(u:UOp):
+    acc = UOp.alloc((1,), u.dtype, slot=next(acc_slots), addrspace=AddrSpace.REG)
+    acc = acc.replace(arg=replace(acc.arg, vmin_vmax=u._min_max))
+    gate = UOp(Ops.IF, src=((u.src[0] > 0),)) if u.src[0].vmin <= 0 else None
+    return RangeCtx(acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), gate)
+  ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
+    and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
+  cleanups = pm_data_invalid+pm_move_gates_from_index+pm_remove_invalid
+  return graph_rewrite(graph_rewrite(sink, pm_end_to_backedge, ctx=ctx, bottom_up=True), cleanups)
+
+def cur_acc(ctx:RangeCtx, x:UOp):
+  acc = ctx.acc.after(*((ctx.loop, ctx.gate) if ctx.gate is not None else (ctx.loop,)))[0].load()
+  return acc.valid(acc < x.src[0])
+
+def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
+  inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
+  end = body.backedge(ctx.loop, inc[0].load() < bnd)
+  return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate,)).after(end)
+
+pm_end_to_backedge = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: cur_acc(ctx[x],x) if x in ctx else None),
+  (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"),
+    lambda body,bnd,rng,x,ctx: close_range(ctx[rng], x, rng, bnd, body) if rng in ctx else None)
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -325,6 +362,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
+  sink = remove_range(sink)
+
   sink = graph_rewrite(sink, symbolic_simple+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?

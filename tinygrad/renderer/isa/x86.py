@@ -312,8 +312,6 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # range is lowered to acc, cmp, jmp after regalloc
-  (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),))),
   # BACKEDGE becomes a conditional jump referencing the RANGE start label
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
@@ -447,7 +445,7 @@ isel_matcher = PatternMatcher([
    x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC), name="x"), alloc_vregs),
   # tag shape srcs so they aren't materialized into registers
   (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
     x.replace(src=tuple(s.rtag() for s in x.src)) if any(s.tag is not True for s in x.src) else None),
@@ -458,7 +456,7 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op is Ops.BACKEDGE or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
@@ -472,31 +470,10 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
-# TODO: control flow should be overhauled so that this isn't necessary
-def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  loop_label = "_".join(str(i) for i in x.axis_id)
-  label = UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=f".LOOP_{loop_label}")
-  # loop, cmp on backedge all we need is a jmp tag
-  if x.dtype is dtypes.void: return (label, [label])
-  else:
-    # an AFTER-wrapped bound carries the loop's ordering deps, they keep the acc unique per loop (hash-consing)
-    bound, deps = ((b:=x.src[0]).src[0], b.src[1:]) if (b:=x.src[0]).op is Ops.AFTER else (x.src[0], ())
-    acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + tuple(deps))
-    cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if bound.op is Ops.CAST else X86Ops.CMP, dtypes.void), src=(acc, bound))
-    jump_out = UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
-    ctx.loop_label[acc] = loop_label
-    return (acc, [acc, label, cmp, jump_out])
-
-def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  end_label = UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
-  jmp = UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  inc = x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),))
-  return (inc, [inc, jmp, end_label])
-
 def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   cond = x.replace(op=x.tag, src=x.src[:2])
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
@@ -510,10 +487,6 @@ post_regalloc_matcher = PatternMatcher([
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
-  # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
-  (UPat(Ops.END, name="x"), lower_end),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
