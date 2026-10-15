@@ -136,12 +136,12 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local = UOp.placeholder((x.max_numel(),), addr.src[0].dtype, next(ctx.alloc_n), AddrSpace.LOCAL)
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
-  sel = gate.where(addr, local_idx)
+  sel = gate.where(addr.bitcast(dtypes.uint64), local_idx.bitcast(dtypes.uint64))
   return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
 def gated_store(ctx, addr:UOp, gate:UOp, val:UOp):
   local = UOp.placeholder((val.max_numel(),), addr.src[0].dtype, next(ctx.alloc_n), AddrSpace.LOCAL)
-  sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
+  sel = gate.where(addr.bitcast(dtypes.uint64), local.index(UOp.cconst(0, dtypes.int32)).bitcast(dtypes.uint64))
   return UOp(Ops.AFTER, src=(sel,)).store(val)
 
 # a gate the flags can be picked with, or the bool compared to zero that replaces one they can't: only an integer
@@ -186,6 +186,9 @@ pre_isel_matcher = PatternMatcher([
    # alu register constraints/validation
   ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
   (UPat((Ops.SHL, Ops.SHR), dtype=dtypes.ints, name="x"), shift),
+  # conditional moves between addresses is actually u64
+  (UPat.var("m").where(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat((Ops.INDEX, Ops.SHRINK), name="b")), lambda m,a,b:
+   m.where(a.bitcast(dtypes.uint64), b.bitcast(dtypes.uint64)) if not _is_vec_xmm(a.src[0]) else None),
 ])
 
 # ***** X86 registers *****
@@ -326,9 +329,6 @@ isel_matcher = PatternMatcher([
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
-  # conditional moves between addresses, lea both srcs
-  (UPat.var("m").where(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat((Ops.INDEX, Ops.SHRINK), name="b")), lambda m,a,b:
-   m.where(lea(a), lea(b)) if not _is_vec_xmm(a.src[0]) else None),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("c").cast(dtypes.int64s, name="x"), lambda c,x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, c.val),)) if not x.tag else None),
   (UPat.cvar("c").cast(dtypes.ints+(dtypes.bool,), name="x"), lambda c,x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, c.val),)) if not x.tag else None),
