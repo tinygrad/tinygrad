@@ -102,7 +102,7 @@ def fix_store_hazard(target:UOp, src:UOp):
   unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=store_hazard_boundary):
-    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
+    reaches_base[s] = any(c is base or reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
 
 def split_reduceop(reduce:UOp, x:UOp):
