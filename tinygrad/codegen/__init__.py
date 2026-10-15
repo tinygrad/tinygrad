@@ -513,7 +513,7 @@ to_program_lower_config = (EMULATED_DTYPES, IMAGE, DISABLE_FAST_IDIV, TRANSCENDE
 to_program_config = (*to_program_lower_config, NOOPT, USE_TC, ALLOW_TF32, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
 to_program_context = (*to_program_config, SPEC, DEBUG)
 def to_program_key(ast:UOp, renderer:Renderer, optimize:bool=True) -> tuple:
-  config = to_program_config if optimize and ast.tag is None else to_program_lower_config
+  config = to_program_config if optimize and not (isinstance(ast.arg, KernelInfo) and ast.arg.optimized) else to_program_lower_config
   return (ast.key, type(renderer), renderer.target, *[x.value for x in config])
 
 to_program_cache: dict[tuple, UOp] = {}

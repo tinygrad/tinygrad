@@ -563,19 +563,18 @@ def amd_decode(buf:bytes|memoryview, arch:str, off:int=0, stop_at_end:bool=False
   code_end = amd_code_end(arch)
   addr_table:dict[int, Inst] = {}
   offset, branch_end, view = 0, 0, memoryview(buf)
-  while offset < len(buf):
-    if code_end and view[offset:offset+len(code_end)] == code_end: break
+  while offset < len(view):
     remaining = view[offset:]
+    if code_end and remaining[:len(code_end)] == code_end: break
     try: fmt = detect_format(remaining, arch)
     except ValueError:
       if not any(getattr(inst, "op_name", "") == "S_ENDPGM" for inst in addr_table.values()): raise
       break
-    decoded = fmt.from_bytes(remaining)
-    addr_table[off+offset] = decoded
-    offset += decoded.size()
+    addr_table[off+offset] = inst = fmt.from_bytes(remaining)
+    offset += inst.size()
     if stop_at_end:
-      op = getattr(decoded, "op_name", "").lower()
-      if (branch:=parse_branch(decoded, op)) is not None: branch_end = max(branch_end, offset+branch)
+      op = getattr(inst, "op_name", "").lower()
+      if (branch:=parse_branch(inst, op)) is not None: branch_end = max(branch_end, offset+branch)
       if op == "s_endpgm" and offset > branch_end: break
   return addr_table
 

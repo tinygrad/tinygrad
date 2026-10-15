@@ -457,5 +457,5 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
-  sink = UOp.sink(body, arg=KernelInfo()).rtag(1)
+  sink = UOp.sink(body, arg=KernelInfo(optimized=True))
   return to_program(sink, renderer)
