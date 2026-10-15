@@ -20,6 +20,7 @@ def backedge_accs(uops):
   return {u.src[2].src[0].buf_uop for u in uops if u.op is Ops.BACKEDGE and u.src[2].op is Ops.CMPLT and u.src[2].src[0].op is Ops.LOAD}
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "WGLS cant compile backedge range")
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
