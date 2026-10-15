@@ -238,12 +238,14 @@ def usb_poke(link:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: a dword
 
 @uopfunc
 def usb_stream(link:UOp, addr:UOp, data:UOp, n:UOp, write:bool, fill:bool=False) -> UOp: # 0xF0 mode 1/2: header, then bulk per STREAM
-  i = UOp.range(((n + (STREAM - 1)) // STREAM).after(link), next(UOp.unique_num), dtype=dtypes.int)
-  off, cnt = i * STREAM, (n - i * STREAM).minimum(STREAM)
-  payload = usb_stack(dtypes.uint64, addr + off.cast(dtypes.uint64), cnt // 4)
-  live = UOp.range(link.after(i).index(5).load().eq(0).cast(dtypes.int).after(link), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
-  header = usb_ctrl(link.after(live), 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2, payload.index(0), 12, 5000)
-  return usb_bulk(link.after(header), 0x02 if write else 0x81, data.index(0 if fill else off // data.dtype.itemsize), cnt).end(live, i).sink()
+  live = UOp.range((link.index(5).load().eq(0) & (n > 0)).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
+  loop, at = UOp.range(UOp(Ops.NOOP).after(link, live), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.int, 0)
+  off = at.after(loop).index(0).load()
+  cnt = (n - off).minimum(STREAM)
+  header = usb_ctrl(link.after(loop), 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2,
+                    usb_stack(dtypes.uint64, addr + off.cast(dtypes.uint64), cnt // 4).index(0), 12, 5000)
+  sent = usb_bulk(link.after(header), 0x02 if write else 0x81, data.index(0 if fill else off // data.dtype.itemsize), cnt)
+  return at.after(sent).index(0).store(off + STREAM).backedge(loop, (off + STREAM < n) & link.after(sent).index(5).load().eq(0)).end(live).sink()
 
 def usb_poke_word(link:UOp, addr:UOp, val:UOp) -> UOp:
   low = usb_poke(link, addr, val.cast(dtypes.uint32))
@@ -413,10 +415,11 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
   done = UOp.custom_function("usb_begin").call(link, usb_fence(dev), link.index(2).load())
   for cin, run, table, k in runs:
     if run: done = UOp.custom_function("usb_drain").call(link.after(done), usb_fence(dev), UOp.const(run + 1, dtypes.uint64)) # a run uses both halves
-    i = UOp.range(k, next(UOp.unique_num), dtype=dtypes.int)
-    word = usb_fence(dev) if cin else usb_go(dev)
-    live = UOp.range(link.after(done, i).index(5).load().eq(0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
-    done = UOp.custom_function("usb_send" if cin else "usb_recv").call(link.after(live), table, i, UOp.const(run, dtypes.int), word).end(live, i)
+    live = UOp.range(link.after(done).index(5).load().eq(0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
+    loop, at = UOp.range(UOp(Ops.NOOP).after(link, live), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.int, 0)
+    i, word = at.after(loop).index(0).load(), usb_fence(dev) if cin else usb_go(dev)
+    sent = UOp.custom_function("usb_send" if cin else "usb_recv").call(link.after(loop), table, i, UOp.const(run, dtypes.int), word)
+    done = at.after(sent).index(0).store(i + 1).backedge(loop, (i + 1 < k) & link.after(sent).index(5).load().eq(0)).end(live)
   return s.replace(src=(link.after(done).index(2).store(UOp.const(n, dtypes.uint64)),))
 pm_usb_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), usb_copy_rewriter)])
 
