@@ -290,7 +290,7 @@ def _strided_copy(dst:memoryview, src:memoryview, offset:int, count:int, size:in
   for w in range(words): d[w:w+(count-1)*dstep+1:dstep] = s[base+w:base+w+(count-1)*step+1:step]
 
 def _direct_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
-                 units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int]) -> dict[str, Tensor]|None:
+                 units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str]) -> dict[str, Tensor]|None:
   """
   loads every tensor's bytes straight from the mmapped gguf: one buffer per device holds all its tensors (views), filled through a host
   buffer of the device in big copies. None if a tensor isn't in a file or the devices have no host memory
@@ -302,9 +302,22 @@ def _direct_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices
   if any(v is None for v in srcs.values()): return None
   # every device's part of every tensor: (nbytes, writer(dst, src))
   plan:dict[str, list[tuple[int, Callable]]] = {}
+  fused_up = set(fuse.values())
   for name, (data, shape, typ) in entries.items():
     src = cast(memoryview, srcs[name])
     nb = len(src)
+    if name in fused_up: continue
+    if name in fuse:
+      # the gate and up units in one: their rows interleaved by 16 (fuse_gate_up)
+      slices, per_device = units[name]
+      E, rows, _ = shape
+      unit, up = nb // (E*slices), cast(memoryview, srcs[fuse[name]])
+      chunk = unit // (rows // slices) * 16
+      def w_fused(dst, src, us, up=up, unit=unit, chunk=chunk):
+        for i,u in enumerate(us):
+          for k,s in enumerate((src, up)): _strided_copy(dst[2*i*unit+k*chunk:2*(i+1)*unit], s, u*unit, unit // chunk, chunk, chunk, 2*chunk)
+      plan[name] = [(2*unit*len(us), functools.partial(w_fused, us=us)) for us in per_device]
+      continue
     if name in units:
       slices, per_device = units[name]
       E, rows, _ = shape
@@ -394,19 +407,24 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
-               pads:dict[str, int]|None=None) -> dict[str, Tensor]:
+               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   a tensor (E, rows, cols) in `units` (slices, per device unit lists) is cut in E*slices units: unit e*slices+j is expert e's rows j*rows/slices..
   (its columns for the down projection). every device gets its units in order, a tensor (devices*units, unit rows, unit cols)
   pads: a sharded tensor is zero padded on its shard axis to this size (gguf_pad)
+  fuse: gate -> up tensors in units to load as one gate tensor, their unit rows interleaved by 16 (if loaded straight from the file)
   """
-  pads = pads or {}
+  pads, fuse = pads or {}, fuse or {}
   n, packed, shard_map, units, shapes = len(devices), {}, shard_map or {}, units or {}, {}
   for name, (_, shape, _) in entries.items():
     if name in units: shapes[name] = (n*len(units[name][1][0]), shape[1] // units[name][0], shape[2]) if not name.endswith("down_exps.weight") else \
       (n*len(units[name][1][0]), shape[1], shape[2] // units[name][0])
-  if (direct:=_direct_load(entries, devices, shard_map, units, pads)) is not None: packed, entries_left = direct, {}
+  if (direct:=_direct_load(entries, devices, shard_map, units, pads, fuse)) is not None:
+    packed, entries_left = direct, {}
+    for g, u in fuse.items():
+      shapes[g] = (shapes[g][0], 2*shapes[g][1], shapes[g][2])
+      del entries[u]
   else: entries_left = {k:gguf_pad(v, unwrap(shard_map.get(k)), pads[k]) if k in pads else v for k,v in entries.items()}
   entries = {k:(d, s[:shard_map[k]] + (pads[k],) + s[shard_map[k]+1:] if k in pads else s, t) for k,(d,s,t) in entries.items()}
   for name, (data, shape, typ) in entries_left.items():

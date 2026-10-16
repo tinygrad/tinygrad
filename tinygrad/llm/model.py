@@ -842,7 +842,10 @@ class Transformer:
           sizes[name] = round_up(shape[axis], shard*unit)
       pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    state_dict = gguf_shard(entries, devices, shard_map, units_map, pads if shard > 1 else {})
+    # gate and up experts of the same format load as one (fuse_gate_up)
+    fuse = {g: u for g in units_map if g.endswith("ffn_gate_exps.weight") and (u:=g.replace("gate", "up")) in units_map and
+            entries[g][2] == entries[u][2] and getenv("FUSE_GATE_UP", 1)}
+    state_dict = gguf_shard(entries, devices, shard_map, units_map, pads if shard > 1 else {}, fuse)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -931,6 +934,13 @@ class Transformer:
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer)
     model = Transformer(config)
+    # gate experts loaded with the up rows (fused): one weight of twice the rows
+    for i, b in enumerate(model.blk):
+      if (g:=state_dict.get(f"blk.{i}.ffn_gate_exps.weight")) is not None and f"blk.{i}.ffn_up_exps.weight" not in state_dict and \
+         hasattr(b, "ffn_up_exps"):
+        (e:=ExpertWeights(g.shape[0], g.shape[2], g.shape[1])).fused, e.slices, e.experts = True, b.ffn_gate_exps.slices, b.ffn_gate_exps.experts
+        b.ffn_gate_exps = e
+        del b.ffn_up_exps
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
@@ -956,7 +966,8 @@ class Transformer:
       if m.ggml_type is not None: packed.add(id(m.weight))
     # packed gate and up experts of the same format are one weight: their rows interleaved
     for b in self.blk:
-      if (g:=getattr(b, 'ffn_gate_exps', None)) is not None and g.ggml_type is not None and g.ggml_type == b.ffn_up_exps.ggml_type and \
+      if (g:=getattr(b, 'ffn_gate_exps', None)) is not None and hasattr(b, 'ffn_up_exps') and g.ggml_type is not None and \
+         g.ggml_type == b.ffn_up_exps.ggml_type and \
          amd_custom_kernels_supported(g.weight.device) and getenv("FUSE_GATE_UP", 1):
         packed.discard(id(b.ffn_up_exps.weight))
         packed.discard(id(g.weight))
