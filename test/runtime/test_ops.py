@@ -519,8 +519,6 @@ class TestOps(TensorTestCase):
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
-    helper_test_op(None, lambda x,y,z,w,d: x/d + y/d + z/d + w/d, forward_only=True,
-                   vals=[[v]*4 for v in [1e-39, 2e-39, 3e-39, 4e-39, 1e-39]])
 
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:

@@ -350,7 +350,7 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), [1,2,3])
     np.testing.assert_equal(b.numpy(), [10,20,30])
 
-  def test_precompiled_offset_slice(self):
+  def test_offset_slice(self):
     @function(precompile=True)
     def square(x:Tensor) -> Tensor: return x * x
 
