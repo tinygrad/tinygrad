@@ -275,7 +275,6 @@ class RangeCtx:
   gate: UOp|None
 
 def remove_range(sink:UOp):
-  sink = graph_rewrite(sink, pm_split_ends)
   loop_ids = itertools.count(max((aid for u in sink.toposort() if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
   acc_slots = itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
@@ -286,7 +285,7 @@ def remove_range(sink:UOp):
     return RangeCtx(init, l.replace(src=(l.src[0].after(init),)), gate)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
-  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
+  return graph_rewrite(sink, pm_end_to_backedge+pm_lower_weak+pm_commit_weak+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))

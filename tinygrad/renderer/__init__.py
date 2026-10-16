@@ -50,7 +50,7 @@ class Estimates:
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
-        if u.dtype is dtypes.void and u not in ends: continue
+        if u.dtype is dtypes.void and u not in bnds: continue
         mults *= cast(sint, bnds.get(u, u.src[0]).ssimplify())
         # SPECIAL are already counted in mults
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
