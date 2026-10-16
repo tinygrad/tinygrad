@@ -380,6 +380,9 @@ class AMDComputeQueue(HWQueue):
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
+    if type(self.dev.iface).__name__.startswith("MOCK"):
+      name = prg.src[0].arg.name.encode() + b"\x00"
+      self.pkt3(self.pm4.PACKET3_NOP, *struct.unpack(f"{(len(name)+3)//4}I", name.ljust(round_up(len(name), 4), b"\x00")))
 
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     args_addr = self.kernargs(call, prg, data)

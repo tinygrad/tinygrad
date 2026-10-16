@@ -338,11 +338,11 @@ def decode_cfg(insts:dict[int, Inst]):
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
 @rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
-                  user_data_count:int, backend:str) -> UOp:
+                  user_data_count:int, backend:str, name:str="test") -> UOp:
   view = to_mv(lib, lib_sz)
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
-  key = (lib_sz, arch, backend, dispatch, type(renderer), renderer.target, *(x.value for x in to_program_lower_config))
+  key = (lib_sz, arch, backend, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_lower_config))
   entries = dispatch_cache.setdefault(key, [])
   for code, prg in entries:
     if bytes(view[:len(code)]) == code: return prg
@@ -350,13 +350,13 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
   end = max((pc+inst.size() for pc,inst in insts.items()), default=0)
   # Include the stop marker: an extended instruction stream must not match a shorter cached program.
   code = bytes(view[:end+len(amd_code_end(arch))])
-  prg = _lift(insts, arch, backend, dispatch)
+  prg = _lift(insts, arch, backend, dispatch, name)
   entries.append((code, prg))
   return prg
 
 dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
 
-def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
+def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str="test") -> UOp:
   renderer = backend_renderer(backend)
   cfg, regions = decode_cfg(insts)
   # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
@@ -457,5 +457,5 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple) -> UOp:
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
-  sink = UOp.sink(body, arg=KernelInfo(optimized=True))
+  sink = UOp.sink(body, arg=KernelInfo(name=f"asm_call_{name}", optimized=True))
   return to_program(sink, renderer)
