@@ -12,8 +12,8 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from test.helpers import replace_opts
 
-def flops_mem(uops, ignore_indexing=False):
-  est = Estimates.from_uops(uops, ignore_indexing)
+def flops_mem(uop, ignore_indexing=False):
+  est = Estimates.from_uops(uop, ignore_indexing)
   return est.ops, est.lds
 
 # **************** new FlopCounter ****************
@@ -163,7 +163,6 @@ class TestUOpsStats(unittest.TestCase):
     u3 = UOp.const(3, dtypes.int)
     u4 = UOp(Ops.MUL, src=(u1,u2))
     u5 = UOp(Ops.ADD, src=(u4,u3))
-    uops = tuple(u5.toposort())
 
     globl = UOp.param(0, dtypes.int, 3)
     o1 = UOp.const(1, dtypes.int)
@@ -172,9 +171,8 @@ class TestUOpsStats(unittest.TestCase):
     u2 = globl.index(o2)
     u3 = UOp.const(3, dtypes.int)
     u4 = UOp(Ops.MULACC, src=(u1,u2,u3))
-    uops_fma = tuple(u4.toposort())
 
-    self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
+    self.assertEqual(flops_mem(u5), flops_mem(u4))
 
 N = 64
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "wrong in PTX") # maybe?
