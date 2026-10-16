@@ -1,10 +1,9 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
-from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
+from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX
 from typing import TYPE_CHECKING, get_args, Generic, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
-  assert not WIN, "ioctl not supported"
   import tinygrad.runtime.support.system as system, fcntl
   ioctl = __fd.ioctl if isinstance(__fd, system.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
   if __struct is None: return ioctl((__base<<8)|__nr, __payload or (args[0] if args else 0))
@@ -103,8 +102,8 @@ class DLL(ctypes.CDLL):
         else: continue
       for pre in (pathlib.Path(pre) for pre in ([path] if path else []) + libpaths.get(os.name, []) + libpaths.get(sys.platform, []) + extra_paths):
         if not pre.is_dir(): continue
-        if WIN or OSX:
-          for base in ([f"lib{p}.dylib", f"{p}.dylib", str(p)] if OSX else [f"{p}.dll"]):
+        if OSX:
+          for base in [f"lib{p}.dylib", f"{p}.dylib", str(p)]:
             if (l:=pre / base).is_file() or (OSX and 'framework' in str(l) and l.is_symlink()): return str(l)
         else:
           for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so[.0-9]*", l.name)):

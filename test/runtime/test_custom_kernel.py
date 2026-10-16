@@ -443,6 +443,21 @@ class TestCustomKernel(unittest.TestCase):
     x = Tensor.empty(4).uop
     self.assertEqual(Tensor(x.after(x.store(5), x.store(Invalid))).tolist(), [5]*4)
 
+  def test_store_behind_value_after_kept(self):
+    def kernel(A:UOp, loop:bool) -> UOp:
+      x = UOp.const(1, dtypes.weakint).after(A[0].store(7))
+      return (A[(r:=UOp.range(x, 0))+1].store(9).end(r) if loop else A[x].store(9)).sink(arg=KernelInfo(opts_to_apply=()))
+    for loop in (False, True):
+      out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int).contiguous().realize(), fxn=functools.partial(kernel, loop=loop))[0]
+      self.assertEqual(out.tolist(), [7, 9])
+
+  def test_deleted_store_keeps_deps(self):
+    for f in (lambda a, s: s[1].store(s[1].load()), lambda a, s: s[UOp.invalid()].store(5),
+              lambda a, s: s[1].store(UOp.invalid()), lambda a, s: a[UOp.invalid()].store(s[1].load())):
+      out = Tensor.custom_kernel(Tensor.zeros(3, dtype=dtypes.int).contiguous(),
+                                 fxn=lambda a: f(a, a.after(a[0].store(7))).sink(arg=KernelInfo(opts_to_apply=())))[0]
+      self.assertEqual(out.tolist(), [7, 0, 0])
+
   def test_expand_view_invalid_assign_keeps_uncovered_reads(self):
     x = Tensor([[10., 11., 12., 13.], [20., 21., 22., 23.], [30., 31., 32., 33.], [40., 41., 42., 43.]]).realize()
     v = x[:1, :].expand(4, 4)

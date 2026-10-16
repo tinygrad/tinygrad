@@ -1,6 +1,5 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, sys, contextlib
-assert sys.platform != 'win32'
+import os, ctypes, functools, mmap, struct, array, math, contextlib
 from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
 from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program

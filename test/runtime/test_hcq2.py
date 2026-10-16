@@ -101,14 +101,14 @@ class TestHCQ2Fence(unittest.TestCase):
 
   def test_a_schedule_waits_for_its_previous_run(self):
     slots = UOp.alloc((4,), dtypes.uint64, device="CPU").rtag("slots")
-    program = lower_and_compile(lower_hcq(UOp.custom_function("hcq_fence").call(slots[0:2], slots[2:4])))
+    program = lower_and_compile(lower_hcq(fence:=hcq2.make_fence({"CPU": slots}, {"CPU": 1}), *hcq2.announce({"CPU": slots}, {"CPU": 1}, fence)))
     linked = hcq2.hcq_link(program, allow_cache=False)
     (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.without_after.tag == "slots"]
     slots_mv = linked.src[0].without_after.src[1 + i].buffer.host.view(fmt='Q')
-    slots_mv[2], base = 7, self.tl[1]
+    slots_mv[0], base = 7, self.tl[1]
 
     run_linear(linked, jit=True)
-    self.assertEqual((self.tl[1], slots_mv[0], slots_mv[2]), (base + 1, base + 1, 0), "the run is announced, recorded, the signal re-armed")
+    self.assertEqual((self.tl[1], slots_mv[2], slots_mv[0]), (base + 1, base + 1, 0), "the run is announced, recorded, the signal re-armed")
 
     t = threading.Thread(target=run_linear, args=(linked,), kwargs={"jit": True}, daemon=True)
     t.start()
