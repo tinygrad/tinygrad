@@ -279,13 +279,13 @@ def remove_range(sink:UOp):
   acc_slots = itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
-    acc = UOp.alloc((1,), dtypes.int, slot=next(acc_slots), addrspace=AddrSpace.REG)
+    acc = UOp.alloc((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
     init = acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0))
     l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0),)) if u.src[0].vmin <= 0 else None
     return RangeCtx(init, l.replace(src=(l.src[0].after(init),)), gate)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
-  return graph_rewrite(sink, pm_end_to_backedge+pm_lower_weak+pm_commit_weak+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
+  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
