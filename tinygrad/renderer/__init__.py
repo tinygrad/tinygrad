@@ -33,7 +33,13 @@ class Estimates:
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.BACKEDGE)))
+    ends = {u for u in uops if u.op is Ops.BACKEDGE and (cond:=u.src[2]).op is Ops.CMPLT
+      and cond.src[0].op is Ops.LOAD and cond.src[0].buf_uop.addrspace is AddrSpace.REG}
+    accs = {u.src[2].buf_uop for u in ends}
+    bnds: dict[UOp, UOp] = {u.src[1]:u.src[2].src[1] for u in ends}
+    def acc_op(u:UOp) -> bool: return u.op in (Ops.LOAD, Ops.STORE) and u.src[0].buf_uop in accs
+    excluded.update([u for u in uops if acc_op(u) or u.op in GroupOp.ALU and any(acc_op(s) for s in u.src)])
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
@@ -44,11 +50,10 @@ class Estimates:
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
-        if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          mults *= cast(sint, u.src[0].ssimplify())
-          # SPECIAL are already counted in mults
-          mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
-      elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
+        mults *= cast(sint, bnds[u].ssimplify())
+        # SPECIAL are already counted in mults
+        mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
+      elif u.op is Ops.BACKEDGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.itemsize * mults
