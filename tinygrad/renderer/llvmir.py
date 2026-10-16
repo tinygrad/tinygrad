@@ -1,4 +1,4 @@
-import math, struct, sys
+import math, struct
 from tinygrad.renderer import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
@@ -72,7 +72,7 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "ur
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CDIV: "sdiv", Ops.CMOD: "srem", Ops.SHR: "ashr"}
-flags = " nsz contract afn"
+flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -214,12 +214,8 @@ class LLVMRenderer(Renderer):
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
-  abi = 'win64cc' if sys.platform == 'win32' else None
-  code_for_op = LLVMRenderer.code_for_op | {Ops.SQRT:lambda:None}
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.SQRT, src=(UPat.var("x"),), name="u"), lambda ctx,u,x:
-     f"  {ctx[u]} = call {ldt(u.dtype)} @llvm.sqrt.f{u.dtype.itemsize*8}({ldt(x.dtype)} {ctx[x]})"),
-  ]) + base_rewrite
+  abi = None
+  string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
@@ -228,8 +224,6 @@ class CPULLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
-    decls.update({f"llvm.sqrt.f{x.dtype.itemsize*8}":f"declare {ldt(x.dtype)} @llvm.sqrt.f{x.dtype.itemsize*8}({ldt(x.dtype)})"
-                  for x in uops if x.op is Ops.SQRT})
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
     return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])

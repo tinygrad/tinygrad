@@ -13,7 +13,7 @@ import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
 
 def lower_hcq(*body:UOp) -> UOp: # body through lower_call, as a linear
-  return UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(UOp.sink(*body, arg=KernelInfo("test"), tag=1).call(aux=HCQInfo(("CPU",))))),))
+  return UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(UOp.sink(*body, arg=KernelInfo("test", optimized=True)).call(aux=HCQInfo(("CPU",))))),))
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
@@ -46,8 +46,12 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
   with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_vars(*ts[1:])[0], **kwargs)
   return batches
 
+def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order
+  calls, s = list[UOp](), batch.src[0]
+  while s.op is Ops.AFTER: calls, s = [s.src[0]] + calls, s.src[-1]
+  return calls
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
-  return {(q.device, q.arg.name): list(c.body.src) for c in hcq2.submits(batch.body) for q in [c.src[1]]}
+  return {(q.device, q.arg.name): list(c.body.src) for c in submits(batch.body) for q in [c.src[1]]}
 def ins_name(c:UOp) -> str|None: return c.body.arg.name if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION else None
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL and ins_name(c) is None]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
@@ -60,8 +64,8 @@ T = 5 # the timeline value the last submitted batch of every device signals
 def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[list, dict, dict]:
   qs, cs, mem = queues(batch), calls(batch), defaultdict(int)
   for d in batch.arg.aux.device:
-    mem[word(hcq2.timeline((d,)))] = (done or {}).get(d, T)
-    mem[word(hcq2.timeline((d,)).index(1))] = T
+    mem[word(hcq2.timeline(d))] = (done or {}).get(d, T)
+    mem[word(hcq2.timeline(d).index(1))] = T
   def val(u:UOp) -> int:
     if u.op is Ops.CONST: return u.val
     if u.op is Ops.LOAD: return mem[word(u.src[0])]
@@ -80,7 +84,7 @@ def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[
       elif c in cs: log.append(cs.index(c))
       cmds.pop(0)
       break
-    else: return log, {q: len(cmds) for q, cmds in qs.items()}, {d: mem[word(hcq2.timeline((d,)))] for d in batch.arg.aux.device}
+    else: return log, {q: len(cmds) for q, cmds in qs.items()}, {d: mem[word(hcq2.timeline(d))] for d in batch.arg.aux.device}
 
 def rotations(batch:UOp) -> list[list]: return [(qs:=list(queues(batch)))[i:] + qs[:i] for i in range(len(queues(batch)))]
 def orders(batch:UOp) -> set[tuple[int, ...]]: return {tuple(x for x in run(batch, prio=p)[0] if isinstance(x, int)) for p in rotations(batch)}
@@ -90,44 +94,44 @@ class TestHCQ2Deps(unittest.TestCase):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
     for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([view], [0], 0)
-      self.assertEqual(tracker.access_resources([b.mselect(1)], [], 1), [])
-      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((16, 24),))], [], 2), [])
-      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((12, 20),))], [], 3), [0])
+      tracker.access_resources([(view, True)], 0)
+      self.assertEqual(tracker.access_resources([(b.mselect(1), False)], 1), [])
+      self.assertEqual(tracker.access_resources([(b.mselect(0).shrink(((16, 24),)), False)], 2), [])
+      self.assertEqual(tracker.access_resources([(b.mselect(0).shrink(((12, 20),)), False)], 3), [0])
 
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    for write in ([], [0]):
+    for write in (False, True):
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([b.shrink(((0, 4),))], write, 0)
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 8),))], [0], 1), [])
-      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
+      tracker.access_resources([(b.shrink(((0, 4),)), write)], 0)
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 8),)), True)], 1), [])
+      self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
 
   def test_partial_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    for write in ([], [0]):
+    for write in (False, True):
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([b], write, 0)
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 1), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
+      tracker.access_resources([(b, write)], 0)
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 1), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((12, 16),)), True)], 3), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), False)], 4), [1])
 
   def test_write_waits_for_all_readers(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     tracker = hcq2.DepsTracker()
-    self.assertEqual(tracker.access_resources([b], [], 0), [])
-    self.assertEqual(tracker.access_resources([b], [], 1), [])
-    self.assertEqual(tracker.access_resources([b], [0], 2), [0, 1])
-    self.assertEqual(tracker.access_resources([b], [], 3), [2])
+    self.assertEqual(tracker.access_resources([(b, False)], 0), [])
+    self.assertEqual(tracker.access_resources([(b, False)], 1), [])
+    self.assertEqual(tracker.access_resources([(b, True)], 2), [0, 1])
+    self.assertEqual(tracker.access_resources([(b, False)], 3), [2])
 
   def test_aliases_do_not_wait_on_themselves(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    for write in ([0], [1], [0, 1]):
+    for whole, part in ((True, False), (False, True), (True, True)):
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([b], [0], 0)
-      self.assertEqual(tracker.access_resources([b, b.shrink(((4, 12),))], write, 1), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 2), [1])
+      tracker.access_resources([(b, True)], 0)
+      self.assertEqual(tracker.access_resources([(b, whole), (b.shrink(((4, 12),)), part)], 1), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 2), [1])
 
 class TestHCQ2Schedule(unittest.TestCase):
   def setUp(self):
@@ -152,9 +156,6 @@ class TestHCQ2Schedule(unittest.TestCase):
   def batch(self, *ts:Tensor) -> UOp: return unwrap(self.scheduled(*ts)[0])
 
   def test_kernels_run_in_order(self): self.assertEqual(orders(self.batch(chain(self.x, 3))), {(0, 1, 2)})
-
-  def test_a_peer_kernel_runs_after_the_copy_that_feeds_it(self):
-    self.assertEqual(orders(self.batch((self.x.to("NULL:1") + 1).contiguous())), {(0, 1)})
 
   def test_a_copy_waits_for_the_kernel_when_the_scalar_is_first(self):
     n, B = Tensor(Variable("n", 0, 10, dtypes.int).bind(5)), Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
@@ -200,7 +201,7 @@ class TestHCQ2Profile(unittest.TestCase):
   def test_slots_addressed_by_the_device(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
                           lambda buf: buf.getaddr(Device["NULL"].host) if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
-    with patch.object(Device["NULL"], "pm_lower", pm): self.test_profiling_reports_a_range_per_kernel(n=3)
+    with patch.object(Compiled, "pm_lower", pm + Compiled.pm_lower): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))

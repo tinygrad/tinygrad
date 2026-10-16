@@ -1,6 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertools
-assert sys.platform != 'win32'
+import os, ctypes, contextlib, re, functools, mmap, struct, array, itertools
 from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
@@ -672,11 +671,11 @@ class NVDevice(Compiled):
     return [x.data for x in infos]
 
   def _submit_cmds(self, queue:str, *cmds:int): # channel setup uses the same runtime submit as kernels
-    tl = timeline(devs:=(self.device,))
+    tl = timeline(self.device)
     value = tl.index(1).load()
     submit = make_submit(ins("wait", tl, value), ins("nv", UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes())), ins("store", tl, value + 1),
                          dev=self.device, queue=queue, deps=(tl,))
-    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo(devs))
+    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo((self.device,)))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)
 

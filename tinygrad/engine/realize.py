@@ -32,7 +32,7 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
     kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
-    return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
+    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.aux.kernels]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
   return [(d, call, None) for d in to_tuple(call.device)]
@@ -187,18 +187,18 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
-  for d in {d for devs, _, _, prof, *_ in info.kernels for d in devs if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
+  for d in {d for d, _, _, prof, *_ in info.kernels if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   if not (ctx.wait or PROFILE): return ets
 
-  for devs, name, _, prof, pkey, *_ in info.kernels:
-    for d in (devs if prof else ()): cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
+  for d, name, _, prof, pkey, *_ in info.kernels:
+    if prof: cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
   if ctx.wait:
     for device in info.device: cast(Any, Device[device]).synchronize(timeout=ctx.timeout)
   def _prof_tm(device:str, prof:tuple[int, ...]) -> float:
     st, en = (slots[device].host.view(fmt='Q')[x] for x in prof)
     return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
-  return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, *_ in info.kernels if prof for device in devices]
+  return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([

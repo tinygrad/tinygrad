@@ -1,10 +1,9 @@
 from __future__ import annotations
 from typing import cast, Any
-import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, itertools, collections, atexit
-assert sys.platform != 'win32'
+import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, itertools, collections, atexit
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args
-from tinygrad.runtime.support.hcq2 import pack_args, make_program
+from tinygrad.runtime.support.hcq2 import pack_args, make_program, ccall
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
 from tinygrad.dtype import dtypes, DType
@@ -12,7 +11,7 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, Profil
 from tinygrad.helpers import ceildiv, unwrap, pluralize, ContextVar, VIZ, DEV
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.runtime.autogen import kfd, hsa, amdgpu_kd, amdgpu_drm
+from tinygrad.runtime.autogen import kfd, hsa, amdgpu_kd, amdgpu_drm, libc
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.memory import MMIOInterface
@@ -61,9 +60,8 @@ def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged
 def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
   rs, n, p = ring.max_numel(), words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
   first = (rs - (tail:=((p * (unit // 4)) % rs).cast(dtypes.int))).minimum(n)
-  for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
-    i = UOp.range(count.after(cmdbuf), rid, dtype=dtypes.int)
-    cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
+  for dst, src, count in ((tail, 0, first), (0, first, n - first)):
+    cmdbuf = ccall(libc.memcpy, ring.after(cmdbuf).index(dst), words.bitcast(dtypes.uint32).index(src), (count * 4).cast(dtypes.uint64))
   w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit).barrier()
   return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
 
@@ -76,10 +74,8 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UO
   tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
   fits = (size_dw <= rs - tail).cast(dtypes.int)
   start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
-  zi = UOp.range(zero_amt.after(cmdbuf), 10, dtype=dtypes.int)
-  zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
-  i = UOp.range(UOp.const(size_dw, dtypes.int).after(cmdbuf), 11, dtype=dtypes.int)
-  copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
+  zero_tail = ccall(libc.memset, ring.after(cmdbuf).index(tail), 0, (zero_amt * 4).cast(dtypes.uint64))
+  copy = ccall(libc.memcpy, ring.after(zero_tail).index(start_dw), cmdbuf.bitcast(dtypes.uint32).index(0), UOp.const(size_dw * 4, dtypes.uint64))
   next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
   w = wptr.after(copy).index(0).store(next_put).barrier()
   return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put).sink()
