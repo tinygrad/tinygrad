@@ -280,7 +280,7 @@ def remove_range(sink:UOp):
   acc_slots = itertools.count(max((u.arg.slot+1 for u in sink.toposort() if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
-    acc = UOp.alloc((1,), u.dtype, slot=next(acc_slots), addrspace=AddrSpace.REG)
+    acc = UOp.alloc((1,), dtypes.int, slot=next(acc_slots), addrspace=AddrSpace.REG)
     acc = acc.replace(arg=replace(acc.arg, vmin_vmax=(u.vmin,u.vmax+1)))
     gate = UOp(Ops.IF, src=((u.src[0] > 0),)) if u.src[0].vmin <= 0 else None
     return RangeCtx(acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), gate)
