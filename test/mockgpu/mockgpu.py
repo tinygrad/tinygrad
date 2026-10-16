@@ -27,8 +27,9 @@ def hook_doorbells(s:UOp) -> UOp|None:
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
-def name_kernel(ctx, prg:UOp):
-  if "AMD" in mocked and ctx.devs[0].split(":")[0] == "AMD":
+def name_kernel(ctx:HWQueue, prg:UOp) -> None:
+  from tinygrad.runtime.ops_amd import AMDComputeQueue
+  if isinstance(ctx, AMDComputeQueue):
     name = prg.src[0].arg.name.encode() + b"\x00"
     ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"))
 # Emit the name, then fall through to the normal dispatch encoder.
