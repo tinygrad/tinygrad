@@ -449,6 +449,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE)
+    if self.op is Ops.ENDIF: return self.src[1].ended_ranges
     if self.op is Ops.BACKEDGE: return self.src[1:2]  # the condition's other ranges remain live
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
