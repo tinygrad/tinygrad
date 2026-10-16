@@ -284,7 +284,7 @@ def remove_range(sink:UOp):
   def init(u:UOp):
     acc = UOp.alloc((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
     init = acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0))
-    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0).after(init, *range_inputs[u]),)) if u.src[0].vmin <= 0 else None
+    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0).after(init, *range_inputs[u]),UOp(Ops.NOOP))) if u.src[0].vmin <= 0 else None
     l = l.replace(src=(l.src[0].after(gate if gate is not None else init),))
     return RangeCtx(init, l, gate)
   ctx = {u:init(u) for u in uops if u.op is Ops.RANGE
