@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
 from typing import Any
-from tinygrad.helpers import DEBUG, DEV, getenv
+from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
 from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
