@@ -81,7 +81,7 @@ jobs:
 
   llmbenchmark:
     name: Benchmark ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -123,7 +123,7 @@ jobs:
 
   cifarbenchmark:
     name: HLB-CIFAR10 (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -170,7 +170,7 @@ jobs:
 
   mlperfbenchmark:
     name: MLPerf (${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -211,7 +211,7 @@ jobs:
 
   sdbenchmark:
     name: Stable Diffusion (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
