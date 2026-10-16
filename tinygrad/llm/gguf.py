@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, round_up
+from tinygrad.helpers import prod, round_up, getenv, Context, unwrap
 from tinygrad.nn.state import TensorIO
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
@@ -267,6 +267,102 @@ def _file_mmap(path:str) -> memoryview:
   import mmap
   with open(path, "rb") as f: return memoryview(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
 
+def _disk_bytes(data:Tensor) -> memoryview|None:
+  # the bytes of a parsed tensor in the mmapped file, None if it isn't a view of a gguf file
+  from tinygrad.device import Buffer
+  try: buf = data.uop.buffer
+  except Exception: return None
+  if not isinstance(buf, Buffer) or not buf.device.startswith("DISK:") or buf.device.startswith("DISK:shm:"): return None
+  return _file_mmap(buf.device[5:])[buf.offset:buf.offset+buf.nbytes]
+
+def _strided_copy(dst:memoryview, src:memoryview, offset:int, count:int, size:int, stride:int, dst_stride:int|None=None):
+  # count pieces of `size` bytes of src, from `offset` every `stride` bytes, to dst every dst_stride (default size) bytes: strided copies of words
+  dst_stride = size if dst_stride is None else dst_stride
+  if size == 0 or count == 0: return
+  item = next(i for i in (8, 4, 2, 1) if size % i == 0 and stride % i == 0 and offset % i == 0 and dst_stride % i == 0)
+  # whichever is fewer python steps: a copy per piece, or a strided copy per word
+  if count <= size // item:
+    for c in range(count): dst[c*dst_stride:c*dst_stride+size] = src[offset+c*stride:offset+c*stride+size]
+    return
+  fmt = cast(Any, {8: "Q", 4: "I", 2: "H", 1: "B"}[item])
+  s, d, words, dstep = src.cast(fmt), dst.cast(fmt), size // item, dst_stride // item
+  base, step = offset // item, stride // item
+  for w in range(words): d[w:w+(count-1)*dstep+1:dstep] = s[base+w:base+w+(count-1)*step+1:step]
+
+def _direct_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
+                 units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int]) -> dict[str, Tensor]|None:
+  """
+  loads every tensor's bytes straight from the mmapped gguf: one buffer per device holds all its tensors (views), filled through a host
+  buffer of the device in big copies. None if a tensor isn't in a file or the devices have no host memory
+  """
+  from tinygrad.device import Buffer, BufferSpec, MultiBuffer
+  n = len(devices)
+  if not getenv("GGUF_DIRECT", 1) or not all(d.split(":")[0] == "AMD" for d in devices): return None
+  srcs = {name: _disk_bytes(data) for name, (data, _, _) in entries.items()}
+  if any(v is None for v in srcs.values()): return None
+  # every device's part of every tensor: (nbytes, writer(dst, src))
+  plan:dict[str, list[tuple[int, Callable]]] = {}
+  for name, (data, shape, typ) in entries.items():
+    src = cast(memoryview, srcs[name])
+    nb = len(src)
+    if name in units:
+      slices, per_device = units[name]
+      E, rows, _ = shape
+      unit = nb // (E*slices)
+      def w_units(dst, src, us, by_rows=not name.endswith("down_exps.weight"), unit=unit, rows=rows, slices=slices):
+        for i,u in enumerate(us):
+          if by_rows: dst[i*unit:(i+1)*unit] = src[u*unit:(u+1)*unit]
+          else:
+            e, j = divmod(u, slices)
+            _strided_copy(dst[i*unit:(i+1)*unit], src, e*unit*slices + j*(unit//rows), rows, unit//rows, unit*slices//rows)
+      plan[name] = [(unit*len(us), functools.partial(w_units, us=us)) for us in per_device]
+    elif (axis:=shard_map.get(name)) is None: plan[name] = [(nb, lambda dst, src: dst.__setitem__(slice(None), src))]*n
+    else:
+      # the bytes of an outer row (the axis and the inner dims), padded with zeros to the padded size of the axis
+      outer, size = prod(shape[:axis]), pads.get(name, shape[axis])
+      if size % n or (axis == len(shape)-1 and size//n % _GGML_QUANT.get(typ, (1,))[0]):
+        raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
+      row = nb // outer
+      part = row * size // shape[axis] // n
+      def w_part(dst, src, i, outer=outer, part=part, row=row):
+        real = max(0, min(part, row - i*part))
+        if real < part: dst[:] = bytes(len(dst))
+        _strided_copy(dst, src, i*part, outer, real, row, part)
+      plan[name] = [(part*outer, functools.partial(w_part, i=i)) for i in range(n)]
+  # the offsets of every tensor in every device's buffer
+  align, offsets, totals = 256, cast(dict[str, list[int]], {}), [0]*n
+  for name, parts in plan.items():
+    offsets[name] = []
+    for i,(nb, _) in enumerate(parts):
+      offsets[name].append(totals[i])
+      totals[i] += round_up(nb, align)
+  with Context(ALLOW_DEVICE_USAGE=1):
+    bufs = [Buffer(d, t).ensure_allocated() for d,t in zip(devices, totals)]
+    stage_size = max(1 << 28, max(nb for parts in plan.values() for nb,_ in parts))
+    stages = [Buffer(d, stage_size, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for d in devices]
+    # fill a device's host buffer with its next tensors, then one copy to the device, all the devices in turn
+    for i, (d, stage) in enumerate(zip(devices, stages)):
+      mv, fill, start = stage.as_memoryview(allow_zero_copy=True), 0, 0
+      # the tensors are in order in the device's buffer: the host buffer holds the next ones, copied when it's full
+      for name, parts in plan.items():
+        nb, writer = parts[i]
+        if fill + round_up(nb, align) > stage_size:
+          bufs[i].view(fill, start).ensure_allocated().copy_from(stage.view(fill, 0).ensure_allocated())
+          Device[d].synchronize()
+          start, fill = offsets[name][i], 0
+        writer(mv[fill:fill+nb], srcs[name])
+        fill += round_up(nb, align)
+      if fill: bufs[i].view(fill, start).ensure_allocated().copy_from(stage.view(fill, 0).ensure_allocated())
+      Device[d].synchronize()
+    del stages
+  packed:dict[str, Tensor] = {}
+  for name, parts in plan.items():
+    # a realized multi device buffer of the views: copies of a replicated tensor, or the parts of a sharded one
+    (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [bufs[i].view(nb, offsets[name][i]).ensure_allocated() for i,(nb,_) in enumerate(parts)]
+    buf = UOp.from_buffer(mb, dtypes.uint8, devices)
+    packed[name] = Tensor(buf if name not in units and shard_map.get(name) is None else buf.reshape(1, -1).unshard(0))
+  return packed
+
 _staging:dict[str, Any] = {}
 def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_rows:bool, device:str) -> Tensor:
   """the bytes of `units` of the (E, rows, cols) packed tensor `data` on `device`, (1, bytes). a unit is the rows (or the column blocks) of a slice"""
@@ -297,14 +393,23 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
   return Tensor(UOp.from_buffer(out_buf, dtypes.uint8, device)).reshape(1, -1)
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None) -> dict[str, Tensor]:
+               shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
+               pads:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   a tensor (E, rows, cols) in `units` (slices, per device unit lists) is cut in E*slices units: unit e*slices+j is expert e's rows j*rows/slices..
   (its columns for the down projection). every device gets its units in order, a tensor (devices*units, unit rows, unit cols)
+  pads: a sharded tensor is zero padded on its shard axis to this size (gguf_pad)
   """
+  pads = pads or {}
   n, packed, shard_map, units, shapes = len(devices), {}, shard_map or {}, units or {}, {}
-  for name, (data, shape, typ) in entries.items():
+  for name, (_, shape, _) in entries.items():
+    if name in units: shapes[name] = (n*len(units[name][1][0]), shape[1] // units[name][0], shape[2]) if not name.endswith("down_exps.weight") else \
+      (n*len(units[name][1][0]), shape[1], shape[2] // units[name][0])
+  if (direct:=_direct_load(entries, devices, shard_map, units, pads)) is not None: packed, entries_left = direct, {}
+  else: entries_left = {k:gguf_pad(v, unwrap(shard_map.get(k)), pads[k]) if k in pads else v for k,v in entries.items()}
+  entries = {k:(d, s[:shard_map[k]] + (pads[k],) + s[shard_map[k]+1:] if k in pads else s, t) for k,(d,s,t) in entries.items()}
+  for name, (data, shape, typ) in entries_left.items():
     if name in units:
       slices, per_device = units[name]
       E, rows, cols = shape
@@ -323,7 +428,8 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
       else: parts = [x[:, i].contiguous() for x in [data.to("CPU").reshape(outer, n, -1)] for i in range(n)]
       Tensor.realize(*(parts:=[p.reshape(1, -1).to(d).contiguous() for p,d in zip(parts, devices)]))
       packed[name] = Tensor(UOp.mstack(*[p.uop.base for p in parts]).reshape(parts[0].shape).unshard(0))
-  for t in packed.values(): t.realize()
+  if entries_left:
+    for t in packed.values(): t.realize()
   for d in devices: Device[d].allocator.free_cache()
   def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
     if name in shapes: shape = shapes[name]

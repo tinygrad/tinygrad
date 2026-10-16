@@ -7,7 +7,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   pool_topk_mask, pool_topk_index, indexer_scores, _wmma_rdna4
-from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
+from tinygrad.llm.gguf import gguf_parse, gguf_shard, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
 from tinygrad.device import Buffer, BufferSpec
@@ -802,6 +802,7 @@ class Transformer:
     entries = {k:v for k,v in entries.items() if not ((m:=re.match(r"blk\.(\d+)\.", k)) and int(m.group(1)) >= num_blocks)}
     shard_map:dict[str, int] = {}
     units_map:dict[str, tuple[int, list[list[int]]]] = {}
+    pads:dict[str, int] = {}
     padded_heads, sizes, expert_slices = n_heads, {}, 0
     if shard > 1:
       # MLA and kda attention split all their tensors by the n_heads heads: those are zero padded to a multiple of the devices
@@ -839,9 +840,9 @@ class Transformer:
           down = entries.get(re.sub(r"ffn_(gate|up)(_shexp)?\.", r"ffn_down\2.", name), entries[name])
           unit = 1 if k == 'output.weight' or '_exps' in k else _GGML_QUANT.get(down[2], (1,))[0]
           sizes[name] = round_up(shape[axis], shard*unit)
-      entries = {k:gguf_pad(v, shard_map[k], sizes[k]) if k in sizes else v for k,v in entries.items()}
+      pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    state_dict = gguf_shard(entries, devices, shard_map, units_map)
+    state_dict = gguf_shard(entries, devices, shard_map, units_map, pads if shard > 1 else {})
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
