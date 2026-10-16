@@ -307,7 +307,7 @@ jobs:
 
   tests:
     name: Tests (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
