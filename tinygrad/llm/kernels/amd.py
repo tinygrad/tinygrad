@@ -37,6 +37,13 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   with Context(ALLOW_DEVICE_USAGE=1):
     return (t:=getattr(Device[device], "target", None)) is not None and t[0] in (11, 12) and isinstance(Device[device].renderer, HIPRenderer)
 
+# int8 WMMA on q8 activations pays a rescale per 32 inputs of every output: it wins where the f16 decode is expensive, the grid formats
+I8_WMMA_QUANTS = (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
+# formats with a single scale per 32 weights and no offset
+GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K)
+def _use_i8_wmma(device:str|tuple[str, ...], ggml_type:int) -> bool:
+  return bool(getenv("I8_WMMA", 1)) and _wmma_rdna4(device) and (ggml_type in I8_WMMA_QUANTS or getenv("I8_WMMA", 1) == 2)
+
 @functools.cache
 def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
   if isinstance(device, tuple): device = device[0]
@@ -367,10 +374,11 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
                                estimates=None if active is None else Estimates(2*weights, nbytes, nbytes))
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
 
-def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
+def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=()):
+  # grouped experts: the token blocks cover the sorted rows (group[0]), not the output
   if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
-  token_block = UOp.range(out.shape[0]//token_tile, 0, AxisType.GLOBAL)
+  token_block = UOp.range((group[0].shape[0] if group else out.shape[0])//token_tile, 0, AxisType.GLOBAL)
   output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
@@ -415,12 +423,12 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   estimates, expert_base = None, UOp.const(0, dtypes.weakint)
   if group:
     rows, tiles = group
-    assert token_tile == 16, "grouped experts have tiles of 16 rows"
+    assert token_tile == MOE_TILE, "grouped experts have tiles of MOE_TILE rows"
     expert = tiles[token_block].load()
     # a tile without an expert skips its loop: no estimate from the data dependent loop
     group_rng = UOp.range((expert >= 0).where(in_features // Q8_GROUP_SIZE, 0), 4, AxisType.LOOP)
     expert_base = expert.cast(dtypes.weakint) * expert_words
-    weights = out.shape[0]*out_features*in_features
+    weights = rows.shape[0]*out_features*in_features
     estimates = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
     x_rows = tuple((r:=rows[t].load()).valid(r >= 0) // x_div for t in input_tokens) if x_div else input_tokens
     if not x_div: tokens = tuple(tuple((r:=rows[t].load()).valid(r >= 0) for t in tile_tokens) for tile_tokens in tokens)
@@ -450,8 +458,8 @@ def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *group:UOp, out_features
                                expert_words:int=0, x_div:int=0) -> UOp:
   token_tile, output_tiles = (64, 1 if out_features <= 1024 else 2) if out.shape[0] % 64 == 0 else \
     (32 if out.shape[0] % 32 == 0 else 16, 2)
-  if group: token_tile = 16
-  layout = _wmma_layout(out, out_features, token_tile, output_tiles)
+  if group: token_tile = MOE_TILE
+  layout = _wmma_layout(out, out_features, token_tile, output_tiles, group)
   word_indices = (layout[5], layout[5]+2) if rdna4 else tuple(range(4))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
@@ -468,9 +476,9 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, ou
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else 64 if out.shape[0] % 64 == 0 and \
     out_features <= 6144 else 128 if out.shape[0] % 128 == 0 else \
     32 if out.shape[0] % 32 == 0 else 16
-  if group: token_tile = 16
+  if group: token_tile = MOE_TILE
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
-  layout = _wmma_layout(out, out_features, token_tile, output_tiles)
+  layout = _wmma_layout(out, out_features, token_tile, output_tiles, group)
   output_waves, _, _, lane, wave, half, _, _, _ = layout
   word_indices = (half, half+2) if rdna4 else tuple(range(4))
   local_lut = UOp.alloc((256,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
@@ -484,13 +492,108 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, ou
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[IQ4_XS]//4, layout, dequant, "linear_iq4_xs_f16_wmma", rdna4,
                             group, expert_words, x_div)
 
+def _wmma_scale(raw:UOp, base:UOp, subgroup:UOp, half:int, ggml_type:int) -> tuple[UOp, int, UOp]:
+  # the weights of half `half` (16) of group `subgroup` (32) of a block are (q - zero)*scale - minimum, q the bytes of _quant_word
+  def byte(offset): return _load_byte(raw, base, offset)
+  zero, minimum = 0, UOp.const(0, dtypes.float)
+  if ggml_type in (Q4_K, Q5_K):
+    d, dmin, sc, mn = _q5_scales(raw, base, subgroup)
+    scale, minimum = d*sc, dmin*mn
+  elif ggml_type == IQ4_XS: scale = _iq4_scale(raw, base, subgroup)
+  elif ggml_type == Q2_K:
+    sc = byte(subgroup*2+half)
+    scale, minimum = _half(raw[base+40])*(sc & 15).float(), _half(raw[base+41])*(sc >> 4).float()
+  elif ggml_type == Q3_K:
+    j = subgroup*2+half
+    sc = ((byte(96+j%8) >> ((j//8)*4)) & 15) | (((byte(104+j%4) >> ((j//4)*2)) & 3) << 4)
+    scale, zero = _half(raw[base+54])*(sc.cast(dtypes.int32)-32).float(), 4
+  elif ggml_type == Q6_K:
+    scale, zero = _half(raw[base+104])*byte(192+subgroup*2+half).cast(dtypes.uint8).bitcast(dtypes.int8).float(), 32
+  else:
+    scale = _half(raw[base])
+    if ggml_type in (IQ2_XS, IQ2_S):
+      sc = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
+      scale *= (((sc >> (half*4)) & 15).float()+0.5)*0.25
+    elif ggml_type == IQ3_S: scale *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
+    elif ggml_type == IQ3_XXS: scale *= ((_load_u32(raw, base, 66+subgroup*4) >> 28).float()+0.5)*0.5
+  return scale, zero, minimum
+
+def _i8_frag(words:tuple[UOp, ...]) -> UOp:
+  # NOTE: a bitcast of the words to int8 vectors loops in devectorize, the compiler packs the bytes back
+  return UOp.stack(*(((w >> (8*i)) & 0xff).cast(dtypes.uint8).bitcast(dtypes.int8) for w in words for i in range(4)))
+
+@functools.cache
+def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int,
+                                 expert_words:int=0, x_div:int=0) -> UOp:
+  # RDNA4 int8 WMMA on q8 activations: the weights are their packed bytes, the scales apply per 16 inputs (see _wmma_scale), like the decode
+  grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
+  rows = group[0].shape[0] if group else out.shape[0]
+  token_tile = MOE_TILE if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
+  layout = _wmma_layout(out, out_features, token_tile, 2, group)
+  output_waves, token_block, output_block, lane, wave, ph, outputs, input_tokens, tokens = layout
+  grid = None
+  if grids:
+    grid = UOp.alloc((int(grids[0].numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    tid, threads = wave*32+lane, output_waves*32
+    grid = grid.after(*(grid[tid+i*threads].store(grids[0][tid+i*threads]) for i in range(int(grid.numel())//threads)))
+  type_words = QUANT_SIZES[ggml_type]//raw.dtype.itemsize
+  output_words = in_features * type_words // GGML_BLOCK_SIZE
+  n_groups, estimates, expert_base = in_features // Q8_GROUP_SIZE, None, UOp.const(0, dtypes.weakint)
+  # the x row of the fragment rows (input_tokens) and of the accumulator rows (tokens), and the output row of the accumulator rows
+  def xrow(r:UOp) -> UOp: return r
+  store_rows = tokens
+  if group:
+    entries, tiles = group
+    expert = tiles[token_block].load()
+    group_rng = UOp.range((expert >= 0).where(n_groups, 0), 4, AxisType.LOOP)
+    expert_base = expert.cast(dtypes.weakint) * expert_words
+    weights = rows*out_features*in_features
+    estimates = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
+    if x_div:
+      def xrow(r:UOp) -> UOp: return (e:=entries[r].load()).valid(e >= 0) // x_div
+    else: store_rows = tuple(tuple((e:=entries[t].load()).valid(e >= 0) for t in tile_tokens) for tile_tokens in tokens)
+  else: group_rng = UOp.range(n_groups, 4, AxisType.LOOP)
+  g = group_rng
+  block, subgroup = g // 8, g % 8
+  accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in tokens] for _ in outputs]
+  accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
+  a_rows = [xrow(t) for t in input_tokens]
+  s_rows = [[xrow(t) for t in tile_tokens] for tile_tokens in tokens]
+  d_x = [[xd[r, g].load() for r in tile_rows] for tile_rows in s_rows]
+  zero_acc = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
+  new_vals = [[[accs[o][t].after(g)[j].load() for j in range(8)] for t in range(len(tokens))] for o in range(len(outputs))]
+  # one scale per 32 inputs: both halves accumulate in int32 and the group is scaled once, else every half has its own scale
+  halves = ((0, 1),) if ggml_type in GROUP_SCALE_QUANTS else ((0,), (1,))
+  for hs in halves:
+    afrags = [[_i8_frag((xq[r, g, half*4+ph].load(), xq[r, g, half*4+2+ph].load())) for half in hs] for r in a_rows]
+    s_x = [[sum((xs[r, g, half].load() for half in hs), UOp.const(0, dtypes.float)) for r in tile_rows] for tile_rows in s_rows]
+    for o, output in enumerate(outputs):
+      base = expert_base + output*output_words + block*type_words
+      if ggml_type in SMALL_BLOCK_QUANTS: base = base + subgroup*SMALL_BLOCK_QUANTS[ggml_type]
+      scale, zero, minimum = _wmma_scale(raw, base, subgroup, hs[0], ggml_type)
+      bfrags = [_i8_frag(tuple(_quant_word(raw, base, subgroup, half*4+i, ggml_type, grid) for i in (ph, ph+2))) for half in hs]
+      for t, tile_afrags in enumerate(afrags):
+        acc_i = zero_acc
+        for afrag, bfrag in zip(tile_afrags, bfrags): acc_i = UOp.wmma(afrag, bfrag, acc_i, *WMMA_ARG)
+        dot = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+        dot = dot.after(dot.store(acc_i))
+        for j in range(8):
+          sx = s_x[t][j]
+          term = scale * dot[j].load().float() if not zero else scale * (dot[j].load().float() - zero*sx)
+          new_vals[o][t][j] = new_vals[o][t][j] + d_x[t][j] * (term if ggml_type not in (Q4_K, Q5_K, Q2_K) else term - minimum*sx)
+  update = UOp.group(*(accs[o][t].store(UOp.stack(*new_vals[o][t])) for o in range(len(outputs)) for t in range(len(tokens)))).end(g)
+  stores = [out[row, output].store(accs[o][t].after(update)[j].load()) for o, output in enumerate(outputs)
+            for t, tile_rows in enumerate(store_rows) for j, row in enumerate(tile_rows)]
+  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
+    arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_i8_wmma", opts_to_apply=(), estimates=estimates))
+
 @functools.cache
 def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                                   out_features:int, in_features:int, ggml_type:int, rdna4:bool=False, expert_words:int=0, x_div:int=0) -> UOp:
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
-  token_tile = 16 if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
-  layout = _wmma_layout(out, out_features, token_tile, 2)
+  token_tile = MOE_TILE if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
+  layout = _wmma_layout(out, out_features, token_tile, 2, group)
   output_waves, _, _, lane, wave, physical_half, _, _, _ = layout
   word_indices = (physical_half, physical_half+2) if rdna4 else tuple(range(4))
   grid = None
@@ -500,24 +603,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
     grid = grid.after(*(grid[tid+i*threads].store(grids[0][tid+i*threads]) for i in range(int(grid.numel())//threads)))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     if ggml_type in SMALL_BLOCK_QUANTS: base += subgroup*SMALL_BLOCK_QUANTS[ggml_type]  # eight independent blocks per 256 weights
-    def byte(offset): return _load_byte(raw, base, offset)
-    zero, minimum = 0, UOp.const(0, dtypes.float)
-    if ggml_type == Q2_K:
-      sc = byte(subgroup*2+half)
-      scale, minimum = _half(raw[base+40])*(sc & 15).float(), _half(raw[base+41])*(sc >> 4).float()
-    elif ggml_type == Q3_K:
-      j = subgroup*2+half
-      sc = ((byte(96+j%8) >> ((j//8)*4)) & 15) | (((byte(104+j%4) >> ((j//4)*2)) & 3) << 4)
-      scale, zero = _half(raw[base+54])*(sc.cast(dtypes.int32)-32).float(), 4
-    elif ggml_type == Q6_K:
-      scale, zero = _half(raw[base+104])*byte(192+subgroup*2+half).cast(dtypes.uint8).bitcast(dtypes.int8).float(), 32
-    else:
-      scale = _half(raw[base])
-      if ggml_type in (IQ2_XS, IQ2_S):
-        sc = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
-        scale *= (((sc >> (half*4)) & 15).float()+0.5)*0.25
-      elif ggml_type == IQ3_S: scale *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
-      elif ggml_type == IQ3_XXS: scale *= ((_load_u32(raw, base, 66+subgroup*4) >> 28).float()+0.5)*0.5
+    scale, zero, minimum = _wmma_scale(raw, base, subgroup, half, ggml_type)
     words = tuple(_quant_word(raw, base, subgroup, half*4+i, ggml_type, grid) for i in word_indices)
     return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
                  for word in words for b in range(4))
@@ -535,7 +621,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
-  if tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
+  if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and _use_i8_wmma(x.device, layer.ggml_type):
+    fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
+    srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
+  elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else:
@@ -586,7 +675,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   result = Tensor.custom_kernel(out, weight, *xq, sel.cast(dtypes.int32).flatten(), first, *extra, fxn=fxn)[0]
   return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
 
-MOE_TILE = 16  # grouped experts: rows of an expert are padded to whole tiles
+MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
 
 def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0) -> Tensor:
   """
@@ -603,13 +692,20 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // weight.dtype.itemsize
   extra:tuple[Tensor, ...] = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   fxn:Callable[..., UOp]
+  group = (rows.cast(dtypes.int32).flatten().contiguous(), tiles.cast(dtypes.int32).flatten().contiguous())
+  rows_out = R if slots else selections
+  out = Tensor.empty((devices*rows_out, out_features), dtype=dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
+  if _use_i8_wmma(x.device, ggml_type):
+    x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
+    fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
+                            expert_words=expert_words, x_div=slots)
+    result = Tensor.custom_kernel(out, weight, *q8_quantize(x.contiguous(), int(x_rows), in_features)[:3], *extra, *group, fxn=fxn)[0]
+    return result.reshape(devices, rows_out, out_features) if devices > 1 else result
   if ggml_type == IQ4_XS: fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
   else: fxn = functools.partial(_q5_linear_f16_wmma_kernel if ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel, ggml_type=ggml_type)
   fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device), out_features=out_features, in_features=in_features, expert_words=expert_words,
                           x_div=slots)
-  rows_out = R if slots else selections
-  out = Tensor.empty((devices*rows_out, out_features), dtype=dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
-  srcs = (x.cast(dtypes.float16).contiguous(), *extra, rows.cast(dtypes.int32).flatten().contiguous(), tiles.cast(dtypes.int32).flatten().contiguous())
+  srcs = (x.cast(dtypes.float16).contiguous(), *extra, *group)
   result = Tensor.custom_kernel(out, weight, *srcs, fxn=fxn)[0]
   return result.reshape(devices, rows_out, out_features) if devices > 1 else result
 
@@ -730,8 +826,9 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv_len, max_kv_len, block_n, waves=4, group=None, shared=False,
-                                        scale=None):
+                                        scale=None, causal_rows=0):
   # shared: one kv head for every query head that is also the value (MLA latent), group: query heads per block. mask: additive (B, N)
+  # causal_rows (prefill): the query heads are (head, token) rows of causal_rows tokens ending at valid_kv_len, mask: (B, tokens, N)
   valid_kv_len = _unbind(valid_kv_len)
   _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
@@ -755,17 +852,22 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   valids: list[UOp] = []
   scores: list[list[UOp]] = [[zerof]*G for _ in range(SEC)]
   vfrags: list[tuple[UOp, ...]] = [()]*SEC
+  # the keys a row sees: a prefill row is the token at valid_kv_len - causal_rows + t, it sees the keys up to itself
+  row_tok = [(kv_head*G + h) % causal_rows for h in range(G)] if causal_rows else [None]*G
+  row_len = [(valid_kv_len - causal_rows + t + 1).minimum(valid_kv_len) if causal_rows else valid_kv_len for t in row_tok]
+  row_valids: list[list[UOp]] = []
   for j in range(SEC):
     key = chunk_id*CHUNK + wave*SEC + j
     valid = key < valid_kv_len
     valids.append(valid)
+    row_valids.append([key < n for n in row_len])
     kfrag = _vec_load(cache_kv[0, b, 0 if shared else kv_head, key, lane*DPL], DPL)
     # V is prefetched in the score pass so both streams are in flight together
     vfrags[j] = tuple(valid.where(v, zerof) for v in (kfrag if shared else _vec_load(cache_kv[1, b, kv_head, key, lane*DPL], DPL)))
     for h in range(G):
       s = warp_reduce(sum((qf[h][i]*kfrag[i] for i in range(DPL)), UOp.const(0, dtypes.float)), full_wave=True) * scale
-      if mask: s = s + mask[0][b, key.minimum(N-1)].load().float()
-      scores[j][h] = valid.where(s, UOp.const(-1e30, dtypes.float))
+      if mask: s = s + (mask[0][b, row_tok[h], key.minimum(N-1)] if causal_rows else mask[0][b, key.minimum(N-1)]).load().float()
+      scores[j][h] = row_valids[j][h].where(s, UOp.const(-1e30, dtypes.float))
   # A finite initial max keeps fully masked waves from computing exp(-inf - -inf).
   acc_reg, max_reg, sum_reg = _reg((G, DPL), 0), _reg((G,), -1e30), _reg((G,), 0)
   prev_acc, prev_max, prev_sum = acc_reg.after(chunk_round), max_reg.after(chunk_round), sum_reg.after(chunk_round)
@@ -776,7 +878,7 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   row_sums = [alpha[h]*prev_sum[h].load() for h in range(G)]
   for j in range(SEC):
     for h in range(G):
-      beta = valids[j].where(((scores[j][h]-row_max[h])*LOG2E).exp2(), zerof)
+      beta = row_valids[j][h].where(((scores[j][h]-row_max[h])*LOG2E).exp2(), zerof)
       accs[h] = [a + beta*v for a, v in zip(accs[h], vfrags[j])]
       row_sums[h] = row_sums[h] + beta
   update = UOp.group(acc_reg.store(UOp.stack(*(x for acc in accs for x in acc)).reshape(G, DPL)),
@@ -842,26 +944,42 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
     .end(lane, block_dt, block_bh).sink(arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int, shared:bool=False, scale:float|None=None,
-                               mask:Tensor|None=None) -> Tensor:
-  """shared: the cache (1, B, 1, N, D) is the key and the value of every head (MLA latent), mask: additive (B, N) over the keys"""
+                               mask:Tensor|None=None, causal_rows:int=0, group:int=1, partials:int=48, block_n:int=64) -> Tensor:
+  """
+  shared: the cache (1, B, 1, N, D) is the key and the value of every head (MLA latent), mask: additive (B, N) over the keys.
+  causal_rows: the query heads are (head, token) rows of that many tokens ending at valid_kv_len, `group` of them per block, mask (B, tokens, N)
+  """
   # Carry length bindings even when the cache was populated independently of this call.
   if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
-  chunks, axis = min(48, max_kv_len // 64), q.uop.axis
+  chunks, axis = min(partials, max_kv_len // block_n), q.uop.axis
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
-  # shared: a block per query head, they read the same keys
-  waves, group = 16, 1 if shared else H // cache_kv.shape[2]
-  while waves * group * ((D+LDS_PAD)*2 + 8) > 65536: waves //= 2
+  # shared: a block per `group` query heads, they read the same keys
+  waves, group = 16, group if shared else H // cache_kv.shape[2]
+  while waves * group * ((D+LDS_PAD)*2 + 8) > 65536 or (waves > 1 and block_n // waves < 2): waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
-  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=waves,
-                          group=1 if shared else None, shared=shared, scale=scale)
+  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n, waves=waves,
+                          group=group if shared else None, shared=shared, scale=scale, causal_rows=causal_rows)
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, *(() if mask is None else (mask,)), fxn=fxn)[:2]
-  live = (valid_kv_len+63)//64
+  live = (valid_kv_len+block_n-1)//block_n
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
   out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
+
+def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, valid_kv_len:int|UOp, max_kv_len:int, scale:float, mask:Tensor|None=None,
+                                    group:int=4, partials:int=4, block_n:int=32) -> Tensor:
+  """
+  causal attention of the (B, H, T, D) queries ending at valid_kv_len on the shared latent cache (1, B, 1, N, D): (B, H, T, D).
+  mask: additive (B, T, N). every (head, token) is a row of the flash decode kernel, `group` rows of a head share their key loads
+  """
+  B, H, T, D = q.shape
+  assert isinstance(T, int) and (H*T) % group == 0 and T % group == 0
+  rows = q.half().reshape(B, H*T, 1, D).contiguous()
+  out = amd_flash_attention_decode(rows, cache, valid_kv_len, max_kv_len, shared=True, scale=scale, mask=mask, causal_rows=T, group=group,
+                                   partials=partials, block_n=block_n)
+  return out.reshape(B, H, T, D)
 
 def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
   return fragment.reshape(2, 2, 4)[:, lane//16, :].reshape(8) if rdna4 else fragment

@@ -5,7 +5,7 @@ from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
-  moe_grouped_linear
+  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple
@@ -435,11 +435,17 @@ class MLATransformerBlock(FFNBlock):
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.cast(self.cache_k.dtype).uop)))
     mask, (N, D) = self._attn_mask(x, start_pos), self.cache_k.shape[2:]
-    if amd_custom_kernels_supported(x.device) and T == 1 and N % 64 == 0 and D & (D-1) == 0:
-      # decode: flash attention on the latent cache, the keys and values of every head
-      if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
-      attn = flash_attention_decode(q.half(), cache.reshape(1, *cache.shape), start_pos+T, int(N), shared=True, scale=1.0/self.config.head_dim**0.5,
-                                    mask=mask)
+    if amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0:
+      # flash attention on the latent cache, the keys and values of every head
+      scale, latent = 1.0/self.config.head_dim**0.5, cache.reshape(1, *cache.shape)
+      if T == 1:
+        if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
+        attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask)
+      else:
+        # prefill: a symbolic chunk runs padded to its max size, the rows past the chunk are sliced off
+        qp = q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3])) if not isinstance(T, int) else q
+        if mask is not None: mask = mask.reshape(B, T, -1).pad_to((B, qp.shape[2], N)).float().contiguous()
+        attn = flash_attention_mla_prefill(qp, latent, start_pos+T, int(N), scale, mask)[:, :, :T]
       attn = (attn[..., :self.config.kv_lora_rank] @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
       return self.attn_output(attn)
     k = cache[:, :, 0:start_pos+T, :].float()
