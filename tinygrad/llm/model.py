@@ -5,7 +5,7 @@ from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
-  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum
+  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple
@@ -41,6 +41,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
 class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   ggml_type:int|None = None
+  fused = False  # the packed rows hold the gate and up weights interleaved by 16 (fuse_gate_up)
   def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
     self.num_experts, self.in_features = num_experts, in_features
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
@@ -56,9 +57,14 @@ class ExpertWeights:
     self.ggml_type, self.weight, self.local_experts = found[0], found[1], self.num_experts // n
     first = Tensor([i*self.local_experts for i in range(n)], dtype=dtypes.int32)
     self.first = (first.shard(devices, 0) if n > 1 else first.to(devices[0] if len(devices) == 1 else devices)).realize()
-  def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0) -> Tensor:
+  def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0, act:tuple|None=None) -> Tensor:
     """the selections sorted by expert (moe_route), see moe_grouped_linear. expert parallel: a leading device axis"""
-    return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections)
+    return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections, act)
+  def fuse_up(self, up:ExpertWeights, rows:int):
+    """take the up weights: the packed rows interleaved by 16 with this gate's, one kernel for both"""
+    assert self.ggml_type is not None and self.ggml_type == up.ggml_type and self.weight.device == up.weight.device
+    self.weight = fuse_gate_up(self.weight, up.weight, self.num_experts, rows).contiguous().realize()
+    self.fused = True
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     # expert parallel: x and the output have a leading device axis, (devices, B, T, k, out) partial outputs from the experts of each device
@@ -246,7 +252,11 @@ class FFNBlock:
       return self._feed_forward(x.pad_to(x.max_shape))[:, :x.shape[1]]
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits = self.ffn_gate_inp(x)
+      router = self.ffn_gate_inp
+      if router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and x.shape[1] > 32 and isinstance(x.shape[1], int):
+        # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
+        logits = x.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
+      else: logits = router(x)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
       # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
@@ -263,11 +273,15 @@ class FFNBlock:
       if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
       if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
       probs = probs * self.config.routed_scaling_factor
-      exps = (self.ffn_gate_exps, self.ffn_up_exps, self.ffn_down_exps)
+      exps = (self.ffn_gate_exps, self.ffn_down_exps) + (() if self.ffn_gate_exps.fused else (self.ffn_up_exps,))
       if resolve(x.shape[1] != 1) and all(e.ggml_type is not None for e in exps):
         out = self._grouped_experts(x, sel, probs)
       else:
-        gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
+        if self.ffn_gate_exps.fused:  # one kernel for the gate and up rows, interleaved by 16
+          gu = self.ffn_gate_exps(sel, h)
+          gu = gu.reshape(*gu.shape[:-1], -1, 2, 16)
+          gate, up = gu[..., 0, :].flatten(-2), gu[..., 1, :].flatten(-2)
+        else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
         act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
         x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D), expert parallel: (devices, B, T, k, D) partials
         out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
@@ -289,12 +303,16 @@ class FFNBlock:
     B, T, D = x.shape
     # a symbolic token count runs padded to the max size, the garbage tokens are sliced off
     if not isinstance(T, int): x, sel, probs = x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), probs.pad_to(probs.max_shape)
-    gate_exps, up_exps, down_exps = self.ffn_gate_exps, self.ffn_up_exps, self.ffn_down_exps
+    gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
     valid, entries, tiles = moe_route(sel, gate_exps.first, gate_exps.local_experts)
     k = sel.shape[-1]
     # gate and up read the token of each sorted row, down writes the row of each selection
-    gate, up = (e.grouped(x.reshape(-1, D), entries, tiles, slots=k) for e in (gate_exps, up_exps))
-    act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
+    if gate_exps.fused:  # the activation is computed in the kernel of the interleaved gate and up rows
+      act = gate_exps.grouped(x.reshape(-1, D), entries, tiles, slots=k,
+                              act=(self.config.swiglu_alpha, self.config.swiglu_limit or 0.0, self.config.swiglu_up_bias))
+    else:
+      gate, up = (e.grouped(x.reshape(-1, D), entries, tiles, slots=k) for e in (gate_exps, self.ffn_up_exps))
+      act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
     down = down_exps.grouped(act.contiguous(), entries, tiles, selections=int(sel.numel()))
     if down.ndim == 2: down = down.unsqueeze(0)
     # the rows of other devices' experts are not written
@@ -814,6 +832,14 @@ class Transformer:
         m.set_quantized(m.weight)
       if isinstance(m, ExpertWeights): m.set_quantized()
       if m.ggml_type is not None: packed.add(id(m.weight))
+    # packed gate and up experts of the same format are one weight: their rows interleaved
+    for b in self.blk:
+      if (g:=getattr(b, 'ffn_gate_exps', None)) is not None and g.ggml_type is not None and g.ggml_type == b.ffn_up_exps.ggml_type and \
+         amd_custom_kernels_supported(g.weight.device) and getenv("FUSE_GATE_UP", 1):
+        packed.discard(id(b.ffn_up_exps.weight)); packed.discard(id(g.weight))
+        g.fuse_up(b.ffn_up_exps, b.config.hidden_dim)
+        del b.ffn_up_exps
+        packed.add(id(g.weight))
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
     Tensor.realize(*small)
