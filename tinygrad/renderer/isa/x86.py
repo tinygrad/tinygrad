@@ -15,7 +15,7 @@ from dataclasses import replace
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  FRAME_INDEX = auto(); LABEL = auto(); LOOP_CMP = auto()
+  FRAME_INDEX = auto(); LABEL = auto();
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -293,7 +293,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.op is Ops.INS and x.arg[0] in {X86Ops.LOOP_CMP, X86Ops.FRAME_INDEX}: return None
+  if x.op is Ops.INS and x.arg[0] is X86Ops.FRAME_INDEX: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -312,9 +312,10 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # BACKEDGE becomes a conditional jump referencing the RANGE start label
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
-    lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
+  # BACKEDGE becomes a conditional jump referencing the RANGE start label. cache jmp opcode in arg
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), arg=None, name="x"),
+    lambda x,cond: x.replace(src=(*x.src[:2], cmp(cond)), arg=(X86Ops.JB if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
+      else {Ops.CMPLT:X86Ops.JL, Ops.CMPEQ:X86Ops.JE, Ops.CMPNE:X86Ops.JNE}[cond.op]))),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
@@ -474,10 +475,6 @@ pre_regalloc_matcher = PatternMatcher([
 ])
 
 # ***** post register allocation *****
-def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  cond = x.replace(op=x.tag, src=x.src[:2])
-  jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
-  return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
@@ -486,8 +483,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
   (UPat(Ops.RANGE, dtypes.void, name="l"), lambda l: ((nx:=l.ins(X86Ops.LABEL, src=(), tag=f".LOOP_{range_str(l)}")), [nx])),
-  # expand the cmp here so we can preserve rng src edge to get label from ctx
-  (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat.var("l"), UPat()), name="x"), lambda x,l: (x, [UOp(Ops.INS, arg=(x.arg, dtypes.void), tag=l.tag)])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
@@ -741,7 +737,6 @@ class X86Renderer(ISARenderer):
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS: continue
-      if u.arg[0] is X86Ops.LOOP_CMP: continue
       if u.arg[0] is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
