@@ -16,7 +16,6 @@ from tinygrad.runtime.autogen import libc
 MAP_JIT = 0x0800
 
 class CPUExecutable:
-  fxn: Any
   rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
 
   def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
@@ -28,7 +27,7 @@ class CPUExecutable:
     self.addr = mv_address(self.mem)
 
     if OSX: unwrap(self.rt_lib).pthread_jit_write_protect_np(False)
-    self.mem.write(loaded:=self._load(lib, self.addr))
+    self.mem.write(loaded:=self._load(lib, mv_address(self.mem)))
     if OSX: unwrap(self.rt_lib).pthread_jit_write_protect_np(True)
 
     # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
@@ -40,7 +39,7 @@ class CPUExecutable:
       # msync should be a universal POSIX way to do this
       libc.msync(ctypes.c_void_p(self.addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-    self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if lvp else ctypes.CFUNCTYPE(None)(self.addr)
+    self.fxn:Any = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
 class CPUProgram(CPUExecutable, Program['CPUDevice']):
   def __init__(self, dev:CPUDevice, obj:TinyELF):

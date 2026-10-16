@@ -340,7 +340,7 @@ def decode_cfg(insts:dict[int, Inst]):
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
-                  user_data_count:int, backend:str, name:str="") -> UOp|int:
+         user_data_count:int, backend:str, name:str="") -> UOp|int:
   view = to_mv(lib, lib_sz)
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
@@ -390,7 +390,7 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str
   scratch = UOp.alloc((max(scratch_size*wave_size*n_waves, 1),), dtypes.uint8, 4, AddrSpace.REG)
   accvgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
-  code_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
+  lib_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   # Keep grid dimensions unsigned: mixing the uint64 workgroup index with int32 promotes division/modulo to floats.
   dims = [gx, gy, *(UOp.const(x, dtypes.int) for x in (lx, ly, total_threads))]
   ctx = _Ctx(4, wave_size)
@@ -435,7 +435,7 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str
     off = instructions[0][0]
     body, bufs = instruction_block([(pc-off, info) for pc,info in instructions])
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
-    args += [code_addr.after(end, *scopes), UOp.const(off, dtypes.uint64), UOp.const(block_pc, dtypes.int)]
+    args += [lib_addr.after(end, *scopes), UOp.const(off, dtypes.uint64), UOp.const(block_pc, dtypes.int)]
     params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
                         else AddrSpace.GLOBAL) for i,a in enumerate(args)]
     # Lower the wave loop with the block, so repeated blocks share its indexing and route check too.

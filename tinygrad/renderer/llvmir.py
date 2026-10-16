@@ -21,7 +21,7 @@ def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, Addr
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
-    if dtype == dtypes.double or math.isinf(x) or math.isnan(x): return "0x" + struct.pack(">d", x).hex().upper()
+    if dtype == dtypes.double or math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
     return truncate[dtype](x)
   return int(x)
 
