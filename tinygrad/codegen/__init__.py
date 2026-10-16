@@ -281,12 +281,11 @@ def remove_range(sink:UOp):
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
     acc = UOp.alloc((1,), dtypes.int, slot=next(acc_slots), addrspace=AddrSpace.REG)
-    acc = acc.replace(arg=replace(acc.arg, vmin_vmax=(u.vmin,u.vmax+1)))
     gate = UOp(Ops.IF, src=((u.src[0] > 0),)) if u.src[0].vmin <= 0 else None
     return RangeCtx(acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), gate)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
-  return graph_rewrite(sink, pm_end_to_backedge, ctx=ctx, bottom_up=True, name="remove range")
+  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
@@ -295,7 +294,7 @@ def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
 
 pm_end_to_backedge = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: (cur:=ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
-    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load()).valid((cur < x.src[0]) & (cur >= 0)) if x in ctx else None),
+    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load()) if x in ctx else None),
   (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"),
     lambda body,bnd,rng,x,ctx: close_range(ctx[rng], x, rng, bnd, body) if rng in ctx else None)
 ])
@@ -357,7 +356,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = remove_range(sink)
 
   sink = graph_rewrite(sink, symbolic_simple+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
@@ -422,6 +420,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
         print(render_uir(sink))
         raise
     else: type_verify(sink, spec_program)
+
+  # remove ranges after z3 validation. rewrites to BACKEDGE + explicit acc so rendering is simple
+  sink = remove_range(sink)
 
   # return the rewritten sink
   return sink
