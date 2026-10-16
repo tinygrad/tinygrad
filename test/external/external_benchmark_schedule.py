@@ -4,7 +4,6 @@ from tinygrad.helpers import Profiling, Timing, getenv
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.linearizer import linearize
-from tinygrad.uop.spec import type_verify, spec_program
 
 if __name__ == "__main__":
   mdl = ResNet50()

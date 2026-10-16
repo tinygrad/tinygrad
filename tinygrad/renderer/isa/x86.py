@@ -155,7 +155,7 @@ def flag_gate(m:UOp) -> UOp|None:
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # IF jumps over its body on the inverse condition. cache the jump opcode and preserve ordering deps around the flag compare
-  (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="cond").or_after(),), arg=None, name="x"), lambda x,cond:
+  (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="cond").or_after(), UPat()), arg=None, name="x"), lambda x,cond:
     x.replace(src=((x.src[0].replace(src=(cmp(cond), *x.src[0].src[1:])) if x.src[0].op is Ops.AFTER else cmp(cond)),),
       arg=(X86Ops.JAE if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
         else {Ops.CMPLT:X86Ops.JGE, Ops.CMPEQ:X86Ops.JNE, Ops.CMPNE:X86Ops.JE}[cond.op]))),
