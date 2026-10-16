@@ -1,8 +1,7 @@
-import unittest, base64, functools, re, sys, time, unicodedata
+import unittest, base64, functools, re, time, unicodedata
 from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
 
-@unittest.skipIf(sys.platform == 'win32', "fetch race condition on Windows")
 class TestLLMTokenizer(unittest.TestCase):
   @functools.cached_property
   def llama_tok(self):

@@ -1,10 +1,9 @@
 import ctypes, struct, subprocess, tempfile, unittest
-from tinygrad.helpers import OSX, WIN
+from tinygrad.helpers import OSX
 from tinygrad.runtime.support.c import DLL, record, Field
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support.autogen import gen
 
-@unittest.skipIf(WIN, "doesn't compile on windows")
 class TestC(unittest.TestCase):
   def compile(self, src):
     with tempfile.NamedTemporaryFile(suffix=".so") as f:
@@ -322,7 +321,6 @@ class TestC(unittest.TestCase):
     self.assertEqual(result, 43)  # 42 + 1
 
 @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
-@unittest.skipIf(WIN, "doesn't compile on windows")
 class TestAutogen(unittest.TestCase):
   def run_gen(self, contents):
     with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
