@@ -5,7 +5,7 @@ from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
-  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up
+  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple
@@ -572,6 +572,14 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # input processing
     x = x.half()
+    if is_kda and Tq == 1 and B == 1 and not rows and self.head_k_dim == self.head_v_dim == 128 and self.ssm_conv_kernel == 4 and \
+       amd_custom_kernels_supported(x.device) and getenv("KDA_DECODE", 1):
+      # one token: a kernel for the convolutions, the delta rule, the norm and the gate
+      z = kda_decode(self.recurrent_state, self.conv_states, [self.attn_q(x), self.attn_k(x), self.attn_v(x)],
+                     [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)], self.ssm_g_b(self.ssm_g_a(x)),
+                     self.ssm_f_b(self.ssm_f_a(x)), self.ssm_beta(x), self.ssm_dt["bias"], self.ssm_a, unwrap(self.ssm_norm.weight), Tensor(start_pos),
+                     unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps)
+      return self.ssm_out(z)
     out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
     out_gate = out_gate.reshape(B, Tq, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, Tq, self.num_v_heads)
