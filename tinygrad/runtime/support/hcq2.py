@@ -447,7 +447,7 @@ def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
   body = body.substitute({u: _param_for(u, slots.index(u)) for u in leaves}, walk=True)
 
   # new args in the caller
-  own = {p: args[p.arg.slot].without_after for u in new for p in u.toposort() if p.op is Ops.PARAM and not _needs_arg(p, root)}
+  own = {p: args[p.arg.slot].without_after for u in new for p in u.toposort() if p.op is Ops.PARAM and p.arg.name and not _needs_arg(p, root)}
   return call.replace(src=(body, *args, *UOp.sink(*new).substitute(own, walk=True).src))
 
 pm_lift = PatternMatcher([
@@ -554,7 +554,7 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
-  linked = graph_rewrite(linked, pm_resolve_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
+  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=(ctx:=LinkCtx(inputs, allow_cache and not cache)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
