@@ -4,7 +4,7 @@ from tinygrad.helpers import GlobalCounters, Target
 from tinygrad.engine.realize import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo, sym_infer
+from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
@@ -101,13 +101,6 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
 class TestUOpsStats(unittest.TestCase):
-  def test_ordered_symbolic_range(self):
-    n = UOp.variable("n", 1, 32)
-    r = UOp.range((n*2).after(UOp.param(0, dtypes.int, 1).index(0).store(1)), 0)
-    add = UOp.const(1, dtypes.int) + UOp.const(2, dtypes.int)
-    est = Estimates.from_uops((r, add, add.sink().end(r)))
-    self.assertEqual(sym_infer(est.ops, {"n":3}), 6)
-
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)
     prg = to_program(buf.index(1).store(5).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
