@@ -476,7 +476,6 @@ pm_lower_call = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="cal
 
 Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.ALLOC, tag="timeline", name="b"), lambda b: Device[b.device].timeline)])
 Compiled.pm_link = PatternMatcher([])
-Compiled.pm_resolve = PatternMatcher([]) # link rules that need the buffers
 
 @dataclass
 class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
@@ -555,7 +554,7 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
-  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_resolve, ctx=(ctx:=LinkCtx(inputs, allow_cache and not cache)), walk=True, name="link")
+  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=(ctx:=LinkCtx(inputs, allow_cache and not cache)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked

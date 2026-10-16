@@ -219,7 +219,7 @@ class MetalDevice(Compiled):
       (UPat(Ops.ALLOC, tag=self.tag("handles")), lambda d=self: d.handles),
       (UPat(Ops.ALLOC, tag="slots", name="b"), # with stamps
        lambda b, d=self: d.new_slots(b.max_numel()) if b.device == d.device and b.max_numel() > 4 else None)])
-    Compiled.pm_resolve += PatternMatcher([
+    Compiled.pm_link += PatternMatcher([
       (UPat(Ops.BUFFER, name="b").store(UPat(Ops.LINEAR, name="cmds")), lambda b, cmds, d=self: d.new_icb(b.buffer, cmds.src))])
 
   @functools.cached_property
