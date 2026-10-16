@@ -281,8 +281,9 @@ def remove_range(sink:UOp):
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in sink.toposort() if u.op is Ops.END and len(u.ranges)}
   def init(u:UOp):
     acc = UOp.alloc((1,), dtypes.int, slot=next(acc_slots), addrspace=AddrSpace.REG)
-    gate = UOp(Ops.IF, src=((u.src[0] > 0),)) if u.src[0].vmin <= 0 else None
-    return RangeCtx(acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0)), UOp.loop(next(loop_ids)), gate)
+    init = acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0))
+    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0),)) if u.src[0].vmin <= 0 else None
+    return RangeCtx(init, l.replace(src=(l.src[0].after(init),)), gate)
   ctx = {u:init(u) for u in sink.toposort() if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void}
   return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
