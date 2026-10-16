@@ -363,10 +363,8 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
 
   # try all the valids together (but only the whole expressions)
-  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates), walk=True)) is not uop:
-    # If tighter bounds did not simplify anything, there is nothing to substitute back.
-    if (simplified:=s_uop.simplify()) is s_uop: return uop
-    uop = simplified.substitute({newX:X for X,newX in sub_dict.items()}).simplify()
+  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
+    uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]) -> tuple[int, int]:
