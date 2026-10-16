@@ -457,7 +457,7 @@ isel_matcher = PatternMatcher([
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
   op = x.arg if x.op in (Ops.IF, Ops.BACKEDGE) else x.arg[0]
-  if op in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op is Ops.RANGE or op in X86GroupOp.WriteFlags: ctx.lock = x
   elif op in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1].without_after):
     ctx.lock = flag_def
     return (x, [flag_def, x])
@@ -471,7 +471,7 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.IF, Ops.BACKEDGE), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.RANGE, Ops.IF, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
