@@ -124,7 +124,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
       afters = {b:arg.after(backedge) for b,arg in afters.items()}
     end = UOp.group(*afters.values()).end(wave)
-  sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu_{name}", optimized=True))
+  sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu {name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device[backend].renderer)
