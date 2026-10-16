@@ -56,11 +56,12 @@ class CapturedJit(Generic[ReturnType]):
   _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  fixed_vars: dict[str, int]  # vars bound inside the jitted function, they keep their value
 
   @functools.cached_property
   def linear(self) -> UOp: return link_linear(self._linear, allow_cache=False) # do not cache jit
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self.fixed_vars)
 
   @functools.cached_property
   def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort() if u.op is Ops.BUFFER}
@@ -72,7 +73,7 @@ class CapturedJit(Generic[ReturnType]):
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     concrete = tuple(_copy_input(u) if u in self._jit_bufs else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
-    run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
+    run_linear(self.linear, {**self.fixed_vars, **var_vals}, input_uops=concrete, jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
@@ -149,11 +150,14 @@ class _TinyJit(Generic[ReturnType]):
       # combine all captured linears into one, memory plan, and compile
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
       del self._linears
+      # like a normal realize, the vars bound inside the function are passed in var_vals. a name bound to two values stays per call
+      binds = [(u.expr, u.arg.val) for u in big_linear.toposort() if u.is_bound_var and u.expr not in var_vals]
+      fixed_vars = {k:v for k,v in binds if all(v2 == v for k2,v2 in binds if k2 == k)}
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        run_linear(onetime_linear, var_vals)
+        run_linear(onetime_linear, {**fixed_vars, **var_vals})
         del onetime_linear
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
@@ -165,7 +169,7 @@ class _TinyJit(Generic[ReturnType]):
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
+      self.captured = CapturedJit(ret, linear, names, expected_input_info, fixed_vars)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
