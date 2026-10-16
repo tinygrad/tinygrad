@@ -7,11 +7,10 @@ import ctypes, unittest
 from tinygrad.helpers import Context
 from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from test.mockgpu.amd.emu import run_asm, sqtt_traces
 
-@Context(ASM_CALL=0)
 def _run_kernel(instructions: list, lx=1, ly=1, lz=1, gx=1, gy=1, gz=1, args_ptr=0) -> bytes:
   """Assemble instructions, run on emulator with PROFILE=1, return the SQTT blob."""
-  from test.mockgpu.amd.emu import run_asm, sqtt_traces
   code = b''.join(inst.to_bytes() for inst in instructions)
   buf = (ctypes.c_char * len(code))(*code)
   lib = ctypes.addressof(buf)
@@ -21,8 +20,8 @@ def _run_kernel(instructions: list, lx=1, ly=1, lz=1, gx=1, gy=1, gz=1, args_ptr
   assert len(sqtt_traces) == 1, f"expected 1 trace, got {len(sqtt_traces)}"
   return sqtt_traces.pop()
 
-@Context(ASM_CALL=0)
 class TestSQTTEncoder(unittest.TestCase):
+  def setUp(self): self.enterContext(Context(ASM_CALL=0))
 
   def test_simple_salu(self):
     """A simple s_mov + s_endpgm kernel emits SALU INST packet."""
@@ -98,7 +97,6 @@ class TestSQTTEncoder(unittest.TestCase):
 
   def test_no_trace_without_profile(self):
     """No SQTT trace is emitted when PROFILE=0."""
-    from test.mockgpu.amd.emu import run_asm, sqtt_traces
     code = s_endpgm().to_bytes()
     buf = (ctypes.c_char * len(code))(*code)
     sqtt_traces.clear()

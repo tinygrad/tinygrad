@@ -1,5 +1,5 @@
 import itertools
-from typing import Callable, TypeVar
+from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
@@ -19,7 +19,6 @@ pm_flatten_range = PatternMatcher([
 # index/range arithmetic uses FLOORDIV/FLOORMOD prior to late rewrite
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  if len(u.ended_ranges) < 2: return None
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
@@ -49,8 +48,7 @@ def mark_gated(ctx, idx):
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
-T = TypeVar("T")
-def do_substitute(ctx:dict[UOp, T|None], x: UOp, sub_fxn:Callable[[UOp, T], UOp]) -> UOp|None:
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
   if x.arg is None: return None
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
@@ -65,25 +63,15 @@ pm_simplify_ranges = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
-def mark_range_mod(ctx:dict[UOp, list[UOp]], r:UOp, c:UOp) -> None:
+def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   # ranges that aren't looped over can't be split
-  if r.axis_type not in {AxisType.WARP, AxisType.DEVICE} \
-    and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx.setdefault(r, []).append(c)
-
-def split_range(r:UOp, divisors:list[UOp]) -> UOp:
-  if not divisors: return r
-  c, *rest = divisors
-  rest.sort(key=lambda v:v.val, reverse=True)
-  high = r.replace(src=(r.src[0]//c,), arg=r.arg+(0,))
-  low = r.replace(src=(c,), arg=r.arg+(1,))
-  # Compatible divisors belong to either the quotient or the remainder of this split.
-  high = split_range(high, [v.const_like(v.val//c.val) for v in rest if v.val > c.val and v.val % c.val == 0])
-  low = split_range(low, [v for v in rest if v.val < c.val and c.val % v.val == 0])
-  return high*c + low
+  if r not in ctx and r.axis_type not in {AxisType.WARP, AxisType.DEVICE} \
+    and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, split_range)),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg+(0,))*v + k.replace(src=(v,), arg=k.arg+(1,)))),
 ])
 
 # **** reduce simplification ****
