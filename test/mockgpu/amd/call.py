@@ -63,9 +63,9 @@ pm_asm_call = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), move_const_idxs),
 ])
 
-@rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
+@rewrite_group(name=lambda *args,ret,**kw: TracingKey(f"Lift {kw.get('name', '')}", "lift"))
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
-         user_data_count:int=0, backend:str|None=None) -> UOp:
+         user_data_count:int=0, backend:str|None=None, name:str="test") -> UOp:
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
   view = to_mv(lib, lib_sz)
@@ -124,7 +124,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
       afters = {b:arg.after(backedge) for b,arg in afters.items()}
     end = UOp.group(*afters.values()).end(wave)
-  sink = UOp.sink(end.end(wg), arg=KernelInfo(opts_to_apply=()))
+  sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu_{name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     return to_program(sink, Device[backend].renderer)
