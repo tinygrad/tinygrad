@@ -76,8 +76,8 @@ class AMDQueue:
 class PM4Executor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
-    self.kernel_name = "test"
     self.ib_executor: PM4Executor|None = None
+    self.kernel_name = ""
     super().__init__(base, size, rptr, wptr)
 
   def _next_dword(self):
@@ -111,7 +111,7 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
       elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       elif op == amd_gpu.PACKET3_NOP:
-        self.kernel_name = b"".join(self._next_dword().to_bytes(4, "little") for _ in range(n+1)).rstrip(b"\x00").decode()
+        self.kernel_name = b"".join(self._next_dword().to_bytes(4,"little") for _ in range(n+1)).rstrip(b"\x00").decode()
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
     return (self.rptr[0] - prev_rptr) + executed_in_ib
 

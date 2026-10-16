@@ -14,7 +14,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.ops_cpu import CPUExecutable
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, TracingKey, Target, cpu_profile, to_mv
+from tinygrad.helpers import Context, Target, cpu_profile, to_mv
 from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
@@ -336,9 +336,9 @@ def decode_cfg(insts:dict[int, Inst]):
 # ISA operand types and operations are independent of tensor construction and GPU lowering settings.
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
-@rewrite_group(name=lambda *args,ret,**_: TracingKey(f"Lift {(k:=ret.src[0].arg).name}", (("lift", k.function_name),)))
+@rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
-                  user_data_count:int, backend:str, name:str="test") -> UOp:
+                  user_data_count:int, backend:str, name:str="") -> UOp:
   view = to_mv(lib, lib_sz)
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
@@ -356,7 +356,7 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
 
 dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
 
-def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str="test") -> UOp:
+def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str="") -> UOp:
   renderer = backend_renderer(backend)
   cfg, regions = decode_cfg(insts)
   # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
@@ -457,5 +457,5 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
-  sink = UOp.sink(body, arg=KernelInfo(name=f"asm_call_{name}", optimized=True))
+  sink = UOp.sink(body, arg=KernelInfo(name=f"emu {name}", optimized=True))
   return to_program(sink, renderer)

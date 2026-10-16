@@ -14,7 +14,7 @@ class PythonRemu:
   scratch_size: int = 0  # private_segment_fixed_size from kernel descriptor
   arch: str = "rdna3"  # Architecture: rdna3 or rdna4
   user_data: list[int] = []  # All COMPUTE_USER_DATA registers (loaded into s[0:N])
-  name: str = "test"
+  name: str = ""   # Name of the emulated kernel
 
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
     from test.mockgpu.amd.emu import run_asm
