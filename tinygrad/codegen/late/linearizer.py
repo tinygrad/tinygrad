@@ -1,7 +1,7 @@
 import heapq
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, multirange_str
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
 
@@ -24,8 +24,6 @@ def linearize(sink:UOp) -> list[UOp]:
     match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
-      # Pure expressions must precede loop exits when they are shared across sibling scopes.
-      case _ if u.op in GroupOp.Elementwise | {Ops.CONST}: priority = -6
       case Ops.BUFFER | Ops.ALLOC: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
@@ -59,42 +57,27 @@ class CFGContext:
     # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
     # independent, endrange y is not a dependency of endrange x
     # everything is nested inside the sink
-    # Only control-flow nodes matter here. Bitsets avoid copying growing dependency dictionaries at every UOp.
-    deps: dict[UOp, int] = {}
-    indices: dict[UOp, int] = {}
-    controls: list[UOp] = []
-    ends = 0
-    siblings: dict[UOp, list[UOp]] = {}
+    deps: dict[UOp, dict[UOp, None]] = {}
+    nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
-      deps[u] = 0
+      # get the deps from the src
+      deps[u] = {}
       for s in u.src_without_body: deps[u] |= deps[s]
 
       if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
-        pending = deps[u] & ends
-        parent = 1 << indices[u.src[1]] if u.op is not Ops.SINK else 0
-        # An end preceding the parent range in topological order cannot be nested inside it.
-        if parent: pending &= -parent
-        while pending:
-          bit = pending & -pending
-          pending -= bit
-          x = controls[bit.bit_length()-1]
-          if not parent or deps[x] & parent:
-            siblings.setdefault(u, []).append(x)
-            ends ^= bit
-      if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE):
-        indices[u] = len(controls)
-        controls.append(u)
-        bit = 1 << indices[u]
-        deps[u] |= bit
-        if u.op is not Ops.RANGE: ends |= bit
+        nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
+      if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
+    siblings: dict[UOp, list[UOp]] = {}
+    for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
-      # Ends were collected in topological order, so dependencies already precede their consumers.
-      zipped = zip(v, v[1:]) if k.op is Ops.SINK else zip([k.src[1]] + v, v)
+      # ranges that have dependencies on other siblings need to be scheduled after them
+      order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
+      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
       for x,y in zipped:
         # TODO: this can happen! it causes infinite loop in shufflenet
-        assert not deps[x] & (1 << indices[y.src[1]])
+        assert y.src[1] not in x.backward_slice_with_self
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
