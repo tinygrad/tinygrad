@@ -70,18 +70,21 @@ def do_get_time_ms(ms:UOp) -> UOp:
 def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
 
 @uopfunc
-def hcq_fence(slots:UOp, tl:UOp, tv:UOp, last:int) -> UOp: # wait for the previous run of this schedule, then announce and record this one
+def hcq_fence(slots:UOp, tl:UOp, last:int) -> UOp: # wait for the previous run of this schedule
   tl = tl.replace(arg=replace(tl.arg, volatile=True)) # make it volatile, since it's polled
 
   loop = UOp.range(UOp(Ops.NOOP).after(start:=get_time_ms(target:=slots.index(last).load())), next(UOp.unique_num), dtype=dtypes.void)
   done = tl.after(target, loop).index(0).load()
-  bumped = tl.after(done.backedge(loop, (done < target) & (get_time_ms(done) - start < 30000))).index(1).store(nxt:=tv + 1)
-  return slots.after(bumped).index(last).store(nxt).sink()
+  return done.backedge(loop, (done < target) & (get_time_ms(done) - start < 30000)).sink()
 
 def make_fence(slots:dict[str, UOp], num_queues:dict[str, int]) -> UOp:
-  fences = [hcq_fence(patch(buf, [], bytes(buf.nbytes())), timeline(dev), timeline_value(dev), 2 * num_queues[dev]) for dev, buf in slots.items()]
+  fences = [hcq_fence(patch(b, [], bytes(b.nbytes())), timeline(dev), 2 * num_queues[dev], name=to_name("fence", dev)) for dev, b in slots.items()]
   rearmed = [slots[dev].after(*fences).index(2 * i).store(0) for dev, n in num_queues.items() for i in range(n)]
   return UOp.group(*rearmed).barrier()
+
+def announce(slots:dict[str, UOp], num_queues:dict[str, int], dep:UOp) -> list[UOp]: # bump the timeline and record it for the next run's fence
+  bumped = [timeline(dev).after(dep).index(1).store(timeline_value(dev) + 1) for dev in slots]
+  return bumped + [buf.after(dep).index(2 * num_queues[dev]).store(timeline_value(dev) + 1) for dev, buf in slots.items()]
 
 def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
 
@@ -287,10 +290,10 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   queues = _build_queues(ctx)
 
   # wait for the previous (this) schedule run
-  fence = make_fence(ctx.slots, {dev: len(qs) for dev, qs in ctx.queues.items()})
+  fence = make_fence(ctx.slots, num_queues:={dev: len(qs) for dev, qs in ctx.queues.items()})
   submits:list[UOp] = []
   for (dev, queue), cmds in queues.items(): submits.append(make_submit(*cmds, dev=dev, queue=queue, deps=(fence, *submits[-1:])))
-  sink = UOp.sink(submits[-1], arg=KernelInfo("hcq_submit", estimates=Estimates(), optimized=True))
+  sink = UOp.sink(submits[-1], *announce(ctx.slots, num_queues, submits[-1]), arg=KernelInfo("hcq_submit", estimates=Estimates(), optimized=True))
 
   # per call metadata
   names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
