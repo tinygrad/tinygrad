@@ -141,16 +141,16 @@ class MetalQueue(HWQueue):
       self.sizes.append((len(self.cmds), at:=round_up(self.nbytes, 8)))
       self.rows += layout_args([UOp.const(d, dtypes.uint64) for d in dims], at)
       self.nbytes = at + 48
-    self.cmds.append(UOp.sink(prg, *[UOp.const(1 if isinstance(d, UOp) else d, dtypes.uint64) for d in (*dims, off)])) # [prg, dims, off]
+    self.cmds.append(UOp(Ops.LINEAR, src=(prg, *[UOp.const(1 if isinstance(d, UOp) else d, dtypes.uint64) for d in (*dims, off)]))) # [prg, dims, off]
 
   def wait(self, dst:UOp, val:UOp, eq=False): pass # the fence orders the queue
   def timestamp(self, dst:UOp): self.stamps.append(dst)
   def signal(self, dst:UOp, val:UOp): self.value = val
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    n, zero, pipes = len(self.cmds), round_up(self.nbytes, 8), dedup(c.src[0] for c in self.cmds)
+    n, zero, pipes, cmds = len(self.cmds), round_up(self.nbytes, 8), dedup(c.src[0] for c in self.cmds), UOp(Ops.LINEAR, src=tuple(self.cmds))
     buf = UOp.alloc((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs[0]).rtag("mtl_icb")
-    icb = patch(buf.after(buf.store(UOp.sink(*self.cmds)), *self.deps), self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
+    icb = patch(buf.after(buf.store(cmds), *self.deps), self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
 
     # symbolic sizes
     for ci, off in self.sizes:
@@ -218,7 +218,7 @@ class MetalDevice(Compiled):
       (UPat(Ops.ALLOC, tag="slots", name="b"), # with stamps
        lambda b, d=self: d.new_slots(b.max_numel()) if b.device == d.device and b.max_numel() > 4 else None),
       (UPat(Ops.ALLOC, tag="mtl_icb", name="b"), lambda b, d=self: d.icb_bufs.pop(b, None))])
-    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, tag="mtl_icb", name="b").store(UPat(Ops.SINK, name="cmds")), lambda b, cmds, d=self:
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, tag="mtl_icb", name="b").store(UPat(Ops.LINEAR, name="cmds")), lambda b, cmds, d=self:
       d.new_icb(b, cmds.src) if b.device == d.device else None)])
 
   @functools.cached_property
