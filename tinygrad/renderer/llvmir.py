@@ -152,16 +152,21 @@ base_rewrite = PatternMatcher([
    ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
 
+pm_widen_uidx = PatternMatcher([
+  # GEP sign-extends indices to pointer width, so unsigned indices must be widened first.
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.uint32), name="i")),
+        allow_any_len=True, name="x"), lambda x,i: x.replace(src=(x.src[0], i.cast(dtypes.int64), *x.src[2:]))),
+])
+
 class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
 
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + PatternMatcher([
-    # GEP sign-extends indices to pointer width, so unsigned indices must be widened first.
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.uint32), name="i")),
-          allow_any_len=True, name="x"), lambda x,i: x.replace(src=(x.src[0], i.cast(dtypes.int64), *x.src[2:]))),
-  ])
+  def __init__(self, target:Target):
+    super().__init__(target)
+    self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
+      pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU)}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
@@ -259,11 +264,6 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{('fp8', 'bf8')[fp8_index(y.dtype)]}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
-  extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
-    # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
-    (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
-    (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
-  ])
   def asm(self, prg: UOp, lin: UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
@@ -297,6 +297,13 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     self.string_rewrite += PatternMatcher([
       (UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna:
         render_wmma_amd(ctx, wmma, cdna, rdna4))
+    ])
+    self.extra_matcher = self.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
+      # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
+      (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
+      (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
+      (UPat.var("a", dtype=(dtypes.f16,dtypes.bf16)).cast((dtypes.f16, dtypes.bf16), name="b"),
+        lambda a,b: a.float().cast(b.dtype) if a.dtype != b.dtype else None),
     ])
     if self.is_cdna: self.extra_matcher += tc.pm_validate_wmma_cdna
     if target.arch in {"gfx1100", "gfx1151"}: self.extra_matcher += tc.pm_validate_wmma_rdna3
