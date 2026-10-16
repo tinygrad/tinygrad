@@ -20,6 +20,7 @@ def _run_kernel(instructions: list, lx=1, ly=1, lz=1, gx=1, gy=1, gz=1, args_ptr
   assert len(sqtt_traces) == 1, f"expected 1 trace, got {len(sqtt_traces)}"
   return sqtt_traces.pop()
 
+@Context(ASM_CALL=0)
 class TestSQTTEncoder(unittest.TestCase):
 
   def test_simple_salu(self):
