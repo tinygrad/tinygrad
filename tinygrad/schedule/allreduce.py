@@ -39,6 +39,23 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
     return UOp.usum(*[c.pad(((s, numel - e),)) for (s, e), c in zip(cs, gathered)]).reshape(shape)
 
   # hub: when peers can't map the memory of some devices, reduce on a device every peer reaches. the others push to it, then pull the result
+  if all_int(buf.shape) and (hub:=_allreduce_hub(buf.device)) is not None and isinstance(device, tuple) and \
+     numel * buf.dtype.itemsize >= getenv("ALLREDUCE_HOST_RS", 1 << 20):
+    # large: a reduce-scatter through host memory, every device on its own link. the partials go to the host, device i pulls range i of the
+    # others and sums it, pushes it back, then every device pulls the ranges of the others
+    host, d, fold = _host_of(buf.device[0]), buf.device, functools.partial(functools.reduce, lambda x, y: x.alu(op, y))
+    flat = buf.reshape((numel,))
+    # aligned ranges: the kernels cutting them are vectorized
+    step = -(-numel // ndev // 1024) * 1024 if numel >= 1024 * ndev else -(-numel // ndev)
+    bounds = [(min(numel, step * i), min(numel, step * (i + 1))) for i in range(ndev)]
+    # the ranges are cut on the devices: the host only holds whole buffers
+    ranges = [[flat.mselect(j).shrink((r,)).contiguous() for r in bounds] for j in range(ndev)]
+    range_sums = [fold([ranges[j][i] if j == i else ranges[j][i].copy_to_device(host).copy_to_device(d[i]) for j in range(ndev)])
+                  for i in range(ndev)]
+    result = [r.copy_to_device(host) for r in range_sums]
+    gathered = [UOp.usum(*[(range_sums[i] if i == j else result[i].copy_to_device(d[j])).pad(((s, numel - e),)) for i, (s, e) in enumerate(bounds)])
+                for j in range(ndev)]
+    return UOp.mstack(*gathered).reshape(shape)
   if all_int(buf.shape) and (hub:=_allreduce_hub(buf.device)) is not None:
     hub_dev = buf.device[hub]
     total = functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i) if i == hub else buf.mselect(i).copy_to_device(hub_dev) for i in range(ndev)])
