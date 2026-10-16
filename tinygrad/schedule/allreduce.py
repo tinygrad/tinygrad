@@ -1,8 +1,15 @@
 import functools, itertools
-from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
+from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv, Context
 from tinygrad.uop.ops import UOp
 
 # *** allreduce implementation ***
+def _allreduce_hub(devices:tuple[str, ...]) -> int|None:
+  from tinygrad.device import Device
+  with Context(ALLOW_DEVICE_USAGE=1):
+    reachable = [Device[d].peer_reachable for d in devices]
+    if all(reachable) or len({Device[d].peer_group for d in devices}) != 1: return None
+  return reachable.index(True) if any(reachable) else None
+
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
@@ -26,6 +33,12 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
     summed = {i: fold([owned[i], *(owned[j].copy_to_device(d[i]) for j in rank if j != i)]) for rank in zip(*boxes) for i in rank}
     gathered = [UOp.mstack(*(summed[box[k]].copy_to_device(d[j]) for box in boxes for j in box)) for k in range(hdev)]
     return UOp.usum(*[c.pad(((s, numel - e),)) for (s, e), c in zip(cs, gathered)]).reshape(shape)
+
+  # hub: when peers can't map the memory of some devices, reduce on a device every peer reaches. the others push to it, then pull the result
+  if all_int(buf.shape) and (hub:=_allreduce_hub(buf.device)) is not None:
+    hub_dev = buf.device[hub]
+    total = functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i) if i == hub else buf.mselect(i).copy_to_device(hub_dev) for i in range(ndev)])
+    return total.copy_to_device(device).shrink_to(shape)
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:

@@ -2,6 +2,7 @@ import functools, io, pathlib, re, struct
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
@@ -248,6 +249,19 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
+def gguf_pad(entry:tuple[Tensor, tuple[int, ...], int], axis:int, size:int) -> tuple[Tensor, tuple[int, ...], int]:
+  """
+  Zero pads a parsed `(data, shape, ggml_type)` entry on `axis` to `size`, in its packed form. Zero bytes decode to zero weights.
+  """
+  data, shape, typ = entry
+  if shape[axis] == size: return entry
+  block, nbytes = (1, _GGML_NATIVE[typ].itemsize) if typ in _GGML_NATIVE else _GGML_QUANT[typ]
+  if axis == len(shape)-1:
+    if shape[axis] % block or size % block: raise ValueError(f"can't pad {shape} on axis {axis} to {size} in blocks of {block}")
+    data = data.to("CPU").reshape(prod(shape[:-1]), shape[-1]//block*nbytes).pad(((0, 0), (0, (size-shape[-1])//block*nbytes)))
+  else: data = data.to("CPU").reshape(prod(shape[:axis]), shape[axis], -1).pad(((0, 0), (0, size-shape[axis]), (0, 0)))
+  return data.flatten(), shape[:axis] + (size,) + shape[axis+1:], typ
+
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
@@ -259,9 +273,12 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
     else:
       if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
         raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
-      parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
-      packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
-  # TODO: shard copies the full tensor to every device
+      # every device copies its own part: (devices, part bytes) sharded on the devices
+      outer = prod(shape[:axis])
+      if outer == 1: parts = [data[i*(sz:=data.shape[0]//n):(i+1)*sz] for i in range(n)]
+      else: parts = [x[:, i].contiguous() for x in [data.to("CPU").reshape(outer, n, -1)] for i in range(n)]
+      Tensor.realize(*(parts:=[p.reshape(1, -1).to(d).contiguous() for p,d in zip(parts, devices)]))
+      packed[name] = Tensor(UOp.mstack(*[p.uop.base for p in parts]).reshape(parts[0].shape).unshard(0))
   for t in packed.values(): t.realize()
   for d in devices: Device[d].allocator.free_cache()
   def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
