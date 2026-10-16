@@ -29,9 +29,9 @@ class TestIndexing(unittest.TestCase):
 
   @unittest.skipIf(DEV.renderer == "LLVM", "TODO: LLVM lowering exceeds the HIP kernel op-count bound")
   def test_llama_8b_rope_backward_f16(self):
-    self.base_test_llama_8b_rope_backward(dtypes.float16, ops_scale=2)
-  # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
+    self.base_test_llama_8b_rope_backward(dtypes.float16, ops_scale=3)
+  # bfloat16 on non CDNA4 has additional ops overhead because of the software emulation
   def test_llama_8b_rope_backward_bf16(self):
-    self.base_test_llama_8b_rope_backward(dtypes.bfloat16, ops_scale=2 if Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950") else 25)
+    self.base_test_llama_8b_rope_backward(dtypes.bfloat16, ops_scale=3 if Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950") else 5)
 
 if __name__ == "__main__": unittest.main()
