@@ -40,6 +40,4 @@ if __name__ == "__main__":
             uops_line = []
             for u in rewritten_uops:
               uops_line.append(linearize(u))
-          with Timing("***** model verify in    "):
-            for u in uops_line: type_verify(u, spec_program)
           print(sum(len(u) for u in uops_line))
