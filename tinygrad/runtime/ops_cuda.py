@@ -82,9 +82,9 @@ class CUDAAllocator(Allocator['CUDADevice']):
     if (status:=api.cuMemHostRegister_v2(host.addr, buf.nbytes, 0)) != cuda.CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:
       check(status) # another device pinned it already
     addr = init_c_var(api.CUdeviceptr, lambda x: check(api.cuMemHostGetDevicePointer_v2(ctypes.byref(x), host.addr, 0))).value
-    return BufferStorage(addr, host.addr if status == cuda.CUDA_SUCCESS else None)
+    return BufferStorage(addr, status == cuda.CUDA_SUCCESS)
   def _unmap(self, mapping:BufferStorage):
-    if mapping.meta: check(self.dev.api.cuMemHostUnregister(mapping.meta))
+    if mapping.meta: check(self.dev.api.cuMemHostUnregister(unwrap(mapping.host).addr))
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
 Compiled.pm_encode += PatternMatcher([
