@@ -298,7 +298,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
       (UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna:
         render_wmma_amd(ctx, wmma, cdna, rdna4))
     ])
-    self.extra_matcher = super().extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
+    self.extra_matcher = self.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
       # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
       (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
       (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
