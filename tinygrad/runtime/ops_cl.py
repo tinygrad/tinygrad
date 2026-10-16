@@ -53,7 +53,7 @@ def launch(ctx:tuple[CLDevice, UOp, UOp], call:UOp, prg:UOp) -> UOp:
   buf = patch(UOp.alloc((rows[-1][0] + 8,), dtypes.uint8, device=HCQ_RUNTIME_DEV.device).rtag("kernargs"), rows).after(h)
   sets = [ccall(cl.clSetKernelArg, kernel, i, UOp.const(w.dtype.itemsize, dtypes.uint64), buf.index(o)) for i, (o, w) in enumerate(rows[:len(args)])]
   h = ccall(cl.clEnqueueNDRangeKernel, rt.after(*sets).index(1).load(), kernel, 3, z, buf.index(rows[-6][0]), buf.index(rows[-3][0]), 0, z, z)
-  for img in imgs.values(): h = ccall(cl.clReleaseMemObject, img.after(h))
+  for i in imgs: h = ccall(cl.clReleaseMemObject, buf.after(h).bitcast(dtypes.uint64).index(rows[i][0] // 8).load())
   return h
 
 pm_cl = PatternMatcher([ # ctx: (device, rt_vars, the last command), the queue is in order so a wait is nothing
