@@ -1,8 +1,7 @@
 from __future__ import annotations
-import ctypes, mmap, struct, sys
+import ctypes, mmap, struct
 from typing import Any, Callable
-from tinygrad.runtime.autogen import libusb
-if sys.platform != "win32": from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.autogen import libusb, libc
 
 class MockUSB:
   def __init__(self, mem):

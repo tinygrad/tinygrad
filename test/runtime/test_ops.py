@@ -1,4 +1,4 @@
-import time, math, unittest, functools, platform, warnings, sys
+import time, math, unittest, functools, warnings, sys
 import numpy as np
 import torch
 from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context, to_tuple
@@ -897,7 +897,6 @@ class TestOps(TensorTestCase):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
@@ -907,7 +906,6 @@ class TestOps(TensorTestCase):
       helper_test_op(None, lambda x: x.cos(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2

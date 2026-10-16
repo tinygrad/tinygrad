@@ -1,4 +1,4 @@
-import math, struct, sys
+import math, struct
 from tinygrad.renderer import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
@@ -214,7 +214,7 @@ class LLVMRenderer(Renderer):
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
-  abi = 'win64cc' if sys.platform == 'win32' else None
+  abi = None
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     topo = UOp.sink(*uops).toposort(enter_calls=True)
