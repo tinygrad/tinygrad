@@ -362,7 +362,8 @@ class _Ctx:
 
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
-    return self.vmem.index((self.rpc() >> 2) + dword_idx).load()
+    addr = self.inst_addr if self.inst_addr is not None else self.rpc()
+    return self.vmem.index((addr >> 2) + dword_idx).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -513,7 +514,7 @@ class _Ctx:
 
   def rpc(self) -> UOp:
     """Read PC as 64-bit byte address."""
-    if self.inst_addr is not None: return self.inst_addr
+    # Index at PC_LO, then cast to uint64 ptr and load
     return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
 
   def wpc(self, val:UOp) -> list[UOp]:
@@ -544,7 +545,8 @@ class _Ctx:
         else: stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.extend(self.wmask(_c(VCC_LO.offset), val))
       elif dest.startswith('PC'):  # S_SETPC/S_SWAPPC jump: write PC directly (caller skips inc_pc)
-        stores.extend(self.wpc(val))
+        lo, hi = _split64(val.cast(dtypes.uint64))
+        stores.extend([self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)])
     return stores
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp | int], sdst_reg: UOp, sdst_size: int) -> UOp:
