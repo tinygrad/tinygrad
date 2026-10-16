@@ -1,7 +1,7 @@
 from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, dedup
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
@@ -279,16 +279,17 @@ def remove_range(sink:UOp):
   loop_ids = itertools.count(max((aid for u in uops if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
   acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if u.op in GroupOp.Defines), default=0))
   enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in uops if u.op is Ops.END and len(u.ranges)}
+  ends = {u.src[1] for u in uops if u.op is Ops.END}
+  range_inputs = {r:dedup(s for u in uops if r in u.ranges for s in u.src_without_body if r not in s.ranges and s is not r) for r in ends}
   def init(u:UOp):
     acc = UOp.alloc((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
     init = acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0))
-    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0).after(init),)) if u.src[0].vmin <= 0 else None
+    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0).after(init, *range_inputs[u]),)) if u.src[0].vmin <= 0 else None
     l = l.replace(src=(l.src[0].after(gate if gate is not None else init),))
     return RangeCtx(init, l, gate)
-  ends = {u.src[1] for u in uops if u.op is Ops.END}
   ctx = {u:init(u) for u in uops if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void and u in ends}
-  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
+  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const+symbolic_simple, ctx=ctx, bottom_up=True, name="remove range")
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
