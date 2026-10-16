@@ -27,7 +27,7 @@ def hook_doorbells(s:UOp) -> UOp|None:
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
-# this links AMD emulators kernel back to the original kernel
+# this links AMD emulator's kernel back to the original kernel
 def emit_kernel_name(ctx:HWQueue, prg:UOp) -> None:
   from tinygrad.runtime.ops_amd import AMDComputeQueue
   if isinstance(ctx, AMDComputeQueue):
