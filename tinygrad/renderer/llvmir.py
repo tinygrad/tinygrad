@@ -165,7 +165,8 @@ class LLVMRenderer(Renderer):
 
   def __init__(self, target:Target):
     super().__init__(target)
-    self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
+    self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
+      pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU)}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
@@ -263,13 +264,6 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{('fp8', 'bf8')[fp8_index(y.dtype)]}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
-  def __init__(self, target:Target):
-    super().__init__(target)
-    self.extra_matcher = super().extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
-      # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
-      (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
-      (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
-    ])
   def asm(self, prg: UOp, lin: UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
@@ -303,6 +297,11 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     self.string_rewrite += PatternMatcher([
       (UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna:
         render_wmma_amd(ctx, wmma, cdna, rdna4))
+    ])
+    self.extra_matcher = super().extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
+      # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
+      (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
+      (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
     ])
     if self.is_cdna: self.extra_matcher += tc.pm_validate_wmma_cdna
     if target.arch in {"gfx1100", "gfx1151"}: self.extra_matcher += tc.pm_validate_wmma_rdna3
