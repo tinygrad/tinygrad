@@ -826,10 +826,10 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv_len, max_kv_len, block_n, waves=4, group=None, shared=False,
-                                        scale=None, causal_rows=0):
+                                        scale=None, causal_rows=0, q_start=None):
   # shared: one kv head for every query head that is also the value (MLA latent), group: query heads per block. mask: additive (B, N)
-  # causal_rows (prefill): the query heads are (head, token) rows of causal_rows tokens ending at valid_kv_len, mask: (B, tokens, N)
-  valid_kv_len = _unbind(valid_kv_len)
+  # causal_rows (prefill): the query heads are (head, token) rows of causal_rows tokens from q_start, mask: (B, tokens, N)
+  valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
   _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
   if group is not None: H_KV = H // group
@@ -852,9 +852,9 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   valids: list[UOp] = []
   scores: list[list[UOp]] = [[zerof]*G for _ in range(SEC)]
   vfrags: list[tuple[UOp, ...]] = [()]*SEC
-  # the keys a row sees: a prefill row is the token at valid_kv_len - causal_rows + t, it sees the keys up to itself
+  # the keys a row sees: a prefill row is the token at q_start + t, it sees the keys up to itself (padding rows past valid_kv_len see them all)
   row_tok = [(kv_head*G + h) % causal_rows for h in range(G)] if causal_rows else [None]*G
-  row_len = [(valid_kv_len - causal_rows + t + 1).minimum(valid_kv_len) if causal_rows else valid_kv_len for t in row_tok]
+  row_len = [(q_start + t + 1).minimum(valid_kv_len) if causal_rows else valid_kv_len for t in row_tok]
   row_valids: list[list[UOp]] = []
   for j in range(SEC):
     key = chunk_id*CHUNK + wave*SEC + j
@@ -944,10 +944,11 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
     .end(lane, block_dt, block_bh).sink(arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int, shared:bool=False, scale:float|None=None,
-                               mask:Tensor|None=None, causal_rows:int=0, group:int=1, partials:int=48, block_n:int=64) -> Tensor:
+                               mask:Tensor|None=None, causal_rows:int=0, group:int=1, partials:int=48, block_n:int=64,
+                               q_start:int|UOp|None=None) -> Tensor:
   """
   shared: the cache (1, B, 1, N, D) is the key and the value of every head (MLA latent), mask: additive (B, N) over the keys.
-  causal_rows: the query heads are (head, token) rows of that many tokens ending at valid_kv_len, `group` of them per block, mask (B, tokens, N)
+  causal_rows: the query heads are (head, token) rows of that many tokens from q_start, `group` of them per block, mask (B, tokens, N)
   """
   # Carry length bindings even when the cache was populated independently of this call.
   if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
@@ -960,7 +961,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   while waves * group * ((D+LDS_PAD)*2 + 8) > 65536 or (waves > 1 and block_n // waves < 2): waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n, waves=waves,
-                          group=group if shared else None, shared=shared, scale=scale, causal_rows=causal_rows)
+                          group=group if shared else None, shared=shared, scale=scale, causal_rows=causal_rows, q_start=q_start)
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, *(() if mask is None else (mask,)), fxn=fxn)[:2]
   live = (valid_kv_len+block_n-1)//block_n
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
@@ -968,17 +969,17 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
 
-def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, valid_kv_len:int|UOp, max_kv_len:int, scale:float, mask:Tensor|None=None,
-                                    group:int=4, partials:int=4, block_n:int=32) -> Tensor:
+def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
+                                    mask:Tensor|None=None, group:int=4, partials:int=4, block_n:int=32) -> Tensor:
   """
-  causal attention of the (B, H, T, D) queries ending at valid_kv_len on the shared latent cache (1, B, 1, N, D): (B, H, T, D).
+  causal attention of the (B, H, T, D) queries at q_start.. on the shared latent cache (1, B, 1, N, D) of valid_kv_len keys: (B, H, T, D).
   mask: additive (B, T, N). every (head, token) is a row of the flash decode kernel, `group` rows of a head share their key loads
   """
   B, H, T, D = q.shape
   assert isinstance(T, int) and (H*T) % group == 0 and T % group == 0
   rows = q.half().reshape(B, H*T, 1, D).contiguous()
   out = amd_flash_attention_decode(rows, cache, valid_kv_len, max_kv_len, shared=True, scale=scale, mask=mask, causal_rows=T, group=group,
-                                   partials=partials, block_n=block_n)
+                                   partials=partials, block_n=block_n, q_start=q_start)
   return out.reshape(B, H, T, D)
 
 def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:

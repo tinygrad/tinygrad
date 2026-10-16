@@ -476,7 +476,7 @@ class MLATransformerBlock(FFNBlock):
         attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask)
       else:
         if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
-        attn = flash_attention_mla_prefill(q, latent, start_pos+T, int(N), scale, mask)
+        attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, int(N), scale, mask)
       attn = (attn[..., :self.config.kv_lora_rank] @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, Tq, -1)
       return self.attn_output(attn)
     k = cache[:, :, 0:start_pos+T, :].float()
