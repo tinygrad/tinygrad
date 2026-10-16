@@ -1458,15 +1458,18 @@ def _pool_topk_mask_kernel(mask:UOp, scores:UOp, q_start:UOp, valid_len:UOp, poo
     bits = scores[row, p.minimum(P-1)].load().bitcast(dtypes.uint32)
     return ok.where((bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000), UOp.const(0, dtypes.uint32))
   keys = [key(t + i*TOPK_THREADS) for i in range(per)]
-  # the count of keys >= a candidate: per thread, the waves' sums (exact in float), then the workgroup's through LDS
+  # bit by bit from the top: the count of keys >= a candidate, per thread, the waves' sums (exact in float), then the workgroup's through LDS.
+  # with no more pools than k they are all picked: no loop
   lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  thr = UOp.const(0, dtypes.uint32)
-  for b in range(31, -1, -1):
-    cand = thr | (1 << b)
-    cnt = functools.reduce(lambda a,kk: a + (kk >= cand).cast(dtypes.float32), keys[1:], (keys[0] >= cand).cast(dtypes.float32))
-    stage = lds.after(lds[31-b, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
-    total = functools.reduce(lambda a,j: a + stage[31-b, j].load(), range(1, W), stage[31-b, 0].load())
-    thr = (total >= k).where(cand, thr)
+  thr_reg = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+  thr_reg = thr_reg.after(thr_reg.store(thr_reg.const_like(0)))
+  bit = UOp.range((pools > k).where(32, 0), 3, AxisType.LOOP)
+  prev = thr_reg.after(bit)[0].load()
+  cand = prev | (UOp.const(1, dtypes.uint32) << (31 - bit).cast(dtypes.uint32))
+  cnt = functools.reduce(lambda a,kk: a + (kk >= cand).cast(dtypes.float32), keys[1:], (keys[0] >= cand).cast(dtypes.float32))
+  stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
+  total = functools.reduce(lambda a,j: a + stage[bit, j].load(), range(1, W), stage[bit, 0].load())
+  thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load()
   # the mask of every key position s < valid_len: a loop over the keys of this thread
   lds_k = UOp.alloc((P,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
   lds_k = lds_k.after(UOp.group(*(lds_k[(t + i*TOPK_THREADS).valid(t + i*TOPK_THREADS < P)].store(kk) for i,kk in enumerate(keys))).barrier())
