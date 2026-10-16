@@ -1,13 +1,14 @@
 from __future__ import annotations
-import enum, functools, itertools, math, pathlib, re
+import array, enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
-from tinygrad.helpers import unwrap, round_up
+from tinygrad.helpers import unwrap, round_up, to_tuple
+from tinygrad.device import Buffer, BufferSpec
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -572,10 +573,16 @@ class Transformer:
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)[:, :self.config.vocab_size]
     q8_quantize_cache_clear()  # don't keep the graph alive
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+    tok = (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+    # the tokens are a view of generate's token buffer: the sampled token goes after them unless that is a prompt token (chunked prefill)
+    if (buf:=getattr(self, "_token_buf", None)) is not None and tokens.uop.base is buf.uop.base:
+      tok = (dst:=buf[:, (nxt:=start_pos + tokens.shape[1]):nxt+1]).assign((dst < 0).where(tok.cast(buf.dtype), dst))
+    return tok
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
+    # a view of the token buffer is already realized: no schedule for the jit input
+    if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -755,18 +762,33 @@ class Transformer:
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
-    # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
+    if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
+      # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
+      if not hasattr(self, "_token_buf"):
+        dev = self.token_embd.weight.device if isinstance(self.token_embd.weight.device, str) else self.token_embd.weight.device[0]
+        buf = Buffer(dev, 4*(self.max_context+1), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+        self._token_host, self._token_buf = buf.as_memoryview(allow_zero_copy=True).cast('i'), Tensor(UOp.from_buffer(buf, dtypes.int32))[None]
+      for d in to_tuple(self.token_embd.weight.device): Device[d].synchronize()  # a step run ahead by the last generate may still use it
+      self._token_host[:] = array.array('i', tokens + [-1] * (self.max_context + 1 - len(tokens)))
+      t = self._token_buf
+    else:
+      # assign all input tokens once, then slice from start_pos for the model call
+      t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    out, prompt_len = None, len(tokens)
+    out, prompt_len, ahead = None, len(tokens), False
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
-      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
+      # with run ahead, the previous step already submitted this one
+      if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
-      tokens.append(int(out.item()))
-      self._cached_tokens = tokens[:-1]
+      if fast:
+        # run ahead: submit the next step (it reads this token on the device) before waiting for this one
+        if ahead:=len(tokens) + 1 < self.max_context: self(t[:, (sp:=v_start_pos.bind(start_pos)):sp+1], sp, temp)
+        while (tok:=self._token_host[start_pos]) < 0: pass
+      tokens.append(tok if fast else int(cast(Tensor, out).item()))
+      self._cached_tokens = tokens[:] if ahead else tokens[:-1]
       yield tokens[-1]

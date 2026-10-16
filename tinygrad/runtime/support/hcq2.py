@@ -242,8 +242,21 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
   call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
   queues:dict[tuple[tuple[str, ...], str], list[UOp]] = {}
+  # kernels on a queue may overlap: a kernel waits for the earlier ones (kernel_barrier) only if it accesses what they write or writes what
+  # they access. the (writes, accesses) since the last barrier per queue, as byte ranges (buffers in the jit's arena share a base)
+  pending:dict[tuple[tuple[str, ...], str], tuple[list, list]] = {}
   for tag, ((call, devices, queue), waits) in enumerate(zip(ctx.batch, call_waits)):
     if not (q:=queues.setdefault((devices, queue), [])): q += _start_ins(ctx, devices[0], queue) # first use of a queue
+
+    if call.op is Ops.CALL and call.body.op is Ops.PROGRAM:
+      bufs = [(base, lane, off, off + b.max_numel() * b.dtype.itemsize) for b in get_call_arg_uops(call) for base, lane, off in [unwrap_lane(b)]]
+      pos = [k for k, s in enumerate(call.src[1:]) if not s.is_variable]
+      writes, (pw, pa) = [bufs[pos.index(i)] for i in get_call_outs_ins(call)[0]], pending.setdefault((devices, queue), ([], []))
+      if any(x[:2] == y[:2] and x[2] < y[3] and y[2] < x[3] for xs, ys in ((pw, bufs), (pa, writes)) for x in xs for y in ys):
+        q.append(ins("kernel_barrier"))
+        del pw[:], pa[:]
+      pw.extend(writes)
+      pa.extend(bufs)
 
     # dependency waits, then the call between its timestamps
     ts_ins = [ins("timestamp", ctx.slot(devices, i)) for i in ctx.stamps(devices, tag)]
@@ -325,6 +338,7 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
      lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("barrier"),)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("kernel_barrier"),)), lambda ctx: ctx.kernel_barrier()),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait_eq"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="dst"))), lambda ctx, dst: ctx.timestamp(dst)),
@@ -364,6 +378,7 @@ class HWQueue:
     self.blob += self.blob[start:] * int(r.vmax)
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
+  def kernel_barrier(self): pass # wait for the kernels before. queues that run their kernels one after another have nothing to do
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
