@@ -744,29 +744,39 @@ def fuse_gate_up(gate:Tensor, up:Tensor, experts:int, rows:int) -> Tensor:
   g, u = (w.reshape(experts, rows // 16, -1) for w in (gate, up))
   return g.stack(u, dim=2).flatten()
 
+@functools.cache
+def _scatter_rows_kernel(out:UOp, pos:UOp) -> UOp:
+  # out[pos[i]] = i for every i with pos[i] >= 0 (pos is injective)
+  i = UOp.range(pos.shape[0], 0, AxisType.GLOBAL)
+  p = pos[i].load()
+  return out[p.valid(p >= 0)].store(i.cast(dtypes.int32)).end(i).sink(arg=KernelInfo(name="scatter_rows", opts_to_apply=()))
+
 def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Tensor]:
   """
   sorts the (token, slot) selections of sel (B, T, k) by local expert, each expert's rows padded to whole tiles.
   returns valid (..., B*T*k) if a selection is an expert of this device, entries (..., R) the selection of each row (-1: padding)
-  and tiles (..., R/16) the local expert of each tile (-1: none). first: the first expert of each device, a leading device axis if sharded
+  and tiles (..., R/MOE_TILE) the local expert of each tile (-1: none). first: the first expert of each device, a leading device axis if sharded
   """
   k, N = sel.shape[-1], int(sel.numel())
-  R = round_up(N + (MOE_TILE-1)*experts, MOE_TILE)
-  e = sel.reshape(1, N).cast(dtypes.int32) - first.reshape(-1, 1)
+  tokens, R = N // k, round_up(N + (MOE_TILE-1)*experts, MOE_TILE)
+  e = sel.reshape(1, tokens, k).cast(dtypes.int32) - first.reshape(-1, 1, 1)
   valid = (e >= 0) & (e < experts)
-  e = valid.where(e, experts)
-  onehot = e.unsqueeze(-1) == Tensor.arange(experts, dtype=dtypes.int32)
-  padded = (onehot.sum(1) + MOE_TILE-1) // MOE_TILE * MOE_TILE
+  onehot = (e.unsqueeze(-1) == Tensor.arange(experts, dtype=dtypes.int32)) & valid.unsqueeze(-1)  # (n, tokens, k, experts)
+  # a token selects an expert at most once: the rank of a selection is the count of earlier tokens of its expert
+  per_token = onehot.sum(2)  # (n, tokens, experts)
+  earlier = per_token.cumsum(1) - per_token
+  padded = (per_token.sum(1) + MOE_TILE-1) // MOE_TILE * MOE_TILE
   offsets = padded.cumsum(-1) - padded
-  # the rank of a selection among the earlier ones of its expert
-  ar = Tensor.arange(N, dtype=dtypes.int32)
-  rank = ((e.unsqueeze(-1) == e.unsqueeze(-2)) & (ar.reshape(1, N) < ar.reshape(N, 1))).sum(-1)
-  pos = valid.where((onehot.where(offsets.unsqueeze(1), 0)).sum(-1) + rank, -1)
-  entries = ((pos.unsqueeze(-1) == Tensor.arange(R, dtype=dtypes.int32)).where((ar + 1).unsqueeze(-1), 0)).sum(1) - 1
+  pos = valid.where(onehot.where((offsets.unsqueeze(1) + earlier).unsqueeze(2), 0).sum(-1), -1).reshape(-1, N)
+  # the selection of every sorted row: a scatter of the positions into rows of -1 (padding)
+  n = pos.shape[0]
+  entries = Tensor.full((n, R), -1, dtype=dtypes.int32)
+  entries = (entries.shard(first.device, 0) if isinstance(first.device, tuple) else entries.to(first.device)).contiguous()
+  entries = Tensor.custom_kernel(entries.reshape(-1), pos.cast(dtypes.int32).reshape(-1).contiguous(), fxn=_scatter_rows_kernel)[0].reshape(n, R)
   start = Tensor.arange(R // MOE_TILE, dtype=dtypes.int32) * MOE_TILE
   inside = (offsets.unsqueeze(1) <= start.unsqueeze(-1)) & (start.unsqueeze(-1) < (offsets + padded).unsqueeze(1))
   tiles = inside.where(Tensor.arange(experts, dtype=dtypes.int32) + 1, 0).sum(-1) - 1
-  return valid, entries.cast(dtypes.int32), tiles.cast(dtypes.int32)
+  return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32)
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********
 
