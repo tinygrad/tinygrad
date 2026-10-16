@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 # **************** Device ****************
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
-HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL", "CL"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
-UVM_DEVS = frozenset(("QCOM", "METAL")) # the host maps their memory, so copies are host memcpys
+UVM_DEVS = frozenset(("QCOM", "METAL", "CL")) # the host maps their memory, so copies are host memcpys
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -489,9 +489,8 @@ class Compiled:
     for _ in range(5):
       with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
       if not (ents:=list(self.prof_ents.items())): return
-      self.prof_ents.clear()
       st = perf_counter_us()
-      self.synchronize()
+      with Context(PROFILE=0): self.synchronize()
       gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
