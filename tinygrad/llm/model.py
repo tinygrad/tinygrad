@@ -69,9 +69,9 @@ class ExpertWeights:
     onehot = (sel.unsqueeze(-1) == Tensor.arange(E, dtype=dtypes.int32)).unsqueeze(-1)
     lsel = onehot.where(self.slice_table.reshape(-1, 1, 1, 1, E, w), 0).sum(-2, dtype=dtypes.int32)
     return lsel.reshape(*lsel.shape[:3], -1), probs.unsqueeze(-1).expand(*probs.shape, w).reshape(*probs.shape[:2], -1)
-  def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0, act:tuple|None=None) -> Tensor:
+  def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0, act:tuple|None=None, out_dtype=dtypes.float32) -> Tensor:
     """the selections sorted by expert (moe_route), see moe_grouped_linear. expert parallel: a leading device axis"""
-    return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections, act)
+    return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections, act, out_dtype)
   def fuse_up(self, up:ExpertWeights, rows:int):
     """take the up weights: the packed rows interleaved by 16 with this gate's, one kernel for both"""
     assert self.ggml_type is not None and self.ggml_type == up.ggml_type and self.weight.device == up.weight.device
@@ -367,10 +367,12 @@ class FFNBlock:
     else:
       gate, up = (e.grouped(x.reshape(-1, D), entries, tiles, slots=k) for e in (gate_exps, self.ffn_up_exps))
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=int(prod(sel_shape)))
+    # sliced: a selection has a row per slice, in half (the sum over the slots reads them all)
+    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=int(prod(sel_shape)),
+                             out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
     if down.ndim == 2: down = down.unsqueeze(0)
     # the rows of other devices' experts are not written
-    y = valid.unsqueeze(-1).where(down * probs.reshape(1, -1, 1), 0)
+    y = valid.unsqueeze(-1).where(down.float() * probs.reshape(1, -1, 1), 0)
     y = y.reshape(-1, *sel_shape, D).sum(-2)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
 

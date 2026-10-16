@@ -432,7 +432,7 @@ def _act_stores(out, outputs, tokens, accs, update, act):
 def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_waves, rdna4):
   # RDNA4 owns eight consecutive rows per half-wave, matching tokens directly.
   if rdna4:
-    return [out[token, output].store(acc.after(update)[i].load()) for output,output_accs in zip(outputs, accs)
+    return [out[token, output].store(acc.after(update)[i].load().cast(out.dtype)) for output,output_accs in zip(outputs, accs)
             for tile_tokens,acc in zip(tokens, output_accs) for i,token in enumerate(tile_tokens)]
   # the accumulator fragment halves are exchanged between lane pairs (l, l^16) through LDS (a ds_swizzle without CUSTOM)
   flat_accs = [acc for output_accs in accs for acc in output_accs]
@@ -445,7 +445,7 @@ def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_wa
     low = half.eq(0)
     return tuple(low.where(own[i], peer[i+4]) if j == 0 else low.where(peer[i], own[i+4]) for i in range(4) for j in range(2))
   tt = len(tokens)
-  return [out[token, output].store(value) for ot,(output,output_accs) in enumerate(zip(outputs, accs))
+  return [out[token, output].store(value.cast(out.dtype)) for ot,(output,output_accs) in enumerate(zip(outputs, accs))
           for tile,(tile_tokens,_acc) in enumerate(zip(tokens, output_accs)) for token,value in zip(tile_tokens, values(ot*tt+tile))]
 
 def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name, rdna4, group:tuple[UOp, ...]=(),
@@ -629,7 +629,7 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
           new_vals[o][t][j] = new_vals[o][t][j] + d_x[t][j] * (term if ggml_type not in (Q4_K, Q5_K, Q2_K) else term - minimum*sx)
   update = UOp.group(*(accs[o][t].store(UOp.stack(*new_vals[o][t])) for o in range(len(outputs)) for t in range(len(tokens)))).end(g)
   if act is not None: stores = _act_stores(out, outputs, store_rows, accs, update, act)
-  else: stores = [out[row, output].store(accs[o][t].after(update)[j].load()) for o, output in enumerate(outputs)
+  else: stores = [out[row, output].store(accs[o][t].after(update)[j].load().cast(out.dtype)) for o, output in enumerate(outputs)
                   for t, tile_rows in enumerate(store_rows) for j, row in enumerate(tile_rows)]
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
     arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_i8_wmma", opts_to_apply=(), estimates=estimates))
@@ -828,7 +828,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
 
 def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0,
-                       act:tuple[float, float, float]|None=None) -> Tensor:
+                       act:tuple[float, float, float]|None=None, out_dtype=dtypes.float32) -> Tensor:
   """
   grouped experts (prefill): every expert reads its weights once for all its rows, the selections sorted by expert (moe_route). entries (R,): the
   selection of each row (-1: padding), tiles (R/16,): the local expert of each tile of 16 rows (-1: none).
@@ -846,7 +846,7 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   fxn:Callable[..., UOp]
   group = (rows.cast(dtypes.int32).flatten().contiguous(), tiles.cast(dtypes.int32).flatten().contiguous())
   rows_out, cols = R if slots else selections, out_features // 2 if act else out_features
-  out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
+  out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
   if _use_i8_wmma(x.device, ggml_type):
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
@@ -870,6 +870,29 @@ def fuse_gate_up(gate:Tensor, up:Tensor, experts:int, rows:int) -> Tensor:
   return g.stack(u, dim=2).flatten()
 
 @functools.cache
+def _exclusive_cumsum_kernel(out:UOp, x:UOp, block:int=64) -> UOp:
+  # x, out (n, T, C) int32: out[i, t, c] is the sum of x[i, :t, c]. a workgroup per column, a thread per block of rows: the totals of the
+  # blocks before it through LDS, then the block's rows
+  n, T, C = cast(tuple[int, int, int], x.shape)
+  blocks = T // block
+  col, b = UOp.range(n*C, 0, AxisType.GLOBAL), UOp.range(blocks, 1, AxisType.LOCAL)
+  i, c = col // C, col % C
+  vals = [x[i, b*block + r, c].load() for r in range(block)]
+  lds = UOp.alloc((blocks,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(lds[b].store(functools.reduce(lambda a,v: a+v, vals[1:], vals[0])).barrier())
+  start = functools.reduce(lambda a,j: a + (j < b).where(lds[j].load(), UOp.const(0, dtypes.int32)), range(blocks), UOp.const(0, dtypes.int32))
+  stores, run = [], start
+  for r in range(block):
+    stores.append(out[i, b*block + r, c].store(run))
+    run = run + vals[r]
+  return UOp.group(*stores).end(col, b).sink(arg=KernelInfo(name="exclusive_cumsum", opts_to_apply=()))
+
+def exclusive_cumsum(x:Tensor) -> Tensor:
+  """(n, T, C) int32: the sum of the rows before every row"""
+  out = Tensor.empty(*x.shape, dtype=dtypes.int32, device=x.device, axis=x.uop.axis)
+  return Tensor.custom_kernel(out, x.cast(dtypes.int32).contiguous(), fxn=_exclusive_cumsum_kernel)[0]
+
+@functools.cache
 def _scatter_rows_kernel(out:UOp, pos:UOp) -> UOp:
   # out[pos[i]] = i for every i with pos[i] >= 0 (pos is injective)
   i = UOp.range(pos.shape[0], 0, AxisType.GLOBAL)
@@ -888,8 +911,8 @@ def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Te
   valid = (e >= 0) & (e < experts)
   onehot = (e.unsqueeze(-1) == Tensor.arange(experts, dtype=dtypes.int32)) & valid.unsqueeze(-1)  # (n, tokens, k, experts)
   # a token selects an expert at most once: the rank of a selection is the count of earlier tokens of its expert
-  per_token = onehot.sum(2)  # (n, tokens, experts)
-  earlier = per_token.cumsum(1) - per_token
+  per_token = onehot.sum(2, dtype=dtypes.int32)  # (n, tokens, experts)
+  earlier = exclusive_cumsum(per_token) if tokens % 64 == 0 and amd_custom_kernels_supported(sel.device) else per_token.cumsum(1) - per_token
   padded = (per_token.sum(1) + MOE_TILE-1) // MOE_TILE * MOE_TILE
   offsets = padded.cumsum(-1) - padded
   pos = valid.where(onehot.where((offsets.unsqueeze(1) + earlier).unsqueeze(2), 0).sum(-1), -1).reshape(-1, N)
