@@ -577,8 +577,8 @@ class GatedDeltaNetBlock(FFNBlock):
       # one token: a kernel for the convolutions, the delta rule, the norm and the gate
       z = kda_decode(self.recurrent_state, self.conv_states, [self.attn_q(x), self.attn_k(x), self.attn_v(x)],
                      [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)], self.ssm_g_b(self.ssm_g_a(x)),
-                     self.ssm_f_b(self.ssm_f_a(x)), self.ssm_beta(x), self.ssm_dt["bias"], self.ssm_a, unwrap(self.ssm_norm.weight), Tensor(start_pos),
-                     unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps)
+                     self.ssm_f_b(self.ssm_f_a(x)), self.ssm_beta(x), self.ssm_dt["bias"], self.ssm_a, unwrap(self.ssm_norm.weight),
+                     Tensor(start_pos), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps)
       return self.ssm_out(z)
     out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
     out_gate = out_gate.reshape(B, Tq, self.num_v_heads, self.head_v_dim)
