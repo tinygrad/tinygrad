@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import cast
 from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element, axis_colors
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element, ALLOW_TF32, count, Context
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, prod, get_single_element, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -111,6 +111,9 @@ class Scheduler:
         # We currently don't support a group within another reduce, TODO: fix if-contexts
         check(not any(u in self.reduce_ranges and u.axis_type is AxisType.WEAK for u in reduces[0].ranges),
               "cannot have a group inside another reduce")
+      # a symbolic size is padded to a multiple of amt so it can be split
+      if rng.src[0].op is not Ops.CONST and rng.src[0].divides(amt) is None:
+        rng = self.apply_opt(Opt(OptOps.PADTO, opt.axis, amt), append_opt=False)
       ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
@@ -125,14 +128,14 @@ class Scheduler:
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
       check(type(opt.arg) is int and opt.arg > 1, f"padto arg is a multiple > 1, not {opt.arg}")
-      check(rng.src[0].op is Ops.CONST, "only pad const axes")
       # TODO: upcasted is only wrong for a range pinned in WMMA tc_upcast_axes
       check(rng.axis_type not in {AxisType.UPCAST, AxisType.WARP}, "cannot pad upcasted or warp")
-      new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
-      check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
-      replaced_rng = rng.replace(src=(rng.src[0].const_like(new_sz),))
+      size, amt = rng.src[0], cast(int, opt.arg)
+      new_size = ((size+(amt-1))//amt*amt).simplify()
+      check(rng.vmax+1 > new_size.vmax//4, "pad adds more than quadruple the work")
+      replaced_rng = rng.replace(src=(new_size,))
       replaces = {rng:replaced_rng}
-      valid = replaced_rng < rng.vmax+1
+      valid = replaced_rng < size
       def gate(b:UOp) -> UOp: return b.replace(src=(b.src[0], b.src[1].get_idx().valid(valid&b.src[1].get_valid())))
       for b in self.bufs:
         if rng in b.src[1].ranges: replaces[b] = gate(b)
