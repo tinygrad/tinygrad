@@ -1019,10 +1019,15 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv_len, max_kv_len, block_n, waves=4, group=None, shared=False,
-                                        scale=None, causal_rows=0, q_start=None):
+                                        scale=None, causal_rows=0, q_start=None, indexed=False):
   # shared: one kv head for every query head that is also the value (MLA latent), group: query heads per block. mask: additive (B, N)
   # causal_rows (prefill): the query heads are (head, token) rows of causal_rows tokens from q_start, mask: (B, tokens, N)
+  # indexed: instead of the mask, the list of the keys to attend to (count last): a data dependent count of chunks
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
+  index = mask[0] if indexed else None
+  if index is not None:
+    mask, n_max = (), cast(int, index.shape[0]) - 1
+    valid_kv_len = index[n_max].load().cast(dtypes.weakint)
   _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
   if group is not None: H_KV = H // group
@@ -1033,6 +1038,7 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   SEC = CHUNK // WAVES  # keys each wave scans independently
   total_chunks = (valid_kv_len+CHUNK-1)//CHUNK
   live_chunks = min(total_chunks, PARTIALS) if isinstance(total_chunks, int) else total_chunks.minimum(PARTIALS)
+  if index is not None: live_chunks = min((n_max+CHUNK-1)//CHUNK, PARTIALS)
   block_bhkv, block_chunk = UOp.range(B*H_KV, 0, AxisType.GLOBAL), UOp.range(live_chunks, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   b, kv_head = block_bhkv // H_KV, block_bhkv % H_KV
@@ -1040,7 +1046,9 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   qf = tuple(_vec_load(q[b, kv_head*G+h, 0, lane*DPL], DPL) for h in range(G))
   zerof = UOp.const(0, dtypes.float)
   # Each block scans every PARTIALS-th chunk, keeping an online softmax across rounds.
-  chunk_round = UOp.range((total_chunks-1-block_chunk)//PARTIALS+1, 4, AxisType.LOOP)
+  # (blocks past the chunks run no round: the count is never negative)
+  chunk_round = UOp.range((total_chunks-1-block_chunk)//PARTIALS+1 if index is None else
+                          ((total_chunks-block_chunk+PARTIALS-1)//PARTIALS).maximum(0), 4, AxisType.LOOP)
   chunk_id = block_chunk + chunk_round*PARTIALS
   valids: list[UOp] = []
   scores: list[list[UOp]] = [[zerof]*G for _ in range(SEC)]
@@ -1054,6 +1062,8 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
     valid = key < valid_kv_len
     valids.append(valid)
     row_valids.append([key < n for n in row_len])
+    # (the list past the count isn't written: clamped)
+    if index is not None: key = index[key.minimum(n_max-1)].load().cast(dtypes.weakint).maximum(0).minimum(N-1)
     kfrag = _vec_load(cache_kv[0, b, 0 if shared else kv_head, key, lane*DPL], DPL)
     # V is prefetched in the score pass so both streams are in flight together
     vfrags[j] = tuple(valid.where(v, zerof) for v in (kfrag if shared else _vec_load(cache_kv[1, b, kv_head, key, lane*DPL], DPL)))
@@ -1104,7 +1114,10 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   L = sum((((ml_lds[w, hstat, 0].load()-M)*LOG2E).exp2() * ml_lds[w, hstat, 1].load() for w in range(WAVES)), zerof)
   q_head = (kv_head*G + hstat).valid(hstat < G) if WAVES*WARP_SIZE > G else kv_head*G + hstat
   final_stores += [stats[b, q_head, block_chunk, 0].store(M), stats[b, q_head, block_chunk, 1].store(L)]
-  return UOp.group(*final_stores).end(lane, wave, block_chunk, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
+  # indexed: a data dependent count of keys, an upper bound estimate
+  est = None if index is None else Estimates(4*n_max*B*H*D, n_max*B*D*cache_kv.dtype.itemsize, n_max*B*D*cache_kv.dtype.itemsize)
+  return UOp.group(*final_stores).end(lane, wave, block_chunk, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=(),
+                                                                                              estimates=est))
 
 @functools.cache
 def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UOp:
@@ -1138,7 +1151,7 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int, shared:bool=False, scale:float|None=None,
                                mask:Tensor|None=None, causal_rows:int=0, group:int=1, partials:int=48, block_n:int=64,
-                               q_start:int|UOp|None=None) -> Tensor:
+                               q_start:int|UOp|None=None, index:Tensor|None=None) -> Tensor:
   """
   shared: the cache (1, B, 1, N, D) is the key and the value of every head (MLA latent), mask: additive (B, N) over the keys.
   causal_rows: the query heads are (head, token) rows of that many tokens from q_start, `group` of them per block, mask (B, tokens, N)
@@ -1154,10 +1167,14 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   while waves * group * ((D+LDS_PAD)*2 + 8) > 65536 or (waves > 1 and block_n // waves < 2): waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n, waves=waves,
-                          group=group if shared else None, shared=shared, scale=scale, causal_rows=causal_rows, q_start=q_start)
-  partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, *(() if mask is None else (mask,)), fxn=fxn)[:2]
+                          group=group if shared else None, shared=shared, scale=scale, causal_rows=causal_rows, q_start=q_start,
+                          indexed=index is not None)
+  extra = (index,) if index is not None else () if mask is None else (mask,)
+  partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, *extra, fxn=fxn)[:2]
   live = (valid_kv_len+block_n-1)//block_n
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
+  # indexed: the partials of every block (the empty ones weigh nothing)
+  if index is not None: live = min((int(index.shape[0])-1+block_n-1)//block_n, chunks)
   out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
@@ -1443,14 +1460,9 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
 
 TOPK_THREADS = 256
 
-@functools.cache
-def _pool_topk_mask_kernel(mask:UOp, scores:UOp, q_start:UOp, valid_len:UOp, pools:UOp, k:int, kpool:int) -> UOp:
-  # a workgroup per query row: the complete pools before the query compete, the k best (and the ties of the k-th) are picked by a bisection
-  # on order preserving integer keys. the mask (0 or -inf) lets the query see the picked pools, the tail of its own pool, nothing after it
-  rows, P = cast(tuple[int, int], scores.shape)
-  W = TOPK_THREADS // WARP_SIZE
-  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  t, q_pos = wave * WARP_SIZE + lane, q_start + row
+def _pool_keys(scores:UOp, row:UOp, t:UOp, q_pos:UOp, pools:UOp, k:int, kpool:int, wave:UOp, lane:UOp, W:int) -> tuple[list[UOp], UOp]:
+  # the order preserving keys of the pools of thread t (strided) and the threshold of the k best
+  P = cast(int, scores.shape[1])
   per = (P + TOPK_THREADS - 1) // TOPK_THREADS
   def key(p:UOp) -> UOp:
     # complete pools before the query, others are the lowest key
@@ -1458,6 +1470,10 @@ def _pool_topk_mask_kernel(mask:UOp, scores:UOp, q_start:UOp, valid_len:UOp, poo
     bits = scores[row, p.minimum(P-1)].load().bitcast(dtypes.uint32)
     return ok.where((bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000), UOp.const(0, dtypes.uint32))
   keys = [key(t + i*TOPK_THREADS) for i in range(per)]
+  thr = _topk_threshold(keys, pools, k, wave, lane, W)
+  return keys, thr
+
+def _topk_threshold(keys:list[UOp], pools:UOp, k:int, wave:UOp, lane:UOp, W:int) -> UOp:
   # bit by bit from the top: the count of keys >= a candidate, per thread, the waves' sums (exact in float), then the workgroup's through LDS.
   # with no more pools than k they are all picked: no loop
   lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
@@ -1469,7 +1485,17 @@ def _pool_topk_mask_kernel(mask:UOp, scores:UOp, q_start:UOp, valid_len:UOp, poo
   cnt = functools.reduce(lambda a,kk: a + (kk >= cand).cast(dtypes.float32), keys[1:], (keys[0] >= cand).cast(dtypes.float32))
   stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
   total = functools.reduce(lambda a,j: a + stage[bit, j].load(), range(1, W), stage[bit, 0].load())
-  thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load()
+  return thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load()
+
+@functools.cache
+def _pool_topk_mask_kernel(mask:UOp, scores:UOp, q_start:UOp, valid_len:UOp, pools:UOp, k:int, kpool:int) -> UOp:
+  # a workgroup per query row: the complete pools before the query compete, the k best (and the ties of the k-th) are picked by a bisection
+  # on order preserving integer keys. the mask (0 or -inf) lets the query see the picked pools, the tail of its own pool, nothing after it
+  rows, P = cast(tuple[int, int], scores.shape)
+  W = TOPK_THREADS // WARP_SIZE
+  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  t, q_pos = wave * WARP_SIZE + lane, q_start + row
+  keys, thr = _pool_keys(scores, row, t, q_pos, pools, k, kpool, wave, lane, W)
   # the mask of every key position s < valid_len: a loop over the keys of this thread
   lds_k = UOp.alloc((P,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
   lds_k = lds_k.after(UOp.group(*(lds_k[(t + i*TOPK_THREADS).valid(t + i*TOPK_THREADS < P)].store(kk) for i,kk in enumerate(keys))).barrier())
@@ -1479,6 +1505,48 @@ def _pool_topk_mask_kernel(mask:UOp, scores:UOp, q_start:UOp, valid_len:UOp, poo
   seen = (picked | (s >= (q_pos + 1) // kpool * kpool)) & (s <= q_pos)
   store = mask[row, s.valid(s < valid_len)].store(seen.where(UOp.const(0, mask.dtype), UOp.const(-math.inf, mask.dtype)))
   return store.end(it).end(row, wave, lane).sink(arg=KernelInfo(name="pool_topk_mask", opts_to_apply=()))
+
+@functools.cache
+def _pool_topk_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpool:int) -> UOp:
+  # decode: like the mask, but the keys the query sees in a list, ascending (the picked pools then the tail of its own pool). the count is
+  # after the list. ties of the k-th past k are dropped
+  P = cast(int, scores.shape[1])
+  W, n_max = TOPK_THREADS // WARP_SIZE, cast(int, index.shape[0]) - 1
+  wave, lane = UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  t, q_pos, row = wave * WARP_SIZE + lane, q_start, UOp.const(0, dtypes.weakint)
+  keys, thr = _pool_keys(scores, row, t, q_pos, pools, k, kpool, wave, lane, W)
+  lds_k = UOp.alloc((P,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  lds_k = lds_k.after(UOp.group(*(lds_k[(t + i*TOPK_THREADS).valid(t + i*TOPK_THREADS < P)].store(kk) for i,kk in enumerate(keys))).barrier())
+  # a thread compacts a contiguous block of pools (valid keys are never 0): its count, the counts of the threads before it through LDS
+  per = (P + TOPK_THREADS - 1) // TOPK_THREADS
+  thr = thr.maximum(1)
+  picked = [((p:=t*per + i) < P) & (lds_k[p.minimum(P-1)].load() >= thr) for i in range(per)]
+  ones = [x.where(UOp.const(1, dtypes.int32), UOp.const(0, dtypes.int32)) for x in picked]
+  cnt = functools.reduce(lambda a,b: a+b, ones[1:], ones[0])
+  lds_c = UOp.alloc((TOPK_THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  lds_c = lds_c.after(lds_c[t].store(cnt).barrier())
+  zero = UOp.const(0, dtypes.int32)
+  start = functools.reduce(lambda a,u: a + (u < t).where(lds_c[u].load(), zero), range(TOPK_THREADS), zero)
+  total = functools.reduce(lambda a,u: a + lds_c[u].load(), range(1, TOPK_THREADS), lds_c[0].load()).minimum(k)
+  stores, run = [], start
+  for i, (x, one) in enumerate(zip(picked, ones)):
+    stores += [index[(run*kpool + j).valid(x & (run < k))].store((t*per + i)*kpool + j) for j in range(kpool)]
+    run = run + one
+  tail_start = (q_pos + 1) // kpool * kpool
+  tail = q_pos + 1 - tail_start
+  stores.append(index[(total*kpool + t).valid(t < tail)].store(tail_start + t))
+  stores.append(index[UOp.const(n_max, dtypes.weakint).valid(t.eq(0))].store((total*kpool + tail).cast(dtypes.int32)))
+  return UOp.group(*stores).end(wave, lane).sink(arg=KernelInfo(name="pool_topk_index", opts_to_apply=()))
+
+def pool_topk_index(scores:Tensor, q_start:UOp, pools:int|UOp, k:int, kpool:int) -> Tensor:
+  """decode: the (k*kpool+kpool+1,) int32 list of the keys the query at q_start sees (see pool_topk_mask), the count last"""
+  P = scores.max_shape[-1]
+  sc = scores.float().contiguous()
+  if not isinstance(scores.shape[-1], int): sc = sc.pad_to((1, P)).contiguous()
+  sc = Tensor(sc.uop.after(*(v for v in (pools, q_start) if isinstance(v, UOp))))
+  out = Tensor.empty(k*kpool + kpool + 1, dtype=dtypes.int32, device=scores.device)
+  fxn = functools.partial(_pool_topk_index_kernel, q_start=_unbind(q_start), pools=_unbind(pools), k=k, kpool=kpool)
+  return Tensor.custom_kernel(out, sc, fxn=fxn)[0]
 
 def pool_topk_mask(scores:Tensor, q_start:int|UOp, valid_len:int|UOp, max_len:int|UOp, k:int, kpool:int, dtype,
                    pools:int|UOp|None=None) -> Tensor:

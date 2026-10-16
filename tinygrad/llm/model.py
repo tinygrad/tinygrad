@@ -6,7 +6,7 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
-  pool_topk_mask, indexer_scores, _wmma_rdna4
+  pool_topk_mask, pool_topk_index, indexer_scores, _wmma_rdna4
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
@@ -479,8 +479,8 @@ class Indexer:
       self.cache_pk = Tensor.zeros(x.shape[0], self.cache_kg.shape[1] // self.idx.kpool, self.idx.head_dim, dtype=dtypes.float32,
                                    device=x.device).contiguous()
 
-  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
-    # x has Tq rows, the first T (default all) are the tokens at start_pos
+  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None, index:bool=False) -> Tensor:
+    # x has Tq rows, the first T (default all) are the tokens at start_pos. index (one token): the list of the keys it sees (pool_topk_index)
     (B, Tq, _), idx = x.shape, self.idx
     S = start_pos + (T := Tq if T is None else T)
     # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
@@ -508,6 +508,9 @@ class Indexer:
     scores = ((iq @ pooled.transpose(-1, -2).unsqueeze(1)).relu() * weights.unsqueeze(-1)).sum(2)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     # NOTE: a symbolic arange is a reduce over the positions, slice a static one
+    if index:
+      assert Tq == 1 and isinstance(start_pos, UOp)
+      return pool_topk_index(scores.reshape(1, pools), start_pos, pools, idx.top_k // idx.kpool, idx.kpool)
     if B == 1 and max_pools <= 8192 and amd_custom_kernels_supported(x.device) and getenv("POOL_TOPK", 1):
       # one kernel: the top pools of every query by a bisection, and the mask
       mask = pool_topk_mask(scores.reshape(Tq, pools), start_pos, S, self.cache_kg.shape[1], idx.top_k // idx.kpool, idx.kpool, x.dtype)
@@ -569,13 +572,19 @@ class MLATransformerBlock(FFNBlock):
 
     k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)[:, :, :T]
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.cast(self.cache_k.dtype).uop)))
-    mask, (N, D) = self._attn_mask(x, start_pos, T), self.cache_k.shape[2:]
-    if amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0:
+    (N, D), fast = self.cache_k.shape[2:], amd_custom_kernels_supported(x.device) and self.cache_k.shape[2] % 64 == 0
+    fast = fast and D & (D-1) == 0
+    # one token with an indexer: the attention gathers the keys it sees (a list), not every key under a mask
+    if gather:=(fast and Tq == 1 and B == 1 and isinstance(start_pos, UOp) and self.indexer is not None and getenv("MLA_GATHER", 1) and
+                self.config.max_context > self.indexer.idx.top_k and self.indexer.cache_kg.shape[1] // self.indexer.idx.kpool <= 8192):
+      keys, mask = self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T, index=True), None
+    else: mask = self._attn_mask(x, start_pos, T)
+    if fast:
       # flash attention on the latent cache, the keys and values of every head
       scale, latent = 1.0/self.config.head_dim**0.5, cache.reshape(1, *cache.shape)
       if Tq == 1:
         if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
-        attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask)
+        attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask, index=keys if gather else None)
       else:
         if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
         attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, int(N), scale, mask)
