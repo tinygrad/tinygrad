@@ -77,7 +77,7 @@ class PM4Executor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
     self.ib_executor: PM4Executor|None = None
-    self.kernel_name = "test"
+    self.kernel_name = ""
     super().__init__(base, size, rptr, wptr)
 
   def _next_dword(self):

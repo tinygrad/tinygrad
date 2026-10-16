@@ -1,8 +1,9 @@
 import ctypes, time, os, builtins, fcntl, typing
-from tinygrad.helpers import DEV, dedup, to_tuple
+from tinygrad.helpers import DEV, dedup, to_tuple, round_up
 from tinygrad.device import Compiled
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.runtime.support.system import FileIOInterface, System
+from tinygrad.runtime.support.hcq2 import HWQueue
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -25,6 +26,17 @@ def hook_doorbells(s:UOp) -> UOp|None:
                 for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.tag) and to_tuple(b.device)[0].split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
+
+# this links AMD emulators kernel back to the original kernel
+def emit_kernel_name(ctx:HWQueue, prg:UOp) -> None:
+  from tinygrad.runtime.ops_amd import AMDComputeQueue
+  if isinstance(ctx, AMDComputeQueue):
+    name = prg.src[0].arg.name.encode() + b"\x00"
+    ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"))
+
+HWQueue.q_rewrite = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), allow_any_len=True), emit_kernel_name),
+]) + HWQueue.q_rewrite
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:
