@@ -170,6 +170,33 @@ class TestCustomKernel(unittest.TestCase):
     assert all(x == 6 for x in c.flatten().tolist()), "all 6"
     assert all(x == 9 for x in d.flatten().tolist()), "all 9"
 
+  def test_multioutput_realize_one(self):
+    for reverse in (False, True):
+      with self.subTest(reverse=reverse):
+        a, b = Tensor.full((16, 16), 3.).contiguous().realize(), Tensor.full((16, 16), 2.).contiguous().realize()
+        c, d = Tensor.custom_kernel(Tensor.empty(16, 16), Tensor.empty(16, 16), a, b, fxn=custom_elementwise_addmul_kernel)[:2]
+        first, second = (d, c) if reverse else (c, d)
+        alias = second.reshape(256)
+        first.realize()
+        GlobalCounters.reset()
+        second.realize(alias)
+        assert_kernel_count(0)
+        self.assertEqual(c.flatten().tolist(), [5.] * 256)
+        self.assertEqual(d.flatten().tolist(), [6.] * 256)
+        self.assertEqual(alias.tolist(), [5. if reverse else 6.] * 256)
+
+  def test_multioutput_realize_one_inplace(self):
+    def increment(C:UOp, D:UOp):
+      i = UOp.range(C.shape[0], 0)
+      return UOp.sink(C[i].store(C[i] + 1).end(i), D[i].store(D[i] + 2).end(i), arg=KernelInfo(name="increment_both"))
+    c, d = Tensor.custom_kernel(Tensor([1., 2., 3., 4.]).realize(), Tensor([5., 6., 7., 8.]).realize(), fxn=increment)
+    c.realize()
+    GlobalCounters.reset()
+    d.realize()
+    assert_kernel_count(0)
+    self.assertEqual(c.tolist(), [2., 3., 4., 5.])
+    self.assertEqual(d.tolist(), [7., 8., 9., 10.])
+
   def test_arange(self):
     ref = Tensor.arange(100)
     tst = Tensor.empty_like(ref)

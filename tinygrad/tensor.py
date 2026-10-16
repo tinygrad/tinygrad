@@ -197,14 +197,17 @@ class Tensor(RandMixin):
           u = buf.after(buf.store(src))
       if u is not x: tensor_map[x] = u
 
-    sink = tensor_map.get(sink, sink)
+    sink_in, sink = sink, tensor_map.get(sink, sink)
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
     storage = graph_rewrite(stores:=UOp.sink(*(u for u in sink.toposort() if is_store_after(u))), pm_drop_after, bottom_up=True, name="drop after")
     becomes_map = {u:s.shrink_to(u.shape) for u,s in zip(stores.src, storage.src)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
-    _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
+    # Drop completed call dependencies from other outputs backed by bound storage. Unbound outputs still need their call.
+    called = {s.after(c):b for c in sink_in.toposort() if c.op is Ops.CALL for s in c.src[1:]
+              if (b:=tensor_map.get(s, s)).storage_base.op is Ops.BUFFER}
+    _apply_map_to_tensors(called | becomes_map | tensor_map, name="bufferize")
 
     return create_linear_with_vars(sink)
 
