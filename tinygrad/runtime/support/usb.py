@@ -344,8 +344,11 @@ def usb_recv(link:UOp, table:UOp, i:UOp, run:UOp, go:UOp, stage:UOp) -> UOp: # c
   armed = usb_ctrl(link, 0x40, 0xF2, (wire // 512) | 0x8000, (wire + SLOT - 1) // SLOT << 8, UOp.const(0, dtypes.uint64), 0)
   released = usb_poke(link.after(armed), go, (i + run + 1).cast(dtypes.uint32))
   received = usb_bulk(link.after(released), 0x81, stage.index(0), wire)
-  lower = ccall(libc.memcpy, addr, stage.after(received).index(0), first.cast(dtypes.uint64))
-  return ccall(libc.memcpy, addr + CHUNK, stage.after(lower).index(HALF), second.cast(dtypes.uint64)).sink()
+  # a failed receive must fail the copy: the stage holds no transferred bytes, and copying them out is a stale read
+  # (GMMU=0: a long-K square fp32 matmul stalls this copyout's first chunk; the corrupt set is not a size threshold)
+  ok = link.after(received).index(5).load().eq(0)
+  lower = ccall(libc.memcpy, addr, stage.after(received).index(0), ok.where(first, UOp.const(0, dtypes.int)).cast(dtypes.uint64))
+  return ccall(libc.memcpy, addr + CHUNK, stage.after(lower).index(HALF), ok.where(second, UOp.const(0, dtypes.int)).cast(dtypes.uint64)).sink()
 
 # *****************
 # 5. batch and encode

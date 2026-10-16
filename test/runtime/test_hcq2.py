@@ -1,8 +1,9 @@
 import unittest, gc, struct, ctypes, threading, numpy as np
+from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, DEV
 from tinygrad.uop.ops import Ops, UOp, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -54,6 +55,26 @@ class TestHCQ2Schedule(unittest.TestCase):
     copyout, copyin = hu.store_call(vu), vu.store_call(nu)
     run_linear(UOp(Ops.LINEAR, src=(copyout, copyin, copyout)), wait=True)
     self.assertEqual(bytes(host.host[:]), bytes(new.host[:]))
+
+  @unittest.skipUnless(DEV.interface.startswith("MOCKUSB"), "a short transfer needs the libusb mock")
+  def test_short_copyout_fails_and_keeps_the_destination(self):
+    vram, host, new = [Buffer(d, 4096, preallocate=True) for d in (Device.DEFAULT, "CPU", "CPU")]
+    new.host[:] = bytes(range(256)) * 16
+    host.host[:] = b"\x5a" * 4096
+    hu, vu, nu = [UOp.from_buffer(b, dtypes.uint8) for b in (host, vram, new)]
+    run_linear(UOp(Ops.LINEAR, src=(vu.store_call(nu),)), wait=True) # the upload must land
+
+    from test.mockgpu.usb import MockUSB3
+    cut, real = [True], MockUSB3.bulk_read
+    def short_bulk_read(self, length, timeout=1000):
+      mv = real(self, length, timeout)
+      if cut[0] and length >= 4096:
+        cut[0] = False
+        return mv[:-1] # the F2 read comes back short
+      return mv
+    with patch.object(MockUSB3, "bulk_read", short_bulk_read):
+      with self.assertRaises(RuntimeError): run_linear(UOp(Ops.LINEAR, src=(hu.store_call(vu),)), wait=True)
+    self.assertEqual(bytes(host.host[:]), b"\x5a" * 4096, "a short copyout must not copy un-transferred staging into the destination")
 
   @unittest.skipIf(Device.DEFAULT == "METAL", "unified memory: METAL copies on the host and maps nothing")
   def test_map_cpu_buffer_preserves_contents(self):
