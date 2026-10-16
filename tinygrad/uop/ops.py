@@ -212,15 +212,7 @@ class recursive_property:
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    stack = [x]
-    while stack:
-      node = stack[-1]
-      if self.nm not in node.__dict__:
-        if missing:=[s for s in node.src if self.nm not in s.__dict__]:
-          stack.extend(reversed(missing))
-          continue
-        node.__dict__[self.nm] = self.fxn(node)
-      stack.pop()
+    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
 class _UOpTuple(tuple):
@@ -282,14 +274,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    stack, seen = [self], set()
-    while stack:
-      node = stack.pop()
-      if node.op in ops: return True
-      if node in seen: continue
-      seen.add(node)
-      stack.extend(node.src_without_body)
-    return False
+    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
+    return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   @recursive_property
   def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
@@ -484,9 +470,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         # if it's not a RANGE, we include all ranges in srcs.
         # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
         for s in er.ranges: ret.pop(s, None)
-    # Dependencies have already closed their own ranges. Explicit scopes following a CALL must remain live.
-    if self.op is Ops.AFTER:
-      for s in self.src[1:]: ret.update(s.ranges)
     return ret
 
   @property
