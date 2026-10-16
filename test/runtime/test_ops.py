@@ -522,7 +522,6 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x,y,z,w,d: x/d + y/d + z/d + w/d, forward_only=True,
                    vals=[[v]*4 for v in [1e-39, 2e-39, 3e-39, 4e-39, 1e-39]])
 
-  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.renderer == "LLVM", "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
       # int numerator
