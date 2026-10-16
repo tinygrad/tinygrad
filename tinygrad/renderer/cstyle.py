@@ -301,7 +301,7 @@ class ClangRenderer(CStyleLanguage):
 
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
-    alignment = 2**int(math.log2(dt.itemsize * count)) if not dtypes.is_bool(dt)
+    alignment = 2**int(math.log2(dt.itemsize * count)) if not dtypes.is_bool(dt) else 1
     vec = self._render_dtype(dt, count, AddrSpace.REG)
     return f"typedef {self.render_dtype(dt)} {vec} __attribute__((aligned({alignment}),ext_vector_type({count})));"
 
