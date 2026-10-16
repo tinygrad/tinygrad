@@ -5,10 +5,10 @@ from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
-  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode
+  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
-from tinygrad.helpers import unwrap, round_up, to_tuple
+from tinygrad.helpers import unwrap, round_up, to_tuple, prod
 from tinygrad.device import Buffer, BufferSpec
 
 class ExpertGating(enum.IntEnum):
@@ -42,6 +42,8 @@ class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   ggml_type:int|None = None
   fused = False  # the packed rows hold the gate and up weights interleaved by 16 (fuse_gate_up)
+  slices = 0  # sliced experts (expert_slicing): the weights are the slices of every device, num_experts = experts*slices
+  experts = 0
   def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
     self.num_experts, self.in_features = num_experts, in_features
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
@@ -55,8 +57,18 @@ class ExpertWeights:
     if self.weight.uop.axis not in (None, 0) or (found:=find_packed(self.weight, self.in_features)) is None: return
     n = len(devices) if self.expert_parallel else 1
     self.ggml_type, self.weight, self.local_experts = found[0], found[1], self.num_experts // n
-    first = Tensor([i*self.local_experts for i in range(n)], dtype=dtypes.int32)
+    # sliced: the selections are mapped to the local slices of every device (slice_table), the ids are local
+    first = Tensor([0 if self.slices else i*self.local_experts for i in range(n)], dtype=dtypes.int32)
     self.first = (first.shard(devices, 0) if n > 1 else first.to(devices[0] if len(devices) == 1 else devices)).realize()
+    if self.slices:
+      tables = [expert_slice_table(units, self.experts, self.slices) for units in unwrap(expert_slicing(self.experts, self.slices, n))]
+      self.slice_table = Tensor(tables, dtype=dtypes.int32).shard(devices, 0).realize()
+  def select_slices(self, sel:Tensor, probs:Tensor) -> tuple[Tensor, Tensor]:
+    """sliced: the selections (B, T, k) of experts to the local slices of every device (devices, B, T, k*w) (-1: none), their probabilities"""
+    E, w = self.slice_table.shape[-2:]
+    onehot = (sel.unsqueeze(-1) == Tensor.arange(E, dtype=dtypes.int32)).unsqueeze(-1)
+    lsel = onehot.where(self.slice_table.reshape(-1, 1, 1, 1, E, w), 0).sum(-2, dtype=dtypes.int32)
+    return lsel.reshape(*lsel.shape[:3], -1), probs.unsqueeze(-1).expand(*probs.shape, w).reshape(*probs.shape[:2], -1)
   def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0, act:tuple|None=None) -> Tensor:
     """the selections sorted by expert (moe_route), see moe_grouped_linear. expert parallel: a leading device axis"""
     return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections, act)
@@ -76,6 +88,27 @@ class ExpertWeights:
       return out.shrink(tuple((0, s) for s in out.shape[:-4])+tuple((0, s) for s in sel.shape)+((0, out.shape[-1]),))
     ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
+
+def expert_slicing(experts:int, slices:int, n:int) -> list[list[int]]|None:
+  """
+  the units (expert*slices + slice) of every device: every device holds slices//n slices of every expert, the slices%n left go to a class of
+  devices (by expert, cycling): the work of a token's experts is spread over all the devices. None if the devices don't get the same count
+  """
+  base, r = divmod(slices, n)
+  if r and (n % r or experts % (n // r)): return None
+  per:list[list[int]] = [[] for _ in range(n)]
+  for e in range(experts):
+    extra = set(range((e % (n // r))*r, (e % (n // r))*r + r)) if r else set()
+    devs = [d for d in range(n) if d in extra for _ in range(base+1)] + [d for d in range(n) if d not in extra for _ in range(base)]
+    for j, d in enumerate(devs): per[d].append(e*slices + j)
+  return per
+
+def expert_slice_table(units:list[int], experts:int, slices:int) -> list[list[int]]:
+  """(experts, w): the local index of every slice a device holds of an expert, -1 padded"""
+  table:list[list[int]] = [[] for _ in range(experts)]
+  for i, u in enumerate(units): table[u // slices].append(i)
+  w = max(len(t) for t in table)
+  return [t + [-1]*(w-len(t)) for t in table]
 
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
@@ -178,6 +211,7 @@ class TransformerConfig:
   qkv_bias: bool = False
   expert_bias: bool = False
   expert_proj_bias: bool = False
+  expert_slices: int = 0  # the experts are split in slices of their hidden dim, spread over the devices (see expert_slicing)
   swiglu_alpha: float = 1.0
   swiglu_limit: float|None = None
   swiglu_up_bias: float = 0.0
@@ -238,9 +272,13 @@ class FFNBlock:
     if config.num_experts > 0:
       self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=config.expert_proj_bias)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim, bias=config.expert_proj_bias)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim, bias=config.expert_proj_bias)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim, bias=config.expert_proj_bias)
+      # sliced experts: num_experts*slices experts of hidden_dim/slices
+      S = config.expert_slices or 1
+      self.ffn_gate_exps = ExpertWeights(config.num_experts*S, config.dim, config.hidden_dim//S, bias=config.expert_proj_bias)
+      self.ffn_up_exps = ExpertWeights(config.num_experts*S, config.dim, config.hidden_dim//S, bias=config.expert_proj_bias)
+      self.ffn_down_exps = ExpertWeights(config.num_experts*S, config.hidden_dim//S, config.dim, bias=config.expert_proj_bias)
+      if config.expert_slices:
+        for e in (self.ffn_gate_exps, self.ffn_up_exps, self.ffn_down_exps): e.slices, e.experts = S, config.num_experts
       if config.shared_expert_dim > 0:
         self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
@@ -264,6 +302,10 @@ class FFNBlock:
       else: logits = router(x)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
+      if gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and x.shape[1] == 1 and amd_custom_kernels_supported(x.device) \
+         and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1):
+        sel, probs = moe_router(logits, bias, self.config.num_experts_per_tok, self.config.routed_scaling_factor)
+        return self._experts(x, h, sel, probs)
       # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
       if gating == ExpertGating.SOFTMAX and bias is None and normalize_topk:
         gating, normalize_topk = ExpertGating.SOFTMAX_WEIGHT, False
@@ -278,30 +320,37 @@ class FFNBlock:
       if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
       if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
       probs = probs * self.config.routed_scaling_factor
-      exps = (self.ffn_gate_exps, self.ffn_down_exps) + (() if self.ffn_gate_exps.fused else (self.ffn_up_exps,))
-      if resolve(x.shape[1] != 1) and all(e.ggml_type is not None for e in exps):
-        out = self._grouped_experts(x, sel, probs)
-      else:
-        if self.ffn_gate_exps.fused:  # one kernel for the gate and up rows, interleaved by 16
-          gu = self.ffn_gate_exps(sel, h)
-          gu = gu.reshape(*gu.shape[:-1], -1, 2, 16)
-          gate, up = gu[..., 0, :].flatten(-2), gu[..., 1, :].flatten(-2)
-        else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
-        act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-        x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D), expert parallel: (devices, B, T, k, D) partials
-        out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
-      partial = out.ndim == x.ndim + 1
-      if hasattr(self, 'ffn_gate_shexp'):
-        shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
-        # a row parallel shared expert adds its partial sums to the ones of the experts: one allreduce for both
-        shexp = self.ffn_down_shexp.partial(shexp_act) if partial else self.ffn_down_shexp(shexp_act)
-        if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
-        if shexp.ndim == out.ndim: out = out + shexp
-        if partial: out = partial_sum(out)
-        if shexp.ndim != out.ndim + partial: out = out + shexp
-      elif partial: out = partial_sum(out)
-      return out
+      return self._experts(x, h, sel, probs)
     return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit))
+
+  def _experts(self, x:Tensor, h:Tensor, sel:Tensor, probs:Tensor) -> Tensor:
+    """the selected experts (and the shared expert) of every token, summed over the devices"""
+    exps = (self.ffn_gate_exps, self.ffn_down_exps) + (() if self.ffn_gate_exps.fused else (self.ffn_up_exps,))
+    for e in exps: e.set_quantized()
+    # sliced experts: every device runs its slices of the selected experts
+    if self.ffn_gate_exps.slices: sel, probs = self.ffn_gate_exps.select_slices(sel, probs)
+    if resolve(x.shape[1] != 1) and all(e.ggml_type is not None for e in exps):
+      out = self._grouped_experts(x, sel, probs)
+    else:
+      if self.ffn_gate_exps.fused:  # one kernel for the gate and up rows, interleaved by 16
+        gu = self.ffn_gate_exps(sel, h)
+        gu = gu.reshape(*gu.shape[:-1], -1, 2, 16)
+        gate, up = gu[..., 0, :].flatten(-2), gu[..., 1, :].flatten(-2)
+      else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
+      act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
+      x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D), expert parallel: (devices, B, T, k, D) partials
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
+    partial = out.ndim == x.ndim + 1
+    if hasattr(self, 'ffn_gate_shexp'):
+      shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
+      # a row parallel shared expert adds its partial sums to the ones of the experts: one allreduce for both
+      shexp = self.ffn_down_shexp.partial(shexp_act) if partial else self.ffn_down_shexp(shexp_act)
+      if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+      if shexp.ndim == out.ndim: out = out + shexp
+      if partial: out = partial_sum(out)
+      if shexp.ndim != out.ndim + partial: out = out + shexp
+    elif partial: out = partial_sum(out)
+    return out
 
   def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor) -> Tensor:
     """prefill: the selections sorted by expert, every expert reads its weights once for all its tokens. (devices, B, T, D) partials if split"""
@@ -310,7 +359,7 @@ class FFNBlock:
     if not isinstance(T, int): x, sel, probs = x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), probs.pad_to(probs.max_shape)
     gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
     valid, entries, tiles = moe_route(sel, gate_exps.first, gate_exps.local_experts)
-    k = int(sel.shape[-1])
+    k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
     if gate_exps.fused:  # the activation is computed in the kernel of the interleaved gate and up rows
       act = gate_exps.grouped(x.reshape(-1, D), entries, tiles, slots=k,
@@ -318,11 +367,11 @@ class FFNBlock:
     else:
       gate, up = (e.grouped(x.reshape(-1, D), entries, tiles, slots=k) for e in (gate_exps, self.ffn_up_exps))
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=int(sel.numel()))
+    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=int(prod(sel_shape)))
     if down.ndim == 2: down = down.unsqueeze(0)
     # the rows of other devices' experts are not written
     y = valid.unsqueeze(-1).where(down * probs.reshape(1, -1, 1), 0)
-    y = y.reshape(-1, *sel.shape, D).sum(-2)[:, :, :x.shape[1] if isinstance(T, int) else T]
+    y = y.reshape(-1, *sel_shape, D).sum(-2)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
 
   # given the token-prefix match, return how much cached state this block can still reuse
@@ -674,6 +723,8 @@ class Transformer:
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
+    # a jit for every max size of a chunk (their own variables): static padded shapes of a small chunk don't pay for a big one
+    self.prefill_jits:dict[int, Callable[..., Tensor]] = {}
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -701,7 +752,9 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
+    if not resolve(tokens.shape[1] != 1): return self.rollout_jit(tokens, start_pos, temperature)
+    if isinstance(T:=tokens.shape[1], UOp): return self.prefill_jits.setdefault(int(T.vmax), TinyJit(self.forward))(tokens, start_pos, temperature)
+    return self.prefill_jit(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -715,7 +768,8 @@ class Transformer:
     num_blocks = kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)
     entries = {k:v for k,v in entries.items() if not ((m:=re.match(r"blk\.(\d+)\.", k)) and int(m.group(1)) >= num_blocks)}
     shard_map:dict[str, int] = {}
-    padded_heads, sizes = n_heads, {}
+    units_map:dict[str, tuple[int, list[list[int]]]] = {}
+    padded_heads, sizes, expert_slices = n_heads, {}, 0
     if shard > 1:
       # MLA and kda attention split all their tensors by the n_heads heads: those are zero padded to a multiple of the devices
       pad_heads = bool(kv.get(f'{arch}.attention.kv_lora_rank')) or arch in ('kimi-linear', 'glm5-next')
@@ -733,9 +787,15 @@ class Transformer:
       # experts are split by their hidden dim, or by experts when it doesn't split (expert parallel)
       exp_hidden, exp_count = kv.get(f'{arch}.expert_feed_forward_length', 0), kv.get(f'{arch}.expert_count', 0)
       down_block = max([_GGML_QUANT.get(t, (1,))[0] for k,(_,_,t) in entries.items() if k.endswith('ffn_down_exps.weight')], default=1)
+      exp_names = ('ffn_gate_exps.weight', 'ffn_up_exps.weight', 'ffn_down_exps.weight')
       if exp_hidden % shard == 0 and (exp_hidden // shard) % down_block == 0:
         ffn_rules.update({'ffn_gate_exps.weight': 1, 'ffn_up_exps.weight': 1, 'ffn_down_exps.weight': 2})
-      elif exp_count % shard == 0: ffn_rules.update({w: 0 for w in ('ffn_gate_exps.weight', 'ffn_up_exps.weight', 'ffn_down_exps.weight')})
+      elif exp_count and exp_hidden % down_block == 0 and getenv("EXPERT_SLICES", 1) and \
+           (slicing:=expert_slicing(exp_count, exp_hidden // down_block, shard)) is not None:
+        # slices of the experts' hidden dim (whole quant blocks of the down projection) spread over the devices: the work of a token is balanced
+        expert_slices = exp_hidden // down_block
+        units_map = {name: (expert_slices, slicing) for name in entries if re.sub(r"^blk\.\d+\.", "", name) in exp_names}
+      elif exp_count % shard == 0: ffn_rules.update({w: 0 for w in exp_names})
       for name, (_, shape, typ) in entries.items():
         if (k:=re.sub(r"^blk\.\d+\.", "", name)) in head_rules:
           axis = shard_map[name] = head_rules[k]
@@ -748,7 +808,7 @@ class Transformer:
           sizes[name] = round_up(shape[axis], shard*unit)
       entries = {k:gguf_pad(v, shard_map[k], sizes[k]) if k in sizes else v for k,v in entries.items()}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    state_dict = gguf_shard(entries, devices, shard_map)
+    state_dict = gguf_shard(entries, devices, shard_map, units_map)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -830,7 +890,7 @@ class Transformer:
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
       ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
-      expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
+      expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict, expert_slices=expert_slices,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
@@ -866,7 +926,7 @@ class Transformer:
          amd_custom_kernels_supported(g.weight.device) and getenv("FUSE_GATE_UP", 1):
         packed.discard(id(b.ffn_up_exps.weight))
         packed.discard(id(g.weight))
-        g.fuse_up(b.ffn_up_exps, b.config.hidden_dim)
+        g.fuse_up(b.ffn_up_exps, b.config.hidden_dim // (b.config.expert_slices or 1))
         del b.ffn_up_exps
         packed.add(id(g.weight))
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
@@ -891,6 +951,9 @@ class Transformer:
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
+    # a prompt that fits a small chunk runs it padded to the small size (its own jit)
+    small = min(chunk_size, getenv("PREFILL_SMALL", 512 if amd_custom_kernels_supported(self.token_embd.weight.device) else chunk_size))
+    v_small = UOp.variable("toks", 1, small)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
@@ -910,7 +973,7 @@ class Transformer:
     out, prompt_len, ahead = None, len(tokens), False
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
+      sp, nt = v_start_pos.bind(start_pos), (v_small if n_toks <= small else v_toks).bind(n_toks)
       # with run ahead, the previous step already submitted this one
       if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
       start_pos += n_toks

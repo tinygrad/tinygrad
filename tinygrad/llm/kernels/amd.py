@@ -222,13 +222,15 @@ def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool) -> tuple[Te
   outs = Tensor.custom_kernel(q, scale, xsum, x, *sq, fxn=functools.partial(_q8_quantize_kernel, tokens=tokens, in_features=in_features))
   return tuple(outs[:3]) + ((outs[4],) if sumsq else ())
 
-def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str) -> UOp:
+def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
+                   estimates:Estimates|None=None) -> UOp:
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
   # share the workgroup: they add up their sums in LDS
   # a wave serves 32//lanes outputs with `lanes` lanes each, whichever leaves fewer lanes idle. at most 16 waves in a workgroup: a wave sums
   # `per` slots of its lanes
+  # active(token) -> bool: inactive tokens (experts of other devices) skip their loop and store 0
   def waste(lanes:int) -> int: return lanes*((group_count+lanes-1)//lanes) - group_count
-  lanes = 16 if waste(16) < waste(32) and out_features % 2 == 0 else 32
+  lanes = min((l for l in (32, 16, 8) if out_features % (32//l) == 0), key=lambda l: (waste(l), -l))
   outs_per_wave, slots = 32 // lanes, (group_count+lanes-1)//lanes
   per = (slots + 15) // 16
   chunks = (slots + per-1) // per
@@ -241,14 +243,21 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   token, output = token_output // out_features, token_output % out_features
   def dot(group:UOp) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
-  total = functools.reduce(lambda a,s: a + dot(sub+(chunk*per+s)*lanes), range(1, per), dot(sub+chunk*per*lanes))
-  total = warp_reduce(total, full_wave=lanes == 32)
+  if active is None: total = functools.reduce(lambda a,s: a + dot(sub+(chunk*per+s)*lanes), range(1, per), dot(sub+chunk*per*lanes))
+  else:
+    # a data dependent loop: inactive tokens run it 0 times
+    s = UOp.range(active(token).where(per, 0), 5, AxisType.LOOP)
+    acc = _reg((1,), 0)
+    total = acc.after(acc[0].store(acc.after(s)[0].load() + dot(sub+(chunk*per+s)*lanes)).end(s))[0].load()
+  for offset in (16, 8, 4, 2, 1)[(32//lanes).bit_length()-1:]:
+    total = total + UOp(Ops.CUSTOM, src=(total,), arg=
+      (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
   if chunks > 1:
     lds = UOp.alloc((rows, chunks, outs_per_wave), dtypes.float32, addrspace=AddrSpace.LOCAL)
     lds = lds.after(lds[wave, chunk, which.valid(sub.eq(0))].store(total).barrier())
     total = functools.reduce(lambda a,c: a + lds[wave, c, which].load(), range(1, chunks), lds[wave, 0, which].load())
   return out[token, output.valid(sub.eq(0) & chunk.eq(0))].store(total.cast(out.dtype)).end(row, wave, chunk, lane).sink(
-    arg=KernelInfo(name=name, opts_to_apply=()))
+    arg=KernelInfo(name=name, opts_to_apply=(), estimates=estimates))
 
 def _decode_linear_loop(out:UOp, out_features:int, group_count:int, group_dot, name:str, waves:int=4, active:Callable|None=None,
                         estimates:Estimates|None=None) -> UOp:
@@ -380,6 +389,11 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
     return total * xd[token, group]
+  if len(out.shape) == 2 and active is not None:
+    # moe on a grid: a row per (token, slot), inactive rows skip their loop. an upper bound estimate
+    weights, nbytes = (w:=out.shape[0]*out_features*in_features), w*QUANT_SIZES[ggml_type]//256
+    return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], active=active,
+                          estimates=Estimates(2*weights, nbytes, nbytes))
   if len(out.shape) == 3 and out.shape[2] == out_features:
     # an upper bound: the rows of inactive experts are skipped
     weights, nbytes = (w:=out.shape[0]*out.shape[1]*out_features*in_features), w*QUANT_SIZES[ggml_type]//256
@@ -453,7 +467,8 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
     expert = tiles[token_block].load()
     # a tile without an expert skips its loop: no estimate from the data dependent loop
     group_rng = UOp.range((expert >= 0).where(in_features // Q8_GROUP_SIZE, 0), 4, AxisType.LOOP)
-    expert_base = expert.cast(dtypes.weakint) * expert_words
+    # clamped: loads that don't depend on the loop can be hoisted above it, a tile without an expert reads expert 0
+    expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
     weights = rows.shape[0]*out_features*in_features
     estimates = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
     x_rows = tuple((r:=rows[t].load()).valid(r >= 0) // x_div for t in input_tokens) if x_div else input_tokens
@@ -576,7 +591,8 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     entries, tiles = group
     expert = tiles[token_block].load()
     group_rng = UOp.range((expert >= 0).where(n_groups, 0), 4, AxisType.LOOP)
-    expert_base = expert.cast(dtypes.weakint) * expert_words
+    # clamped: loads that don't depend on the loop can be hoisted above it, a tile without an expert reads expert 0
+    expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
     weights = rows*out_features*in_features
     estimates = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
     if x_div:
@@ -741,6 +757,45 @@ def partial_sum(x:Tensor) -> Tensor:
 # ******** mixture of experts: the selected experts of each token ********
 
 @functools.cache
+def _moe_router_kernel(sel:UOp, probs:UOp, logits:UOp, bias:UOp, k:int, scale:float) -> UOp:
+  # sigmoid gating, a workgroup per token and a thread per expert: the rank of an expert is the count of those below it (a lower score, or
+  # the same and a higher index), the top k are the ranks n-k..n-1 in that order (as pairwise_topk). the probabilities are normalized
+  n = cast(int, logits.shape[-1])
+  tokens = cast(int, logits.numel()) // n
+  logits, sel, probs = logits.reshape(tokens, n), sel.reshape(tokens, k), probs.reshape(tokens, k)
+  token, i = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(n, 1, AxisType.LOCAL)
+  score = (1 + (logits[token, i].load().float() * (-1/math.log(2))).exp2()).reciprocal()
+  key = score + bias[i].load().float()
+  lds = UOp.alloc((n,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(lds[i].store(key).barrier())
+  j = UOp.range(n, 2, AxisType.LOOP)
+  other = lds[j].load()
+  below = ((key > other) | (key.eq(other) & (i < j))).where(UOp.const(1, dtypes.int32), UOp.const(0, dtypes.int32))
+  rank = _reg_int(below, j)
+  slot = rank - (n - k)
+  picked = slot >= 0
+  lds_p = UOp.alloc((k,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds_p = lds_p.after(UOp.group(lds_p[slot.valid(picked)].store(score), sel[token, slot.valid(picked)].store(i.cast(dtypes.int32))).barrier())
+  total = functools.reduce(lambda a,s: a + lds_p[s].load(), range(1, k), lds_p[0].load())
+  out = probs[token, i.valid(i < k)].store(lds_p[i.minimum(k-1)].load() / total * scale)
+  return UOp.group(out, lds_p).end(token, i).sink(arg=KernelInfo(name="moe_router", opts_to_apply=()))
+
+def _reg_int(value:UOp, rng:UOp) -> UOp:
+  # the sum of value over the loop rng in an int register
+  acc = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  acc = acc.after(acc.store(acc.const_like(0)))
+  return acc.after(acc[0].store(acc.after(rng)[0].load() + value).end(rng))[0].load()
+
+def moe_router(logits:Tensor, bias:Tensor, k:int, scale:float) -> tuple[Tensor, Tensor]:
+  """sigmoid gating with a selection bias, normalized: the top k experts (B, T, k) int32 and their probabilities times scale"""
+  shape = (*logits.shape[:-1], k)
+  sel = Tensor.empty(*shape, dtype=dtypes.int32, device=logits.device)
+  probs = Tensor.empty(*shape, dtype=dtypes.float32, device=logits.device)
+  fxn = functools.partial(_moe_router_kernel, k=k, scale=scale)
+  sel, probs = Tensor.custom_kernel(sel, probs, logits.contiguous(), bias, fxn=fxn)[:2]
+  return sel, probs
+
+@functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, first:UOp, *grids:UOp,
                        out_features:int, in_features:int, ggml_type:int, experts:int, slots:int, x_slots:int) -> UOp:
   # out rows are (token, slot): the slot's expert reads its weight rows, experts of other devices read nothing
@@ -755,13 +810,16 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   weight: packed (experts, out, in) local to each device, x: (..., x_slots, in), sel: (B, T, slots) expert ids, first: the first expert of a device.
   returns (..., slots, out). on devices holding some of the experts the output is (devices, B, T, slots, out), every device has its own partial
   """
-  B, T, slots = sel.shape
+  B, T, slots = sel.shape[-3:]  # sel can have a leading device axis: the selections of every device
   in_features, x_slots, tokens = int(x.uop.shard_shape[-1]), int(x.shape[-2]), int(B*T)
   out_features = weight.uop.max_shard_shape[0] * weight.dtype.itemsize * 256 // QUANT_SIZES[ggml_type] // in_features // experts
   devices = len(weight.device) if isinstance(weight.device, tuple) else 1
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   xq = q8_quantize(x.contiguous(), tokens*x_slots, in_features)
-  out = Tensor.empty((devices*tokens, slots, out_features), dtype=dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
+  # a grid over the (token, slot) rows, or a workgroup loops over the slots of a token
+  grid = getenv("MOE_GRID", 1)
+  out = Tensor.empty((devices*tokens*slots, out_features) if grid else (devices*tokens, slots, out_features), dtype=dtypes.float32,
+                     device=x.device, axis=0 if devices > 1 else None)
   fxn = functools.partial(_moe_decode_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, experts=experts,
                           slots=slots, x_slots=x_slots)
   result = Tensor.custom_kernel(out, weight, *xq, sel.cast(dtypes.int32).flatten(), first, *extra, fxn=fxn)[0]
@@ -824,9 +882,9 @@ def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Te
   returns valid (..., B*T*k) if a selection is an expert of this device, entries (..., R) the selection of each row (-1: padding)
   and tiles (..., R/MOE_TILE) the local expert of each tile (-1: none). first: the first expert of each device, a leading device axis if sharded
   """
-  k, N = sel.shape[-1], int(sel.numel())
+  k, N = sel.shape[-1], int(prod(sel.shape[-3:]))  # sel can have a leading device axis
   tokens, R = N // k, round_up(N + (MOE_TILE-1)*experts, MOE_TILE)
-  e = sel.reshape(1, tokens, k).cast(dtypes.int32) - first.reshape(-1, 1, 1)
+  e = sel.reshape(-1, tokens, k).cast(dtypes.int32) - first.reshape(-1, 1, 1)
   valid = (e >= 0) & (e < experts)
   onehot = (e.unsqueeze(-1) == Tensor.arange(experts, dtype=dtypes.int32)) & valid.unsqueeze(-1)  # (n, tokens, k, experts)
   # a token selects an expert at most once: the rank of a selection is the count of earlier tokens of its expert

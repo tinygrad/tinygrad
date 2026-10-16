@@ -1,5 +1,5 @@
 import functools, io, pathlib, re, struct
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
@@ -262,13 +262,57 @@ def gguf_pad(entry:tuple[Tensor, tuple[int, ...], int], axis:int, size:int) -> t
   else: data = data.to("CPU").reshape(prod(shape[:axis]), shape[axis], -1).pad(((0, 0), (0, size-shape[axis]), (0, 0)))
   return data.flatten(), shape[:axis] + (size,) + shape[axis+1:], typ
 
+@functools.cache
+def _file_mmap(path:str) -> memoryview:
+  import mmap
+  with open(path, "rb") as f: return memoryview(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+
+_staging:dict[str, Any] = {}
+def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_rows:bool, device:str) -> Tensor:
+  """the bytes of `units` of the (E, rows, cols) packed tensor `data` on `device`, (1, bytes). a unit is the rows (or the column blocks) of a slice"""
+  from tinygrad.device import Buffer, BufferSpec
+  buf = data.uop.buffer
+  assert isinstance(buf, Buffer) and buf.device.startswith("DISK:"), "units are gathered from the gguf file"
+  src = _file_mmap(buf.device[5:])[buf.offset:buf.offset+buf.nbytes]
+  unit = buf.nbytes // (E*slices)
+  nbytes = unit * len(units)
+  # a host buffer of the device: written here, then one copy to its memory
+  if (stage:=_staging.get(device)) is None or stage.nbytes < nbytes:
+    stage = _staging[device] = Buffer(device, nbytes, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+  dst = stage.as_memoryview(allow_zero_copy=True)[:nbytes]
+  if by_rows:
+    for i,u in enumerate(units): dst[i*unit:(i+1)*unit] = src[u*unit:(u+1)*unit]
+  else:
+    # unit (e, j) is the j-th column block of every row of expert e: strided copies of words
+    block = unit // rows
+    item = next(i for i in (8, 4, 2, 1) if block % i == 0 and buf.offset % i == 0)
+    fmt = {8: "Q", 4: "I", 2: "H", 1: "B"}[item]
+    s, d, words, row_words = src.cast(cast(Any, fmt)), dst.cast(cast(Any, fmt)), block // item, block * slices // item
+    for i,u in enumerate(units):
+      e, j = divmod(u, slices)
+      base, out = e*rows*row_words + j*words, d[i*rows*words:(i+1)*rows*words]
+      for t in range(words): out[t::words] = s[base+t:base+rows*row_words:row_words]
+  out_buf = Buffer(device, nbytes).ensure_allocated().copy_from(stage.view(nbytes, 0).ensure_allocated() if stage.nbytes != nbytes else stage)
+  Device[device].synchronize()
+  return Tensor(UOp.from_buffer(out_buf, dtypes.uint8, device)).reshape(1, -1)
+
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
+               shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
+  a tensor (E, rows, cols) in `units` (slices, per device unit lists) is cut in E*slices units: unit e*slices+j is expert e's rows j*rows/slices..
+  (its columns for the down projection). every device gets its units in order, a tensor (devices*units, unit rows, unit cols)
   """
-  n, packed, shard_map = len(devices), {}, shard_map or {}
+  n, packed, shard_map, units, shapes = len(devices), {}, shard_map or {}, units or {}, {}
   for name, (data, shape, typ) in entries.items():
+    if name in units:
+      slices, per_device = units[name]
+      E, rows, cols = shape
+      by_rows = not name.endswith("down_exps.weight")
+      parts = [_gather_units(data, E, rows, slices, us, by_rows, d) for us,d in zip(per_device, devices)]
+      packed[name] = Tensor(UOp.mstack(*[p.uop.base for p in parts]).reshape(parts[0].shape).unshard(0))
+      shapes[name] = (n*len(per_device[0]), rows // slices, cols) if by_rows else (n*len(per_device[0]), rows, cols // slices)
+      continue
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
     else:
       if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
@@ -282,8 +326,9 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
   for t in packed.values(): t.realize()
   for d in devices: Device[d].allocator.free_cache()
   def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
+    if name in shapes: shape = shapes[name]
     decoded = ggml_data_to_tensor(packed[name].flatten(), prod(shape), typ)
-    if (axis:=shard_map.get(name)) is None: return decoded.reshape(shape)
+    if (axis:=0 if name in shapes else shard_map.get(name)) is None: return decoded.reshape(shape)
     local = decoded.reshape(n, *shape[:axis], shape[axis]//n, *shape[axis+1:])
     return local.permute(*range(1, axis+1), 0, *range(axis+1, local.ndim)).reshape(shape)
   return {name: decode(name, shape, typ) for name, (_, shape, typ) in entries.items()}
