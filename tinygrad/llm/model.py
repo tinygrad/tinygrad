@@ -91,6 +91,28 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   picked = cmp.sum(axis=-1).unsqueeze(-2) == Tensor.arange(n-k, n).reshape(k, 1)
   return picked.where(x.unsqueeze(-2), 0).sum(-1), picked.where(vals.unsqueeze(-2), 0).sum(-1).cast('int32')
 
+def pairwise_topk_mask(x:Tensor, k:int) -> Tensor:
+  """the top k of the last axis: those beaten by fewer than k (a higher value, or the same and a lower index). one reduce instead of a sort"""
+  n = x.shape[-1]
+  first = Tensor.arange(n).reshape(1, n) < Tensor.arange(n).reshape(n, 1) if isinstance(n, int) else None
+  if first is None:  # a symbolic length: slice the comparison of a static arange
+    ar = Tensor.arange(n.vmax)[:n]
+    first = ar.reshape(1, n) < ar.reshape(n, 1)
+  return ((x.unsqueeze(-2) > x.unsqueeze(-1)) | ((x.unsqueeze(-2) == x.unsqueeze(-1)) & first)).sum(-1) < k
+
+def topk_mask(x:Tensor, k:int) -> Tensor:
+  """
+  the top k of the last axis (and the values tied with the k-th): the k-th largest is found bit by bit on order preserving integer keys.
+  32 reduces over the axis instead of one over its square
+  """
+  bits = x.float().bitcast(dtypes.uint32)
+  key = (bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000)
+  thr = key.sum(-1, keepdim=True).const_like(0).cast(dtypes.uint32)
+  for bit in range(31, -1, -1):
+    cand = thr | (1 << bit)
+    thr = ((key >= cand).sum(-1, keepdim=True) >= k).where(cand, thr)
+  return key >= thr
+
 @dataclass(frozen=True)
 class SSMConfig:
   conv_kernel: int
@@ -378,27 +400,28 @@ class Indexer:
     if not hasattr(self, "cache_kg"):
       self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), 2, self.idx.head_dim, dtype=dtypes.half, device=x.device)
 
-  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp) -> Tensor:
-    (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
+  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
+    # x has Tq rows, the first T (default all) are the tokens at start_pos
+    (B, Tq, _), idx = x.shape, self.idx
+    S = start_pos + (T := Tq if T is None else T)
     # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
-    kg, iq = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
-    kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg.half().uop))).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
+    kg, iq = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2), self.attn_q_b(q).reshape(B, Tq, idx.n_heads, idx.head_dim)
+    kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg[:, :T].half().uop))).float()
+    kg = kg.reshape(B, -1, idx.kpool, 2, idx.head_dim)
     # only the pools with tokens: the cost doesn't grow with the max context
     kg = kg[:, :(S + idx.kpool - 1) // idx.kpool]
     pooled_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2).transpose(-1, -2).unsqueeze(1)  # (B, 1, D, pools)
     scores = ((iq @ pooled_k).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     # NOTE: a symbolic arange is a reduce over the positions, slice a static one
-    q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(self.cache_kg.shape[1])[:S]
+    q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(Tq)).reshape(Tq, 1), Tensor.arange(self.cache_kg.shape[1])[:S]
     pools, max_pools = scores.shape[-1], self.cache_kg.shape[1] // idx.kpool
     arange = Tensor.arange(max_pools)[:pools]
     masked = ((arange + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
-    # the top_k/kpool pools: those beaten by fewer (a higher score, or the same and a lower index). one reduce instead of a sort
-    first = arange.reshape(1, pools) < arange.reshape(pools, 1)
-    rank = ((masked.unsqueeze(-2) > masked.unsqueeze(-1)) | ((masked.unsqueeze(-2) == masked.unsqueeze(-1)) & first)).sum(-1)
     # selected incomplete pools add only tail/future tokens, handled by the final tail and causal mask
-    picked = (rank < idx.top_k // idx.kpool).repeat_interleave(idx.kpool, dim=-1)[..., :S]
-    return ((picked | (k_pos >= (q_pos + 1) // idx.kpool * idx.kpool)) & (k_pos <= q_pos)).where(0.0, -math.inf).reshape(B, 1, T, S).cast(x.dtype)
+    picked = (topk_mask(masked, idx.top_k // idx.kpool) if Tq != 1 else pairwise_topk_mask(masked, idx.top_k // idx.kpool))
+    picked = picked.repeat_interleave(idx.kpool, dim=-1)[..., :S]
+    return ((picked | (k_pos >= (q_pos + 1) // idx.kpool * idx.kpool)) & (k_pos <= q_pos)).where(0.0, -math.inf).reshape(B, 1, Tq, S).cast(x.dtype)
 
 
 class MLATransformerBlock(FFNBlock):
@@ -419,34 +442,42 @@ class MLATransformerBlock(FFNBlock):
     self.indexer = Indexer(config) if config.indexer else None
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    B, T, _ = x.shape
+    N, D = self.cache_k.shape[2:]
+    flash = amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0
+    # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
+    if flash and not isinstance(T:=x.shape[1], int): return self._attention_rows(x.pad_to(x.max_shape), start_pos, T)[:, :T]
+    return self._attention_rows(x, start_pos, x.shape[1])
+
+  def _attention_rows(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    # x has Tq rows, the first T are the tokens at start_pos
+    B, Tq, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
-    q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
+    q = q_proj.reshape(B, Tq, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
+    freqs = self.freqs_cis[start_pos:start_pos+T]
+    if Tq is not T: freqs = freqs.pad_to((Tq, freqs.shape[1]))
+    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, freqs)
     q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
-    k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
+    k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
+    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, freqs)
 
-    k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
+    k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)[:, :, :T]
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.cast(self.cache_k.dtype).uop)))
-    mask, (N, D) = self._attn_mask(x, start_pos), self.cache_k.shape[2:]
+    mask, (N, D) = self._attn_mask(x, start_pos, T), self.cache_k.shape[2:]
     if amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0:
       # flash attention on the latent cache, the keys and values of every head
       scale, latent = 1.0/self.config.head_dim**0.5, cache.reshape(1, *cache.shape)
-      if T == 1:
+      if Tq == 1:
         if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
         attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask)
       else:
-        # prefill: a symbolic chunk runs padded to its max size, the rows past the chunk are sliced off
-        qp = q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3])) if not isinstance(T, int) else q
-        if mask is not None: mask = mask.reshape(B, T, -1).pad_to((B, qp.shape[2], N)).float().contiguous()
-        attn = flash_attention_mla_prefill(qp, latent, start_pos+T, int(N), scale, mask)[:, :, :T]
-      attn = (attn[..., :self.config.kv_lora_rank] @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+        if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
+        attn = flash_attention_mla_prefill(q, latent, start_pos+T, int(N), scale, mask)
+      attn = (attn[..., :self.config.kv_lora_rank] @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, Tq, -1)
       return self.attn_output(attn)
     k = cache[:, :, 0:start_pos+T, :].float()
     v = k[..., :self.config.kv_lora_rank]
@@ -457,8 +488,9 @@ class MLATransformerBlock(FFNBlock):
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn)
 
-  def _attn_mask(self, x:Tensor, start_pos:int|UOp) -> Tensor|None:  # (1, 1, T, start_pos+T), None: everything is visible
-    if self.indexer and self.config.max_context > self.indexer.idx.top_k: return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos)
+  def _attn_mask(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor|None:  # (1, 1, Tq, start_pos+T), None: all visible
+    if self.indexer and self.config.max_context > self.indexer.idx.top_k:
+      return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T)
     T = x.shape[1]
     return Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) if resolve(T != 1) else None
 
