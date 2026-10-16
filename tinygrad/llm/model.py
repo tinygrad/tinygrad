@@ -458,7 +458,11 @@ class MLATransformerBlock(FFNBlock):
     freqs = self.freqs_cis[start_pos:start_pos+T]
     if Tq is not T: freqs = freqs.pad_to((Tq, freqs.shape[1]))
     if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, freqs)
-    q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
+    # half weights: half copies of the input and the output and a float accumulator use the tensor cores (casts or permutes fused into the
+    # matmul don't)
+    k_b, half = self.attn_k_b["weight"].transpose(-1, -2), self.attn_k_b["weight"].dtype == dtypes.half and Tq > 1
+    q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
+    q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
@@ -477,8 +481,9 @@ class MLATransformerBlock(FFNBlock):
       else:
         if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
         attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, int(N), scale, mask)
-      attn = (attn[..., :self.config.kv_lora_rank] @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, Tq, -1)
-      return self.attn_output(attn)
+      v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
+      attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b
+      return self.attn_output(attn.transpose(1, 2).reshape(B, Tq, -1))
     k = cache[:, :, 0:start_pos+T, :].float()
     v = k[..., :self.config.kv_lora_rank]
 

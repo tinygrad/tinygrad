@@ -3,6 +3,10 @@ from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE
 from tinygrad.uop.ops import UOp
 
 # *** allreduce implementation ***
+def _host_of(device:str) -> str:
+  from tinygrad.device import Device
+  with Context(ALLOW_DEVICE_USAGE=1): return Device[device].host
+
 def _allreduce_hub(devices:tuple[str, ...]) -> int|None:
   from tinygrad.device import Device
   with Context(ALLOW_DEVICE_USAGE=1):
@@ -38,6 +42,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if all_int(buf.shape) and (hub:=_allreduce_hub(buf.device)) is not None:
     hub_dev = buf.device[hub]
     total = functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i) if i == hub else buf.mselect(i).copy_to_device(hub_dev) for i in range(ndev)])
+    # large results go through host memory once: the devices pull them over their own links, not all over the hub's
+    if numel * buf.dtype.itemsize >= getenv("ALLREDUCE_HOST_STAGE", 1 << 20): total = total.copy_to_device(_host_of(hub_dev))
     return total.copy_to_device(device).shrink_to(shape)
 
   # naive: copy to all devices. if you shrink later, that'll be handled
