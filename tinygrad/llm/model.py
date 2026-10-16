@@ -5,7 +5,8 @@ from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
-  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router
+  moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
+  pool_topk_mask, indexer_scores, _wmma_rdna4
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_pad, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
@@ -485,12 +486,24 @@ class Indexer:
     kg = kg.reshape(B, -1, idx.kpool, 2, idx.head_dim)
     # only the pools with tokens: the cost doesn't grow with the max context
     kg = kg[:, :(S + idx.kpool - 1) // idx.kpool]
-    pooled_k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2).transpose(-1, -2).unsqueeze(1)  # (B, 1, D, pools)
-    scores = ((iq @ pooled_k).relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2)
+    pooled = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, pools, D)
+    weights = self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5
+    pools, max_pools = pooled.shape[1], self.cache_kg.shape[1] // idx.kpool
+    if B == 1 and max_pools <= 8192 and Tq % 16 == 0 and max_pools % 64 == 0 and idx.head_dim % 16 == 0 and _wmma_rdna4(x.device) and \
+       getenv("POOL_TOPK", 1):
+      # the scores on the tensor cores (half), the pools padded to the max, then one kernel for the top pools and the mask
+      pk = pooled[0].half().contiguous().pad_to((max_pools, idx.head_dim))
+      scores = indexer_scores(iq[0], pk, weights[0], pools)
+      mask = pool_topk_mask(scores, start_pos, S, self.cache_kg.shape[1], idx.top_k // idx.kpool, idx.kpool, x.dtype, pools=pools)
+      return mask.reshape(B, 1, Tq, S)
+    scores = ((iq @ pooled.transpose(-1, -2).unsqueeze(1)).relu() * weights.unsqueeze(-1)).sum(2)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     # NOTE: a symbolic arange is a reduce over the positions, slice a static one
+    if B == 1 and max_pools <= 8192 and amd_custom_kernels_supported(x.device) and getenv("POOL_TOPK", 1):
+      # one kernel: the top pools of every query by a bisection, and the mask
+      mask = pool_topk_mask(scores.reshape(Tq, pools), start_pos, S, self.cache_kg.shape[1], idx.top_k // idx.kpool, idx.kpool, x.dtype)
+      return mask.reshape(B, 1, Tq, S)
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(Tq)).reshape(Tq, 1), Tensor.arange(self.cache_kg.shape[1])[:S]
-    pools, max_pools = scores.shape[-1], self.cache_kg.shape[1] // idx.kpool
     arange = Tensor.arange(max_pools)[:pools]
     masked = ((arange + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
     # selected incomplete pools add only tail/future tokens, handled by the final tail and causal mask
@@ -949,7 +962,8 @@ class Transformer:
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
     # the prefill jit is specialized for one chunk size
     # the custom kernels compute chunks padded to a static size: large chunks are efficient
-    chunk_size = chunk_size or getenv("PREFILL_CHUNK", 2048 if amd_custom_kernels_supported(self.token_embd.weight.device) else 32)
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 2048 if amd_custom_kernels_supported(self.token_embd.weight.device) else 32),
+                                   self.max_context)
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
@@ -978,6 +992,8 @@ class Transformer:
       sp, nt = v_start_pos.bind(start_pos), (v_small if n_toks <= small else v_toks).bind(n_toks)
       # with run ahead, the previous step already submitted this one
       if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
+      # the token is polled only if the call wrote it to the token buffer (a replaced __call__ doesn't)
+      if fast and (out is None or out.uop.base is not self._token_buf.uop.base): fast = False
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
