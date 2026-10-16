@@ -294,7 +294,7 @@ def remove_range(sink:UOp):
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
   end = body.backedge(ctx.loop, inc[0].load() < bnd)
-  return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate,end))
+  return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate, end))
 
 pm_end_to_backedge = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
@@ -434,7 +434,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 pm_linearize_cleanups = PatternMatcher([
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate,)), st, UOp(Ops.ENDIF, src=(mif,))]))
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate,)), st, UOp(Ops.ENDIF, src=(mif,st))]))
 ])
 
 pm_alloc_to_buf = PatternMatcher([(UPat(Ops.ALLOC, name="x"), lambda x: ((buf:=x.replace(op=Ops.BUFFER)), [buf])),])

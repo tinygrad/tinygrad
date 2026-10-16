@@ -220,7 +220,7 @@ spec_program = PatternMatcher([
 
   # if has a gate
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
-  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),UPat())), lambda: True),
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.int32),), name="s"), lambda s: isinstance(s.arg, str)),
