@@ -938,7 +938,7 @@ class Transformer:
     for i, b in enumerate(model.blk):
       if (g:=state_dict.get(f"blk.{i}.ffn_gate_exps.weight")) is not None and f"blk.{i}.ffn_up_exps.weight" not in state_dict and \
          hasattr(b, "ffn_up_exps"):
-        (e:=ExpertWeights(g.shape[0], g.shape[2], g.shape[1])).fused, e.slices, e.experts = True, b.ffn_gate_exps.slices, b.ffn_gate_exps.experts
+        (e:=ExpertWeights(*(int(s) for s in (g.shape[0], g.shape[2], g.shape[1])))).fused, e.slices, e.experts = True, b.ffn_gate_exps.slices, b.ffn_gate_exps.experts
         b.ffn_gate_exps = e
         del b.ffn_up_exps
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
