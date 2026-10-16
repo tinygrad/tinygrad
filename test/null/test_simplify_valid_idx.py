@@ -558,7 +558,7 @@ class TestRangeShrink(unittest.TestCase):
     # Bounded RANGE is lowered to a BACKEDGE over an integer register accumulator. Open ranges have no BACKEDGE yet,
     # so read the optimized bound preserved on that accumulator.
     uops = result.toposort()
-    return [u for u in uops if u.op is Ops.ALLOC and u.dtype is dtypes.int and u.arg.vmin_vmax is not None]
+    return [u for u in uops if u.op is Ops.ALLOC and u.dtype is dtypes.int]
 
   def assert_range_end(self, ranges:list[UOp], end:int):
     self.assertEqual(len(ranges), 1)

@@ -70,7 +70,7 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out)
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     # slice at the last loop end
-    uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
+    uslice = [i for i,u in enumerate(uops) if u.op == Ops.BACKEDGE][-1]
     # only valid if the outermost loop ends an accumulator update, rather than an output store
     if (update:=uops[uslice].src[0]).op is Ops.STORE and update.addrspace is AddrSpace.REG:
       load_idxs = [u.src[0] for u in uops[uslice+1:] if u.op == Ops.LOAD]

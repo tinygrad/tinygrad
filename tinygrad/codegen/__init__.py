@@ -294,8 +294,8 @@ def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate,)).after(end)
 
 pm_end_to_backedge = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: (cur:=ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
-    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load()) if x in ctx else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
+    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load() if x in ctx else None),
   (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"),
     lambda body,bnd,rng,x,ctx: close_range(ctx[rng], x, rng, bnd, body) if rng in ctx else None)
 ])
