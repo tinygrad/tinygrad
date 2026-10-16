@@ -5,7 +5,7 @@ import sys, struct, functools, itertools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg, range_str
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef
 from tinygrad.helpers import unwrap, Target
 from dataclasses import replace
@@ -485,6 +485,7 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda l: ((nx:=l.ins(X86Ops.LABEL, src=(), tag=f".LOOP_{range_str(l)}")), [nx])),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
