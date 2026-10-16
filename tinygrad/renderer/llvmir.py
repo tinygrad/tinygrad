@@ -216,10 +216,10 @@ class CPULLVMRenderer(LLVMRenderer):
   global_max = (1, 0, 0)
   abi = None
   code_for_op = LLVMRenderer.code_for_op | {Ops.SQRT:lambda:None}
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.SQRT, src=(UPat.var("x"),), name="u"), lambda ctx,u,x:
-     f"  {ctx[u]} = call {ldt(u.dtype)} @llvm.sqrt.f{u.dtype.itemsize*8}({ldt(x.dtype)} {ctx[x]})"),
-  ]) + base_rewrite
+  string_rewrite = base_rewrite
+  extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([
+    (UPat(Ops.SQRT, name="x"), lambda x: UOp.custom_function(f"llvm.sqrt.f{x.dtype.itemsize*8}", dtype=x.dtype).call(*x.src)),
+  ])
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
@@ -230,8 +230,6 @@ class CPULLVMRenderer(LLVMRenderer):
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
-    decls.update({f"llvm.sqrt.f{x.dtype.itemsize*8}":f"declare {ldt(x.dtype)} @llvm.sqrt.f{x.dtype.itemsize*8}({ldt(x.dtype)})"
-                  for x in uops if x.op is Ops.SQRT})
     return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
