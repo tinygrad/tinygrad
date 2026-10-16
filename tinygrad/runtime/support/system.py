@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools
-try: import fcntl # windows misses that
-except ImportError: fcntl = None #type:ignore[assignment]
+import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
 from tinygrad.runtime.autogen import libc, pci, vfio
@@ -186,8 +185,6 @@ class _System:
     return bars
 
   def flock_acquire(self, name:str) -> int:
-    import fcntl # to support windows
-
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
     # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.

@@ -25,7 +25,7 @@ class DiskDevice(Compiled):
       return
     filename = self.device[len("disk:"):]
 
-    if sys.platform != "win32" and filename.startswith("shm:"):
+    if filename.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+filename[4:].lstrip("/"), os.O_RDWR, 0o600)
       self.mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
