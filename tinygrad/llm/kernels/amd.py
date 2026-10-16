@@ -642,9 +642,14 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1:
     if not reduce: return result.reshape(splits, *x.shape[:-1], out_features)  # the partial sums, sharded on the device axis
-    result = result.reshape(splits, tokens, out_features).sum(0)
+    result = partial_sum(result.reshape(splits, tokens, out_features))
   result = result.reshape(*x.shape[:-1], out_features)
   return result if layer.bias is None else result + layer.bias
+
+def partial_sum(x:Tensor) -> Tensor:
+  """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
+  if prod(x.shape[1:-1]) > 1 and getenv("ALLREDUCE_HALF", 1): return x.half().sum(0, dtype=dtypes.half).float()
+  return x.sum(0)
 
 # ******** mixture of experts: the selected experts of each token ********
 
