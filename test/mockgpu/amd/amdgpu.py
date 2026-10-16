@@ -77,6 +77,7 @@ class PM4Executor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
     self.ib_executor: PM4Executor|None = None
+    self.kernel_name = "test"
     super().__init__(base, size, rptr, wptr)
 
   def _next_dword(self):
@@ -109,6 +110,8 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_DISPATCH_DIRECT: self._exec_dispatch_direct(n)
       elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
       elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
+      elif op == amd_gpu.PACKET3_NOP:
+        self.kernel_name = b"".join(self._next_dword().to_bytes(4, "little") for _ in range(n+1)).rstrip(b"\x00").decode()
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
     return (self.rptr[0] - prev_rptr) + executed_in_ib
 
@@ -219,6 +222,7 @@ class PM4Executor(AMDQueue):
     remu.scratch_size = scratch_size
     remu.arch = self.gpu.arch
     remu.user_data = user_data
+    remu.name = self.kernel_name
     err = remu.run_asm(prg_addr, prg_sz, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 

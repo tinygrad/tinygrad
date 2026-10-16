@@ -65,7 +65,7 @@ pm_asm_call = PatternMatcher([
 
 @rewrite_group(name=lambda *args,ret,**kw: TracingKey(f"Lift {kw.get('name', '')}", "lift"))
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
-         user_data_count:int=0, backend:str|None=None, name:str="test") -> UOp:
+         user_data_count:int=0, backend:str|None=None, name="") -> UOp:
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
   view = to_mv(lib, lib_sz)
