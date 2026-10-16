@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args, to_name, bufferize_buf
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args, to_name
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
 
@@ -111,7 +111,7 @@ def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, q:MetalQueu
 
   # before apple9 the encoder must use the pipelines
   if not dev.arch.startswith("Apple") or int(dev.arch[5:]) < 9:
-    r = UOp.range(len(dedup(c[:2] for c in cmds)), next(UOp.unique_num), dtype=dtypes.uint64)
+    r = UOp.range(len(dedup(c.src[0] for c in cmds)), next(UOp.unique_num), dtype=dtypes.uint64)
     c = mtl_msg(enc.after(c), "setComputePipelineState:", icb.bitcast(dtypes.uint64).index(hdr // 8 + 1 + len(cmds) + r).load())
     c = mtl_msg(enc.after(c), "dispatchThreadgroups:threadsPerThreadgroup:", icb.index(hdr - 24), icb.index(hdr - 24)).end(r)
 
@@ -129,11 +129,10 @@ class MetalQueue(HWQueue):
   dev:MetalDevice
   def __init__(self, submit:UOp):
     super().__init__(submit)
-    self.rows, self.cmds, self.sizes, self.stamps, self.nbytes = list[tuple[int, UOp]](), list[tuple](), list[tuple[int, int]](), list[UOp](), 0
+    self.rows, self.cmds, self.sizes, self.stamps, self.nbytes = list[tuple[int, UOp]](), list[UOp](), list[tuple[int, int]](), list[UOp](), 0
 
   def exec(self, call:UOp, prg:UOp):
-    args, obj = get_call_kernel_args(call, prg, self.devs), prg.to_elf()
-    self.rows += (rows:=layout_args(args, off:=round_up(self.nbytes, 256)))
+    self.rows += (rows:=layout_args(get_call_kernel_args(call, prg, self.devs), off:=round_up(self.nbytes, 256)))
     self.nbytes = max([o + w.dtype.itemsize for o, w in rows], default=off + 8)
 
     # symbolic sizes, set on the command at run time
@@ -142,17 +141,16 @@ class MetalQueue(HWQueue):
       self.sizes.append((len(self.cmds), at:=round_up(self.nbytes, 8)))
       self.rows += layout_args([UOp.const(d, dtypes.uint64) for d in dims], at)
       self.nbytes = at + 48
-    self.cmds.append((obj.lib, obj.name, tuple(1 if isinstance(d, UOp) else int(d) for d in dims), off))
+    self.cmds.append(UOp.sink(prg, *[UOp.const(1 if isinstance(d, UOp) else d, dtypes.uint64) for d in (*dims, off)])) # [prg, dims, off]
 
   def wait(self, dst:UOp, val:UOp, eq=False): pass # the fence orders the queue
   def timestamp(self, dst:UOp): self.stamps.append(dst)
   def signal(self, dst:UOp, val:UOp): self.value = val
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    n, zero, pipes = len(self.cmds), round_up(self.nbytes, 8), dedup(c[:2] for c in self.cmds)
-    tag = (self.dev.tag("mtl_icb"), tuple(self.cmds), zero + 24)
-    buf = UOp.alloc((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs[0]).rtag(tag).after(*self.deps)
-    icb = patch(buf, self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
+    n, zero, pipes = len(self.cmds), round_up(self.nbytes, 8), dedup(c.src[0] for c in self.cmds)
+    buf = UOp.alloc((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs[0]).rtag("mtl_icb")
+    icb = patch(buf.after(buf.store(UOp.sink(*self.cmds)), *self.deps), self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
 
     # symbolic sizes
     for ci, off in self.sizes:
@@ -209,7 +207,7 @@ class MetalDevice(Compiled):
 
     self.resources, self.table = list[int](), (ctypes.c_uint64 * 1)()
     self.event, self.fence = self.sysdevice.newSharedEvent(), self.sysdevice.newFence()
-    self.icbs, self.profile_slots = weakref.WeakKeyDictionary[Buffer, tuple](), weakref.WeakSet[Buffer]()
+    self.icbs, self.icb_bufs, self.profile_slots = weakref.WeakKeyDictionary[Buffer, tuple](), dict[UOp, Buffer](), weakref.WeakSet[Buffer]()
 
     # https://developer.apple.com/documentation/metal/mtlgpufamily
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
@@ -219,8 +217,9 @@ class MetalDevice(Compiled):
       (UPat(Ops.ALLOC, tag=self.tag("handles")), lambda d=self: d.handles),
       (UPat(Ops.ALLOC, tag="slots", name="b"), # with stamps
        lambda b, d=self: d.new_slots(b.max_numel()) if b.device == d.device and b.max_numel() > 4 else None),
-      (UPat(Ops.ALLOC, name="b"), lambda ctx, b, d=self:
-       d.new_icb(bufferize_buf(ctx, b.rtag(None)).buffer, *b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("mtl_icb") else None)])
+      (UPat(Ops.ALLOC, tag="mtl_icb", name="b"), lambda b, d=self: d.icb_bufs.pop(b, None))])
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, tag="mtl_icb", name="b").store(UPat(Ops.SINK, name="cmds")), lambda b, cmds, d=self:
+      d.new_icb(b, cmds.src) if b.device == d.device else None)])
 
   @functools.cached_property
   def handles(self) -> Buffer:
@@ -250,23 +249,24 @@ class MetalDevice(Compiled):
     descriptor.setSupportIndirectCommandBuffers(True)
     return checked(self.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error, descriptor, metal.MTLPipelineOptionNone, None)
 
-  def new_icb(self, buf:Buffer, cmds:tuple[tuple[bytes, str, tuple[int, ...], int], ...], header:int) -> Buffer:
-    pipes = dedup(c[:2] for c in cmds)
+  def new_icb(self, b:UOp, cmds:tuple[UOp, ...]) -> UOp: # the icb handles are the tail of the buffer: [icb, commands, pipelines]
+    buf = Buffer(self.device, b.nbytes(), options=b.arg.spec or BufferSpec(cpu_access=True), preallocate=True)
+    pipes = [self.pipeline(p.src[3].arg, p.src[0].arg.function_name) for p in dedup(c.src[0] for c in cmds)]
     desc = metal.MTLIndirectCommandBufferDescriptor.new()
     desc.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     desc.setMaxKernelBufferBindCount(1)
     icb = self.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(desc, max(len(cmds), 1), 0)
     if icb.value is None: raise RuntimeError("create indirect command buffer failed, does your system support this?")
     commands = [icb.indirectComputeCommandAtIndex(i).own() for i in range(len(cmds))]
-    for cmd, (lib, name, dims, off) in zip(commands, cmds):
-      cmd.setComputePipelineState(state:=self.pipeline(lib, name))
+    for cmd, (prg, *dims, off) in zip(commands, [(c.src[0], *[v.val for v in c.src[1:]]) for c in cmds]):
+      cmd.setComputePipelineState(state:=self.pipeline(prg.src[3].arg, prg.src[0].arg.function_name))
       if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
       cmd.setKernelBuffer_offset_atIndex(buf.meta, buf.offset + off, 0)
       cmd.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*dims[:3]), metal.MTLSize(*dims[3:]))
       cmd.setBarrier()
-    buf.host.view(fmt='Q')[header // 8:] = array.array('Q', [icb.value, *[c.value for c in commands], *[self.pipeline(*p).value for p in pipes]])
-    self.icbs[buf] = (icb, commands)
-    return buf
+    buf.host.view(fmt='Q')[-1 - len(cmds) - len(pipes):] = array.array('Q', [icb.value, *[c.value for c in commands], *[p.value for p in pipes]])
+    self.icbs[buf], self.icb_bufs[b] = (icb, commands), buf
+    return UOp(Ops.NOOP)
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     if sys.is_finalizing(): return # the event doesn't wake at exit
