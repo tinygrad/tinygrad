@@ -665,8 +665,65 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   result = result.reshape(*x.shape[:-1], out_features)
   return result if layer.bias is None else result + layer.bias
 
+# ******** allreduce through host memory, in a kernel ********
+
+# a queue level allreduce through a hub costs copies and cross device signals (~45us), a kernel on every device exchanges through a mailbox in
+# host memory instead (every device maps it): it writes its partial, then spins until the partials of all the devices are there and sums them
+HOST_AR_THREADS, HOST_AR_MAXN = 256, 1 << 16
+
+class HostAllreduce:
+  def __init__(self, devs:tuple[str, ...]):
+    from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
+    def multi(bufs:list, dtype) -> Tensor:
+      (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = bufs
+      return Tensor(UOp.from_buffer(mb, dtype, devs))
+    N, self.groups = len(devs), HOST_AR_MAXN // HOST_AR_THREADS
+    nbytes = 2*N*HOST_AR_MAXN*8  # two parities of a slot per device, 64-bit words: the value and the epoch
+    with Context(ALLOW_DEVICE_USAGE=1):
+      host = Buffer(devs[0], nbytes, options=BufferSpec(host=True, uncached=True, cpu_access=True)).ensure_allocated()
+      host.as_memoryview(allow_zero_copy=True)[:] = bytes(nbytes)
+      mbox = [host] + [Buffer(d, nbytes, opaque=BufferStorage(host.get_buf(d))) for d in devs[1:]]
+      # the epoch of every workgroup, then the index of the device
+      counters = [Buffer(d, (self.groups+1)*4, initial_value=bytes(self.groups*4)+i.to_bytes(4, "little")) for i,d in enumerate(devs)]
+    self.mbox, self.counter = multi(mbox, dtypes.uint64), multi(counters, dtypes.int32)
+
+@functools.cache
+def host_allreduce(devs:tuple[str, ...]) -> HostAllreduce|None:
+  if not getenv("HOST_ALLREDUCE", 1) or len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
+  return HostAllreduce(devs)
+
+_SYS = "__ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM"
+
+@functools.cache
+def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int) -> UOp:
+  # workgroup g owns its epoch counter and the elements g*THREADS..: an epoch in every word, a reader spins until the word has its epoch.
+  # the parity of the epoch picks the slot: a device can't get two allreduces ahead, the next one needs the partials of all the devices.
+  # every device sums the same values in the same order: the same bits everywhere
+  wg, t = UOp.range(n // HOST_AR_THREADS, 0, AxisType.GLOBAL), UOp.range(HOST_AR_THREADS, 1, AxisType.LOCAL)
+  e = wg * HOST_AR_THREADS + t
+  epoch, me = counter[wg].load() + 1, counter[HOST_AR_MAXN // HOST_AR_THREADS].load()
+  def slot(p:UOp|int) -> UOp: return ((epoch & 1) * N + p) * HOST_AR_MAXN + e
+  val = x[0, e].load().float()
+  write = UOp(Ops.CUSTOM, src=(mbox[slot(me)], val, epoch), arg=(
+    "__hip_atomic_store((unsigned long long*){0}, ((unsigned long long)(unsigned){2} << 32) | __builtin_bit_cast(unsigned, (float){1}), "
+    f"{_SYS});", dtypes.void))
+  # the write is a src of the reads: it is issued before this device spins on the others
+  def read(p:int) -> UOp: return UOp(Ops.CUSTOM, src=(mbox[slot(p)], epoch, write), arg=(
+    f"({{{{ unsigned long long _w; for (;;) {{{{ _w = __hip_atomic_load((unsigned long long*){{0}}, {_SYS}); "
+    "if ((unsigned)(_w >> 32) == (unsigned){1}) break; __builtin_amdgcn_s_sleep(1); }} __builtin_bit_cast(float, (unsigned)_w); }})", dtypes.float32))
+  total = functools.reduce(lambda a,b: a+b, [me.eq(p).where(val, read(p)) for p in range(N)])
+  store = out[e].store(total)
+  # the next epoch is stored once every thread of the workgroup read the counter
+  done = counter.after(UOp.group(store).barrier())[wg.valid(t.eq(0))].store(epoch)
+  return UOp.group(store, done).end(wg, t).sink(arg=KernelInfo(name="host_allreduce", opts_to_apply=()))
+
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
+  n = prod(x.shape[1:])
+  if isinstance(x.device, tuple) and isinstance(n, int) and n % HOST_AR_THREADS == 0 and n <= HOST_AR_MAXN and (comm:=host_allreduce(x.device)):
+    out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
+    fxn = functools.partial(_host_allreduce_kernel, N=len(x.device), n=n)
+    return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), comm.mbox, comm.counter, fxn=fxn)[0].reshape(x.shape[1:])
   if prod(x.shape[1:-1]) > 1 and getenv("ALLREDUCE_HALF", 1): return x.half().sum(0, dtype=dtypes.half).float()
   return x.sum(0)
 
