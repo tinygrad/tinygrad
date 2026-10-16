@@ -1011,6 +1011,7 @@ def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, val
   mask: additive (B, T, N). every (head, token) is a row of the flash decode kernel, `group` rows of a head share their key loads
   """
   B, H, T, D = q.shape
+  group, partials, block_n = getenv("MLA_G", group), getenv("MLA_P", partials), getenv("MLA_BN", block_n)
   assert isinstance(T, int) and (H*T) % group == 0 and T % group == 0
   rows = q.half().reshape(B, H*T, 1, D).contiguous()
   out = amd_flash_attention_decode(rows, cache, valid_kv_len, max_kv_len, shared=True, scale=scale, mask=mask, causal_rows=T, group=group,

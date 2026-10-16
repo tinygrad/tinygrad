@@ -193,8 +193,11 @@ class HyperConnection:
     self.fn = Linear(self.count * config.dim, (2 + self.count) * self.count, bias=False)
     self.base, self.scale = {"weight": Tensor.zeros((2 + self.count) * self.count)}, {"weight": Tensor.zeros(3)}
 
-  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor]) -> Tensor:
-    """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
+  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor], rows:bool=False) -> Tensor:
+    """
+    mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb.
+    rows: the streams have static padded rows, so do the sublayer's input and output
+    """
     base, scale = self.base["weight"], self.scale["weight"]
     if amd_custom_kernels_supported(xs.device) and self.fn.ggml_type in QUANT_SIZES:
       # a symbolic token count runs the streams padded to the max size: static shapes, the sublayer sees the real tokens
@@ -202,13 +205,15 @@ class HyperConnection:
       if not isinstance(xs.numel(), int): xs = xs.pad_to(xs.max_shape).contiguous()
       # fn(rmsnorm(x)) is fn(x) scaled by the rms: the quantization of x has its sums of squares, one kernel for the coefficients and sinkhorn
       flat = xs.flatten(2)
-      rows, features = int(math.prod(flat.shape[:-1])), int(flat.shape[-1])
-      *xq, sq = q8_quantize(flat, rows, features, sumsq=True)
+      n, features = int(math.prod(flat.shape[:-1])), int(flat.shape[-1])
+      *xq, sq = q8_quantize(flat, n, features, sumsq=True)
       mix = q8_linear(self.fn, flat, xq=tuple(xq))
       pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features)
-      out = sublayer((xs * pre.unsqueeze(-1)).sum(2)[:, :T])
+      h = (xs * pre.unsqueeze(-1)).sum(2)
+      out = sublayer(h if rows else h[:, :T])
       if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
-      return (out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs))[:, :T]
+      ret = out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
+      return ret if rows else ret[:, :T]
     else:
       flat = xs.flatten(2)
       mix = self.fn(flat.rmsnorm(eps=self.norm_eps))
@@ -325,17 +330,18 @@ class FFNBlock:
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
-  def __call__(self, x: Tensor, start_pos: int|UOp):
+  def __call__(self, x: Tensor, start_pos: int|UOp, T:int|UOp|None=None):
+    # T (hyper-connections): x has static padded rows of which the first T are the tokens, the output too
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp):
+    def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None):
       if self.config.hc is not None:
-        xs = self.hc_attn(x, lambda h: self._attention(self.attn_norm(h), start_pos))
-        return self.hc_ffn(xs, lambda h: self._feed_forward(self.ffn_norm(h))).contiguous()
+        xs = self.hc_attn(x, lambda h: self._attention(self.attn_norm(h), start_pos, *(() if T is None else (T,))), rows=T is not None)
+        return self.hc_ffn(xs, lambda h: self._feed_forward(self.ffn_norm(h)), rows=T is not None).contiguous()
       h =     x + self._attention(self.attn_norm(x), start_pos)
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
-    return _run(x, start_pos)
+    return _run(x, start_pos, T)
 
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -459,7 +465,8 @@ class MLATransformerBlock(FFNBlock):
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
     self.indexer = Indexer(config) if config.indexer else None
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
+    if T is not None: return self._attention_rows(x, start_pos, T)  # rows mode: x is padded, the first T rows are the tokens
     N, D = self.cache_k.shape[2:]
     flash = amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0
     # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
@@ -551,24 +558,30 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    B, T, _ = x.shape
+  def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
+    # T: x has static padded rows of which the first T are the tokens (rows mode), the padded rows are computed but don't change the state
+    rows = T is not None
+    B, Tq, _ = x.shape
+    if T is None: T = Tq
     # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
     initial = Tensor(start_pos).eq(0)
     is_kda = hasattr(self, "ssm_g_a")
-    symbolic = isinstance(T, UOp)
+    symbolic = isinstance(T, UOp) and not rows
     T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
     x = x.half()
     out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
-    out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
+    out_gate = out_gate.reshape(B, Tq, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x).sigmoid().reshape(B, Tq, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
+    g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, Tq, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
     # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(g * -A) * lb
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
+    if rows and Tq is not T:  # the padded rows are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1)
+      real = Tensor.arange(Tq).reshape(1, Tq, 1) < T
+      beta, log_alpha = real.where(beta, 0), real.unsqueeze(-1).where(log_alpha, 0)
 
     # qkv conv, conv_state is reset when starting from position 0
     def conv(state:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
@@ -622,7 +635,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
-    return self.ssm_out(z.reshape(B, T, -1))
+    return self.ssm_out(z.reshape(B, Tq, -1))
 
   def _init_state(self, x):
     if not hasattr(self, "recurrent_state"):
@@ -658,7 +671,14 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
-    for block in self.blk: x = block(x, start_pos)
+    # a symbolic chunk with hyper-connections runs every block on static padded rows (their real count is T), sliced at the end
+    if hc is not None and not isinstance(T:=x.shape[1], int) and amd_custom_kernels_supported(x.device) and \
+       all(isinstance(b, (MLATransformerBlock, GatedDeltaNetBlock)) for b in self.blk):
+      x = x.pad_to(x.max_shape).contiguous()
+      for block in self.blk: x = block(x, start_pos, T)
+      x = x[:, :T]
+    else:
+      for block in self.blk: x = block(x, start_pos)
     if hc is not None: x = x.mean(2)
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)[:, :self.config.vocab_size]
