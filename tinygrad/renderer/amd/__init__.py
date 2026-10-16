@@ -6,13 +6,12 @@ from tinygrad.renderer.amd.dsl import Inst, FixedBitField, EnumBitField
 # 0xf9 (249) = SDWA, 0xfa (250) = DPP16 for CDNA (GFX9)
 _VARIANT_SRC0 = {"_SDWA_SDST": 0xf9, "_SDWA": 0xf9, "_DPP16": 0xfa}
 
-def _matches(data: bytes|memoryview, cls: type[Inst], word0:int) -> bool:
+def _matches(data: bytes|memoryview, cls: type[Inst]) -> bool:
   """Check if data matches all FixedBitFields and op is in allowed."""
   for _, field in cls._fields:
     dword_idx = field.lo // 32
     if len(data) < (dword_idx + 1) * 4: return False
-    if not isinstance(field, FixedBitField) and not (isinstance(field, EnumBitField) and field.allowed is not None): continue
-    word = word0 if dword_idx == 0 else int.from_bytes(data[dword_idx*4:(dword_idx+1)*4], 'little')
+    word = int.from_bytes(data[dword_idx*4:(dword_idx+1)*4], 'little')
     field_lo = field.lo % 32
     if isinstance(field, FixedBitField):
       if ((word >> field_lo) & field.mask) != field.default: return False
@@ -22,14 +21,15 @@ def _matches(data: bytes|memoryview, cls: type[Inst], word0:int) -> bool:
       if opcode not in field.allowed: return False
   # Check SDWA/DPP variant based on src0 field (bits 0-8) - only for variant classes
   name = cls.__name__
+  word = int.from_bytes(data[:4], 'little')
   for suffix, expected_src0 in _VARIANT_SRC0.items():
-    if name.endswith(suffix): return (word0 & 0x1ff) == expected_src0
+    if name.endswith(suffix): return (word & 0x1ff) == expected_src0
   return True
 
 # Lazy-load instruction format tables to avoid circular imports (ins.py imports dsl.py which is in this package)
-_FORMATS: dict[str, list[list[type[Inst]]]] | None = None
+_FORMATS: dict[str, list[type[Inst]]] | None = None
 
-def _load_formats() -> dict[str, list[list[type[Inst]]]]:
+def _load_formats() -> dict[str, list[type[Inst]]]:
   global _FORMATS
   if _FORMATS is not None: return _FORMATS
   from tinygrad.runtime.autogen.amd.rdna3.ins import (VOP1, VOP1_SDST, VOP1_DPP16, VOP1_LIT, VOP2, VOP2_DPP16, VOP2_LIT, VOP3, VOP3_SDST,
@@ -50,7 +50,7 @@ def _load_formats() -> dict[str, list[list[type[Inst]]]]:
     FLAT as C_FLAT, GLOBAL as C_GLOBAL, SCRATCH as C_SCRATCH, MUBUF as C_MUBUF)
   # Order matters: more specific encodings first, catch-alls (SOP2, VOP2) last
   # Order: base before _LIT (base matches regular ops, _LIT catches lit-only ops excluded from base)
-  formats = {
+  _FORMATS = {
     "rdna3": [VOPD, VOP3P, VINTERP, VOP3SD, VOP3_SDST, VOP3, DS, GLOBAL, SCRATCH, FLAT, SMEM,
               SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, VOPC_DPP16, VOPC, VOP1_SDST, VOP1_DPP16, VOP1, VOP1_LIT,
               VOP2_DPP16, VOP2, VOP2_LIT],
@@ -61,19 +61,14 @@ def _load_formats() -> dict[str, list[list[type[Inst]]]]:
               C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_SOPK_LIT, C_VOPC_SDWA_SDST, C_VOPC,
               C_VOP1_DPP16, C_VOP1_SDWA, C_VOP1, C_VOP2_DPP16, C_VOP2_SDWA, C_SOP2, C_VOP2, C_VOP2_LIT],
   }
-  # Dispatch on the high byte, preserving priority among formats whose fixed bits can match it.
-  _FORMATS = {arch: [[cls for cls in classes if all(
-    ((prefix << 24) ^ (field.default << field.lo)) & (field.mask << field.lo) & 0xff000000 == 0
-    for _, field in cls._fields if isinstance(field, FixedBitField))] for prefix in range(256)] for arch, classes in formats.items()}
   return _FORMATS
 
 def detect_format(data: bytes|memoryview, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
-  word0 = int.from_bytes(data[:4], 'little')
-  for cls in _load_formats()[arch][word0 >> 24]:
-    if _matches(data, cls, word0): return cls
-  raise ValueError(f"unknown {arch} format word={word0:#010x}")
+  for cls in _load_formats()[arch]:
+    if _matches(data, cls): return cls
+  raise ValueError(f"unknown {arch} format word={int.from_bytes(data[:4], 'little'):#010x}")
 
 def decode_inst(data: bytes, arch: str = "rdna3") -> Inst:
   """Decode machine code bytes into an instruction."""
