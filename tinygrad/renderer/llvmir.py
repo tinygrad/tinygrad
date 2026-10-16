@@ -302,6 +302,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
       # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
       (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
       (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
+      (UPat.var("a").cast((dtypes.fp16, dtypes.bf16), name="b"), lambda a,b: a.float().cast(b.dtype) if a.dtype != b.dtype else None),
     ])
     if self.is_cdna: self.extra_matcher += tc.pm_validate_wmma_cdna
     if target.arch in {"gfx1100", "gfx1151"}: self.extra_matcher += tc.pm_validate_wmma_rdna3
