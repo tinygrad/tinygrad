@@ -36,7 +36,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JAE = auto(); JMP = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -75,7 +75,7 @@ class X86GroupOp:
 
   # X86Ops that read flags
   ReadFlags = {X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JB, X86Ops.JL,
-               X86Ops.JE, X86Ops.JNE, X86Ops.JGE}
+               X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE}
 
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
@@ -154,6 +154,11 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
+  # IF jumps over its body on the inverse condition. cache the jump opcode and preserve ordering deps around the flag compare
+  (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="cond").or_after(),), arg=None, name="x"), lambda x,cond:
+    x.replace(src=((x.src[0].replace(src=(cmp(cond), *x.src[0].src[1:])) if x.src[0].op is Ops.AFTER else cmp(cond)),),
+      arg=(X86Ops.JAE if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
+        else {Ops.CMPLT:X86Ops.JGE, Ops.CMPEQ:X86Ops.JNE, Ops.CMPNE:X86Ops.JE}[cond.op]))),
   # vector BUFFERs get modeled in STACK space
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL))
     if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
@@ -343,11 +348,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVB, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPEQ, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVE, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPNE, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVNE, src=(b, a, cmp(m)))),
-  # jumps, use flags
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JB, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JL, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JE, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JNE, src=(cmp(y),))),
   # comparisons whose user doesn't use the flag, move flag result to register
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: x.ins(X86Ops.SETB, src=(cmp(x),))),
   (UPat(Ops.CMPLT, name="x"), lambda x: x.ins(X86Ops.SETL, src=(cmp(x),))),
@@ -456,8 +456,9 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op is Ops.BACKEDGE or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
-  elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
+  op = x.arg if x.op in (Ops.IF, Ops.BACKEDGE) else x.arg[0]
+  if op in X86GroupOp.WriteFlags: ctx.lock = x
+  elif op in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1].without_after):
     ctx.lock = flag_def
     return (x, [flag_def, x])
   return None
@@ -470,7 +471,7 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.BACKEDGE), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.IF, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
@@ -481,6 +482,10 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
+  (UPat(Ops.IF, name="x"), lambda x:
+    ((jmp:=UOp(Ops.INS, src=(x.src[0].without_after,), arg=(x.arg, dtypes.void), tag=f".IF_{next(UOp.unique_num)}")), [jmp])),
+  (UPat(Ops.ENDIF, src=(UPat.var("mif"), UPat()), name="x"), lambda x,mif:
+    (x, [UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=mif.tag)])),
   (UPat(Ops.RANGE, dtypes.void, name="l"), lambda l: ((nx:=l.ins(X86Ops.LABEL, src=(), tag=f".LOOP_{range_str(l)}")), [nx])),
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat.var("l"), UPat()), name="x"), lambda x,l: (x, [UOp(Ops.INS, arg=(x.arg, dtypes.void), tag=l.tag)])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
@@ -647,6 +652,7 @@ encodings = {
   X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4),
   X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4),
   X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
+  X86Ops.JAE: lambda x: bytes([0x0F, 0x83]) + int(0).to_bytes(4),
   X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
@@ -741,7 +747,7 @@ class X86Renderer(ISARenderer):
       if u.arg[0] not in encodings or (l:=encodings[u.arg[0]](u)) is None:
         raise RuntimeError(f"failed to encode {u.arg[0]} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       binary.extend(l)
-      if u.arg[0] in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP): jumps[u] = len(binary)
+      if u.arg[0] in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE, X86Ops.JMP): jumps[u] = len(binary)
     # fixup jump targets now that encoding size is known
     for u in uops:
       if (t:=jumps.get(u)) is not None: binary[t-4:t] = (targets[u.tag] - t).to_bytes(4, 'little', signed=True)
