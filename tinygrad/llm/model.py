@@ -102,7 +102,7 @@ def pairwise_topk_mask(x:Tensor, k:int) -> Tensor:
   n = x.shape[-1]
   first = Tensor.arange(n).reshape(1, n) < Tensor.arange(n).reshape(n, 1) if isinstance(n, int) else None
   if first is None:  # a symbolic length: slice the comparison of a static arange
-    ar = Tensor.arange(n.vmax)[:n]
+    ar = Tensor.arange(cast(UOp, n).vmax)[:n]
     first = ar.reshape(1, n) < ar.reshape(n, 1)
   return ((x.unsqueeze(-2) > x.unsqueeze(-1)) | ((x.unsqueeze(-2) == x.unsqueeze(-1)) & first)).sum(-1) < k
 
@@ -310,7 +310,7 @@ class FFNBlock:
     if not isinstance(T, int): x, sel, probs = x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), probs.pad_to(probs.max_shape)
     gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
     valid, entries, tiles = moe_route(sel, gate_exps.first, gate_exps.local_experts)
-    k = sel.shape[-1]
+    k = int(sel.shape[-1])
     # gate and up read the token of each sorted row, down writes the row of each selection
     if gate_exps.fused:  # the activation is computed in the kernel of the interleaved gate and up rows
       act = gate_exps.grouped(x.reshape(-1, D), entries, tiles, slots=k,
@@ -580,7 +580,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(g * -A) * lb
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
     if rows and Tq is not T:  # the padded rows are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1)
-      real = Tensor.arange(Tq).reshape(1, Tq, 1) < T
+      real = Tensor.arange(Tq).reshape(1, Tq, 1) < cast(int, T)  # T can be a bound variable
       beta, log_alpha = real.where(beta, 0), real.unsqueeze(-1).where(log_alpha, 0)
 
     # qkv conv, conv_state is reset when starting from position 0
@@ -856,7 +856,8 @@ class Transformer:
     for b in self.blk:
       if (g:=getattr(b, 'ffn_gate_exps', None)) is not None and g.ggml_type is not None and g.ggml_type == b.ffn_up_exps.ggml_type and \
          amd_custom_kernels_supported(g.weight.device) and getenv("FUSE_GATE_UP", 1):
-        packed.discard(id(b.ffn_up_exps.weight)); packed.discard(id(g.weight))
+        packed.discard(id(b.ffn_up_exps.weight))
+        packed.discard(id(g.weight))
         g.fuse_up(b.ffn_up_exps, b.config.hidden_dim)
         del b.ffn_up_exps
         packed.add(id(g.weight))
@@ -877,19 +878,20 @@ class Transformer:
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
     # the prefill jit is specialized for one chunk size
-    chunk_size = chunk_size or getenv("PREFILL_CHUNK", 32)
+    # the custom kernels compute chunks padded to a static size: large chunks are efficient
+    chunk_size = chunk_size or getenv("PREFILL_CHUNK", 2048 if amd_custom_kernels_supported(self.token_embd.weight.device) else 32)
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
+    devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
       # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
       if not hasattr(self, "_token_buf"):
-        dev = self.token_embd.weight.device if isinstance(self.token_embd.weight.device, str) else self.token_embd.weight.device[0]
-        buf = Buffer(dev, 4*(self.max_context+1), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+        buf = Buffer(devs[0], 4*(self.max_context+1), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
         self._token_host, self._token_buf = buf.as_memoryview(allow_zero_copy=True).cast('i'), Tensor(UOp.from_buffer(buf, dtypes.int32))[None]
-      for d in to_tuple(self.token_embd.weight.device): Device[d].synchronize()  # a step run ahead by the last generate may still use it
+      for d in devs: Device[d].synchronize()  # a step run ahead by the last generate may still use it
       self._token_host[:] = array.array('i', tokens + [-1] * (self.max_context + 1 - len(tokens)))
       t = self._token_buf
     else:

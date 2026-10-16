@@ -41,7 +41,7 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
 I8_WMMA_QUANTS = (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
 # formats with a single scale per 32 weights and no offset
 GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K)
-def _use_i8_wmma(device:str|tuple[str, ...], ggml_type:int) -> bool:
+def _use_i8_wmma(device:str|tuple[str, ...]|None, ggml_type:int) -> bool:
   return bool(getenv("I8_WMMA", 1)) and _wmma_rdna4(device) and (ggml_type in I8_WMMA_QUANTS or getenv("I8_WMMA", 1) == 2)
 
 @functools.cache
@@ -448,21 +448,20 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   else:
     group_rng = UOp.range(in_features // Q8_GROUP_SIZE, 4, AxisType.LOOP)
     x_rows = input_tokens
-  group = group_rng
-  block, subgroup = group // 8, group % 8
+  block, subgroup = group_rng // 8, group_rng % 8
   wmma_accs = [list(output_accs) for output_accs in accs]
   # gfx12 moves k2 from the element index to lane bit 4: each lane supplies two groups of four.
   ks = tuple(i%4 + physical_half*4 + (i//4)*8 for i in range(8)) if rdna4 else tuple(range(16))
   for half in range(2):
-    afrags = tuple(UOp.stack(*(x[input_token, group*32 + half*16 + i].cast(dtypes.float16) for i in ks))
+    afrags = tuple(UOp.stack(*(x[input_token, group_rng*32 + half*16 + i].cast(dtypes.float16) for i in ks))
                    for input_token in x_rows)
     for output_tile,output in enumerate(outputs):
       bfrag = UOp.stack(*dequant(expert_base + output*output_words + block*type_words, subgroup, half))
       for tile,afrag in enumerate(afrags):
-        previous = accs[output_tile][tile].after(group) if half == 0 else wmma_accs[output_tile][tile]
+        previous = accs[output_tile][tile].after(group_rng) if half == 0 else wmma_accs[output_tile][tile]
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, *WMMA_ARG)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
-                       for acc,value in zip(output_accs, output_values))).end(group)
+                       for acc,value in zip(output_accs, output_values))).end(group_rng)
   if act is not None:
     assert rdna4, "the fused activation needs the RDNA4 accumulator layout"
     stores = _act_stores(out, outputs, tokens, accs, update, act)
@@ -1002,7 +1001,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
   # shared: a block per `group` query heads, they read the same keys
-  waves, group = 16, group if shared else H // cache_kv.shape[2]
+  waves, group = 16, group if shared else int(H // cache_kv.shape[2])
   while waves * group * ((D+LDS_PAD)*2 + 8) > 65536 or (waves > 1 and block_n // waves < 2): waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n, waves=waves,
@@ -1014,6 +1013,72 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
 
+@functools.cache
+def _mla_flash_wmma_kernel(out:UOp, q:UOp, cache:UOp, *mask:UOp, tokens:int, q_start:int|UOp, valid_len:int|UOp, scale:float) -> UOp:
+  # RDNA4 WMMA flash attention of the (head, token) rows of q on the shared latent cache (keys = values). a workgroup: 16 tokens of a head, 4 waves
+  # each own a quarter of the latent dims: they sum their partial scores through LDS, then update their quarter of the output with P (via LDS)
+  q_start, valid_len = _unbind(q_start), _unbind(valid_len)
+  R, D = cast(tuple[int, int], q.shape)
+  N, WAVES = cache.shape[0], 4
+  DW = D // WAVES
+  KT = DW // 16
+  blk = UOp.range(R // 16, 0, AxisType.GLOBAL)
+  wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  col, half = lane % 16, lane // 16
+  t0, dbase = (blk % (tokens // 16)) * 16, wave * DW
+  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))  # the k of the 8 fragment elements of a lane (RDNA4)
+  # the query fragments of this wave's dims (A: lane row = col)
+  qfrag = [UOp.stack(*(q[blk*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
+  # the keys up to the causal end of the 16 tokens
+  n_tile = UOp.range(((q_start + t0 + 16).minimum(valid_len) + 15) // 16, 2, AxisType.LOOP)
+  key = n_tile * 16 + col
+  zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
+  # partial scores of this wave's dims (C: lane key = col, rows half*8+e)
+  s_acc = zero8
+  for kk in range(KT): s_acc = UOp.wmma(qfrag[kk], UOp.stack(*(cache[key.minimum(N-1), dbase + kk*16 + k].load() for k in ks)), s_acc, *WMMA_ARG)
+  s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
+  s_reg = s_reg.after(s_reg.store(s_acc))
+  lds_s = UOp.alloc((WAVES, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
+  lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(s_reg[e].load()) for e in range(8))).barrier())
+  m_reg, l_reg = _reg((8,), -1e30), _reg((8,), 0)
+  o_regs = [_reg((8,), 0) for _ in range(KT)]
+  m_old, l_old = m_reg.after(n_tile), l_reg.after(n_tile)
+  p_vals, m_new, l_new, alpha = [], [], [], []
+  for e in range(8):
+    row = t0 + half * 8 + e
+    vis = (key <= q_start + row) & (key < valid_len)
+    s = sum((lds_s[w, lane, e].load() for w in range(WAVES)), UOp.const(0, dtypes.float)) * scale
+    if mask: s = s + mask[0][row, key.minimum(N-1)].load().float()
+    s = vis.where(s, UOp.const(-1e30, dtypes.float))
+    mx = s
+    for sh in (1, 2, 4, 8): mx = mx.maximum(_swizzle_xor(mx, sh))
+    mn = m_old[e].load().maximum(mx)
+    p = vis.where(((s - mn) * LOG2E).exp2(), UOp.const(0, dtypes.float))
+    ps = p
+    for sh in (1, 2, 4, 8): ps = ps + _swizzle_xor(ps, sh)
+    a = ((m_old[e].load() - mn) * LOG2E).exp2()
+    p_vals.append(p)
+    m_new.append(mn)
+    alpha.append(a)
+    l_new.append(l_old[e].load() * a + ps)
+  # P (rows x keys) to the A layout (lane row = col, elements keys) through LDS
+  lds_p = UOp.alloc((WAVES, 16, 16 + 2), dtypes.half, addrspace=AddrSpace.LOCAL)
+  lds_p = lds_p.after(UOp.group(*(lds_p[wave, half*8 + e, col].store(p_vals[e].cast(dtypes.half)) for e in range(8))).barrier())
+  pfrag = UOp.stack(*(lds_p[wave, col, k].load() for k in ks))
+  o_new = []
+  for dt in range(KT):
+    # B: lane dim = col, elements keys. keys past the valid length are zero: p is 0 there but the cache isn't written (0*nan)
+    vfrag = UOp.stack(*((n_tile*16 + k < valid_len).where(cache[(n_tile*16 + k).minimum(N-1), dbase + dt*16 + col].load(), UOp.const(0, dtypes.half))
+                        for k in ks))
+    prev = o_regs[dt].after(n_tile)
+    o_new.append(UOp.wmma(pfrag, vfrag, UOp.stack(*(prev[e].load() * alpha[e] for e in range(8))), *WMMA_ARG))
+  update = UOp.group(m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new)), *(o.store(v) for o, v in zip(o_regs, o_new)))
+  update = update.barrier().end(n_tile)
+  l_fin = l_reg.after(update)
+  stores = [out[blk*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / l_fin[e].load().maximum(1e-30))
+            for dt, o in enumerate(o_regs) for e in range(8)]
+  return UOp.group(*stores).end(blk, wave, lane).sink(arg=KernelInfo(name="mla_flash_wmma", opts_to_apply=()))
+
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
                                     mask:Tensor|None=None, group:int=4, partials:int=4, block_n:int=32) -> Tensor:
   """
@@ -1021,6 +1086,13 @@ def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, val
   mask: additive (B, T, N). every (head, token) is a row of the flash decode kernel, `group` rows of a head share their key loads
   """
   B, H, T, D = q.shape
+  if B == 1 and T % 16 == 0 and D % 64 == 0 and _wmma_rdna4(q.device) and getenv("MLA_WMMA", 1):
+    rows = q.half().reshape(H*T, D).contiguous()
+    if isinstance(valid_kv_len, UOp): cache = Tensor(cache.uop.after(valid_kv_len))
+    out = Tensor.empty(H*T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis if q.uop.axis is None else 0)
+    fxn = functools.partial(_mla_flash_wmma_kernel, tokens=T, q_start=q_start, valid_len=valid_kv_len, scale=scale)
+    srcs = (rows, cache.reshape(cache.shape[-2], D)) + (() if mask is None else (mask.reshape(T, -1),))
+    return Tensor.custom_kernel(out, *srcs, fxn=fxn)[0].reshape(B, H, T, D)
   group, partials, block_n = getenv("MLA_G", group), getenv("MLA_P", partials), getenv("MLA_BN", block_n)
   assert isinstance(T, int) and (H*T) % group == 0 and T % group == 0
   rows = q.half().reshape(B, H*T, 1, D).contiguous()
