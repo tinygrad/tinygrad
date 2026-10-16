@@ -29,12 +29,11 @@ class Estimates:
     mem: dict[tuple[UOp, Ops], sint] = {}
     mults: sint = 1
     mult_stack: list[sint] = []
-    symbolic_ops = GroupOp.Elementwise | {Ops.CONST, Ops.PARAM, Ops.STACK, Ops.SPECIAL}
     excluded: set[UOp] = set()
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded.update(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE}))
+          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
@@ -46,12 +45,7 @@ class Estimates:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          bound = u.src[0].without_after
-          # Data-dependent bounds cannot be evaluated from size variables; don't retain their execution graph in estimates.
-          symbolic = bound.toposort(gate=lambda x:x.op in symbolic_ops)
-          if bound not in symbolic or any(s not in symbolic for x in symbolic for s in x.src):
-            bound = bound.const_like(bound.vmax)
-          mults *= cast(sint, bound.ssimplify())
+          mults *= cast(sint, u.src[0].without_after.ssimplify())
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
