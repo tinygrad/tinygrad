@@ -1,5 +1,5 @@
 from typing import Literal, Callable
-import math, sys
+import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
@@ -297,12 +297,9 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) \
     + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
-  if sys.platform == 'win32':
-    abi = "__attribute__((ms_abi)) "
-    kernel_typedef = abi + "void"
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
-    alignment = 2**int(math.log2(dt.itemsize * count)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
+    alignment = 2**int(math.log2(dt.itemsize * count)) if not dtypes.is_bool(dt) else 1
     vec = self._render_dtype(dt, count, AddrSpace.REG)
     return f"typedef {self.render_dtype(dt)} {vec} __attribute__((aligned({alignment}),ext_vector_type({count})));"
 
