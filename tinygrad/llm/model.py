@@ -475,6 +475,9 @@ class Indexer:
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kg"):
       self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), 2, self.idx.head_dim, dtype=dtypes.half, device=x.device)
+      # the pooled keys: a call recomputes the pools of its tokens only
+      self.cache_pk = Tensor.zeros(x.shape[0], self.cache_kg.shape[1] // self.idx.kpool, self.idx.head_dim, dtype=dtypes.float32,
+                                   device=x.device).contiguous()
 
   def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
     # x has Tq rows, the first T (default all) are the tokens at start_pos
@@ -484,9 +487,15 @@ class Indexer:
     kg, iq = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2), self.attn_q_b(q).reshape(B, Tq, idx.n_heads, idx.head_dim)
     kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg[:, :T].half().uop))).float()
     kg = kg.reshape(B, -1, idx.kpool, 2, idx.head_dim)
-    # only the pools with tokens: the cost doesn't grow with the max context
-    kg = kg[:, :(S + idx.kpool - 1) // idx.kpool]
-    pooled = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, pools, D)
+    # only the pools with tokens: the cost doesn't grow with the max context. the pools before the first token's are cached
+    # (the count of new pools in a form that is visibly not negative)
+    first, pools = start_pos // idx.kpool, (S + idx.kpool - 1) // idx.kpool
+    new_pools = (start_pos % idx.kpool + T + idx.kpool - 1) // idx.kpool
+    kg = kg.shrink((None, (first, first + new_pools), None, None, None))
+    key, gate = (kg.shrink((None, None, None, (i, i+1), None)).squeeze(3) for i in range(2))
+    new = ((gate + self.compressor_ape["weight"]).softmax(2) * key).sum(2)  # (B, new pools, D)
+    store = self.cache_pk.shrink((None, (first, first + new_pools), None)).uop.store(new.uop)
+    pooled = Tensor(self.cache_pk.uop.after(store)).shrink((None, (0, pools), None))  # (B, pools, D)
     weights = self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5
     pools, max_pools = pooled.shape[1], self.cache_kg.shape[1] // idx.kpool
     if B == 1 and max_pools <= 8192 and Tq % 16 == 0 and max_pools % 64 == 0 and idx.head_dim % 16 == 0 and _wmma_rdna4(x.device) and \
