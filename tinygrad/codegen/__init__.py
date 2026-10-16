@@ -289,7 +289,7 @@ def remove_range(sink:UOp):
     return RangeCtx(init, l, gate)
   ctx = {u:init(u) for u in uops if u.op is Ops.RANGE
     and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void and u in ends}
-  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const+symbolic_simple, ctx=ctx, bottom_up=True, name="remove range")
+  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
 
 def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
   inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
