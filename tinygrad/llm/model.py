@@ -320,7 +320,8 @@ class FFNBlock:
       router = self.ffn_gate_inp
       # sequence parallel: every device routes its rows, the selections are gathered
       xr = rows if (rows:=_sp_rows[0]) is not None else x
-      if router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and xr.shape[1] > 32 and isinstance(xr.shape[1], int):
+      if router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
+         xr.shape[1] > 32:
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
         logits = xr.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
       else: logits = router(xr)
