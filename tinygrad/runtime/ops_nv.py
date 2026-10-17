@@ -16,8 +16,9 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import PCIIfaceBase, MAP_FIXED
+from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager, NVUSBPCIDevice
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, MAP_FIXED
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_ctrl_buffer
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -110,8 +111,8 @@ class NVQueue(HWQueue):
 
   def nvm(self, subc:int, mthd:int|UOp, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
 
-  def sem(self, addr:UOp, value:UOp, **flags:str):
-    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, value.ccast(dtypes.uint64), nv_flags("NVC56F_SEM_EXECUTE", payload_size="64bit", **flags))
+  def sem(self, addr:UOp, value:UOp, bits:int=64, **flags:str):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, value.ccast(dtypes.uint64), nv_flags("NVC56F_SEM_EXECUTE", payload_size=f"{bits}bit", **flags))
 
   def wait(self, signal:UOp, value:UOp): self.sem(signal.getaddr(self.devs), value, operation="acq_circ_geq")
   def signal(self, signal:UOp, value:UOp): self.release(signal, value)
@@ -197,6 +198,8 @@ class NVCopyQueue(NVQueue):
   def semaphore(self, addr:UOp, value:UOp, typ:str): # a one word release writes just the payload, a four word one the timestamp after it
     self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *hilo(addr), value.ccast(dtypes.uint32))
     self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, nv_flags("NVC6B5_LAUNCH_DMA", flush_enable="true", semaphore_type=f"release_{typ}_word_semaphore"))
+  def wait(self, signal:UOp, value:UOp, eq:bool=False):
+    self.sem(signal.getaddr(self.devs), value, bits=(value if eq else signal).dtype.itemsize * 8, operation="acquire" if eq else "acq_circ_geq")
   def timestamp(self, signal:UOp): self.semaphore(signal.getaddr(self.devs), UOp.const(0, dtypes.uint32), "four")
   def signal(self, signal:UOp, value:UOp): self.semaphore(signal.getaddr(self.devs), value, "one")
 
@@ -317,7 +320,7 @@ def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVPro
 
 class NVAllocator(Allocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
+    return self.dev.iface.alloc(size, uncached=options.uncached, cpu_access=options.cpu_access, host=options.host)
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
     self.dev.synchronize()
@@ -530,6 +533,9 @@ class PCIIface(PCIIfaceBase):
     super().__init__(dev, dev_id, vendor=0x10de, devices=((0xff00, (0x2200,0x2400,0x2500,0x2600,0x2700,0x2800,0x2b00,0x2c00,0x2d00,0x2f00)),),
       base_class=0x03, vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size, dev_impl_t=NVDev)
 
+    self._init_nvd()
+
+  def _init_nvd(self):
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
@@ -550,6 +556,26 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
+class USBIface(PCIIface):
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
+    visible = filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "NV")
+    self.dev, self.pci_dev, self.vram_bar, self.count = dev, NVUSBPCIDevice(*visible[dev_id]), 1, len(visible)
+    self.dev_impl = NVDev(self.pci_dev)
+    self._init_nvd()
+
+  @functools.cached_property
+  def ctrl(self) -> Buffer: return usb_ctrl_buffer(self, self.dev_impl.gsp.queue_offset)
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
+            **kwargs) -> BufferStorage:
+    if not host and not cpu_access: return super().alloc(size, uncached=uncached, zero=zero, **kwargs)
+    mapping = self.dev_impl.mm.valloc_cpu_visible(size, uncached=uncached, zero=zero)
+    barview = self.pci_dev.map_bar(self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size)
+    return BufferStorage(mapping.va_addr, PCIAllocationMeta(mapping, False, hMemory=mapping.paddrs[0][0]), barview)
+
+  def map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf.host.addr)
+  def unmap(self, mapping:BufferStorage): pass
+
 class MOCKIface(NVKIface): count = 1
 
 Compiled.pm_encode += PatternMatcher([
@@ -559,13 +585,15 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class NVDevice(Compiled):
-  ifaces = [NVKIface, PCIIface, MOCKIface]
+  ifaces = [NVKIface, PCIIface, USBIface, MOCKIface]
   sleep_timeout_ms = 200
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
+    self.is_usb = isinstance(self.iface, USBIface)
+    if self.is_usb: self.rtalloc_size = 4 << 20
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)
@@ -603,6 +631,8 @@ class NVDevice(Compiled):
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
+
+    if self.is_usb: setup_usb_rules(self)
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
@@ -722,6 +752,7 @@ class NVDevice(Compiled):
               (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4))))
 
   def on_device_hang(self):
+    if self.is_usb and self.error_state.host.view(fmt='q')[0]: return
     # Prepare fault report.
     # TODO: Restore the GPU using NV83DE_CTRL_CMD_CLEAR_ALL_SM_ERROR_STATES if needed.
 

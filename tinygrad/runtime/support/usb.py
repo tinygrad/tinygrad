@@ -3,9 +3,9 @@ from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
-from tinygrad.device import Buffer, BufferSpec, Compiled, Device
+from tinygrad.device import Buffer, BufferSpec, BufferStorage, Compiled, Device
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins
-from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface, AddrSpace as MemoryAddrSpace
 from tinygrad.runtime.support import c
 
 def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctypes.c_ubyte * sz)()), to_mv(ctypes.addressof(buf), sz)
@@ -141,18 +141,21 @@ class CustomASM24Controller:
     return self.pcie_request(fmt_type, address, value, size)
 
   def pcie_mem_write(self, address:int, data:bytes):
-    """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is little-endian dwords on the wire."""
+    """Stream aligned PCIe writes via bulk OUT; write up to a dword via control. Data is little-endian."""
     if not data: return
-    assert len(data) % 4 == 0, f"pcie_mem_write requires 4-byte aligned size, got {len(data)}"
+    if len(data) <= 4:
+      assert address % 4 + len(data) <= 4, f"PCIe write crosses a dword: addr={address:#x}, size={len(data)}"
+      return self.pcie_request(0x60 if address >> 32 else 0x40, address, int.from_bytes(data, "little"), size=len(data))
+    assert address % 4 == 0 and len(data) % 4 == 0, f"unaligned PCIe write: addr={address:#x}, size={len(data)}"
     for off in range(0, len(data), STREAM):
       chunk = data[off:off+STREAM]
-      self._f0_out(0x60, 0x0F, address + off, len(chunk) // 4, mode=1)
+      self._f0_out(0x60 if (address + off) >> 32 else 0x40, 0x0F, address + off, len(chunk) // 4, mode=1)
       self.usb.bulk_write(chunk)
 
   def pcie_mem_read(self, address:int, nbytes:int) -> memoryview:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
     assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
-    self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
+    self._f0_out(0x20 if address >> 32 else 0x00, 0x0F, address, nbytes // 4, mode=2)
     return self.usb.bulk_read(nbytes, timeout=30000)
 
   def read(self, base_addr:int, length:int) -> bytes:
@@ -184,19 +187,17 @@ class USBMMIOInterface(MMIOInterface):
   def __getitem__(self, index):
     off, sz = self._off_from_index(index)
     if self.pcimem:
-      assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
+      assert (self.addr + off) % 4 == 0 and sz % 4 == 0, f"unaligned PCIe read: addr={self.addr + off:#x}, size={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
     else: data = self.usb.read(self.addr + off, sz)
-    return data if isinstance(index, slice) else int.from_bytes(data, "little")
+    if isinstance(index, slice): return data if self.fmt == 'B' else memoryview(data).cast(self.fmt).tolist()
+    return int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
     off, _ = self._off_from_index(index)
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
-    if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
-    else:
-      # writes are whole dwords
-      assert len(data) % 4 == 0 and off % 4 == 0, f"pcie_mem_write requires 4-byte aligned access, got off={off}, sz={len(data)}"
-      self.usb.pcie_mem_write(self.addr+off, data)
+    if self.pcimem: self.usb.pcie_mem_write(self.addr + off, data)
+    else: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
     return USBMMIOInterface(self.usb, self.addr+offset, self.nbytes-offset if size is None else size, fmt=fmt or self.fmt, pcimem=self.pcimem)
@@ -209,15 +210,16 @@ HOST_SIZE = 64 + 2 * HALF + STREAM # link, staging, zeros
 
 def usb_host(dev:str) -> UOp: return UOp.alloc((HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.device).rtag(to_name(dev, "usb_host"))
 def usb_link(dev:str) -> UOp: return usb_host(dev)[:48].bitcast(dtypes.uint64) # handle, context, prev chunks, two transfers, error state
-def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + 2 * HALF]
+def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + usb_sram(dev).max_numel()]
 def usb_zeros(dev:str) -> UOp: return usb_host(dev)[64 + 2 * HALF:]
 
 def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev).rtag(to_name(dev, "usb_go")) # chunk + 1: read armed
 
-def usb_asm24(dev:str) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=dev).rtag(to_name(dev, "usb_asm24")) # sys, cq, sram
+def usb_asm24(dev:str) -> UOp:
+  return UOp.alloc((getattr(Device[dev], "iface").ctrl.nbytes,), dtypes.uint8, 0, device=dev).rtag(to_name(dev, "usb_asm24")) # sys, cq, sram
 def usb_fence(dev:str) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # gpu chunks done
 def usb_cq(dev:str) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue
-def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
+def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:]
 
 # *****************
 # 2. transfers
@@ -232,18 +234,22 @@ def usb_bulk(link:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp: # 
   rc = ccall(libusb.libusb_bulk_transfer, link.index(0).load(), ep, data, n, (got:=usb_stack(dtypes.int32, 0)).index(0), timeout)
   return usb_fail(link, rc.minimum(0).minimum(-got.after(rc).index(0).load().ne(n).cast(dtypes.int)))
 
+def usb_tlp_type(addr:UOp, write:bool) -> UOp: # 3 DWs below 4 GiB, 4 DWs above
+  return (addr >> 32).ne(0).cast(dtypes.uint64) * 0x20 | (0x40 if write else 0)
+
 @uopfunc
 def usb_poke(link:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: a dword
-  return usb_ctrl(link, 0x40, 0xF0, 0x60 | 0x0F00, 0, usb_stack(dtypes.uint64, addr, val.cast(dtypes.uint64)).index(0), 12, 5000).sink()
+  return usb_ctrl(link, 0x40, 0xF0, usb_tlp_type(addr, True) | 0x0F00, 0,
+                  usb_stack(dtypes.uint64, addr, val.cast(dtypes.uint64)).index(0), 12, 5000).sink()
 
 @uopfunc
 def usb_stream(link:UOp, addr:UOp, data:UOp, n:UOp, write:bool, fill:bool=False) -> UOp: # 0xF0 mode 1/2: header, then bulk per STREAM
   live = UOp.range((link.index(5).load().eq(0) & (n > 0)).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
   loop, at = UOp.range(UOp(Ops.NOOP).after(link, live), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.int, 0)
   off = at.after(loop).index(0).load()
-  cnt = (n - off).minimum(STREAM)
-  header = usb_ctrl(link.after(loop), 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2,
-                    usb_stack(dtypes.uint64, addr + off.cast(dtypes.uint64), cnt // 4).index(0), 12, 5000)
+  cnt, addr = (n - off).minimum(STREAM), addr + off.cast(dtypes.uint64)
+  header = usb_ctrl(link.after(loop), 0x40, 0xF0, usb_tlp_type(addr, write) | 0x0F00, 1 if write else 2,
+                    usb_stack(dtypes.uint64, addr, cnt // 4).index(0), 12, 5000)
   sent = usb_bulk(link.after(header), 0x02 if write else 0x81, data.index(0 if fill else off // data.dtype.itemsize), cnt)
   return at.after(sent).index(0).store(off + STREAM).backedge(loop, (off + STREAM < n) & link.after(sent).index(5).load().eq(0)).end(live).sink()
 
@@ -319,7 +325,7 @@ def usb_begin(link:UOp, fence:UOp, prev:UOp) -> UOp: # previous batch drained, c
 def usb_send(link:UOp, table:UOp, i:UOp, run:UOp, fence:UOp, stage:UOp) -> UOp: # chunk i -> sram half i & 1
   addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
   n, half, wire = (i + run).cast(dtypes.uint64), i & 1, usb_wire(size)
-  xfer, end = link.index(3 + half).load(), (half + 1) * HALF
+  xfer, end = link.index(3 + half).load(), (half + 1) * (stage.max_numel() // 2)
 
   # host half free: fill it
   reaped = usb_reap(link, xfer)
@@ -337,7 +343,7 @@ def usb_send(link:UOp, table:UOp, i:UOp, run:UOp, fence:UOp, stage:UOp) -> UOp: 
 @uopfunc
 def usb_recv(link:UOp, table:UOp, i:UOp, run:UOp, go:UOp, stage:UOp) -> UOp: # chunk i <- both halves
   addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
-  first, second = size.minimum(CHUNK), (size - CHUNK).maximum(0) # bytes per half
+  first, second = size.minimum(chunk:=stage.max_numel() // 2 - 512), (size - chunk).maximum(0) # bytes per half
   wire = (size + (second > 0).cast(dtypes.int) * 512 + 511) // 512 * 512 # the gap block is read too
 
   # arm, let the gpu copy, receive
@@ -345,13 +351,14 @@ def usb_recv(link:UOp, table:UOp, i:UOp, run:UOp, go:UOp, stage:UOp) -> UOp: # c
   released = usb_poke(link.after(armed), go, (i + run + 1).cast(dtypes.uint32))
   received = usb_bulk(link.after(released), 0x81, stage.index(0), wire)
   lower = ccall(libc.memcpy, addr, stage.after(received).index(0), first.cast(dtypes.uint64))
-  return ccall(libc.memcpy, addr + CHUNK, stage.after(lower).index(HALF), second.cast(dtypes.uint64)).sink()
+  return ccall(libc.memcpy, addr + chunk, stage.after(lower).index(stage.max_numel() // 2), second.cast(dtypes.uint64)).sink()
 
 # *****************
 # 5. batch and encode
 
 def is_staged(call:UOp) -> bool: return call.op is Ops.CALL and call.body.op is Ops.STORE and is_host(call.src[1]) != is_host(call.src[2])
-def usb_window(call:UOp) -> tuple[UOp, int]: return (call.src[2], CHUNK) if is_host(call.src[2]) else (call.src[1], 2 * CHUNK) # host, chunk bytes
+def usb_window(call:UOp, half:int=HALF) -> tuple[UOp, int]: # host, chunk bytes
+  return (call.src[2], half - 512) if is_host(call.src[2]) else (call.src[1], 2 * (half - 512))
 def usb_hostaddr(host:UOp, dev:str) -> UOp:
   base, boff = unwrap_view(host)
   return base.bitcast(dtypes.uint8)[boff:boff + host.nbytes()].getaddr(dev)
@@ -365,19 +372,18 @@ def usb_table(hosts:list[tuple[UOp, int]], n:int, win:int, dev:str) -> UOp: # [a
           for o, w in ((0, usb_hostaddr(host, dev) + UOp.const(r, dtypes.uint64) * win), (8, UOp.const(nb, dtypes.uint64)))]
   return patch(UOp.alloc((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.device).rtag("usb_table"), rows)
 
-def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: chunk id of the copy and of its run
+def usb_chunks(call:UOp, first:int, run:int, half:int=HALF) -> list[UOp]:
   dst, src = call.src[1:]
-  vram, (host, win), ops = (dst if is_host(src) else src).bitcast(dtypes.uint8), usb_window(call), list[UOp]()
-  sram = usb_sram(dev:=vram.device).getaddr(dev)
-
+  vram, (host, win), ops = (dst if is_host(src) else src).bitcast(dtypes.uint8), usb_window(call, half), list[UOp]()
+  sram, chunk = usb_sram(dev:=vram.device).getaddr(dev), half - 512
   for r, nb in chunks(host.nbytes(), win):
     n, va = (i:=UOp.const(r, dtypes.uint64)) + first, vram.getaddr(dev) + i * win
     if is_host(src): # copyin: wait sentinel, copy, release
-      end = sram + (((n - run) & 1) + 1) * HALF
+      end = sram + (((n - run) & 1) + 1) * half
       cmds = [ins("wait_eq", end - 4, usb_sentinel(n)), ins("copy", va, end - usb_wire(nb), nb), ins("store", end - 4, 0)]
     else: # copyout: wait go, fill, signal
       cmds = [ins("wait", usb_go(dev), n + 1), ins("store", usb_go(dev), 0)]
-      cmds += [ins("copy", sram + wo, va + po, pb) for wo, po, pb in ((0, 0, min(nb, CHUNK)), (HALF, CHUNK, nb - CHUNK)) if pb > 0]
+      cmds += [ins("copy", sram + wo, va + po, pb) for wo, po, pb in ((0, 0, min(nb, chunk)), (half, chunk, nb - chunk)) if pb > 0]
       cmds += [ins("store", usb_cq(dev), 0)]
     cmds += [ins("store", usb_fence(dev), n + 1)]
     ops += [UOp(Ops.LINEAR, src=tuple(cmds)).end(r)] if isinstance(r, UOp) else cmds # full chunks as one block
@@ -386,16 +392,18 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
 def usb_copy_rewriter(s:UOp) -> UOp|None:
   call, lin = s.without_after, s.without_after.body
   if not is_usb(dev:=call.src[1].device) or not (copies:=[c for c in lin.src if is_staged(c)]): return None
+  half = usb_stage(dev).max_numel() // 2
 
   # a run: one direction, one table
   runs, nums, n = list[tuple[bool, int, UOp, int]](), list[tuple[int, int]](), 0
   for cin, grp in itertools.groupby(copies, key=lambda call: is_host(call.src[2])):
     hosts, k = list[tuple[UOp, int]](), 0 # (host view, first chunk)
-    for host, win in map(usb_window, grp): nums, hosts, k = nums + [(n + k, n)], hosts + [(host, k)], k + ceildiv(host.nbytes(), win)
+    for host, win in map(functools.partial(usb_window, half=half), grp):
+      nums, hosts, k = nums + [(n + k, n)], hosts + [(host, k)], k + ceildiv(host.nbytes(), win)
     runs, n = runs + [(cin, n, usb_table(hosts, k, win, dev), k)], n + k
 
   # gpu side
-  chunks = (usb_chunks(call, *num) for call, num in zip(copies, nums))
+  chunks = (usb_chunks(call, *num, half) for call, num in zip(copies, nums))
   s = call.replace(src=(lin.replace(src=tuple(flatten(next(chunks) if is_staged(c) else [c] for c in lin.src))), call.src[1])).after(*s.src[1:])
 
   # host side, after the submit
@@ -433,6 +441,16 @@ Compiled.pm_lower += PatternMatcher([
 # *****************
 # 6. bufferize
 
+def usb_ctrl_buffer(iface, size:int=2 * HALF) -> Buffer:
+  # the controller's memory the queue and the host share: sys at 0, cq at 0x1000, sram at 0x5000.
+  # the host view starts at the sys page's controller address 0xa000, putting sram on its scsi window 0xf000.
+  vaddr, pieces = iface.dev_impl.mm.alloc_vaddr(size=0x5000 + size), [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, size)]
+  for off, paddr, n in pieces: iface.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=MemoryAddrSpace.SYS, uncached=True)
+  iface.pci_dev.usb.write(0xa800, bytes(4))
+  iface.pci_dev.usb.scsi_write(bytes(size)) # no stale fence or sentinel
+  return Buffer(iface.dev.device, 0x5000 + size, options=BufferSpec(external_ptr=vaddr),
+                opaque=BufferStorage(vaddr, host=iface.pci_dev.dma_view(0xa000, 0x5000 + size)))
+
 @functools.cache
 def _host_block(dev) -> Buffer:
   xfers = [libusb.libusb_alloc_transfer(0).contents for _ in range(2)]
@@ -445,7 +463,8 @@ def _go(dev) -> Buffer:
   return Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
 
 def usb_reset(dev):
-  for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
+  ctrl = dev.iface.ctrl
+  for buf, off, n in ((ctrl, 0x800, 4), (ctrl, 0x5000, ctrl.nbytes - 0x5000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
   for t in map(libusb.struct_libusb_transfer.from_address, _host_block(dev).host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 
 def setup_usb_rules(dev):
