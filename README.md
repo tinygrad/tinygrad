@@ -13,7 +13,7 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 </h3>
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/tinygrad/tinygrad)](https://github.com/tinygrad/tinygrad/stargazers)
+[![GitHub Repo stars](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Ftinygrad%2Ftinygrad&query=%24.stargazers_count&label=stars&logo=github)](https://github.com/tinygrad/tinygrad)
 [![Unit Tests](https://github.com/tinygrad/tinygrad/actions/workflows/test.yml/badge.svg)](https://github.com/tinygrad/tinygrad/actions/workflows/test.yml)
 [![Discord](https://img.shields.io/discord/1068976834382925865)](https://discord.gg/ZjZadyC7PK)
 
