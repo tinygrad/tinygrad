@@ -402,11 +402,11 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
                                estimates=None if active is None else Estimates(2*weights, nbytes, nbytes))
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
 
-def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=()):
-  # grouped experts: the token blocks cover the sorted rows (group[0]), not the output
+def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None):
+  # grouped experts: the token blocks cover the sorted rows (group[0]), not the output. rows: the rows of out to cover (default all)
   if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
-  token_block = UOp.range((group[0].shape[0] if group else out.shape[0])//token_tile, 0, AxisType.GLOBAL)
+  token_block = UOp.range((group[0].shape[0] if group else rows or out.shape[0])//token_tile, 0, AxisType.GLOBAL)
   output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
@@ -570,13 +570,18 @@ def _i8_frag(words:tuple[UOp, ...]) -> UOp:
 
 @functools.cache
 def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int,
-                                 expert_words:int=0, x_div:int=0, act:tuple|None=None) -> UOp:
-  # RDNA4 int8 WMMA on q8 activations: the weights are their packed bytes, the scales apply per 16 inputs (see _wmma_scale), like the decode
+                                 expert_words:int=0, x_div:int=0, act:tuple|None=None, splits:int=1) -> UOp:
+  # RDNA4 int8 WMMA on q8 activations: the weights are their packed bytes, the scales apply per 16 inputs (see _wmma_scale), like the decode.
+  # splits: the inputs are split in that many ranges (workgroups for few outputs), out has the rows of every split (summed after)
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
-  rows = group[0].shape[0] if group else out.shape[0]
+  rows = group[0].shape[0] if group else out.shape[0] // splits
   token_tile = MOE_TILE if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
-  layout = _wmma_layout(out, out_features, token_tile, 2, group)
+  # outputs past a multiple of 32 (a few rows, e.g. the 24 of a hyper-connection): their tiles read the last row and aren't stored
+  real_out, out_features = out_features, round_up(out_features, 32)
+  layout = _wmma_layout(out, out_features, token_tile, 2, group, rows=int(rows))
   output_waves, token_block, output_block, lane, wave, ph, outputs, input_tokens, tokens = layout
+  stored = outputs
+  if real_out != out_features: outputs = tuple(o.minimum(real_out-1) for o in outputs)
   grid = None
   if grids:
     grid = UOp.alloc((int(grids[0].numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
@@ -599,8 +604,9 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     if x_div:
       def xrow(r:UOp) -> UOp: return (e:=entries[r].load()).valid(e >= 0) // x_div
     else: store_rows = tuple(tuple((e:=entries[t].load()).valid(e >= 0) for t in tile_tokens) for tile_tokens in tokens)
-  else: group_rng = UOp.range(n_groups, 4, AxisType.LOOP)
-  g = group_rng
+  else: group_rng = UOp.range(n_groups // splits, 4, AxisType.LOOP)
+  split = UOp.range(splits, 5, AxisType.GLOBAL)
+  g = group_rng + split * (n_groups // splits)
   block, subgroup = g // 8, g % 8
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in tokens] for _ in outputs]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
@@ -608,7 +614,7 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
   s_rows = [[xrow(t) for t in tile_tokens] for tile_tokens in tokens]
   d_x = [[xd[r, g].load() for r in tile_rows] for tile_rows in s_rows]
   zero_acc = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
-  new_vals = [[[accs[o][t].after(g)[j].load() for j in range(8)] for t in range(len(tokens))] for o in range(len(outputs))]
+  new_vals = [[[accs[o][t].after(group_rng)[j].load() for j in range(8)] for t in range(len(tokens))] for o in range(len(outputs))]
   # one scale per 32 inputs: both halves accumulate in int32 and the group is scaled once, else every half has its own scale
   halves = ((0, 1),) if ggml_type in GROUP_SCALE_QUANTS else ((0,), (1,))
   for hs in halves:
@@ -628,11 +634,12 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
           sx = s_x[t][j]
           term = scale * dot[j].load().float() if not zero else scale * (dot[j].load().float() - zero*sx)
           new_vals[o][t][j] = new_vals[o][t][j] + d_x[t][j] * (term if ggml_type not in (Q4_K, Q5_K, Q2_K) else term - minimum*sx)
-  update = UOp.group(*(accs[o][t].store(UOp.stack(*new_vals[o][t])) for o in range(len(outputs)) for t in range(len(tokens)))).end(g)
+  update = UOp.group(*(accs[o][t].store(UOp.stack(*new_vals[o][t])) for o in range(len(outputs)) for t in range(len(tokens)))).end(group_rng)
   if act is not None: stores = _act_stores(out, outputs, store_rows, accs, update, act)
-  else: stores = [out[row, output].store(accs[o][t].after(update)[j].load().cast(out.dtype)) for o, output in enumerate(outputs)
-                  for t, tile_rows in enumerate(store_rows) for j, row in enumerate(tile_rows)]
-  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
+  else: stores = [out[row + split * rows, output.valid(output < real_out) if real_out != out_features else output].store(
+                    accs[o][t].after(update)[j].load().cast(out.dtype))
+                  for o, output in enumerate(stored) for t, tile_rows in enumerate(store_rows) for j, row in enumerate(tile_rows)]
+  return UOp.group(*stores).end(token_block, output_block, split, lane, wave).sink(
     arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_i8_wmma", opts_to_apply=(), estimates=estimates))
 
 @functools.cache
@@ -667,12 +674,20 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   assert (layer.shard_axis == 1) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.shard_axis}"
   out_shape:tuple[int, ...] = (splits*tokens, out_features)
   fxn:Callable[..., UOp]
+  ksplits = 1  # the input groups split over workgroups, their partial outputs summed after
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
   if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and _use_i8_wmma(x.device, layer.ggml_type):
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
+  elif tokens >= 64 and tokens % 16 == 0 and xq is not None and layer.ggml_type in GROUP_SCALE_QUANTS and layer.shard_axis is None and \
+       _wmma_rdna4(x.device):
+    # many tokens already quantized (a few outputs, e.g. a hyper-connection's): the int8 tensor cores, the inputs split over workgroups
+    ksplits = next(s for s in (16, 8, 4, 2, 1) if (in_features // Q8_GROUP_SIZE) % s == 0 and in_features // Q8_GROUP_SIZE // s >= 8)
+    fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, splits=ksplits)
+    srcs = (*xq[:3], *extra)
+    out_shape = (ksplits*tokens, out_features)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
@@ -686,6 +701,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra)
   out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
+  if ksplits > 1: result = result.reshape(ksplits, tokens, out_features).sum(0)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1:
     if not reduce: return result.reshape(splits, *x.shape[:-1], out_features)  # the partial sums, sharded on the device axis
