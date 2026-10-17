@@ -770,6 +770,7 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
+    self._ckpt_tokens: list[int] = []  # the prompt of the recurrent state's checkpoint (_checkpoint)
     # a jit for every token count of a call (the max size of a symbolic chunk, 1 for decoding): static padded shapes of a small chunk don't pay
     # for a big one
     self.jits:dict[int, Any] = {}
@@ -1008,15 +1009,39 @@ class Transformer:
     chunk, small = self.prefill_chunks()
     for n in sorted({1, small + 1 if chunk > small else 1}):
       for _ in range(2):
-        self._cached_tokens = []
+        self._cached_tokens, self._ckpt_tokens = [], []
         list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
-    self._cached_tokens = []
+    self._cached_tokens, self._ckpt_tokens = [], []
+
+  def _recurrent_states(self) -> list[Tensor]:
+    # the state that isn't indexed by position: the recurrent and conv states, the indexers' rings of the last pool
+    states:list[Tensor] = []
+    for b in self.blk:
+      if isinstance(b, GatedDeltaNetBlock) and hasattr(b, "recurrent_state"):
+        states += [b.recurrent_state, *getattr(b, "conv_states", [getattr(b, "conv_state", None)])]
+      if (idx:=getattr(b, "indexer", None)) is not None and hasattr(idx, "ring"): states.append(idx.ring)
+    return [s for s in states if s is not None]
+
+  def _checkpoint(self, tokens:list[int], save:bool):
+    """
+    a copy of the recurrent state at the end of a prompt (save) or back from it: the next prompt has this one, but the model's reply can come
+    back different (re-rendered by a chat template, re-tokenized): the reply and what follows are prefilled again, not everything
+    """
+    if not (states:=self._recurrent_states()): return
+    if not hasattr(self, "_ckpt"): self._ckpt = [s.clone().realize() for s in states]
+    pairs = zip(self._ckpt, states) if save else zip(states, self._ckpt)
+    Tensor.realize(*[dst.assign(src) for dst, src in pairs])
+    if save: self._ckpt_tokens = tokens[:]
+
+  def _reuse(self, tokens:list[int]) -> tuple[int, bool]:
+    # recurrent state can't be partially reused after divergence: the cached prefix if the tokens extend it, else the checkpoint's (restored)
+    cached, ckpt = self._cached_tokens, getattr(self, "_ckpt_tokens", [])
+    if cached and len(cached) < len(tokens) and tokens[:len(cached)] == cached: return len(cached), False
+    if ckpt and len(ckpt) < len(tokens) and tokens[:len(ckpt)] == ckpt: return len(ckpt), True
+    return 0, False
 
   def get_start_pos(self, tokens:list[int]) -> int:
-    # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
-    if self.has_recurrent_block:
-      return len(self._cached_tokens) if self._cached_tokens and len(self._cached_tokens) < len(tokens) \
-        and tokens[:len(self._cached_tokens)] == self._cached_tokens else 0
+    if self.has_recurrent_block: return self._reuse(tokens)[0]
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
@@ -1041,6 +1066,11 @@ class Transformer:
       t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
+    if self.has_recurrent_block:
+      start_pos, restore = self._reuse(tokens)
+      if restore: self._checkpoint(tokens, save=False)
+      # a prefill from before the checkpoint overwrites the caches it relies on
+      elif start_pos < len(getattr(self, "_ckpt_tokens", [])): self._ckpt_tokens = []
     out, prompt_len, ahead = None, len(tokens), False
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
@@ -1053,6 +1083,8 @@ class Transformer:
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
+      # the end of the prompt: a checkpoint of the recurrent state (before any step of the reply)
+      if self.has_recurrent_block and start_pos == prompt_len and getenv("CHECKPOINT", 1): self._checkpoint(tokens, save=True)
       if fast:
         # run ahead: submit the next step (it reads this token on the device) before waiting for this one. it writes the recurrent states of
         # the next position, the ones before it are kept (see GatedDeltaNetBlock._attention): the caches still hold every token but the last

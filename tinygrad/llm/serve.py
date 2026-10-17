@@ -20,8 +20,9 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   # generated (the next prompt renders it, the model's cache is reused)
   patterns = (
     (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>", True),
-    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$", r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>",
-     False))
+    # a value ends at the </arg_value> before the next <arg_key> or the end (a value can hold the markup, e.g. code that parses it)
+    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$",
+     r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>(?=\s*(?:<arg_key>|$))", False))
   for call_pattern, arg_pattern, own_lines in patterns:
     if (fm := re.match(call_pattern, s, re.DOTALL)):
       args = {}
@@ -110,7 +111,8 @@ class Handler(VizHandler):
           break
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+      # a call ends at the </tool_call> before the next <tool_call> or the end (its arguments can hold the markup)
+      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>(?=\s*(?:<tool_call>|$))|$)", router.buf, re.DOTALL):
         if (parsed := parse_tool_call(m.group(1))) is None:
           stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
           yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use

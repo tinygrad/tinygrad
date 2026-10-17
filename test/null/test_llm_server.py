@@ -16,6 +16,13 @@ class TestParseToolCall(unittest.TestCase):
         self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
                          ("write", {"content":value}))
 
+  def test_glm_markup_in_values(self):
+    # a value (code, a tool call in a string) can hold the format's own markup
+    code = "parse_tool_call('write<arg_key>content</arg_key><arg_value>hi</arg_value>')"
+    call = f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value><arg_key>timeout</arg_key><arg_value>30</arg_value>"
+    self.assertEqual(parse_tool_call(call), ("bash", {"command":code, "timeout":30}))
+    self.assertEqual(parse_tool_call(f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value>"), ("bash", {"command":code}))
+
   def test_json_arguments(self):
     for value in ('"text"', '42', 'true', 'null', '[1, "two"]', '{"nested":{"ok":true}}'):
       for call in (f"read<arg_key>value</arg_key><arg_value>{value}</arg_value>",
