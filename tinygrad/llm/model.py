@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
-  hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
+  hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, token_sharded, shard_rows, reduce_scatter, all_gather
@@ -271,14 +271,19 @@ class HyperConnection:
       split = token_sharded(xs)  # sequence parallel: the rows of the streams are split over the devices
       *xq, sq = q8_quantize(flat, n, features, sumsq=True, split=split)
       mix = q8_linear(self.fn, flat, xq=tuple(xq), split=split)
-      pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features, split)
-      h = (xs * pre.unsqueeze(-1)).sum(2)
+      if isinstance(norm, nn.RMSNorm) and norm.weight is not None and getenv("HC_PRE", 1):
+        # one kernel for the coefficients, the mix of the streams and its norm
+        pre, post, comb, hn = hc_pre(mix, sq, base, scale, xs, norm.weight, self.count, self.iters, self.eps, self.norm_eps, norm.eps, features,
+                                     split)
+      else:
+        pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features, split)
+        hn = norm((xs * pre.unsqueeze(-1)).sum(2))
       if split:
-        _partial_out[0], _sp_rows[0] = True, (hn:=norm(h))
+        _partial_out[0], _sp_rows[0] = True, hn
         try: part = sublayer(all_gather(hn, 1, dtypes.half).float())
         finally: _partial_out[0], _sp_rows[0] = False, None
-        out = reduce_scatter(part, 1) if part.ndim == h.ndim + 1 else shard_rows(part, 1)
-      else: out = sublayer(norm(h if rows else h[:, :T]))
+        out = reduce_scatter(part, 1) if part.ndim == hn.ndim + 1 else shard_rows(part, 1)
+      else: out = sublayer(hn if rows else hn[:, :T])
       if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
       ret = out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
       return ret if rows else ret[:, :T]

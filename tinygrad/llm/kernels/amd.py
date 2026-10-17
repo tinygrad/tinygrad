@@ -1094,6 +1094,67 @@ def hc_coeffs(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, count:int, iters
   out = out.reshape(*mix.shape[:-1], -1)
   return out[..., :count], out[..., count:2*count], out[..., 2*count:].reshape(*mix.shape[:-1], count, count)
 
+@functools.cache
+def _hc_pre_kernel(coef:UOp, hn:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, xs:UOp, norm_w:UOp, count:int, iters:int, eps:float, norm_eps:float,
+                   h_eps:float, features:int) -> UOp:
+  # a workgroup per token: wave 0 the coefficients (as hc_coeffs, pre through LDS), then every thread the mix of the streams of its columns,
+  # their rms (LDS) and the normed mix (the sublayer's input)
+  assert count == 4, "the swizzles assume 4 streams"
+  T, D = cast(tuple[int, int], hn.shape)
+  W = 8
+  token, wave, lane = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  groups = sq.shape[1]
+  total = sum((sq[token, (lane + 32*i).valid(lane + 32*i < groups)].load() for i in range((groups+31)//32)), UOp.const(0, dtypes.float))
+  rms = (warp_reduce(total, full_wave=True) * (1/features) + norm_eps).rsqrt()
+  is_comb = lane < count*count
+  idx = is_comb.where(lane + 2*count, (lane - count*count).minimum(2*count-1).maximum(0))
+  which = is_comb.where(2, (lane < count*count + count).where(0, 1))
+  s = which.eq(0).where(scale[0].load().float(), which.eq(1).where(scale[1].load().float(), scale[2].load().float()))
+  v = mix[token, idx].load() * rms * s + base[idx].load().float()
+  sig = (1 + (v * -LOG2E).exp2()).reciprocal()
+  prepost = which.eq(0).where(sig + eps, sig * 2)
+  def rowsum(x:UOp, op=lambda a,b: a+b) -> UOp: return op(y:=op(x, _swizzle_xor(x, 1)), _swizzle_xor(y, 2))
+  def colsum(x:UOp) -> UOp: return (y:=x + _swizzle_xor(x, 4)) + _swizzle_xor(y, 8)
+  e = ((v - rowsum(v, UOp.maximum)) * LOG2E).exp2()
+  c = e * rowsum(e).reciprocal() + eps
+  for it in range(2 * iters - 1): c = c * ((colsum(c) if it % 2 == 0 else rowsum(c)) + eps).reciprocal()
+  valid = lane < count*count + 2*count
+  out_idx = is_comb.where(lane + 2*count, lane - count*count)
+  value = is_comb.where(c, prepost)
+  st_coef = coef[token, out_idx.valid(valid & wave.eq(0))].store(value)
+  lds_pre = UOp.alloc((count,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  is_pre = wave.eq(0) & (lane >= count*count) & (lane < count*count + count)
+  lds_pre = lds_pre.after(lds_pre[(lane - count*count).valid(is_pre)].store(value).barrier())
+  pre = [lds_pre[i].load() for i in range(count)]
+  # the mix of the streams: every thread its D/(W*32) columns
+  per = D // (W * 32)
+  t = wave * 32 + lane
+  cols = [t * per + i for i in range(per)]
+  h = [functools.reduce(lambda a, b: a + b, [pre[st] * xs[token, st, d].load() for st in range(count)]) for d in cols]
+  part = functools.reduce(lambda a, b: a + b, [x * x for x in h])
+  lds_s = UOp.alloc((W,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds_s = lds_s.after(lds_s[wave.valid(lane.eq(0))].store(warp_reduce(part, full_wave=True)).barrier())
+  ss = warp_reduce(lds_s[lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)
+  inv = (ss * (1 / D) + h_eps).rsqrt()
+  st_h = [hn[token, d].store(x * inv * norm_w[d].load().float()) for x, d in zip(h, cols)]
+  return UOp.group(st_coef, *st_h).end(token, wave, lane).sink(arg=KernelInfo(name="hc_pre", opts_to_apply=()))
+
+def hc_pre(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, xs:Tensor, norm_w:Tensor, count:int, iters:int, eps:float, norm_eps:float,
+           h_eps:float, features:int, split:bool=False) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+  """
+  hc_coeffs, then the mix of the (rows, count, D) streams weighed by pre and its rms norm (weight norm_w, eps h_eps): pre, post, comb and the
+  normed mix (rows, D), the sublayer's input
+  """
+  rows, D = prod(mix.shape[:-1]), int(xs.shape[-1])
+  axis = 0 if split else None
+  coef = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=mix.device, axis=axis)
+  hn = Tensor.empty(rows, D, dtype=dtypes.float32, device=mix.device, axis=axis)
+  fxn = functools.partial(_hc_pre_kernel, count=count, iters=iters, eps=eps, norm_eps=norm_eps, h_eps=h_eps, features=features)
+  coef, hn = Tensor.custom_kernel(coef, hn, mix.float().reshape(rows, -1).contiguous(), sq, base.contiguous(), scale.contiguous(),
+                                  xs.reshape(rows, count, D).contiguous(), norm_w.contiguous(), fxn=fxn)[:2]
+  coef = coef.reshape(*mix.shape[:-1], -1)
+  return coef[..., :count], coef[..., count:2*count], coef[..., 2*count:].reshape(*mix.shape[:-1], count, count), hn.reshape(*mix.shape[:-1], D)
+
 # ******** tiny dense fp16 gemv ********
 
 @functools.cache
