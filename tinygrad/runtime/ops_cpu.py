@@ -15,35 +15,38 @@ from tinygrad.runtime.autogen import libc
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
 
-class CPUProgram(Program['CPUDevice']):
+class CPUExecutable:
   rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
 
   def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
 
+  def __init__(self, lib:bytes, lvp:bool=False):
+    # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
+    # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
+    self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
+    self.addr = mv_address(self.mem)
+
+    if OSX: unwrap(self.rt_lib).pthread_jit_write_protect_np(False)
+    self.mem.write(loaded:=self._load(lib, mv_address(self.mem)))
+    if OSX: unwrap(self.rt_lib).pthread_jit_write_protect_np(True)
+
+    # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
+    # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
+    # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
+    # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
+    if 'rt' in DLL._loaded_: self.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(loaded)))
+    else:
+      # msync should be a universal POSIX way to do this
+      libc.msync(ctypes.c_void_p(self.addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
+
+    self.fxn:Any = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if lvp else ctypes.CFUNCTYPE(None)(self.addr)
+
+class CPUProgram(CPUExecutable, Program['CPUDevice']):
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
     self.lvp = obj.target.renderer == "LVP"
-    if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
-    else:
-      # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
-      # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
-      self.mem = mmap.mmap(-1, len(obj.lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
-      self.addr = mv_address(self.mem)
-
-      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      self.mem.write(loaded:=self._load(obj.lib, mv_address(self.mem)))
-      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
-
-      # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
-      # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
-      # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
-      # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if 'rt' in DLL._loaded_: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(loaded)))
-      else:
-        # msync should be a universal POSIX way to do this
-        libc.msync(ctypes.c_void_p(self.addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
-
-      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
+    if dev.remote is not None: self.fxn = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
+    else: super().__init__(obj.lib, self.lvp)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:

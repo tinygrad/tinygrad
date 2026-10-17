@@ -117,6 +117,13 @@ def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
 # **** tests ****
 
 class TestCustomKernel(unittest.TestCase):
+  def test_constant_after_store(self):
+    def kernel(out:UOp):
+      index = UOp.const(1).after(out[0].store(7))
+      return out[index].store(9).sink(arg=KernelInfo(opts_to_apply=()))
+    out = Tensor.zeros(2, dtype=dtypes.int).contiguous().realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [7, 9])
+
   def test_empty(self):
     a = Tensor.empty(1)
     a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink(arg=KernelInfo()))[0]
@@ -596,6 +603,31 @@ class TestCustomKernel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)),
                      "calls in kernels render on CPU")
 class TestCallInKernel(unittest.TestCase):
+  def test_callee_range_is_local(self):
+    def kernel(out:UOp):
+      buf = UOp.param(0, dtypes.int, 4)
+      inner = UOp.range(4, 0, AxisType.UPCAST)
+      fill = buf[inner].store(inner+1).end(inner).sink()
+      outer = UOp.range(2, 0)
+      call = fill.call(out[outer*4], name="fill")
+      return call.end(outer).sink(arg=KernelInfo(name="callee_range_is_local"))
+
+    out = Tensor.empty(8, dtype=dtypes.int).custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [1, 2, 3, 4, 1, 2, 3, 4])
+
+  def test_scalar_call_block(self):
+    def kernel(out:UOp):
+      buf = out.param_like(0)
+      value = UOp.param(1, dtypes.int, addrspace=AddrSpace.ALU)
+      add = buf[0].store(buf[0]+value).sink()
+      first = add.call(buf, value, name="add")
+      second = add.call(buf, (value+4).after(first), name="add")
+      block = second.sink().call(out, UOp.const(3, dtypes.int), name="block")
+      return block.sink(arg=KernelInfo(name="scalar_call_block"))
+
+    out = Tensor([10], dtype=dtypes.int).realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [20])
+
   def test_simple(self):
     N = getenv("N", 4)
 

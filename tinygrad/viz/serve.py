@@ -169,12 +169,19 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
-  if depth is None and a in data.all_uops: return data.all_uops[a]
+  if depth is None:
+    stack = [(a, False)]
+    while stack:
+      node, visited = stack.pop()
+      if node in data.all_uops: continue
+      op, src, arg, *rest = data.trace.uop_fields[node]
+      if visited: data.all_uops[node] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+      else:
+        stack.append((node, True))
+        stack.extend((s, False) for s in reversed(src))
+    return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
-  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
-  if depth is None: data.all_uops[a] = ret
-  return ret
+  return UOp(op, tuple(_reconstruct(data, s, depth-1) for s in src) if depth > 0 else (), arg, *rest)
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
@@ -548,18 +555,27 @@ def get_elf_section(lib:bytes, name:str):
 
 def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
 
-def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
+def amd_code_end(arch:str) -> bytes:
   from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
-  code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
+  return s_code_end().to_bytes()*5 if arch.startswith("rdna") else b""
+
+def amd_decode(buf:bytes|memoryview, arch:str, off:int=0, stop_at_end:bool=False) -> dict[int, Inst]:
+  code_end = amd_code_end(arch)
   addr_table:dict[int, Inst] = {}
-  offset, view = 0, memoryview(buf)
-  while offset < len(buf):
-    if code_end is not None and view[offset:offset+len(code_end)] == code_end: break
+  offset, branch_end, view = 0, 0, memoryview(buf)
+  while offset < len(view):
     remaining = view[offset:]
-    fmt = detect_format(remaining, arch)
-    decoded = fmt.from_bytes(remaining)
-    addr_table[off+offset] = decoded
-    offset += decoded.size()
+    if code_end and remaining[:len(code_end)] == code_end: break
+    try: fmt = detect_format(remaining, arch)
+    except ValueError:
+      if not any(getattr(inst, "op_name", "") == "S_ENDPGM" for inst in addr_table.values()): raise
+      break
+    addr_table[off+offset] = inst = fmt.from_bytes(remaining)
+    offset += inst.size()
+    if stop_at_end:
+      op = getattr(inst, "op_name", "").lower()
+      if (branch:=parse_branch(inst, op)) is not None: branch_end = max(branch_end, offset+branch)
+      if op == "s_endpgm" and offset > branch_end: break
   return addr_table
 
 def parse_branch(inst, op:str) -> int|None:

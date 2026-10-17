@@ -21,7 +21,7 @@ def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, Addr
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
-    if math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
+    if dtype == dtypes.double or math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
     return truncate[dtype](x)
   return int(x)
 
@@ -72,7 +72,7 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "ur
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CDIV: "sdiv", Ops.CMOD: "srem", Ops.SHR: "ashr"}
-flags = " nsz arcp contract afn"
+flags = " nsz contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -91,15 +91,15 @@ base_rewrite = PatternMatcher([
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
    f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
    f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
    f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:
@@ -220,7 +220,11 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
+  code_for_op = LLVMRenderer.code_for_op | {Ops.SQRT:lambda:None}
   string_rewrite = base_rewrite
+  extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([
+    (UPat(Ops.SQRT, name="x"), lambda x: UOp.custom_function(f"llvm.sqrt.f{x.dtype.itemsize*8}", dtype=x.dtype).call(*x.src)),
+  ])
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
@@ -236,11 +240,12 @@ class CPULLVMRenderer(LLVMRenderer):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
     self.compiler = CPULLVMCompiler(target.arch.split(","))
+    self.has_fp16 = self.compiler.has_fp16
 
-  # FIXME: fp16 works on non-osx, but only if the cpu supports it
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if
-            (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and (d != dtypes.half or OSX) and d not in dtypes.fp8s}
+            (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and
+            (d != dtypes.half or OSX or self.has_fp16) and d not in dtypes.fp8s}
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",

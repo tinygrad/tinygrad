@@ -1,7 +1,7 @@
 from dataclasses import replace
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TUPLE_ORDER, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
@@ -414,10 +414,13 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+call_cache: dict[tuple, UOp] = {}
 def lower_call(ctx:Renderer, call:UOp) -> UOp:
-  body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-  body = full_rewrite_to_sink(body, ctx, optimize=False)
-  body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)), arg=to_function_name(call.arg.name))
+  if (body:=call_cache.get(key:=(to_program_key(call.body, ctx, optimize=False), call.arg.name, TUPLE_ORDER.value))) is None:
+    body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
+    body = full_rewrite_to_sink(body, ctx, optimize=False)
+    body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)), arg=to_function_name(call.arg.name))
+    call_cache[key] = body
   return call.replace(src=(body,)+call.src[1:])
 
 pm_lower_calls = PatternMatcher([
@@ -505,11 +508,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 # config affects generated programs and cache keys; context also carries compile-only behavior to workers
-to_program_config = (NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
-                     DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
+to_program_lower_config = (EMULATED_DTYPES, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, DEFAULT_FLOAT, DEFAULT_INT)
+to_program_config = (*to_program_lower_config, NOOPT, USE_TC, ALLOW_TF32, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
 to_program_context = (*to_program_config, SPEC, DEBUG)
-def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
-  return (ast.key, type(renderer), renderer.target, *[x.value for x in to_program_config])
+def to_program_key(ast:UOp, renderer:Renderer, optimize:bool=True) -> tuple:
+  config = to_program_config if optimize and not (isinstance(ast.arg, KernelInfo) and ast.arg.optimized) else to_program_lower_config
+  return (ast.key, type(renderer), renderer.target, *[x.value for x in config])
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:

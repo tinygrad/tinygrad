@@ -4,12 +4,28 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.codegen import to_program
+from tinygrad.codegen.late.linearizer import CFGContext
 from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.isa import ISARenderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.helpers import Target
 from test.helpers import replace_opts
+
+class TestControlFlowOrdering(unittest.TestCase):
+  def test_nested_siblings(self):
+    out = UOp.placeholder((1,), dtypes.int)
+    outer, first, second = UOp.range(2, 0), UOp.range(3, 1), UOp.range(4, 2)
+    first_end = out.index(0).store(outer+first).end(first)
+    second_end = out.after(first_end).index(0).store(outer+second).end(second)
+    self.assertEqual(CFGContext(second_end.end(outer).sink()).edges, {first:outer, second:first_end})
+
+  def test_sequential_scopes(self):
+    out = UOp.placeholder((1,), dtypes.int)
+    first, second = UOp.range(2, 0), UOp.range(3, 1)
+    first_end = out.index(0).store(first).end(first)
+    second_end = out.after(first_end).index(0).store(second).end(second)
+    self.assertEqual(CFGContext(second_end.sink()).edges, {second:first_end})
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
