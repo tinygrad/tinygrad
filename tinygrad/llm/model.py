@@ -7,7 +7,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
-  indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse
+  indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, token_sharded, shard_rows, reduce_scatter, all_gather
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
@@ -223,18 +223,30 @@ class TransformerConfig:
   indexer: IndexerConfig|None = None
   padded_vocab_size: int = 0  # the output rows, zero padded to split over devices
 
+# set while a block's rows are split over the devices (sequence parallel prefill): the sublayers return their partial sums (a leading device
+# axis), the hyper-connection sums each device's rows of them (reduce_scatter) instead of all of them on every device
+_partial_out = [False]
+def _out(layer:Linear, x:Tensor) -> Tensor:
+  """a sublayer's output projection: its partial sums if they are kept (_partial_out)"""
+  return layer.partial(x) if _partial_out[0] else layer(x)
+
+def _identity(x:Tensor) -> Tensor: return x
+
 class HyperConnection:
   def __init__(self, config:TransformerConfig):
     self.count, self.eps, self.iters, self.norm_eps = (hc:=unwrap(config.hc)).count, hc.eps, hc.sinkhorn_iters, config.norm_eps
     self.fn = Linear(self.count * config.dim, (2 + self.count) * self.count, bias=False)
     self.base, self.scale = {"weight": Tensor.zeros((2 + self.count) * self.count)}, {"weight": Tensor.zeros(3)}
 
-  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor], rows:bool=False) -> Tensor:
+  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor], norm:Callable[[Tensor], Tensor]|None=None, rows:bool=False) -> Tensor:
     """
-    mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb.
-    rows: the streams have static padded rows, so do the sublayer's input and output
+    mHC: the sublayer sees the norm of a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed
+    by comb. rows: the streams have static padded rows, so do the sublayer's input and output.
+    rows split over the devices (sequence parallel): every device computes the coefficients and mixes of its rows, the sublayer sees all
+    of them (all_gather) and returns its partial sums, every device sums its rows of them (reduce_scatter)
     """
     base, scale = self.base["weight"], self.scale["weight"]
+    if norm is None: norm = _identity
     if amd_custom_kernels_supported(xs.device) and self.fn.ggml_type in QUANT_SIZES:
       # a symbolic token count runs the streams padded to the max size: static shapes, the sublayer sees the real tokens
       T = xs.shape[1]
@@ -242,11 +254,17 @@ class HyperConnection:
       # fn(rmsnorm(x)) is fn(x) scaled by the rms: the quantization of x has its sums of squares, one kernel for the coefficients and sinkhorn
       flat = xs.flatten(2)
       n, features = int(math.prod(flat.shape[:-1])), int(flat.shape[-1])
-      *xq, sq = q8_quantize(flat, n, features, sumsq=True)
-      mix = q8_linear(self.fn, flat, xq=tuple(xq))
-      pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features)
+      split = token_sharded(xs)  # sequence parallel: the rows of the streams are split over the devices
+      *xq, sq = q8_quantize(flat, n, features, sumsq=True, split=split)
+      mix = q8_linear(self.fn, flat, xq=tuple(xq), split=split)
+      pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features, split)
       h = (xs * pre.unsqueeze(-1)).sum(2)
-      out = sublayer(h if rows else h[:, :T])
+      if split:
+        _partial_out[0] = True
+        try: part = sublayer(all_gather(norm(h), 1, dtypes.half).float())
+        finally: _partial_out[0] = False
+        out = reduce_scatter(part, 1) if part.ndim == h.ndim + 1 else shard_rows(part, 1)
+      else: out = sublayer(norm(h if rows else h[:, :T]))
       if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
       ret = out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
       return ret if rows else ret[:, :T]
@@ -258,7 +276,7 @@ class HyperConnection:
       comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
       # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
       for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
-    out = sublayer((xs * pre.unsqueeze(-1)).sum(2))
+    out = sublayer(norm((xs * pre.unsqueeze(-1)).sum(2)))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
 
 class FFNBlock:
@@ -323,7 +341,7 @@ class FFNBlock:
       if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
       probs = probs * self.config.routed_scaling_factor
       return self._experts(x, h, sel, probs)
-    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit))
+    return _out(self.ffn_down, gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit))
 
   def _experts(self, x:Tensor, h:Tensor, sel:Tensor, probs:Tensor) -> Tensor:
     """the selected experts (and the shared expert) of every token, summed over the devices"""
@@ -343,15 +361,17 @@ class FFNBlock:
       x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D), expert parallel: (devices, B, T, k, D) partials
       out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
+    keep = partial and _partial_out[0]  # the partial sums are returned (sequence parallel)
     if hasattr(self, 'ffn_gate_shexp'):
       shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
       # a row parallel shared expert adds its partial sums to the ones of the experts: one allreduce for both
       shexp = self.ffn_down_shexp.partial(shexp_act) if partial else self.ffn_down_shexp(shexp_act)
       if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
       if shexp.ndim == out.ndim: out = out + shexp
-      if partial: out = partial_sum(out)
-      if shexp.ndim != out.ndim + partial: out = out + shexp
-    elif partial: out = partial_sum(out)
+      elif keep: out = out + shexp / int(out.shape[0])  # a whole shared expert output: a share of it in every partial
+      if partial and not keep: out = partial_sum(out)
+      if shexp.ndim != out.ndim + partial and not keep: out = out + shexp
+    elif partial and not keep: out = partial_sum(out)
     return out
 
   def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor) -> Tensor:
@@ -390,8 +410,8 @@ class FFNBlock:
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None):
       if self.config.hc is not None:
-        xs = self.hc_attn(x, lambda h: self._attention(self.attn_norm(h), start_pos, *(() if T is None else (T,))), rows=T is not None)
-        return self.hc_ffn(xs, lambda h: self._feed_forward(self.ffn_norm(h)), rows=T is not None).contiguous()
+        xs = self.hc_attn(x, lambda h: self._attention(h, start_pos, *(() if T is None else (T,))), self.attn_norm, rows=T is not None)
+        return self.hc_ffn(xs, self._feed_forward, self.ffn_norm, rows=T is not None).contiguous()
       h =     x + self._attention(self.attn_norm(x), start_pos)
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos, T)
@@ -434,7 +454,7 @@ class TransformerBlock(FFNBlock):
     if amd_custom_kernels_supported(x.device) and self.config.ssm is not None:
       attn = flash_attention(q, assigned_kv, start_pos+T)
       attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-      return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
+      return _out(self.attn_output, attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
     k = assigned_kv[0, :, :, 0:start_pos+T, :]
     v = assigned_kv[1, :, :, 0:start_pos+T, :]
 
@@ -455,7 +475,7 @@ class TransformerBlock(FFNBlock):
       mask = mask.expand(1, self.config.n_heads, T, start_pos+T).cat(sink_col, dim=-1)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
+    return _out(self.attn_output, attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
@@ -599,7 +619,7 @@ class MLATransformerBlock(FFNBlock):
         attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, int(N), scale, mask)
       v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
       attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b
-      return self.attn_output(attn.transpose(1, 2).reshape(B, Tq, -1))
+      return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
     k = cache[:, :, 0:start_pos+T, :].float()
     v = k[..., :self.config.kv_lora_rank]
 
@@ -607,7 +627,7 @@ class MLATransformerBlock(FFNBlock):
     if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
-    return self.attn_output(attn)
+    return _out(self.attn_output, attn)
 
   def _attn_mask(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor|None:  # (1, 1, Tq, start_pos+T), None: all visible
     if self.indexer and self.config.max_context > self.indexer.idx.top_k:
@@ -740,7 +760,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
-    return self.ssm_out(z.reshape(B, Tq, -1))
+    return _out(self.ssm_out, z.reshape(B, Tq, -1))
 
   def _init_state(self, x):
     if not hasattr(self, "recurrent_state"):
@@ -782,11 +802,14 @@ class Transformer:
     if hc is not None and not isinstance(T:=x.shape[1], int) and amd_custom_kernels_supported(x.device) and \
        all(isinstance(b, (MLATransformerBlock, GatedDeltaNetBlock)) for b in self.blk):
       x = x.pad_to(x.max_shape).contiguous()
+      # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
+      if sp:=self.sequence_parallel(int(x.shape[1])): x = shard_rows(x, 1)
       for block in self.blk: x = block(x, start_pos, T)
+      if sp: x = all_gather(x.mean(2), 1)
       x = x[:, :T]
     else:
       for block in self.blk: x = block(x, start_pos)
-    if hc is not None: x = x.mean(2)
+    if hc is not None and x.ndim == 4: x = x.mean(2)
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)[:, :self.config.vocab_size]
     q8_quantize_cache_clear()  # don't keep the graph alive
@@ -996,13 +1019,24 @@ class Transformer:
     for p in small: p.replace(p.contiguous())
     Tensor.realize(*small)
 
+  def sequence_parallel(self, rows:int) -> bool:
+    """the hyper-connection streams of a prefill chunk of `rows` are split over the devices: tiles of 16 rows on every device"""
+    devs = self.token_embd.weight.device
+    return isinstance(devs, tuple) and self.config.hc is not None and rows % (16*len(devs)) == 0 and bool(getenv("SEQ_PARALLEL", 1))
+
   def prefill_chunks(self, chunk_size:int|None=None) -> tuple[int, int]:
     """the (max, small) prefill chunk sizes: the custom kernels compute chunks padded to a static size, a prompt that fits the small size
-    runs it (its own jit), large chunks are efficient"""
+    runs it (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
     fast = amd_custom_kernels_supported(self.token_embd.weight.device)
     chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 2048 if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
-    return chunk_size, min(chunk_size, getenv("PREFILL_SMALL", 512 if fast else chunk_size))
+    small = min(chunk_size, getenv("PREFILL_SMALL", 512 if fast else chunk_size))
+    if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None and getenv("SEQ_PARALLEL", 1):
+      # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
+      tile = math.lcm(16*len(devs), 64)
+      def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
+      chunk_size, small = tiled(chunk_size), tiled(small)
+    return chunk_size, small
 
   def warmup(self):
     """compile and capture every jit a request uses: a prompt of each prefill chunk size (twice: a jit captures on its second call), decoding"""

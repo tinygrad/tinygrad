@@ -204,23 +204,25 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, 
   if sq: stores += (sq[0][token, group.valid(lane.eq(0))].store(warp_reduce(value*value, full_wave=True)),)
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
-def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False) -> tuple[Tensor, ...]:
+def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:bool=False) -> tuple[Tensor, ...]:
   """
   int8 groups of 32 with their scales and sums (and optionally sums of squares). an input shared by several layers is quantized once.
   NOTE: the cache holds graphs, the model clears it after building one (q8_quantize_cache_clear)
   """
-  return _q8_quantize(x.uop, tokens, in_features, sumsq)
+  return _q8_quantize(x.uop, tokens, in_features, sumsq, split)
 
 def q8_quantize_cache_clear(): _q8_quantize.cache_clear()
 
 @functools.lru_cache(maxsize=32)
-def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool) -> tuple[Tensor, ...]:
+def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool, split:bool) -> tuple[Tensor, ...]:
   x, groups = Tensor(x_uop), in_features//Q8_GROUP_SIZE
-  q = Tensor.empty(tokens, groups, 8, dtype=dtypes.uint32, device=x.device)
-  scale = Tensor.empty(tokens, groups, dtype=dtypes.float32, device=x.device)
-  xsum = Tensor.empty(tokens, groups, 2, dtype=dtypes.float32, device=x.device)
-  sq = (Tensor.empty(tokens, groups, dtype=dtypes.float32, device=x.device),) if sumsq else ()
-  outs = Tensor.custom_kernel(q, scale, xsum, x, *sq, fxn=functools.partial(_q8_quantize_kernel, tokens=tokens, in_features=in_features))
+  # split: the rows are split over the devices, so are the outputs, every device quantizes its rows
+  axis, local = (0, tokens // len(cast(tuple, x.device))) if split else (None, tokens)
+  q = Tensor.empty(tokens, groups, 8, dtype=dtypes.uint32, device=x.device, axis=axis)
+  scale = Tensor.empty(tokens, groups, dtype=dtypes.float32, device=x.device, axis=axis)
+  xsum = Tensor.empty(tokens, groups, 2, dtype=dtypes.float32, device=x.device, axis=axis)
+  sq = (Tensor.empty(tokens, groups, dtype=dtypes.float32, device=x.device, axis=axis),) if sumsq else ()
+  outs = Tensor.custom_kernel(q, scale, xsum, x, *sq, fxn=functools.partial(_q8_quantize_kernel, tokens=local, in_features=in_features))
   return tuple(outs[:3]) + ((outs[4],) if sumsq else ())
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
@@ -666,7 +668,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[ggml_type]//raw.dtype.itemsize,
                             layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", rdna4, group, expert_words, x_div, act)
 
-def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None) -> Tensor:
+def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
@@ -682,7 +684,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
   elif tokens >= 64 and tokens % 16 == 0 and xq is not None and layer.ggml_type in GROUP_SCALE_QUANTS and layer.shard_axis is None and \
-       _wmma_rdna4(x.device):
+       _wmma_rdna4(x.device) and not split:
     # many tokens already quantized (a few outputs, e.g. a hyper-connection's): the int8 tensor cores, the inputs split over workgroups
     ksplits = next(s for s in (16, 8, 4, 2, 1) if (in_features // Q8_GROUP_SIZE) % s == 0 and in_features // Q8_GROUP_SIZE // s >= 8)
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, splits=ksplits)
@@ -699,7 +701,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   else:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
     srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra)
-  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
+  # split: x has its rows split over the devices (the weight is whole on every device), so has the output
+  out_axis = 0 if split and layer.shard_axis is None else None if layer.shard_axis is None else 1-layer.shard_axis
+  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=out_axis)
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if ksplits > 1: result = result.reshape(ksplits, tokens, out_features).sum(0)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
@@ -763,6 +767,63 @@ def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int) 
   # the next epoch is stored once every thread of the workgroup read the counter
   done = counter.after(UOp.group(store).barrier())[wg.valid(t.eq(0))].store(epoch)
   return UOp.group(store, done).end(wg, t).sink(arg=KernelInfo(name="host_allreduce", opts_to_apply=()))
+
+# ******** sequence parallel: the rows of a tensor split over the devices ********
+
+def token_sharded(x:Tensor) -> bool:
+  """x is split over devices on an axis before its last: its rows if the caller says so (not a leading device axis of partials)"""
+  return isinstance(x.device, tuple) and (axis:=x.uop.axis) is not None and axis < x.ndim - 1
+
+def _per_device(x:Tensor) -> UOp:
+  # the value on every device of a split kernel output (_materialized): its buffer's view of the device, after the kernel
+  u = x.uop
+  assert u.op is Ops.AFTER and u.src[0].op is Ops.UNSHARD, f"not a split kernel output: {u.op}"
+  return u.src[0].src[0].after(*u.src[1:])
+
+def _cast_kernel(out:UOp, x:UOp) -> UOp:
+  o, s = out.flatten(), x.flatten()
+  i = UOp.range(o.shape[0], 0)
+  return o[i].store(s[i].load().cast(o.dtype)).end(i).sink(arg=KernelInfo(name="cast"))
+
+def _materialized(x:Tensor, dtype) -> Tensor:
+  """
+  x (split over devices) cast into a new buffer by a kernel: x and what it is after (e.g. the stores of a recurrent state) are the kernel's
+  input, the result is just a buffer (its per device values are taken apart without its producers)
+  """
+  out = Tensor.empty(*x.shape, dtype=dtype, device=x.device, axis=x.uop.axis)
+  return Tensor.custom_kernel(out, x, fxn=_cast_kernel)[0]
+
+def shard_rows(x:Tensor, axis:int) -> Tensor:
+  """a tensor on every device split on axis: each device keeps its part, nothing is copied"""
+  return Tensor(x.uop._shard(axis, UOp.range(len(cast(tuple, x.device)), 0, AxisType.DEVICE)).unshard(axis))
+
+def reduce_scatter(p:Tensor, axis:int) -> Tensor:
+  """
+  the sum over the leading device axis of p (devices, *S), split on it, as S split on axis (of S): device i sums part i of every device's
+  partial. the parts cross in half through host memory, every device on its own link, the sums in float
+  """
+  from tinygrad.schedule.allreduce import _host_of
+  devs = cast(tuple[str, ...], p.device)
+  n, S, local = len(devs), p.shape[1:], _per_device(_materialized(p, dtypes.half))
+  size, host = S[axis] // n, _host_of(devs[0])
+  def part(j:int, i:int) -> UOp:
+    return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
+  # summed in half, in device order: the sums of the allreduce of partial_sum
+  parts = [functools.reduce(lambda a, b: a + b, [part(j, i).cast(dtypes.half) if j == i else
+                            part(j, i).cast(dtypes.half).contiguous().copy_to_device(host).copy_to_device(devs[i]) for j in range(n)]).float()
+           for i in range(n)]
+  return Tensor(UOp.mstack(*[x.contiguous() for x in parts]).unshard(axis))
+
+def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
+  """a tensor split on axis over the devices, whole on every device: every part goes through host memory once (in dtype)"""
+  from tinygrad.schedule.allreduce import _host_of
+  devs = cast(tuple[str, ...], x.device)
+  local = _per_device(_materialized(x, dtype or x.dtype))
+  mine = [local.mselect(i).contiguous() for i in range(len(devs))]
+  staged = [m.copy_to_device(_host_of(devs[0])) for m in mine]
+  whole = [Tensor.cat(*[Tensor(mine[i] if i == j else staged[i].copy_to_device(devs[j])) for i in range(len(devs))], dim=axis).uop
+           for j in range(len(devs))]
+  return Tensor(UOp.mstack(*whole))
 
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
@@ -981,13 +1042,13 @@ def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, 
     arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
 
 def hc_coeffs(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, count:int, iters:int, eps:float, norm_eps:float,
-              features:int) -> tuple[Tensor, Tensor, Tensor]:
+              features:int, split:bool=False) -> tuple[Tensor, Tensor, Tensor]:
   """
   pre (..., count), post (..., count) and comb (..., count, count) of mHC from the (..., (2+count)*count) mix of the streams before their rms norm,
   and the sums of squares of the streams in (rows, groups)
   """
   rows = prod(mix.shape[:-1])
-  out = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=mix.device)
+  out = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=mix.device, axis=0 if split else None)
   fxn = functools.partial(_hc_coeffs_kernel, count=count, iters=iters, eps=eps, norm_eps=norm_eps, features=features)
   out = Tensor.custom_kernel(out, mix.float().reshape(rows, -1).contiguous(), sq, base.float().contiguous(), scale.float().contiguous(), fxn=fxn)[0]
   out = out.reshape(*mix.shape[:-1], -1)
