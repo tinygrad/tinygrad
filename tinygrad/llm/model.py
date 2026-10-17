@@ -226,6 +226,8 @@ class TransformerConfig:
 # set while a block's rows are split over the devices (sequence parallel prefill): the sublayers return their partial sums (a leading device
 # axis), the hyper-connection sums each device's rows of them (reduce_scatter) instead of all of them on every device
 _partial_out = [False]
+# and the sublayer's input rows of this device (before the gather): per token work (the router) runs on them, its results are gathered
+_sp_rows:list[Tensor|None] = [None]
 def _out(layer:Linear, x:Tensor) -> Tensor:
   """a sublayer's output projection: its partial sums if they are kept (_partial_out)"""
   return layer.partial(x) if _partial_out[0] else layer(x)
@@ -260,9 +262,9 @@ class HyperConnection:
       pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features, split)
       h = (xs * pre.unsqueeze(-1)).sum(2)
       if split:
-        _partial_out[0] = True
-        try: part = sublayer(all_gather(norm(h), 1, dtypes.half).float())
-        finally: _partial_out[0] = False
+        _partial_out[0], _sp_rows[0] = True, (hn:=norm(h))
+        try: part = sublayer(all_gather(hn, 1, dtypes.half).float())
+        finally: _partial_out[0], _sp_rows[0] = False, None
         out = reduce_scatter(part, 1) if part.ndim == h.ndim + 1 else shard_rows(part, 1)
       else: out = sublayer(norm(h if rows else h[:, :T]))
       if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
@@ -316,16 +318,20 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       router = self.ffn_gate_inp
-      if router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and x.shape[1] > 32 and isinstance(x.shape[1], int):
+      # sequence parallel: every device routes its rows, the selections are gathered
+      xr = rows if (rows:=_sp_rows[0]) is not None else x
+      if router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and xr.shape[1] > 32 and isinstance(xr.shape[1], int):
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
-        logits = x.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
-      else: logits = router(x)
+        logits = xr.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
+      else: logits = router(xr)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
-      if gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and x.shape[1] == 1 and amd_custom_kernels_supported(x.device) \
-         and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1):
+      if gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and isinstance(xr.shape[1], int) and \
+         amd_custom_kernels_supported(x.device) and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1):
         sel, probs = moe_router(logits, bias, self.config.num_experts_per_tok, self.config.routed_scaling_factor)
+        if rows is not None: sel, probs = all_gather(sel, 1), all_gather(probs, 1)
         return self._experts(x, h, sel, probs)
+      assert rows is None, "sequence parallel routing needs the router kernel"
       # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
       if gating == ExpertGating.SOFTMAX and bias is None and normalize_topk:
         gating, normalize_topk = ExpertGating.SOFTMAX_WEIGHT, False

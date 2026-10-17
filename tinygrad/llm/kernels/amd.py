@@ -872,8 +872,9 @@ def _reg_int(value:UOp, rng:UOp) -> UOp:
 def moe_router(logits:Tensor, bias:Tensor, k:int, scale:float) -> tuple[Tensor, Tensor]:
   """sigmoid gating with a selection bias, normalized: the top k experts (B, T, k) int32 and their probabilities times scale"""
   shape = (*logits.shape[:-1], k)
-  sel = Tensor.empty(*shape, dtype=dtypes.int32, device=logits.device)
-  probs = Tensor.empty(*shape, dtype=dtypes.float32, device=logits.device)
+  axis = logits.uop.axis if token_sharded(logits) else None  # the tokens split over the devices: so are the selections
+  sel = Tensor.empty(*shape, dtype=dtypes.int32, device=logits.device, axis=axis)
+  probs = Tensor.empty(*shape, dtype=dtypes.float32, device=logits.device, axis=axis)
   fxn = functools.partial(_moe_router_kernel, k=k, scale=scale)
   sel, probs = Tensor.custom_kernel(sel, probs, logits.contiguous(), bias, fxn=fxn)[:2]
   return sel, probs
