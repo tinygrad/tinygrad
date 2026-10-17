@@ -9,6 +9,12 @@ if TYPE_CHECKING:
 
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
+  # Kimi-K3 format: tool="name" index="1"<|sep|><|open|>argument key="key" type="string"<|sep|>value<|close|>argument<|sep|>...
+  if (m := re.fullmatch(r'tool="([^"]+)"(?: index="\d+")?<\|sep\|>(.*)', s, re.DOTALL)):
+    pattern = r'<\|open\|>argument key="([^"]+)" type="([^"]+)"<\|sep\|>(.*?)<\|close\|>argument<\|sep\|>'
+    if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
+    try: return m[1], {a[1]: a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
+    except json.JSONDecodeError: return None
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
       call = json.loads(s)
@@ -42,31 +48,33 @@ def normalize_messages(messages:list[dict]) -> None:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
+  THINK, END_THINK = ("<think>", "<|open|>think<|sep|>"), ("</think>", "<|close|>think<|sep|><|open|>response<|sep|>")
+  TOOL = ("<tool_call>", "<|close|>response<|sep|>")
   def __init__(self, reasoning:bool=False):
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
-  def split(self, tag:str, final:bool) -> tuple[str, bool]:
+  def split(self, tags:tuple[str, ...], final:bool) -> tuple[str, str|None]:
     # split buf on the first full tag, holding back a partial tag at the end unless final
-    if tag in self.buf:
-      before, self.buf = self.buf.split(tag, 1)
-      return before, True
-    hold = max((i for i in range(1, min(len(self.buf), len(tag))+1) if tag.startswith(self.buf[-i:])), default=0) if not final else 0
+    if found := [(self.buf.index(t), t) for t in tags if t in self.buf]:
+      before, self.buf = self.buf.split(tag := min(found)[1], 1)
+      return before, tag
+    hold = max((i for t in tags for i in range(1, min(len(self.buf), len(t))+1) if t.startswith(self.buf[-i:])), default=0) if not final else 0
     emit, self.buf = self.buf[:len(self.buf)-hold], self.buf[len(self.buf)-hold:]
-    return emit, False
+    return emit, None
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
       self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, done = self.split("</think>", final)
+      emit, done = self.split(self.END_THINK, final)
       if emit: yield "reasoning_content", emit
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, found = self.split("<tool_call>", final)
+    emit, found = self.split(self.TOOL, final)
     if emit: yield "content", emit
-    if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
+    if found: self.mode, self.buf = "tool", found + self.buf
 
 class Handler(VizHandler):
   server: LLMServer
@@ -107,7 +115,7 @@ class Handler(VizHandler):
           break
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+      for m in re.finditer(r"(?:<tool_call>|<\|open\|>call )\s*(.*?)\s*(?:</tool_call>|<\|close\|>call<\|sep\|>|$)", router.buf, re.DOTALL):
         if (parsed := parse_tool_call(m.group(1))) is None:
           stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
           yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
@@ -150,7 +158,7 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+                              reasoning=rendered.rstrip().endswith(StreamRouter.THINK))
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"

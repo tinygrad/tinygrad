@@ -347,6 +347,27 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual(second.choices[0].message.content, "done")
     self.assertEqual(second.choices[0].finish_reason, "stop")
 
+  def test_kimi_streaming_tool_call(self):
+    self.set_output('thinking<|close|>think<|sep|><|open|>response<|sep|>before<|close|>response<|sep|>'
+      '<|open|>tools<|sep|><|open|>call tool="read" index="1"<|sep|>'
+      '<|open|>argument key="path" type="string"<|sep|>README.md<|close|>argument<|sep|>'
+      '<|close|>call<|sep|><|close|>tools<|sep|><|close|>message<|sep|>')
+    with patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>think<|sep|>'):
+      chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Read README.md"}],
+                                                       tools=self.tools(), stream=True))
+    self.assertEqual(''.join(c.choices[0].delta.content or '' for c in chunks if c.choices), 'before')
+    self.assertEqual(''.join(getattr(c.choices[0].delta, 'reasoning_content', '') for c in chunks if c.choices), 'thinking')
+    calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+    self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'path':'README.md'})])
+    self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
+  def test_kimi_typed_arguments(self):
+    body = ('tool="read" index="1"<|sep|><|open|>argument key="path" type="string"<|sep|>\na.txt\n<|close|>argument<|sep|>'
+            '<|open|>argument key="offset" type="number"<|sep|>3<|close|>argument<|sep|>')
+    self.assertEqual(parse_tool_call(body), ('read', {'path':'\na.txt\n', 'offset':3}))
+    self.assertIsNone(parse_tool_call(body+'<|open|>argument key="broken"'))
+    self.assertEqual(parse_tool_call('tool="ping" index="1"<|sep|>'), ('ping', {}))
+
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
