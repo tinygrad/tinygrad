@@ -6,7 +6,8 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
-  pool_topk_mask, pool_topk_index, indexer_scores, _wmma_rdna4
+  indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
+  indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
@@ -473,14 +474,34 @@ class Indexer:
     self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
   def _init_state(self, x:Tensor):
-    if not hasattr(self, "cache_kg"):
-      self.cache_kg = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), 2, self.idx.head_dim, dtype=dtypes.half, device=x.device)
-      # the pooled keys: a call recomputes the pools of its tokens only
-      self.cache_pk = Tensor.zeros(x.shape[0], self.cache_kg.shape[1] // self.idx.kpool, self.idx.head_dim, dtype=dtypes.float32,
-                                   device=x.device).contiguous()
+    if hasattr(self, "cache_pk"): return
+    idx, max_pools = self.idx, round_up(self.max_context, self.idx.kpool) // self.idx.kpool
+    # the sparse path (RDNA4): no mask, the pools a query picks are lists (decode) or per 16 queries (prefill, see pool_union)
+    self.sparse = x.shape[0] == 1 and amd_custom_kernels_supported(x.device) and _wmma_rdna4(x.device) and 16 % idx.kpool == 0 and \
+      idx.head_dim % 16 == 0 and max_pools % 64 == 0 and bool(getenv("INDEXER_SPARSE", 1))
+    # the pooled keys, a call pools its tokens' pools only. the sparse path keeps them in half and the tokens of the last incomplete pool in a
+    # ring, the other one every token's key and gate
+    self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, idx.head_dim,
+                                 dtype=dtypes.half if self.sparse else dtypes.float32, device=x.device).contiguous()
+    if self.sparse: self.ring = Tensor.zeros(idx.kpool, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
+    else: self.cache_kg = Tensor.zeros(x.shape[0], max_pools*idx.kpool, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
 
-  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None, index:bool=False) -> Tensor:
-    # x has Tq rows, the first T (default all) are the tokens at start_pos. index (one token): the list of the keys it sees (pool_topk_index)
+  def picks(self, x:Tensor, q:Tensor, start_pos:UOp, T:int|UOp|None=None) -> Tensor:
+    """the sparse path: for every query (Tq, n+1) the list of the n keys it sees at most (its top pools and the tail of its own), the count last"""
+    Tq, idx = int(x.shape[1]), self.idx
+    S = start_pos + (T := Tq if T is None else T)
+    kg, iq = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2), self.attn_q_b(q).reshape(Tq, idx.n_heads, idx.head_dim)
+    pk = pool_keys(self.cache_pk, self.ring, kg[0].half(), self.compressor_ape["weight"], start_pos, T)
+    weights, pools, k = (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5)[0], (S + idx.kpool - 1) // idx.kpool, idx.top_k // idx.kpool
+    # one token: the heads are the rows of the scores' matmul, a kernel picks its pools
+    if Tq == 1 and idx.n_heads % 16 == 0: return indexer_decode_index(iq[0], pk, weights[0], start_pos, pools, k, idx.kpool).reshape(1, -1)
+    # the scores on the tensor cores (rows of 16 queries), a kernel per query picks its pools
+    rows = round_up(Tq, 16)
+    scores = indexer_scores(iq.pad(((0, rows-Tq), None, None)), pk, weights.pad(((0, rows-Tq), None)), pools)
+    return pool_index_rows(scores, start_pos, pools, k, idx.kpool)[:Tq]
+
+  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
+    # x has Tq rows, the first T (default all) are the tokens at start_pos: the mask (B, 1, Tq, S) of the keys every query sees
     (B, Tq, _), idx = x.shape, self.idx
     S = start_pos + (T := Tq if T is None else T)
     # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
@@ -498,23 +519,9 @@ class Indexer:
     pooled = Tensor(self.cache_pk.uop.after(store)).shrink((None, (0, pools), None))  # (B, pools, D)
     weights = self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5
     pools, max_pools = pooled.shape[1], self.cache_kg.shape[1] // idx.kpool
-    if B == 1 and max_pools <= 8192 and Tq % 16 == 0 and max_pools % 64 == 0 and idx.head_dim % 16 == 0 and _wmma_rdna4(x.device) and \
-       getenv("POOL_TOPK", 1):
-      # the scores on the tensor cores (half), the pools padded to the max, then one kernel for the top pools and the mask
-      pk = pooled[0].half().contiguous().pad_to((max_pools, idx.head_dim))
-      scores = indexer_scores(iq[0], pk, weights[0], pools)
-      mask = pool_topk_mask(scores, start_pos, S, self.cache_kg.shape[1], idx.top_k // idx.kpool, idx.kpool, x.dtype, pools=pools)
-      return mask.reshape(B, 1, Tq, S)
     scores = ((iq @ pooled.transpose(-1, -2).unsqueeze(1)).relu() * weights.unsqueeze(-1)).sum(2)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     # NOTE: a symbolic arange is a reduce over the positions, slice a static one
-    if index:
-      assert Tq == 1 and isinstance(start_pos, UOp)
-      return pool_topk_index(scores.reshape(1, pools), start_pos, pools, idx.top_k // idx.kpool, idx.kpool)
-    if B == 1 and max_pools <= 8192 and amd_custom_kernels_supported(x.device) and getenv("POOL_TOPK", 1):
-      # one kernel: the top pools of every query by a bisection, and the mask
-      mask = pool_topk_mask(scores.reshape(Tq, pools), start_pos, S, self.cache_kg.shape[1], idx.top_k // idx.kpool, idx.kpool, x.dtype)
-      return mask.reshape(B, 1, Tq, S)
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(Tq)).reshape(Tq, 1), Tensor.arange(self.cache_kg.shape[1])[:S]
     arange = Tensor.arange(max_pools)[:pools]
     masked = ((arange + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
@@ -574,17 +581,19 @@ class MLATransformerBlock(FFNBlock):
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.cast(self.cache_k.dtype).uop)))
     (N, D), fast = self.cache_k.shape[2:], amd_custom_kernels_supported(x.device) and self.cache_k.shape[2] % 64 == 0
     fast = fast and D & (D-1) == 0
-    # one token with an indexer: the attention gathers the keys it sees (a list), not every key under a mask
-    if gather:=(fast and Tq == 1 and B == 1 and isinstance(start_pos, UOp) and self.indexer is not None and getenv("MLA_GATHER", 1) and
-                self.config.max_context > self.indexer.idx.top_k and self.indexer.cache_kg.shape[1] // self.indexer.idx.kpool <= 8192):
-      keys, mask = self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T, index=True), None
+    # an indexer on the sparse path: no mask, the attention of a token gathers the keys it sees (a list)
+    picks = None
+    if fast and self.indexer is not None and self.indexer.sparse and isinstance(start_pos, UOp) and self.config.max_context > self.indexer.idx.top_k:
+      picks, mask = self.indexer.picks(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T), None
     else: mask = self._attn_mask(x, start_pos, T)
     if fast:
       # flash attention on the latent cache, the keys and values of every head
       scale, latent = 1.0/self.config.head_dim**0.5, cache.reshape(1, *cache.shape)
       if Tq == 1:
         if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
-        attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask, index=keys if gather else None)
+        attn = flash_attention_decode(q.half(), latent, start_pos+T, int(N), shared=True, scale=scale, mask=mask,
+                                      index=picks.reshape(-1) if picks is not None else None)
+      elif picks is not None: attn = flash_attention_mla_sparse(q, latent, picks, scale, start_pos+T)
       else:
         if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
         attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, int(N), scale, mask)
