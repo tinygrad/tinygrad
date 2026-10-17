@@ -23,6 +23,21 @@ class TestParseToolCall(unittest.TestCase):
     self.assertEqual(parse_tool_call(call), ("bash", {"command":code, "timeout":30}))
     self.assertEqual(parse_tool_call(f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value>"), ("bash", {"command":code}))
 
+  def test_special_token_markup(self):
+    # tags that are special tokens decode to sentinels: the same text in a value is literal
+    from tinygrad.llm.serve import markup_tags
+    tags, sentinels = markup_tags({tag: 1000+i for i, tag in enumerate(("<tool_call>", "</tool_call>", "<arg_key>", "</arg_key>", "<arg_value>",
+                                                                        "</arg_value>"))})
+    self.assertEqual(len(sentinels), 6)
+    code = "x = '</arg_value><arg_key>k</arg_key><arg_value>v</arg_value></tool_call>'"
+    call = f"bash{tags['<arg_key>']}command{tags['</arg_key>']}{tags['<arg_value>']}{code}{tags['</arg_value>']}"
+    self.assertEqual(parse_tool_call(call, tags), ("bash", {"command":code}))
+    router, out = StreamRouter(tags=tags), []
+    for piece in ("prose about `<tool_call>` tags ", tags["<tool_call>"], call, tags["</tool_call>"]): out += list(router.route(piece))
+    out += list(router.route("", final=True))
+    self.assertEqual("".join(d for f, d in out if f == "content"), "prose about `<tool_call>` tags ")
+    self.assertTrue(router.buf.startswith(tags["<tool_call>"]))
+
   def test_json_arguments(self):
     for value in ('"text"', '42', 'true', 'null', '[1, "two"]', '{"nested":{"ok":true}}'):
       for call in (f"read<arg_key>value</arg_key><arg_value>{value}</arg_value>",
@@ -317,7 +332,8 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual("".join(c.choices[0].delta.content or "" for c in chunks if c.choices), "before")
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([tc.function.name for tc in calls], ["read", "read"])
-    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"b"}])
+    # GLM's values are exact
+    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"\nb\n"}])
     self.assertEqual([tc.index for tc in calls], [0, 1])
     self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
 
