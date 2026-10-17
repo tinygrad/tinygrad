@@ -43,6 +43,14 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
   out = functools.reduce(lambda a,b: a+b, [B[i] for B in Bs]) + srcs[n_slot]
   return C[i].store(out).end(i).sink(arg=KernelInfo(name=f"add_var_{n_slot}_{len(Bs)}"))
 
+def custom_range_kernel(r:UOp, C:UOp, B:UOp) -> UOp:
+  i = UOp.range(r, 0)
+  return C[i].store(B[i] + r).end(i).sink(arg=KernelInfo(name="range_r"))
+
+def custom_add_nm_kernel(n:UOp, C:UOp, B:UOp, m:UOp) -> UOp:
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(B[i] + n + m).end(i).sink(arg=KernelInfo(name="add_nm"))
+
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
   linear, var_vals = out.linear_with_vars()
   sink = [u for u in linear.toposort(enter_calls=True) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.name == name][0]
@@ -248,13 +256,19 @@ class TestCustomKernel(unittest.TestCase):
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
   def test_scalar_arg_jit_fixed_bind(self):
-    # m is bound inside the jitted function so it's not an input, a replay keeps m=10 while the input n changes
+    # m and r are bound inside the jitted function so they're not inputs, a replay keeps m=10 and the range r=4 while the input n changes
     kernel = functools.partial(custom_add_var_kernel, n_slot=0)
     def f(B, n):
       Bm = Tensor.custom_kernel(Tensor(Variable("m", 0, 100, dtypes.int).bind(10)), Tensor.empty(4, dtype=dtypes.int), B, fxn=kernel)[1]
-      return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), Bm, fxn=kernel)[1].realize()
+      Br = Tensor.custom_kernel(Tensor(Variable("r", 1, 4, dtypes.int).bind(4)), Tensor.empty(4, dtype=dtypes.int), Bm, fxn=custom_range_kernel)[1]
+      return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), Br, fxn=kernel)[1].realize()
     jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
-    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [11+k, 12+k, 13+k, 14+k])
+    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [15+k, 16+k, 17+k, 18+k])
+
+  def test_scalar_arg_twice(self):
+    n = Tensor(Variable("n", 0, 100, dtypes.int).bind(3))
+    out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), n, fxn=custom_add_nm_kernel)[1]
+    self.assertEqual(out.tolist(), [7, 8, 9, 10])
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
