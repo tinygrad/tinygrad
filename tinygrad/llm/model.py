@@ -1,7 +1,7 @@
 from __future__ import annotations
 import array, enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
-from typing import Callable, cast
+from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
@@ -761,11 +761,9 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
-    # we specialize the JIT for prefill and rollout
-    self.prefill_jit = TinyJit(self.forward)
-    # a jit for every max size of a chunk (their own variables): static padded shapes of a small chunk don't pay for a big one
-    self.prefill_jits:dict[int, Callable[..., Tensor]] = {}
-    self.rollout_jit = TinyJit(self.forward)
+    # a jit for every token count of a call (the max size of a symbolic chunk, 1 for decoding): static padded shapes of a small chunk don't pay
+    # for a big one
+    self.jits:dict[int, Any] = {}
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
@@ -792,9 +790,11 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
-    if not resolve(tokens.shape[1] != 1): return self.rollout_jit(tokens, start_pos, temperature)
-    if isinstance(T:=tokens.shape[1], UOp): return self.prefill_jits.setdefault(int(T.vmax), TinyJit(self.forward))(tokens, start_pos, temperature)
-    return self.prefill_jit(tokens, start_pos, temperature)
+    key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
+    if (jit:=self.jits.get(key)) is None:
+      # once a jit ran the model (its states and caches are set up), a new one captures on its first call
+      jit = self.jits[key] = TinyJit(self.forward, capture_first=any(j.cnt > 0 for j in self.jits.values()))
+    return jit(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -986,8 +986,22 @@ class Transformer:
     for p in small: p.replace(p.contiguous())
     Tensor.realize(*small)
 
+  def prefill_chunks(self, chunk_size:int|None=None) -> tuple[int, int]:
+    """the (max, small) prefill chunk sizes: the custom kernels compute chunks padded to a static size, a prompt that fits the small size
+    runs it (its own jit), large chunks are efficient"""
+    fast = amd_custom_kernels_supported(self.token_embd.weight.device)
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 2048 if fast else 32), self.max_context)
+    if self.has_recurrent_block and not fast: chunk_size = 1
+    return chunk_size, min(chunk_size, getenv("PREFILL_SMALL", 512 if fast else chunk_size))
+
   def warmup(self):
-    for _ in range(2): list(zip(range(2), self.generate([0])))
+    """compile and capture every jit a request uses: a prompt of each prefill chunk size (twice: a jit captures on its second call), decoding"""
+    chunk, small = self.prefill_chunks()
+    for n in sorted({1, small + 1 if chunk > small else 1}):
+      for _ in range(2):
+        self._cached_tokens = []
+        list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
+    self._cached_tokens = []
 
   def get_start_pos(self, tokens:list[int]) -> int:
     # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
@@ -998,16 +1012,10 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
-    # the prefill jit is specialized for one chunk size
-    # the custom kernels compute chunks padded to a static size: large chunks are efficient
-    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 2048 if amd_custom_kernels_supported(self.token_embd.weight.device) else 32),
-                                   self.max_context)
-    if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
+    # the prefill jits are specialized for one chunk size each
+    chunk_size, small = self.prefill_chunks(chunk_size)
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-    v_toks = UOp.variable("toks", 1, chunk_size)
-    # a prompt that fits a small chunk runs it padded to the small size (its own jit)
-    small = min(chunk_size, getenv("PREFILL_SMALL", 512 if amd_custom_kernels_supported(self.token_embd.weight.device) else chunk_size))
-    v_small = UOp.variable("toks", 1, small)
+    v_toks, v_small = UOp.variable("toks", 1, chunk_size), UOp.variable("toks", 1, small)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
