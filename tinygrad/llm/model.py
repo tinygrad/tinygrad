@@ -673,14 +673,19 @@ class GatedDeltaNetBlock(FFNBlock):
       real = Tensor.arange(Tq).reshape(1, Tq, 1) < cast(int, T)  # T can be a bound variable
       beta, log_alpha = real.where(beta, 0), real.unsqueeze(-1).where(log_alpha, 0)
 
+    # the states (2, ...) at a position p are p%2: the ones of start_pos are read, the ones after the tokens written. the other ones keep the
+    # state before: the step of a token can be taken back (a generated token that the next prompt doesn't have)
+    rp, wp = start_pos % 2, (start_pos + T) % 2
+    def parity(s:Tensor, p:UOp) -> Tensor: return s.shrink(((p, p+1),) + (None,)*(s.ndim-1))
     # qkv conv, conv_state is reset when starting from position 0
-    def conv(state:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
+    def conv(states:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
       # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
       # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
+      state = parity(states, rp).reshape(states.shape[1:])
       window = initial.where(0, state).cat(proj.cast(state.dtype), dim=1)
       window = window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
       # the last conv_kernel-1 columns of the window become the next conv state
-      store = state.uop.store(window[:, T:T+self.ssm_conv_kernel-1].cast(state.dtype).uop)
+      store = parity(states, wp).uop.store(window[:, T:T+self.ssm_conv_kernel-1].cast(state.dtype).unsqueeze(0).uop)
       return functools.reduce(lambda a,b: a+b, (window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
     if is_kda:
       convs = [conv(state, proj(x), w["weight"]) for state, proj, w in
@@ -706,11 +711,11 @@ class GatedDeltaNetBlock(FFNBlock):
     state = Tensor(self.recurrent_state.uop.after(*conv_state_stores))  # carry the conv write into this graph
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
-      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
+      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos), end_pos=start_pos + T).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)
-      state = initial.where(0, state.float())
+      state = initial.where(0, parity(state, rp).reshape(state.shape[1:]).float())
       outs = []
       for t in range(T_pad):
         s1 = state * alpha[:, :, t]  # decay the state
@@ -719,7 +724,8 @@ class GatedDeltaNetBlock(FFNBlock):
         outs.append((state * q[:, :, t]).sum(-1))
 
       # store the updated recurrent state in place, then read the stacked outputs after the write
-      state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
+      state_store = parity(self.recurrent_state, wp).uop.store(state.cast(self.recurrent_state.dtype).reshape(self.recurrent_state.shape[1:])
+                                                                .unsqueeze(0).uop)
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store))
 
     # output; undo the padding before the output projection
@@ -731,8 +737,9 @@ class GatedDeltaNetBlock(FFNBlock):
     if not hasattr(self, "recurrent_state"):
       # with heads split over devices, the states are too
       split = isinstance(x.device, tuple) and isinstance(self.ssm_a.device, tuple) and self.ssm_a.uop.axis == 0
+      # two of each state: the state at a position p is p%2 (see _attention)
       def state(*shape:int, axis:int) -> Tensor:
-        return (Tensor.zeros(*shape).shard(x.device, axis) if split else Tensor.zeros(*shape, device=x.device)).clone()
+        return (Tensor.zeros(2, *shape).shard(x.device, axis+1) if split else Tensor.zeros(2, *shape, device=x.device)).clone()
       if hasattr(self, "attn_qkv"): self.conv_state = state(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, axis=2)
       else: self.conv_states = [state(x.shape[0], self.ssm_conv_kernel-1, d, axis=2) for d in self.qkv_dims]
       self.recurrent_state = state(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, axis=1)
@@ -1020,7 +1027,8 @@ class Transformer:
     out, prompt_len, ahead = None, len(tokens), False
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
-      sp, nt = v_start_pos.bind(start_pos), (v_small if n_toks <= small else v_toks).bind(n_toks)
+      # the prompt in chunks (symbolic sizes), then one token at a time (the decode jit)
+      sp, nt = v_start_pos.bind(start_pos), 1 if start_pos >= prompt_len else (v_small if n_toks <= small else v_toks).bind(n_toks)
       # with run ahead, the previous step already submitted this one
       if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
       # the token is polled only if the call wrote it to the token buffer (a replaced __call__ doesn't)
@@ -1029,9 +1037,10 @@ class Transformer:
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       if fast:
-        # run ahead: submit the next step (it reads this token on the device) before waiting for this one
+        # run ahead: submit the next step (it reads this token on the device) before waiting for this one. it writes the recurrent states of
+        # the next position, the ones before it are kept (see GatedDeltaNetBlock._attention): the caches still hold every token but the last
         if ahead:=len(tokens) + 1 < self.max_context: self(t[:, (sp:=v_start_pos.bind(start_pos)):sp+1], sp, temp)
         while (tok:=self._token_host[start_pos]) < 0: pass
       tokens.append(tok if fast else int(cast(Tensor, out).item()))
-      self._cached_tokens = tokens[:] if ahead else tokens[:-1]
+      self._cached_tokens = tokens[:-1]
       yield tokens[-1]

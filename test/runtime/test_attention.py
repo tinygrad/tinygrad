@@ -131,11 +131,12 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block._init_state(x_norm)
     return block._attention(x_norm, start_pos).realize().numpy()
 
-  def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
+  def _cache_views(self, block:GatedDeltaNetBlock, pos:int) -> tuple[np.ndarray, np.ndarray]:
+    # the states at position pos (two of each: the state at a position p is p%2)
     if hasattr(block, 'conv_state'):
-      return block.conv_state.numpy(), block.recurrent_state.numpy()
+      return block.conv_state.numpy()[pos % 2], block.recurrent_state.numpy()[pos % 2]
     if hasattr(block, 'conv_states'):  # kda: q/k/v convolutions apart
-      return np.concatenate([s.numpy() for s in block.conv_states], axis=-1), block.recurrent_state.numpy()
+      return np.concatenate([s.numpy()[pos % 2] for s in block.conv_states], axis=-1), block.recurrent_state.numpy()[pos % 2]
     else:
       conv_flat = (block.ssm_conv_kernel - 1) * block.conv_channels
       cache = block.delta_cache.numpy()
@@ -217,7 +218,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, x)
     out = self._run_attention(block, x, 0)
-    conv_state, recurrent_state = self._cache_views(block)
+    conv_state, recurrent_state = self._cache_views(block, x.shape[1])
     np.testing.assert_allclose(out, np.concatenate(expected_outs, axis=1), rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(conv_state, expected_conv[-1], rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(recurrent_state, expected_recurrent[-1], rtol=1e-3, atol=1e-3)
@@ -225,7 +226,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
     for step in range(x.shape[1]):
       out = self._run_attention(block, x[:, step:step+1], step)
-      conv_state, recurrent_state = self._cache_views(block)
+      conv_state, recurrent_state = self._cache_views(block, step+1)
       np.testing.assert_allclose(out, expected_outs[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet output mismatch at step {step}")
       np.testing.assert_allclose(conv_state, expected_conv[step], rtol=1e-3, atol=1e-3,
@@ -242,7 +243,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
     for step in range(prompt.shape[1]):
       out = self._run_attention(block, prompt[:, step:step+1], step)
-      conv_state, recurrent_state = self._cache_views(block)
+      conv_state, recurrent_state = self._cache_views(block, step+1)
       np.testing.assert_allclose(out, expected_outs[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset output mismatch at step {step}")
       np.testing.assert_allclose(conv_state, expected_conv[step], rtol=1e-3, atol=1e-3,
@@ -264,7 +265,23 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block._attention(x, 0).realize()
     # the first token's state is beta * v (x) l2norm(k), with beta = sigmoid(0) and v, k through the conv and silu
     def silu(z): return z / (1 + np.exp(-z))
-    np.testing.assert_allclose(block.recurrent_state.numpy(), 0.5 * silu(1.0) * silu(1e-4) / np.sqrt(8 * silu(1e-4)**2 + 1e-6), rtol=1e-3)
+    # (the state after position 0 is the second one: the state at a position p is p%2)
+    np.testing.assert_allclose(block.recurrent_state.numpy()[1], 0.5 * silu(1.0) * silu(1e-4) / np.sqrt(8 * silu(1e-4)**2 + 1e-6), rtol=1e-3)
+
+  def test_redo_last_token(self):
+    # the step of a token can be taken back: the state before it is kept (a generated token the next prompt doesn't have, run ahead)
+    for kda in (False, True):
+      ssm = SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda)
+      config = self._make_config(ssm=ssm)
+      block = GatedDeltaNetBlock(config, config.ssm)
+      for p in nn.state.get_parameters(block):
+        p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
+      x, y = self._tensor_linspace(-0.5, 0.5, (1, 3, config.dim)), self._tensor_linspace(0.3, -0.2, (1, 1, config.dim))
+      for i in range(3): self._run_attention(block, x[:, i:i+1], i)
+      redo = self._run_attention(block, y, 2)
+      self._reset_state(block)
+      for i in range(2): self._run_attention(block, x[:, i:i+1], i)
+      np.testing.assert_allclose(redo, self._run_attention(block, y, 2), rtol=1e-5, atol=1e-5, err_msg=f"{kda=}")
 
   def test_kda_channel_decay(self):
     config = self._make_config(dim=4, hidden_dim=8, n_heads=2, head_dim=4, rope_dim=4, v_head_dim=4,
@@ -274,11 +291,12 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block.ssm_f_b.weight = Tensor([[1., 0.], [0., 1.], [1., 1.], [2., 1.]])
     block._init_state(x)
     initial_state = Tensor.arange(8, dtype=dtypes.float32).reshape(1, 2, 2, 2)
-    block.recurrent_state.assign(initial_state).realize()
+    block.recurrent_state.assign(initial_state.unsqueeze(0).repeat(2, 1, 1, 1, 1)).realize()
     block.ssm_a = Tensor([[-1.], [-1.]])
     block._attention(x, x.shape[1]).realize()
     alpha = np.exp(-self._softplus_np(np.array([[1, 2, 3, 4], [2, 1, 3, 5]])).reshape(2, 2, 2)).prod(0)
-    np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[:, None, :], rtol=1e-5, atol=1e-5)
+    # read and written at the positions 2 and 4: the state at a position p is p%2
+    np.testing.assert_allclose(block.recurrent_state.numpy()[0], initial_state.numpy() * alpha[:, None, :], rtol=1e-5, atol=1e-5)
 
   def test_kda_prefill_matches_decode(self):
     config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True))
@@ -287,10 +305,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
     x = self._tensor_linspace(-0.5, 0.5, (1, 3, config.dim))
     prefill = self._run_attention(block, x, 0)
-    prefill_conv, prefill_recurrent = self._cache_views(block)
+    prefill_conv, prefill_recurrent = self._cache_views(block, 3)
     self._reset_state(block)
     decode = np.concatenate([self._run_attention(block, x[:, i:i+1], i) for i in range(3)], axis=1)
-    decode_conv, decode_recurrent = self._cache_views(block)
+    decode_conv, decode_recurrent = self._cache_views(block, 3)
     np.testing.assert_allclose(prefill, decode, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(prefill_conv, decode_conv, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3)
@@ -309,14 +327,14 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       else: block = self._make_block(config)
       x = self._tensor_linspace(-0.5, 0.5, (1, 4, config.dim))
       decode = self._run_attention(block, x, 0)
-      decode_conv, decode_recurrent = self._cache_views(block)
+      decode_conv, decode_recurrent = self._cache_views(block, 4)
       for chunking in ([2, 2], [1, 3]):
         self._reset_state(block)
         outs, start = [], 0
         for size in chunking:
           outs.append(self._run_attention(block, x[:, start:start+size], start))
           start += size
-        chunked_conv, chunked_recurrent = self._cache_views(block)
+        chunked_conv, chunked_recurrent = self._cache_views(block, 4)
         np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")

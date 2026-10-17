@@ -1385,7 +1385,9 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 # ******** gated delta net: fused recurrent scan ********
 
 @functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
+def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
+                                end_pos:UOp|None=None) -> UOp:
+  # end_pos: the state is (2, B, H, V, K), the state at a position p is p%2: read at start_pos, written at end_pos
   batch, heads, tokens, value_dim, row_tile = *core.shape, 4
   key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
   assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
@@ -1393,14 +1395,17 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
   q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
   beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
-  alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
+  alpha = alpha.reshape(batch*heads, tokens, alpha_dim)
+  # the rows of the state read and written: offsets in the (2*B*H, V, K) state with parities
+  read_off, write_off = (0, 0) if end_pos is None else ((cast(UOp, start_pos) % 2) * (batch*heads), (end_pos % 2) * (batch*heads))
+  state = state.reshape(-1, value_dim, key_dim)
   bh_row, lane = UOp.range(batch*heads*value_dim//row_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   bh, row_base = bh_row // (value_dim//row_tile), (bh_row % (value_dim//row_tile))*row_tile
   rows, cols = tuple(row_base+i for i in range(row_tile)), tuple(lane + i*32 for i in range(key_dim//32))
   current = UOp.alloc((row_tile*key_dim//32,), dtypes.float32, addrspace=AddrSpace.REG)
   initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if initial is None else
-    initial.where(0, state[bh, row, col].float()) for row in rows for col in cols))))
+  current = current.after(current.store(UOp.stack(*(state[read_off+bh, row, col].float() if initial is None else
+    initial.where(0, state[read_off+bh, row, col].float()) for row in rows for col in cols))))
   token = UOp.range(tokens, 2, AxisType.LOOP)
   keys = tuple(k[bh, token, col].load() for col in cols)
   queries = tuple(q[bh, token, col].load() for col in cols)
@@ -1414,7 +1419,7 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
     updates += [x + delta*y for x,y in zip(decayed, keys)]
     stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q + delta*kq[bh, token]))
   step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
-  state_stores = (state[bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
+  state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
@@ -1573,12 +1578,14 @@ KDA_WAVES = 8
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
                        dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float) -> UOp:
   # one token of a kda layer, a workgroup per head: the short convolutions of q, k and v (shifting their states), the l2 norms of q and k,
-  # the decay and the delta rule update of the head's state, the rms norm of the output and its sigmoid gate
+  # the decay and the delta rule update of the head's state, the rms norm of the output and its sigmoid gate.
+  # the states (2, ...) at a position p are p%2: read at start_pos, written at start_pos+1 (the other one keeps the state before the token)
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   W, conv = KDA_WAVES, cast(int, wq.shape[-1])
   assert K == V == W*32//2 and conv == 4, "a thread per channel of q, k and v"
-  state, z = state.reshape(heads, V, K), z.reshape(heads*V)
-  cq, ck, cv = (x.reshape(conv-1, heads*K) for x in (cq, ck, cv))
+  state, z = state.reshape(2*heads, V, K), z.reshape(heads*V)
+  cq, ck, cv = (x.reshape(2*(conv-1), heads*K) for x in (cq, ck, cv))
+  rp, wp = start_pos % 2, (start_pos + 1) % 2
   pq, pk, pv, gate, alpha = (x.reshape(heads*K) for x in (pq, pk, pv, gate, alpha))
   h, wave, lane = UOp.range(heads, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   tid, initial = wave * WARP_SIZE + lane, start_pos.eq(0)
@@ -1589,10 +1596,10 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   ch, active = h * K + tid % K, tid < K
   stores = []
   for i, (cs, p, w) in enumerate(((cq, pq, wq), (ck, pk, wk), (cv, pv, wv))):
-    window = [initial.where(0, cs[j, ch].load().float()) for j in range(conv-1)] + [p[ch].load().float()]
+    window = [initial.where(0, cs[rp*(conv-1) + j, ch].load().float()) for j in range(conv-1)] + [p[ch].load().float()]
     out = silu(sum((w[ch, j].load().float() * window[j] for j in range(1, conv)), w[ch, 0].load().float() * window[0]))
-    shifted = cs.after(*window)
-    stores += [lds[i, tid.valid(active)].store(out)] + [shifted[j, ch.valid(active)].store(window[j+1].cast(cs.dtype)) for j in range(conv-1)]
+    stores += [lds[i, tid.valid(active)].store(out)] + [cs[wp*(conv-1) + j, ch.valid(active)].store(window[j+1].cast(cs.dtype))
+                                                       for j in range(conv-1)]
   lds = lds.after(UOp.group(*stores).barrier())
   # every wave: q and k of the head (key column lane + 32*i), l2 normalized, the decay of every column
   cols = [lane + 32*i for i in range(K // 32)]
@@ -1615,11 +1622,11 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   ostores, sstores = [], []
   for j in range(rows_per_wave):
     r = wave * rows_per_wave + j
-    decayed = [initial.where(0, state[h, r, c].load().float()) * d for c, d in zip(cols, decays)]
+    decayed = [initial.where(0, state[rp*heads + h, r, c].load().float()) * d for c, d in zip(cols, decays)]
     sk = warp_reduce(functools.reduce(lambda s,xy: s + xy[0]*xy[1], zip(decayed[1:], ks[1:]), decayed[0]*ks[0]), full_wave=True)
     sq = warp_reduce(functools.reduce(lambda s,xy: s + xy[0]*xy[1], zip(decayed[1:], qs[1:]), decayed[0]*qs[0]), full_wave=True)
     delta = (lds[2, r].load() - sk) * b
-    sstores += [state.after(*decayed)[h, r, c].store((x + delta * kk).cast(state.dtype)) for c, x, kk in zip(cols, decayed, ks)]
+    sstores += [state[wp*heads + h, r, c].store((x + delta * kk).cast(state.dtype)) for c, x, kk in zip(cols, decayed, ks)]
     ostores.append(lds_o[r.valid(lane.eq(0))].store(sq + delta * kq))
   lds_o = lds_o.after(UOp.group(*ostores).barrier())
   # rms norm of the head's output, gated
@@ -1632,8 +1639,11 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float) -> Tensor:
-  """one token of a kda layer: returns the gated, normed output (B, 1, heads*V) in half, updates the conv states and the state in place"""
-  B, heads, V, K = state.shape
+  """
+  one token of a kda layer: returns the gated, normed output (B, 1, heads*V) in half. the states (2, B, ...) at a position p are p%2:
+  the ones of start_pos are read, the ones of start_pos+1 written
+  """
+  _, B, heads, V, K = state.shape
   assert B == 1 and start_pos.uop.is_bound_var
   z = Tensor.empty(1, 1, heads*V, dtype=dtypes.half, device=state.device, axis=None if state.uop.axis is None else 2)
   # the states are written in place
@@ -1644,20 +1654,27 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps).call(*contig)
   return Tensor(contig[0].after(call))
 
-def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None) -> Tensor:
+def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None,
+                        end_pos:UOp|None=None) -> Tensor:
+  """
+  the scan of the (B, H, T, ...) tokens updating the recurrent state in place. end_pos: the state is (2, B, H, V, K), the state at position p
+  is p%2: the scan reads the state of start_pos and writes the one of end_pos (the other one keeps the state before)
+  """
   batch, heads, tokens, key_dim = q.shape
   value_dim = v.shape[-1]
-  assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens) and state.shape == (batch, heads, value_dim, key_dim)
+  assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens)
+  assert state.shape == ((2,) if end_pos is not None else ()) + (batch, heads, value_dim, key_dim)
   assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, key_dim))
   assert key_dim % 32 == 0 and value_dim % 4 == 0
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
   if start_pos is not None:
     assert start_pos.uop.is_bound_var
-    state = Tensor(state.uop.after(start_pos.uop))
+    state = Tensor(state.uop.after(start_pos.uop, *([end_pos] if isinstance(end_pos, UOp) else [])))
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbound()).call(*contig)
+  end = None if end_pos is None else end_pos.unbind_all()[0] if isinstance(end_pos, UOp) else UOp.const(end_pos, dtypes.weakint)
+  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbound(), end).call(*contig)
   return Tensor(contig[0].after(call))
