@@ -406,7 +406,8 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None):
   # grouped experts: the token blocks cover the sorted rows (group[0]), not the output. rows: the rows of out to cover (default all)
-  if out_features % (16*output_tiles): output_tiles = 1
+  # output_tiles: at most that many, as many as divide the outputs
+  output_tiles = next(t for t in (output_tiles, 4, 2, 1) if t <= output_tiles and out_features % (16*t) == 0)
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block = UOp.range((group[0].shape[0] if group else rows or out.shape[0])//token_tile, 0, AxisType.GLOBAL)
   output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
@@ -651,7 +652,8 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
   token_tile = MOE_TILE if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
-  layout = _wmma_layout(out, out_features, token_tile, 2, group)
+  # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few)
+  layout = _wmma_layout(out, out_features, token_tile, 2 if group else 4, group)
   output_waves, _, _, lane, wave, physical_half, _, _, _ = layout
   word_indices = (physical_half, physical_half+2) if rdna4 else tuple(range(4))
   grid = None
