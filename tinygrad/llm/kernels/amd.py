@@ -404,11 +404,11 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
                                estimates=None if active is None else Estimates(2*weights, nbytes, nbytes))
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
 
-def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None):
+def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None, waves:int=2):
   # grouped experts: the token blocks cover the sorted rows (group[0]), not the output. rows: the rows of out to cover (default all)
   # output_tiles: at most that many, as many as divide the outputs
   output_tiles = next(t for t in (output_tiles, 4, 2, 1) if t <= output_tiles and out_features % (16*t) == 0)
-  output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
+  output_waves = next(w for w in (waves, 8, 4, 2, 1) if w <= waves and out_features % (16*output_tiles*w) == 0)
   token_block = UOp.range((group[0].shape[0] if group else rows or out.shape[0])//token_tile, 0, AxisType.GLOBAL)
   output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
@@ -581,7 +581,8 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
   token_tile = MOE_TILE if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
   # outputs past a multiple of 32 (a few rows, e.g. the 24 of a hyper-connection): their tiles read the last row and aren't stored
   real_out, out_features = out_features, round_up(out_features, 32)
-  layout = _wmma_layout(out, out_features, token_tile, 2, group, rows=int(rows))
+  # grouped experts: eight waves share a tile's activations (through LDS)
+  layout = _wmma_layout(out, out_features, token_tile, 2, group, rows=int(rows), waves=8 if group else 2)
   output_waves, token_block, output_block, lane, wave, ph, outputs, input_tokens, tokens = layout
   stored = outputs
   if real_out != out_features: outputs = tuple(o.minimum(real_out-1) for o in outputs)
@@ -615,13 +616,34 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
   a_rows = [xrow(t) for t in input_tokens]
   s_rows = [[xrow(t) for t in tile_tokens] for tile_tokens in tokens]
-  d_x = [[xd[r, g].load() for r in tile_rows] for tile_rows in s_rows]
+  # grouped experts of formats without a zero point: the tile's activations of the group (and their scales) through LDS, loaded once for the
+  # waves (a word or a scale a thread), a lane's words of a fragment next to each other
+  stage_x = bool(group) and ggml_type in GROUP_SCALE_QUANTS and ggml_type not in (Q4_K, Q5_K)
+  if stage_x:
+    tile_rows, threads, tid = len(input_tokens)*16, output_waves*32, wave*32 + lane
+    lds_q = UOp.alloc((tile_rows, 8), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    lds_d = UOp.alloc((tile_rows,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    st = []
+    # every thread loads a word of a row (or a scale)
+    for k in range((tile_rows*9 + threads - 1) // threads):
+      e = tid + k*threads
+      rr, wi = (e // 9).minimum(tile_rows-1), e % 9
+      xr = xrow(token_block*tile_rows + rr)
+      ok = e < tile_rows*9
+      st.append(lds_q[rr.valid(ok & (wi < 8)), ((wi%2)*4 + wi//2).minimum(7)].store(xq[xr, g, wi.minimum(7)].load()))
+      st.append(lds_d[rr.valid(ok & wi.eq(8))].store(xd[xr, g].load()))
+    staged = UOp.group(*st).barrier()
+    lds_q, lds_d = lds_q.after(staged), lds_d.after(staged)
+    d_x = [[lds_d[t*16 + ph*8 + j].load() for j in range(8)] for t in range(len(tokens))]
+  else: d_x = [[xd[r, g].load() for r in tile_rows] for tile_rows in s_rows]
   zero_acc = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
   new_vals = [[[accs[o][t].after(group_rng)[j].load() for j in range(8)] for t in range(len(tokens))] for o in range(len(outputs))]
   # one scale per 32 inputs: both halves accumulate in int32 and the group is scaled once, else every half has its own scale
   halves = ((0, 1),) if ggml_type in GROUP_SCALE_QUANTS else ((0,), (1,))
   for hs in halves:
-    afrags = [[_i8_frag((xq[r, g, half*4+ph].load(), xq[r, g, half*4+2+ph].load())) for half in hs] for r in a_rows]
+    if stage_x: afrags = [[_i8_frag((lds_q[t*16 + lane % 16, ph*4 + 2*half].load(), lds_q[t*16 + lane % 16, ph*4 + 2*half + 1].load()))
+                           for half in hs] for t in range(len(a_rows))]
+    else: afrags = [[_i8_frag((xq[r, g, half*4+ph].load(), xq[r, g, half*4+2+ph].load())) for half in hs] for r in a_rows]
     s_x = [[sum((xs[r, g, half].load() for half in hs), UOp.const(0, dtypes.float)) for r in tile_rows] for tile_rows in s_rows]
     for o, output in enumerate(outputs):
       base = expert_base + output*output_words + block*type_words
