@@ -10,8 +10,9 @@ class TestParseToolCall(unittest.TestCase):
   def test_argument_newlines(self):
     for value in ("", "text", " text ", "\n", "\nfirst\nsecond\n\n", "\r\nfirst\r\nsecond\r\n\r\n"):
       for newline in ("\n", "\r\n"):
+        # GLM's values are exact (its template renders them as they are), the XML format puts them on their own lines
         self.assertEqual(parse_tool_call(f"write<arg_key>content</arg_key><arg_value>{newline}{value}{newline}</arg_value>"),
-                         ("write", {"content":value}))
+                         ("write", {"content":newline+value+newline}))
         self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
                          ("write", {"content":value}))
 
@@ -25,7 +26,7 @@ class TestParseToolCall(unittest.TestCase):
     for separator in ("", "\n"):
       call = separator.join(("write", "<arg_key>path</arg_key>", "<arg_value>out.txt</arg_value>",
                              "<arg_key>content</arg_key>", "<arg_value>\nhello\n</arg_value>"))
-      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"hello"}))
+      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"\nhello\n"}))
 
   def test_glm_no_arguments(self):
     self.assertEqual(parse_tool_call("tools.ping-v1"), ("tools.ping-v1", {}))

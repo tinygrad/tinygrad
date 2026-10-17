@@ -16,14 +16,17 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
     except (json.JSONDecodeError, KeyError): return None
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
   # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
+  # the XML format puts the value on its own lines (the newlines around it aren't part of it), GLM's is exact: a value is sent back as it was
+  # generated (the next prompt renders it, the model's cache is reused)
   patterns = (
-    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>"),
-    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$", r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>"))
-  for call_pattern, arg_pattern in patterns:
+    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>", True),
+    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$", r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>",
+     False))
+  for call_pattern, arg_pattern, own_lines in patterns:
     if (fm := re.match(call_pattern, s, re.DOTALL)):
       args = {}
       for pm in re.finditer(arg_pattern, fm.group(2), re.DOTALL):
-        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
+        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2)) if own_lines else pm.group(2)
         try: args[pm.group(1)] = json.loads(value)
         except json.JSONDecodeError: args[pm.group(1)] = value
       return fm.group(1), args
