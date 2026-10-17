@@ -736,7 +736,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
   scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
   for w in range(16):
     word = raw[base + 1 + w].load().cast(dtypes.uint32)
-    for b in range(2): st.append(lds_w[tid, w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
+    for b in range(2):
+      st.append(lds_w[tid, w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
   staged = UOp.group(*st).barrier()
   lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
   ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8))
