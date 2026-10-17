@@ -1717,70 +1717,86 @@ DECODE_THREADS = 1024
 # a ballot is across the wave: a CUSTOM (a statement of its own), not inlined where it is used (in the branch of a gated store)
 def _ballot(pred:UOp) -> UOp: return UOp(Ops.CUSTOM, src=(pred,), arg=("__builtin_amdgcn_ballot_w32({0})", dtypes.uint32))
 def _popcount(x:UOp) -> UOp: return UOp(Ops.CUSTOMI, src=(x,), arg=("__builtin_popcount({})", dtypes.int32))
+# across the wave: CUSTOMs (statements of their own, not inlined in the branch of a gated store)
+def _bpermute(x:UOp, src_lane:UOp) -> UOp:
+  return UOp(Ops.CUSTOM, src=(x, src_lane), arg=("__builtin_amdgcn_ds_bpermute((int)({1})*4, (int)({0}))", dtypes.int32))
+def _readlane(x:UOp, lane:int) -> UOp: return UOp(Ops.CUSTOM, src=(x,), arg=(f"__builtin_amdgcn_readlane((int)({{0}}), {lane})", dtypes.int32))
+def _wave_scan(x:UOp, lane:UOp) -> UOp:
+  """the inclusive prefix sums of x (int32) over the lanes of a wave"""
+  for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))
+  return x
 
 @functools.cache
 def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpool:int) -> UOp:
-  # a workgroup per query row (the query of row r is at q_start+r): the keys of its pools in registers (pool i*THREADS + t), the key of the
-  # k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in order: the
-  # picks of every (chunk of THREADS pools, wave) through LDS. the tail of the query's pool after them, the count after the list
+  # a workgroup per query row (the query of row r is at q_start+r), thread t holds pool c*THREADS + t of every chunk c of THREADS pools. the
+  # key of the k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in
+  # order: the picks of every (chunk, wave) (ballots), scans of them for their offsets. the tail of the query's pool after them, the count
+  # after the list. the loops over the chunks run over the chunks with pools: the work follows the context, not its max
   rows, P = cast(tuple[int, int], scores.shape)
   n_max, THREADS = cast(int, index.shape[1]) - 1, DECODE_THREADS
   per, W = (P + THREADS - 1) // THREADS, THREADS // WARP_SIZE
+  assert W == WARP_SIZE, "a scan of a chunk's waves is a wave"
   row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   t, q = wave * WARP_SIZE + lane, q_start + row
-  npc = (pools + THREADS - 1) // THREADS  # the chunks with pools: the work follows the context, not its max
-  def key(i:int) -> UOp:
+  npc = ((pools + THREADS - 1) // THREADS).minimum(per)
+  def key(c:UOp) -> UOp:
     # the order preserving key of a complete pool before the query, 0 (the lowest) for the others
-    p = t + i * THREADS
-    bits = scores[row, p.minimum(P-1)].load().bitcast(dtypes.uint32)
-    ok = (p < pools) & ((p + 1) * kpool <= q + 1) & (i < npc)
+    p = t + c * THREADS
+    ok = (p < pools) & ((p + 1) * kpool <= q + 1)
+    bits = scores[row, p.minimum(P-1).valid(ok)].load().bitcast(dtypes.uint32)
     return ok.where((bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000), UOp.const(0, dtypes.uint32))
-  kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
-  kreg = kreg.after(kreg.store(UOp.stack(*(key(i) for i in range(per)))))
-  keys = [kreg[i].load() for i in range(per)]
+  zero = UOp.const(0, dtypes.int32)
   # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
   lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
   thr_reg = _reg_u32()
   bit = UOp.range((pools > k).where(32, 0), 3, AxisType.LOOP)
   prev = thr_reg.after(bit)[0].load()
   cand = prev | (UOp.const(1, dtypes.uint32) << (31 - bit).cast(dtypes.uint32))
-  cnt = functools.reduce(lambda a, kk: a + (kk >= cand).cast(dtypes.float32), keys[1:], (keys[0] >= cand).cast(dtypes.float32))
+  c = UOp.range(npc, 4, AxisType.LOOP)
+  cnt_reg = _reg((1,), 0, bit)  # zeroed for every bit
+  cnt = cnt_reg.after(cnt_reg[0].store(cnt_reg.after(c)[0].load() + (key(c) >= cand).cast(dtypes.float32)).end(c))[0].load()
   stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
-  total = functools.reduce(lambda a, j: a + stage[bit, j].load(), range(1, W), stage[bit, 0].load())
+  total = warp_reduce(stage[bit, lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)  # the sum of the waves' counts
   thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load().maximum(1)
-  # the picks of every (chunk, wave), then per (chunk, wave) the picks of the waves before it in the chunk, then per chunk the chunks before
-  picks = [keys[i] >= thr for i in range(per)]
-  ballots = [_ballot(pk) for pk in picks]
+  # the picks of every (chunk, wave): the counts of a ballot
   wc = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  wc = wc.after(UOp.group(*(wc[i, wave.valid(lane.eq(0))].store(_popcount(bl)) for i, bl in enumerate(ballots))).barrier())
-  # the offset of every (chunk, wave): a thread per (chunk, wave) sums the picks of the waves and chunks before it (loops: no unrolled sums)
-  off = UOp.alloc((per*W,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  zero = UOp.const(0, dtypes.int32)
-  st_off = []
-  for j in range((per*W + THREADS - 1) // THREADS):
-    x = t + j * THREADS
-    ci, cw = x // W, x % W
-    u = UOp.range(per*W, 4+j, AxisType.LOOP)
-    acc = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
-    acc = acc.after(acc.store(acc.const_like(0)))
-    # the waves before (chunk ci, wave cw) in pool order: chunks before ci, and the waves before cw in ci
-    before = (u // W < ci) | ((u // W).eq(ci) & (u % W < cw))
-    acc = acc.after(acc[0].store(acc.after(u)[0].load() + before.where(wc[(u // W).minimum(per-1), u % W].load(), zero)).end(u))
-    st_off.append(off[x.valid(x < per*W)].store(acc[0].load()))
-  # the ballots are read after the barrier, not before it: the per wave counts of the picks must not be reordered after it
-  off = off.after(UOp.group(*st_off).barrier())
-  stores = []
-  for i, (pk, bl) in enumerate(zip(picks, ballots)):
-    pos = off[i * W + wave].load() + _popcount(bl & ((UOp.const(1, dtypes.uint32) << lane.cast(dtypes.uint32)) - 1))
-    p = t + i * THREADS
-    stores += [index[row, (pos * kpool + j).valid(pk & (pos < k))].store((p * kpool + j).cast(dtypes.int32)) for j in range(kpool)]
-  # the count of picked pools: the offset of the last (chunk, wave) and its picks
-  total_picked = (off[per*W - 1].load() + wc[per - 1, W - 1].load()).minimum(k)
+  c2 = UOp.range(npc, 5, AxisType.LOOP)
+  wc = wc.after(wc[c2, wave.valid(lane.eq(0))].store(_popcount(_ballot(key(c2) >= thr))).end(c2).barrier())
+  # the offsets of the (chunk, wave)s in pool order: in every chunk a scan of its waves' counts (a wave per chunk), then a scan of the
+  # chunks' totals (one wave). the chunks without pools count 0
+  def count(ci:UOp) -> UOp: return (ci < npc).where(wc[ci.minimum(per-1), lane].load(), zero)
+  wpre, ct = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL), UOp.alloc((per,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  st_a = []
+  for r in range((per + W - 1) // W):
+    ci = (wave + r * W).minimum(per - 1)
+    n = count(wave + r * W)
+    incl = _wave_scan(n, lane)
+    ok = wave + r * W < per
+    st_a += [wpre[ci.valid(ok), lane].store(incl - n), ct[ci.valid(ok & lane.eq(W - 1))].store(incl)]
+  wpre, ct = (x.after(UOp.group(*st_a).barrier()) for x in (wpre, ct))
+  cb = UOp.alloc((per + 1,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  carry, st_b = zero, []
+  for r in range((per + W - 1) // W):
+    n = (lane + r * W < per).where(ct[(lane + r * W).minimum(per - 1)].load(), zero)
+    incl = _wave_scan(n, lane)
+    st_b.append(cb[(lane + r * W).valid(wave.eq(0) & (lane + r * W < per))].store(carry + incl - n))
+    carry = carry + _readlane(incl, W - 1)
+  st_b.append(cb[UOp.const(per, dtypes.weakint).valid(wave.eq(0) & lane.eq(0))].store(carry))
+  cb = cb.after(UOp.group(*st_b).barrier())
+  # the picked pools of every chunk at their offsets
+  c3 = UOp.range(npc, 6, AxisType.LOOP)
+  pk = key(c3) >= thr
+  pos = cb[c3].load() + wpre[c3, wave].load() + _popcount(_ballot(pk) & ((UOp.const(1, dtypes.uint32) << lane.cast(dtypes.uint32)) - 1))
+  p = t + c3 * THREADS
+  stores = [UOp.group(*(index[row, (pos * kpool + j).valid(pk & (pos < k))].store((p * kpool + j).cast(dtypes.int32))
+                        for j in range(kpool))).end(c3)]
+  total_picked = cb[per].load().minimum(k)  # the count of picked pools
   tail0 = (q + 1) // kpool * kpool
   ntail = q + 1 - tail0
   stores.append(index[row, (total_picked * kpool + t).valid(t < ntail)].store((tail0 + t).cast(dtypes.int32)))
   stores.append(index[row, UOp.const(n_max, dtypes.weakint).valid(t.eq(0))].store((total_picked * kpool + ntail).cast(dtypes.int32)))
-  return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_index", opts_to_apply=()))
+  est = Estimates(rows*P*32, rows*P*4*4, rows*(k+1)*kpool*4)  # data dependent loops: an upper bound
+  return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_index", opts_to_apply=(), estimates=est))
 
 def _reg_u32() -> UOp:
   ret = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
