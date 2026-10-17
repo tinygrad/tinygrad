@@ -315,9 +315,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     if dtypes.long in (x.dtype, y.dtype) and not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
   # an AFTER waits only on the effect ops listed here, any other dep is replaced by its srcs
-  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
-    tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.BARRIER, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE}
-                        else y.src for y in x.src[1:]]))))),
+  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+ tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE,
+    Ops.STORE, Ops.CALL, Ops.BARRIER, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.IF, Ops.ENDIF} else y.src for y in x.src[1:]]))))),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
   # ranges can be subbed for CONSTs, remove them from ENDs. BACKEDGE conditions are never range selectors.

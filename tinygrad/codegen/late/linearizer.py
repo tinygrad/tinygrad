@@ -27,8 +27,8 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.BUFFER | Ops.ALLOC: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
-      case Ops.RANGE: priority = 5    # placing RANGE is good
-      case Ops.END | Ops.BACKEDGE: priority = -5     # placing loop exits is bad
+      case Ops.RANGE | Ops.IF: priority = 5    # placing control-flow openers late is good
+      case Ops.END | Ops.BACKEDGE | Ops.ENDIF: priority = -5     # placing control-flow exits early is good
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, len(u.ranges), priority, extra)
 
@@ -64,9 +64,9 @@ class CFGContext:
       deps[u] = {}
       for s in u.src_without_body: deps[u] |= deps[s]
 
-      if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
+      if u.op in (Ops.END, Ops.ENDIF, Ops.BACKEDGE, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
+      if u.op in (Ops.IF, Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.ENDIF): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}

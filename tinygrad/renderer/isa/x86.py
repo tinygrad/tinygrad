@@ -5,7 +5,7 @@ import struct, functools, itertools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg, range_str
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef
 from tinygrad.helpers import unwrap, Target
 from dataclasses import replace
@@ -15,7 +15,7 @@ from dataclasses import replace
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  FRAME_INDEX = auto(); LABEL = auto(); LOOP_CMP = auto()
+  FRAME_INDEX = auto(); LABEL = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -36,7 +36,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JAE = auto(); JMP = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -75,7 +75,7 @@ class X86GroupOp:
 
   # X86Ops that read flags
   ReadFlags = {X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JB, X86Ops.JL,
-               X86Ops.JE, X86Ops.JNE, X86Ops.JGE}
+               X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE}
 
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
@@ -154,6 +154,11 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
+  # IF jumps over its body on the inverse condition. cache the jump opcode and preserve ordering deps around the flag compare
+  (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="cond").or_after(), UPat()), arg=None, name="x"), lambda x,cond:
+    x.replace(src=((x.src[0].replace(src=(cmp(cond), *x.src[0].src[1:])) if x.src[0].op is Ops.AFTER else cmp(cond)),),
+      arg=(X86Ops.JAE if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
+        else {Ops.CMPLT:X86Ops.JGE, Ops.CMPEQ:X86Ops.JNE, Ops.CMPNE:X86Ops.JE}[cond.op]))),
   # vector BUFFERs get modeled in STACK space
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL))
     if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
@@ -292,7 +297,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.op is Ops.INS and x.arg[0] in {X86Ops.LOOP_CMP, X86Ops.FRAME_INDEX}: return None
+  if x.op is Ops.INS and x.arg[0] is X86Ops.FRAME_INDEX: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -311,11 +316,10 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # range is lowered to acc, cmp, jmp after regalloc
-  (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),))),
-  # BACKEDGE becomes a conditional jump referencing the RANGE start label
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
-    lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
+  # BACKEDGE becomes a conditional jump referencing the RANGE start label. cache jmp opcode in arg
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), arg=None, name="x"),
+    lambda x,cond: x.replace(src=(*x.src[:2], cmp(cond)), arg=(X86Ops.JB if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
+      else {Ops.CMPLT:X86Ops.JL, Ops.CMPEQ:X86Ops.JE, Ops.CMPNE:X86Ops.JNE}[cond.op]))),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
@@ -344,11 +348,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVB, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPEQ, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVE, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPNE, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVNE, src=(b, a, cmp(m)))),
-  # jumps, use flags
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JB, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JL, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JE, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JNE, src=(cmp(y),))),
   # comparisons whose user doesn't use the flag, move flag result to register
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: x.ins(X86Ops.SETB, src=(cmp(x),))),
   (UPat(Ops.CMPLT, name="x"), lambda x: x.ins(X86Ops.SETL, src=(cmp(x),))),
@@ -446,7 +445,7 @@ isel_matcher = PatternMatcher([
    x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC), name="x"), alloc_vregs),
   # tag shape srcs so they aren't materialized into registers
   (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
     x.replace(src=tuple(s.rtag() for s in x.src)) if any(s.tag is not True for s in x.src) else None),
@@ -457,8 +456,9 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
-  elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
+  op = x.arg if x.op in (Ops.IF, Ops.BACKEDGE) else x.arg[0]
+  if x.op is Ops.RANGE or op in X86GroupOp.WriteFlags: ctx.lock = x
+  elif op in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1].without_after):
     ctx.lock = flag_def
     return (x, [flag_def, x])
   return None
@@ -471,35 +471,10 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.RANGE, Ops.IF, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
-# TODO: control flow should be overhauled so that this isn't necessary
-def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  loop_label = "_".join(str(i) for i in x.axis_id)
-  label = UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=f".LOOP_{loop_label}")
-  # loop, cmp on backedge all we need is a jmp tag
-  if x.dtype is dtypes.void: return (label, [label])
-  else:
-    # an AFTER-wrapped bound carries the loop's ordering deps, they keep the acc unique per loop (hash-consing)
-    bound, deps = ((b:=x.src[0]).src[0], b.src[1:]) if (b:=x.src[0]).op is Ops.AFTER else (x.src[0], ())
-    acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + tuple(deps))
-    cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if bound.op is Ops.CAST else X86Ops.CMP, dtypes.void), src=(acc, bound))
-    jump_out = UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
-    ctx.loop_label[acc] = loop_label
-    return (acc, [acc, label, cmp, jump_out])
-
-def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  end_label = UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
-  jmp = UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  inc = x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),))
-  return (inc, [inc, jmp, end_label])
-
-def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  cond = x.replace(op=x.tag, src=x.src[:2])
-  jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
-  return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
@@ -507,12 +482,12 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
-  # expand the cmp here so we can preserve rng src edge to get label from ctx
-  (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
-  # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
-  (UPat(Ops.END, name="x"), lower_end),
+  (UPat(Ops.IF, name="x"), lambda x:
+    ((jmp:=UOp(Ops.INS, src=(x.src[0].without_after,), arg=(x.arg, dtypes.void), tag=f".IF_{next(UOp.unique_num)}")), [jmp])),
+  (UPat(Ops.ENDIF, src=(UPat.var("mif"), UPat()), name="x"), lambda x,mif:
+    (x, [UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=mif.tag)])),
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda l: ((nx:=l.ins(X86Ops.LABEL, src=(), tag=f".LOOP_{range_str(l)}")), [nx])),
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat.var("l"), UPat()), name="x"), lambda x,l: (x, [UOp(Ops.INS, arg=(x.arg, dtypes.void), tag=l.tag)])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
@@ -677,6 +652,7 @@ encodings = {
   X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4),
   X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4),
   X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
+  X86Ops.JAE: lambda x: bytes([0x0F, 0x83]) + int(0).to_bytes(4),
   X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
@@ -685,7 +661,6 @@ class X86LinearContext(LinearContext):
   def __init__(self, ren:X86Renderer):
     super().__init__(ren)
     self.lock: UOp|None = None
-    self.stack_allocated = False
 
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
@@ -766,14 +741,13 @@ class X86Renderer(ISARenderer):
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS: continue
-      if u.arg[0] is X86Ops.LOOP_CMP: continue
       if u.arg[0] is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
       if u.arg[0] not in encodings or (l:=encodings[u.arg[0]](u)) is None:
         raise RuntimeError(f"failed to encode {u.arg[0]} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       binary.extend(l)
-      if u.arg[0] in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP): jumps[u] = len(binary)
+      if u.arg[0] in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE, X86Ops.JMP): jumps[u] = len(binary)
     # fixup jump targets now that encoding size is known
     for u in uops:
       if (t:=jumps.get(u)) is not None: binary[t-4:t] = (targets[u.tag] - t).to_bytes(4, 'little', signed=True)

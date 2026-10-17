@@ -1,7 +1,7 @@
-from dataclasses import replace
+from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, dedup
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
@@ -268,6 +268,41 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+@dataclass(frozen=True)
+class RangeCtx:
+  acc: UOp
+  loop: UOp
+  gate: UOp|None
+
+def remove_range(sink:UOp):
+  uops = list(sink.toposort())
+  loop_ids = itertools.count(max((aid for u in uops if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
+  acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if u.op in GroupOp.Defines), default=0))
+  enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in uops if u.op is Ops.END and len(u.ranges)}
+  ends = {u.src[1] for u in uops if u.op is Ops.END}
+  range_inputs = {r:dedup(s for u in uops if r in u.ranges for s in u.src_without_body if r not in s.ranges and s is not r) for r in ends}
+  def init(u:UOp):
+    acc = UOp.alloc((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
+    init = acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0))
+    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0).after(init, *range_inputs[u]),UOp(Ops.NOOP))) if u.src[0].vmin <= 0 else None
+    l = l.replace(src=(l.src[0].after(gate if gate is not None else init),))
+    return RangeCtx(init, l, gate)
+  ctx = {u:init(u) for u in uops if u.op is Ops.RANGE
+    and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void and u in ends}
+  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
+
+def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
+  inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
+  end = body.backedge(ctx.loop, inc[0].load() < bnd)
+  return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate, end))
+
+pm_end_to_backedge = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
+    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load() if x in ctx else None),
+  (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"),
+    lambda body,bnd,rng,x,ctx: close_range(ctx[rng], x, rng, bnd, body) if rng in ctx else None)
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -389,16 +424,17 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
         raise
     else: type_verify(sink, spec_program)
 
+  # remove ranges after z3 validation. rewrites to BACKEDGE + explicit acc so rendering is simple
+  sink = remove_range(sink)
+
   # return the rewritten sink
   return sink
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
 pm_linearize_cleanups = PatternMatcher([
-  # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,st))]))
 ])
 
 pm_alloc_to_buf = PatternMatcher([(UPat(Ops.ALLOC, name="x"), lambda x: ((buf:=x.replace(op=Ops.BUFFER)), [buf])),])
