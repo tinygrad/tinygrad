@@ -1287,15 +1287,13 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   tmp2 = tmp.after(read_phase)
 
   def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, lane: UOp) -> UOp:
-    """acc += sum_k A[a_row+k] * B[b_row+k] in order (FP-associativity matters). For scaled MFMA only the dot is scaled: D = dot*scale + C."""
-    def prod(k: int) -> UOp:
-      return tmp2.index(a_row + UOp.const(k, dtypes.int)).bitcast(acc_dt) * tmp2.index(b_row + UOp.const(k, dtypes.int)).bitcast(acc_dt)
-    if not scaled:
-      for k in range(K): acc = acc + prod(k)
-      return acc
-    dot = prod(0)
-    for k in range(1, K): dot = dot + prod(k)
-    return acc + dot * scale_factor(lane)
+    """acc += sum_k A[a_row+k] * B[b_row+k] in order (FP-associativity matters). For scaled MFMA only the dot is scaled: D = dot*scale + C.
+    The sum is a loop on a register (same order as unrolling it), the scaled dot starts at -0.0, the exact additive identity."""
+    k, reg = ctx.range(K), UOp.alloc((), acc_dt, addrspace=AddrSpace.REG)
+    init = reg.after(lane).store(acc.const_like(-0.0) if scaled else acc)
+    cur = reg.after(init, k)
+    dot = reg.after(cur.store(cur + tmp2.index(a_row + k).bitcast(acc_dt) * tmp2.index(b_row + k).bitcast(acc_dt)).end(k))
+    return acc + dot * scale_factor(lane) if scaled else dot
 
   compute_lane = ctx.range()
   c_mn, c_grp = mn_idx(compute_lane), grp_idx(compute_lane)
