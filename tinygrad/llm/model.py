@@ -234,6 +234,18 @@ def _out(layer:Linear, x:Tensor) -> Tensor:
 
 def _identity(x:Tensor) -> Tensor: return x
 
+def _argmax_rows(x:Tensor, cols:int=256) -> Tensor:
+  """
+  x (B, V) -> (B, 1) argmax over a long last axis (the vocab) in two parallel steps: the max of every row of `cols`, then the first row with the
+  max and the first index of it there (the first index of the max, as argmax)
+  """
+  B, V = x.shape
+  rows = (V + cols - 1) // cols
+  g = x.pad(((0, 0), (0, rows*cols - V)), value=float("-inf")).reshape(B, rows, cols)
+  row = g.max(-1).argmax(-1, keepdim=True)  # (B, 1)
+  col = g.gather(1, row.unsqueeze(-1).expand(B, 1, cols)).argmax(-1)  # (B, 1)
+  return row * cols + col
+
 class HyperConnection:
   def __init__(self, config:TransformerConfig):
     self.count, self.eps, self.iters, self.norm_eps = (hc:=unwrap(config.hc)).count, hc.eps, hc.sinkhorn_iters, config.norm_eps
@@ -821,7 +833,7 @@ class Transformer:
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)[:, :self.config.vocab_size]
     q8_quantize_cache_clear()  # don't keep the graph alive
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    tok = (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+    tok = _argmax_rows((logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()))
     # the tokens are a view of generate's token buffer: the sampled token goes after them unless that is a prompt token (chunked prefill)
     if (buf:=getattr(self, "_token_buf", None)) is not None and tokens.uop.base is buf.uop.base:
       tok = (dst:=buf[:, (nxt:=start_pos + tokens.shape[1]):nxt+1]).assign((dst < 0).where(tok.cast(buf.dtype), dst))

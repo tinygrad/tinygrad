@@ -1064,8 +1064,8 @@ def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, 
   is_comb = lane < count*count
   idx = is_comb.where(lane + 2*count, (lane - count*count).minimum(2*count-1).maximum(0))
   which = is_comb.where(2, (lane < count*count + count).where(0, 1))
-  s = which.eq(0).where(scale[0].load(), which.eq(1).where(scale[1].load(), scale[2].load()))
-  v = mix[token, idx].load() * rms * s + base[idx].load()
+  s = which.eq(0).where(scale[0].load().float(), which.eq(1).where(scale[1].load().float(), scale[2].load().float()))
+  v = mix[token, idx].load() * rms * s + base[idx].load().float()
   # pre, post
   sig = (1 + (v * -LOG2E).exp2()).reciprocal()
   prepost = which.eq(0).where(sig + eps, sig * 2)
@@ -1089,7 +1089,8 @@ def hc_coeffs(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, count:int, iters
   rows = prod(mix.shape[:-1])
   out = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=mix.device, axis=0 if split else None)
   fxn = functools.partial(_hc_coeffs_kernel, count=count, iters=iters, eps=eps, norm_eps=norm_eps, features=features)
-  out = Tensor.custom_kernel(out, mix.float().reshape(rows, -1).contiguous(), sq, base.float().contiguous(), scale.float().contiguous(), fxn=fxn)[0]
+  # the weights in their dtype: no kernels to convert them every call
+  out = Tensor.custom_kernel(out, mix.float().reshape(rows, -1).contiguous(), sq, base.contiguous(), scale.contiguous(), fxn=fxn)[0]
   out = out.reshape(*mix.shape[:-1], -1)
   return out[..., :count], out[..., count:2*count], out[..., 2*count:].reshape(*mix.shape[:-1], count, count)
 
