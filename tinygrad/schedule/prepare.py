@@ -5,6 +5,7 @@ from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_elem
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
+from tinygrad.uop.symbolic import loads_as_variables
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
@@ -63,14 +64,23 @@ pm_fold_moved_after = PatternMatcher([
 
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
-  idxs = idx.src[1:]
+  # the valids of the index (the gate of a store) aren't the movement op's: it moves the address, they are put back as they were. (moved
+  # with it, the reshape simplifies the address given them and drops the clauses on ranges no longer in the address)
+  idxs, valid = tuple(i.get_idx() for i in idx.src[1:]), UOp.const(True).uprod(*[i.get_valid() for i in idx.src[1:]])
+  # the loaded values in the address are variables to the movement op's index math (it would rewrite the stores they are after)
+  if (hidden:=loads_as_variables(UOp.sink(*idxs))) is None: return None
+  idxs = tuple(i.substitute(hidden) for i in idxs)
+  def gated(moved:tuple[UOp, ...]) -> tuple[UOp, ...]:
+    moved = tuple(m.substitute({v:k for k,v in hidden.items()}) for m in moved)
+    if valid.op is Ops.CONST or not moved: return moved
+    return moved[:-1] + ((valid & moved[-1].get_valid()).where(moved[-1].get_idx(), UOp.invalid()),)
   if len(idxs) == len(r.shape):
-    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), arg=idx.arg)
+    return r.src[0].index(*gated(apply_movement_op(r.op, r.src[0].shape, r.marg, idxs)), arg=idx.arg)
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      if src_prefix == 0: return r.src[0]
-      ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
+      if src_prefix == 0: return r.src[0] if valid.op is Ops.CONST else None
+      ret = r.src[0].index(*gated(apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs)), arg=idx.arg)
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([

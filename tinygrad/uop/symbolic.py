@@ -336,9 +336,25 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   if (a:=lt.src[0]).op is Ops.CONST: return lt.src[1], neg, int(a.val) + (0 if neg else 1)
   return a, not neg, int(lt.src[1].vmin) if neg else int(lt.src[1].vmax)-1
 
+def loads_as_variables(uop:UOp) -> dict[UOp, UOp]|None:
+  """
+  the loads (after stores: an AFTER) in index math as variables. rewriting through a load rewrites the stores and barriers it is after (they
+  are copied, the copies simplified under the index's valid, not their own gates). None if a load can't be a variable
+  """
+  if not uop.op_in_backward_slice_with_self(Ops.AFTER): return {}
+  # the loads (a LOAD or an INDEX read as a value) of an int or bool, an index or a gate: the loads in them go with them
+  loads = [u for u in uop.toposort() if u.op in {Ops.LOAD, Ops.INDEX} and (dtypes.is_int(u.dtype) or u.dtype is dtypes.bool)
+           and any(s.op_in_backward_slice_with_self(Ops.AFTER) for s in u.src)]
+  hidden = {u:UOp.variable(f"_load{i}", u.vmin, u.vmax, u.dtype) for i,u in enumerate(loads)}
+  return None if uop.substitute(hidden).op_in_backward_slice_with_self(Ops.AFTER) else hidden
+
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
+  if (hidden:=loads_as_variables(uop)) is None: return uop
+  if not hidden: return _uop_given_valid(valid, uop, try_simplex)
+  return uop if (ret:=_uop_given_valid(valid, hid:=uop.substitute(hidden), try_simplex)) is hid else ret.substitute({v:k for k,v in hidden.items()})
 
+def _uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[PyConst|None]] = defaultdict(lambda: [None, None])
   for stmt in valid.split_uop(Ops.AND):

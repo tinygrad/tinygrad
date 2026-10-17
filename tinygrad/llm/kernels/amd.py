@@ -1,5 +1,6 @@
 from __future__ import annotations
-import functools, math, re
+import functools, math
+from dataclasses import replace
 from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
@@ -719,8 +720,6 @@ def host_allreduce(devs:tuple[str, ...]) -> HostAllreduce|None:
   if not getenv("HOST_ALLREDUCE", 1) or len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
   return HostAllreduce(devs)
 
-_SYS = "__ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM"
-
 @functools.cache
 def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int) -> UOp:
   # workgroup g owns its epoch counter and the elements g*THREADS..: an epoch in every word, a reader spins until the word has its epoch.
@@ -731,13 +730,18 @@ def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int) 
   epoch, me = counter[wg].load() + 1, counter[HOST_AR_MAXN // HOST_AR_THREADS].load()
   def slot(p:UOp|int) -> UOp: return ((epoch & 1) * N + p) * HOST_AR_MAXN + e
   val = x[0, e].load().float()
-  write = UOp(Ops.CUSTOM, src=(mbox[slot(me)], val, epoch), arg=(
-    "__hip_atomic_store((unsigned long long*){0}, ((unsigned long long)(unsigned){2} << 32) | __builtin_bit_cast(unsigned, (float){1}), "
-    f"{_SYS});", dtypes.void))
-  # the write is a src of the reads: it is issued before this device spins on the others
-  def read(p:int) -> UOp: return UOp(Ops.CUSTOM, src=(mbox[slot(p)], epoch, write), arg=(
-    f"({{{{ unsigned long long _w; for (;;) {{{{ _w = __hip_atomic_load((unsigned long long*){{0}}, {_SYS}); "
-    "if ((unsigned)(_w >> 32) == (unsigned){1}) break; __builtin_amdgcn_s_sleep(1); }} __builtin_bit_cast(float, (unsigned)_w); }})", dtypes.float32))
+  # a value and its epoch in one 64-bit word (one store, one load): no torn reads
+  mbox = mbox.replace(arg=replace(mbox.arg, volatile=True))
+  write = mbox[slot(me)].store((epoch.cast(dtypes.uint64) << 32) | val.bitcast(dtypes.uint32).cast(dtypes.uint64))
+  # spin until the words of all the devices have this epoch. the loop comes after the write: it is issued before this device waits
+  loop = UOp.range(UOp(Ops.NOOP).after(write), next(UOp.unique_num), dtype=dtypes.void)
+  words = UOp.alloc((N,), dtypes.uint64, addrspace=AddrSpace.REG)
+  loaded = words.after(loop).store(UOp.stack(*(mbox.after(loop)[slot(p)].load() for p in range(N))))
+  waiting = functools.reduce(lambda a,b: a | b, [(words.after(loaded)[p].load() >> 32).cast(dtypes.uint32).ne(epoch.cast(dtypes.uint32))
+                                                for p in range(N)])
+  pause = UOp(Ops.CUSTOM, src=(waiting,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
+  words = words.after(pause.backedge(loop, waiting))
+  def read(p:int) -> UOp: return (words[p].load() & 0xFFFFFFFF).cast(dtypes.uint32).bitcast(dtypes.float32)
   total = functools.reduce(lambda a,b: a+b, [me.eq(p).where(val, read(p)) for p in range(N)])
   store = out[e].store(total)
   # the next epoch is stored once every thread of the workgroup read the counter
@@ -1553,17 +1557,6 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
   fxn = functools.partial(_indexer_scores_kernel, pools=_unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint))
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), fxn=fxn)[0]
 
-_SYNC = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup"); __builtin_amdgcn_s_barrier(); __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
-def _hip_block(code:str, *srcs:UOp) -> UOp:
-  # a HIP statement block in a kernel (no headers: __syncthreads() is a workgroup barrier), @i@ is src i
-  code = code.replace("__syncthreads();", _SYNC)
-  return UOp(Ops.CUSTOM, src=srcs, arg=(re.sub(r"@(\d+)@", r"{\1}", code.replace("{", "{{").replace("}", "}}")), dtypes.void))
-
-# the order preserving integer key of a pool's score: complete pools before the query, others are 0 (the lowest key)
-def _pool_key_code(pools:str, kpool:int) -> str:
-  return (f"auto _pool_key = [&](float _s, long _p, long _q) -> unsigned {{ unsigned _b = __builtin_bit_cast(unsigned, _s); "
-          f"return (_p < {pools} && (_p+1)*{kpool} <= _q+1) ? (_b >= 0x80000000u ? ~_b : (_b | 0x80000000u)) : 0u; }};")
-
 @functools.cache
 def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, start_pos:UOp, T:UOp) -> UOp:
   # the pooled key of every pool with a token of this call: the softmax of the gates (+ape) over the pool's tokens weighs their keys. the
@@ -1644,90 +1637,77 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:in
 
 DECODE_THREADS = 1024
 
+# a ballot is across the wave: a CUSTOM (a statement of its own), not inlined where it is used (in the branch of a gated store)
+def _ballot(pred:UOp) -> UOp: return UOp(Ops.CUSTOM, src=(pred,), arg=("__builtin_amdgcn_ballot_w32({0})", dtypes.uint32))
+def _popcount(x:UOp) -> UOp: return UOp(Ops.CUSTOMI, src=(x,), arg=("__builtin_popcount({})", dtypes.int32))
+
 @functools.cache
 def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpool:int) -> UOp:
-  # a workgroup per query row (the query of row r is at q_start+r): the keys of the pools in registers (pool i*THREADS + t), a radix select of
-  # the k-th best (a histogram per wave), then the picked pools in order: the picks of every (chunk of THREADS pools, wave) through LDS. the tail
-  # of the query's pool after them, the count after the list (ties of the k-th past k are dropped)
+  # a workgroup per query row (the query of row r is at q_start+r): the keys of its pools in registers (pool i*THREADS + t), the key of the
+  # k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in order: the
+  # picks of every (chunk of THREADS pools, wave) through LDS. the tail of the query's pool after them, the count after the list
   rows, P = cast(tuple[int, int], scores.shape)
-  n_max = cast(int, index.shape[1]) - 1
-  per, waves = (P + DECODE_THREADS - 1) // DECODE_THREADS, DECODE_THREADS // WARP_SIZE
-  row, t = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(DECODE_THREADS, 1, AxisType.LOCAL)
-  code = "{" + _pool_key_code("(@2@)", kpool) + f"""
-  const float* _sc = @0@; long _q = @1@; int _t = @3@; int* _idx = @4@; int _w = _t / {WARP_SIZE}, _l = _t % {WARP_SIZE};
-  // the chunks of THREADS pools with pools in them: the work follows the context, not its max
-  int _npc = (int)(((@2@) + {DECODE_THREADS-1}) / {DECODE_THREADS});
-  unsigned _keys[{per}];
-  for (int _i = 0; _i < {per}; _i++) {{
-    long _p = (long)_i*{DECODE_THREADS} + _t;
-    _keys[_i] = _i < _npc && _p < {P} ? _pool_key(_sc[_p], _p, _q) : 0u;
-  }}
-  __attribute__((shared)) int _hist[{waves}][256]; __attribute__((shared)) int _tot[256];
-  __attribute__((shared)) unsigned _sp; __attribute__((shared)) int _sk;
-  __attribute__((shared)) int _wc[{per}][{waves}]; __attribute__((shared)) int _wpre[{per}][{waves}]; __attribute__((shared)) int _cb[{per}+1];
-  unsigned _prefix = 0u; int _krem = {k};
-  if ((@2@) > {k}) {{
-    for (int _pass = 0; _pass < 4; _pass++) {{
-      int _shift = 24 - 8*_pass;
-      for (int _b = _l; _b < 256; _b += {WARP_SIZE}) _hist[_w][_b] = 0;
-      __syncthreads();
-      for (int _i = 0; _i < {per} && _i < _npc; _i++) {{
-        unsigned _key = _keys[_i];
-        if (_pass == 0 || (_key >> (_shift+8)) == (_prefix >> (_shift+8)))
-          __hip_atomic_fetch_add(&_hist[_w][(_key >> _shift) & 255u], 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
-      }}
-      __syncthreads();
-      // the counts of the digits >= d: a suffix scan. the digit is the last one with at least _krem
-      if (_t < 256) {{ int _s = 0; for (int _v = 0; _v < {waves}; _v++) _s += _hist[_v][_t]; _tot[_t] = _s; }}
-      for (int _off = 1; _off < 256; _off *= 2) {{
-        __syncthreads();
-        int _v = (_t < 256 && _t + _off < 256) ? _tot[_t + _off] : 0;
-        __syncthreads();
-        if (_t < 256) _tot[_t] += _v;
-      }}
-      __syncthreads();
-      if (_t < 256 && _tot[_t] >= _krem && (_t == 255 || _tot[_t+1] < _krem)) {{
-        _sp = _prefix | ((unsigned)_t << _shift); _sk = _krem - (_t == 255 ? 0 : _tot[_t+1]);
-      }}
-      if (_t == 0 && _tot[0] < _krem) {{ _sp = _prefix; _sk = _krem - (_tot[1]); }}
-      __syncthreads();
-      _prefix = _sp; _krem = _sk;
-    }}
-  }}
-  unsigned _th = _prefix > 1u ? _prefix : 1u;
-  // in pool order: the picks of every (chunk of THREADS pools, wave), the waves before in a chunk, the chunks before, then the positions
-  for (int _i = 0; _i < {per} && _i < _npc; _i++) {{
-    unsigned _bal = __builtin_amdgcn_ballot_w32(_keys[_i] >= _th);
-    if (_l == 0) _wc[_i][_w] = __builtin_popcount(_bal);
-  }}
-  __syncthreads();
-  for (int _x = _t; _x < _npc*{waves}; _x += {DECODE_THREADS}) {{
-    int _i = _x / {waves}, _v = _x % {waves}, _s = 0;
-    for (int _u = 0; _u < _v; _u++) _s += _wc[_i][_u];
-    _wpre[_i][_v] = _s;
-  }}
-  if (_t == 0) {{
-    int _s = 0;
-    for (int _i = 0; _i < _npc; _i++) {{ _cb[_i] = _s; for (int _v = 0; _v < {waves}; _v++) _s += _wc[_i][_v]; }}
-    _cb[{per}] = _s;
-  }}
-  __syncthreads();
-  for (int _i = 0; _i < {per} && _i < _npc; _i++) {{
-    bool _pick = _keys[_i] >= _th;
-    unsigned _bal = __builtin_amdgcn_ballot_w32(_pick);
-    int _pos = _cb[_i] + _wpre[_i][_w] + __builtin_popcount(_bal & ((1u << _l) - 1u));
-    if (_pick && _pos < {k}) {{
-      long _p = (long)_i*{DECODE_THREADS} + _t;
-      for (int _j = 0; _j < {kpool}; _j++) _idx[_pos*{kpool} + _j] = (int)(_p*{kpool} + _j);
-    }}
-  }}
-  int _total = _cb[{per}] < {k} ? _cb[{per}] : {k};
-  long _tail0 = (_q + 1) / {kpool} * {kpool};
-  if (_t < _q + 1 - _tail0) _idx[_total*{kpool} + _t] = (int)(_tail0 + _t);
-  if (_t == 0) _idx[{n_max}] = (int)(_total*{kpool} + (_q + 1 - _tail0));
-}}"""
-  st = _hip_block(code, scores[row, 0], q_start + row, pools, t, index[row, 0])
-  return st.end(row, t).sink(arg=KernelInfo(name="pool_index", opts_to_apply=()))
+  n_max, THREADS = cast(int, index.shape[1]) - 1, DECODE_THREADS
+  per, W = (P + THREADS - 1) // THREADS, THREADS // WARP_SIZE
+  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  t, q = wave * WARP_SIZE + lane, q_start + row
+  npc = (pools + THREADS - 1) // THREADS  # the chunks with pools: the work follows the context, not its max
+  def key(i:int) -> UOp:
+    # the order preserving key of a complete pool before the query, 0 (the lowest) for the others
+    p = t + i * THREADS
+    bits = scores[row, p.minimum(P-1)].load().bitcast(dtypes.uint32)
+    ok = (p < pools) & ((p + 1) * kpool <= q + 1) & (i < npc)
+    return ok.where((bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000), UOp.const(0, dtypes.uint32))
+  kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
+  kreg = kreg.after(kreg.store(UOp.stack(*(key(i) for i in range(per)))))
+  keys = [kreg[i].load() for i in range(per)]
+  # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
+  lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  thr_reg = _reg_u32()
+  bit = UOp.range((pools > k).where(32, 0), 3, AxisType.LOOP)
+  prev = thr_reg.after(bit)[0].load()
+  cand = prev | (UOp.const(1, dtypes.uint32) << (31 - bit).cast(dtypes.uint32))
+  cnt = functools.reduce(lambda a, kk: a + (kk >= cand).cast(dtypes.float32), keys[1:], (keys[0] >= cand).cast(dtypes.float32))
+  stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
+  total = functools.reduce(lambda a, j: a + stage[bit, j].load(), range(1, W), stage[bit, 0].load())
+  thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load().maximum(1)
+  # the picks of every (chunk, wave), then per (chunk, wave) the picks of the waves before it in the chunk, then per chunk the chunks before
+  picks = [keys[i] >= thr for i in range(per)]
+  ballots = [_ballot(pk) for pk in picks]
+  wc = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  wc = wc.after(UOp.group(*(wc[i, wave.valid(lane.eq(0))].store(_popcount(bl)) for i, bl in enumerate(ballots))).barrier())
+  # the offset of every (chunk, wave): a thread per (chunk, wave) sums the picks of the waves and chunks before it (loops: no unrolled sums)
+  off = UOp.alloc((per*W,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  zero = UOp.const(0, dtypes.int32)
+  st_off = []
+  for j in range((per*W + THREADS - 1) // THREADS):
+    x = t + j * THREADS
+    ci, cw = x // W, x % W
+    u = UOp.range(per*W, 4+j, AxisType.LOOP)
+    acc = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+    acc = acc.after(acc.store(acc.const_like(0)))
+    # the waves before (chunk ci, wave cw) in pool order: chunks before ci, and the waves before cw in ci
+    before = (u // W < ci) | ((u // W).eq(ci) & (u % W < cw))
+    acc = acc.after(acc[0].store(acc.after(u)[0].load() + before.where(wc[(u // W).minimum(per-1), u % W].load(), zero)).end(u))
+    st_off.append(off[x.valid(x < per*W)].store(acc[0].load()))
+  # the ballots are read after the barrier, not before it: the per wave counts of the picks must not be reordered after it
+  off = off.after(UOp.group(*st_off).barrier())
+  stores = []
+  for i, (pk, bl) in enumerate(zip(picks, ballots)):
+    pos = off[i * W + wave].load() + _popcount(bl & ((UOp.const(1, dtypes.uint32) << lane.cast(dtypes.uint32)) - 1))
+    p = t + i * THREADS
+    stores += [index[row, (pos * kpool + j).valid(pk & (pos < k))].store((p * kpool + j).cast(dtypes.int32)) for j in range(kpool)]
+  # the count of picked pools: the offset of the last (chunk, wave) and its picks
+  total_picked = (off[per*W - 1].load() + wc[per - 1, W - 1].load()).minimum(k)
+  tail0 = (q + 1) // kpool * kpool
+  ntail = q + 1 - tail0
+  stores.append(index[row, (total_picked * kpool + t).valid(t < ntail)].store((tail0 + t).cast(dtypes.int32)))
+  stores.append(index[row, UOp.const(n_max, dtypes.weakint).valid(t.eq(0))].store((total_picked * kpool + ntail).cast(dtypes.int32)))
+  return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_index", opts_to_apply=()))
+
+def _reg_u32() -> UOp:
+  ret = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+  return ret.after(ret.store(ret.const_like(0)))
 
 def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
   """(rows, top*kpool+kpool+1) int32: for every query row (at q_start+r) the list of the keys it sees (its top pools, its tail), the count last"""
