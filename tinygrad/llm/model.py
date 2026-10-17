@@ -7,7 +7,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
-  indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, token_sharded, shard_rows, reduce_scatter, all_gather
+  indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, _GGML_QUANT
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
@@ -71,9 +71,11 @@ class ExpertWeights:
     onehot = (sel.unsqueeze(-1) == Tensor.arange(E, dtype=dtypes.int32)).unsqueeze(-1)
     lsel = onehot.where(self.slice_table.reshape(-1, 1, 1, 1, E, w), 0).sum(-2, dtype=dtypes.int32)
     return lsel.reshape(*lsel.shape[:3], -1), probs.unsqueeze(-1).expand(*probs.shape, w).reshape(*probs.shape[:2], -1)
-  def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0, act:tuple|None=None, out_dtype=dtypes.float32) -> Tensor:
+  def grouped(self, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0, act:tuple|None=None, out_dtype=dtypes.float32,
+              sorted_out:bool=False) -> Tensor:
     """the selections sorted by expert (moe_route), see moe_grouped_linear. expert parallel: a leading device axis"""
-    return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections, act, out_dtype)
+    return moe_grouped_linear(self.weight, unwrap(self.ggml_type), self.local_experts, x, entries, tiles, slots, selections, act, out_dtype,
+                              sorted_out)
   def fuse_up(self, up:ExpertWeights, rows:int):
     """take the up weights: the packed rows interleaved by 16 with this gate's, one kernel for both"""
     assert self.ggml_type is not None and self.ggml_type == up.ggml_type and self.weight.device == up.weight.device
@@ -373,8 +375,15 @@ class FFNBlock:
     for e in exps: e.set_quantized()
     # sliced experts: every device runs its slices of the selected experts
     if self.ffn_gate_exps.slices: sel, probs = self.ffn_gate_exps.select_slices(sel, probs)
-    if resolve(x.shape[1] != 1) and all(e.ggml_type is not None for e in exps):
-      out = self._grouped_experts(x, sel, probs)
+    grouped = resolve(x.shape[1] != 1) and all(e.ggml_type is not None for e in exps)
+    shexp:Tensor|None = None
+    if grouped and hasattr(self, 'ffn_gate_shexp') and not hasattr(self, 'ffn_gate_inp_shexp') and self.ffn_gate_exps.expert_parallel and \
+       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1:
+      # the shared expert's partial sums are added by the kernel summing the experts' rows of every token
+      shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
+      shexp = self.ffn_down_shexp.partial(shexp_act)
+    if grouped:
+      out = self._grouped_experts(x, sel, probs, add=shexp)
     else:
       if self.ffn_gate_exps.fused:  # one kernel for the gate and up rows, interleaved by 16
         gu = self.ffn_gate_exps(sel, h)
@@ -386,7 +395,9 @@ class FFNBlock:
       out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
     keep = partial and _partial_out[0]  # the partial sums are returned (sequence parallel)
-    if hasattr(self, 'ffn_gate_shexp'):
+    if shexp is not None:
+      if partial and not keep: out = partial_sum(out)
+    elif hasattr(self, 'ffn_gate_shexp'):
       shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
       # a row parallel shared expert adds its partial sums to the ones of the experts: one allreduce for both
       shexp = self.ffn_down_shexp.partial(shexp_act) if partial else self.ffn_down_shexp(shexp_act)
@@ -398,13 +409,13 @@ class FFNBlock:
     elif partial and not keep: out = partial_sum(out)
     return out
 
-  def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor) -> Tensor:
+  def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor, add:Tensor|None=None) -> Tensor:
     """prefill: the selections sorted by expert, every expert reads its weights once for all its tokens. (devices, B, T, D) partials if split"""
     B, T, D = x.shape
     # a symbolic token count runs padded to the max size, the garbage tokens are sliced off
     if not isinstance(T, int): x, sel, probs = x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), probs.pad_to(probs.max_shape)
     gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
-    valid, entries, tiles = moe_route(sel, gate_exps.first, gate_exps.local_experts)
+    _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
     if gate_exps.fused:  # the activation is computed in the kernel of the interleaved gate and up rows
@@ -413,13 +424,10 @@ class FFNBlock:
     else:
       gate, up = (e.grouped(x.reshape(-1, D), entries, tiles, slots=k) for e in (gate_exps, self.ffn_up_exps))
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-    # sliced: a selection has a row per slice, in half (the sum over the slots reads them all)
-    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=int(prod(sel_shape)),
-                             out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
-    if down.ndim == 2: down = down.unsqueeze(0)
-    # the rows of other devices' experts are not written
-    y = valid.unsqueeze(-1).where(down.float() * probs.reshape(1, -1, 1), 0)
-    y = y.reshape(-1, *sel_shape, D).sum(-2)[:, :, :x.shape[1] if isinstance(T, int) else T]
+    # down has a row per sorted row (in half if sliced: a token sums many), every token sums its rows weighed by their probabilities
+    down = down_exps.grouped(act.contiguous(), entries, tiles, sorted_out=True, out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
+    y = moe_combine(down, pos, probs, int(prod(sel_shape[:-1])), int(sel_shape[-1]), add)
+    y = y.reshape(-1, *sel_shape[:-1], D)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
 
   # given the token-prefix match, return how much cached state this block can still reuse

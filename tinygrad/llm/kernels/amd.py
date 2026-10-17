@@ -455,7 +455,8 @@ def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_wa
 def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name, rdna4, group:tuple[UOp, ...]=(),
                        expert_words:int=0, x_div:int=0, act:tuple[float, float, float]|None=None):
   # group (entries, tiles): grouped experts, the row r is the selection entries[r] (padding: -1) of the expert tiles[r//16] (-1: none).
-  # x_div: the x row is entries[r]//x_div and the output row r, else the x row is r and the output row the selection
+  # x_div > 0: the x row is entries[r]//x_div and the output row r, 0: the x row is r and the output row the selection, -1: both are r
+  # (the padding rows aren't stored)
   x = x.reshape(-1, in_features)
   output_waves, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens = layout
   token_tile, output_tiles = len(tokens)*16, len(outputs)
@@ -475,8 +476,9 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
     expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
     weights = rows.shape[0]*out_features*in_features
     estimates = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
-    x_rows = tuple((r:=rows[t].load()).valid(r >= 0) // x_div for t in input_tokens) if x_div else input_tokens
-    if not x_div: tokens = tuple(tuple((r:=rows[t].load()).valid(r >= 0) for t in tile_tokens) for tile_tokens in tokens)
+    x_rows = tuple((r:=rows[t].load()).valid(r >= 0) // x_div for t in input_tokens) if x_div > 0 else input_tokens
+    if x_div == 0: tokens = tuple(tuple((r:=rows[t].load()).valid(r >= 0) for t in tile_tokens) for tile_tokens in tokens)
+    if x_div == -1: tokens = tuple(tuple(t.valid(rows[t].load() >= 0) for t in tile_tokens) for tile_tokens in tokens)
   else:
     group_rng = UOp.range(in_features // Q8_GROUP_SIZE, 4, AxisType.LOOP)
     x_rows = input_tokens
@@ -618,8 +620,9 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
     weights = rows*out_features*in_features
     estimates = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
-    if x_div:
+    if x_div > 0:
       def xrow(r:UOp) -> UOp: return (e:=entries[r].load()).valid(e >= 0) // x_div
+    elif x_div == -1: store_rows = tuple(tuple(t.valid(entries[t].load() >= 0) for t in tile_tokens) for tile_tokens in tokens)
     else: store_rows = tuple(tuple((e:=entries[t].load()).valid(e >= 0) for t in tile_tokens) for tile_tokens in tokens)
   else: group_rng = UOp.range(n_groups // splits, 4, AxisType.LOOP)
   split = UOp.range(splits, 5, AxisType.GLOBAL)
@@ -948,7 +951,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
 
 def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0,
-                       act:tuple[float, float, float]|None=None, out_dtype=dtypes.float32) -> Tensor:
+                       act:tuple[float, float, float]|None=None, out_dtype=dtypes.float32, sorted_out:bool=False) -> Tensor:
   """
   grouped experts (prefill): every expert reads its weights once for all its rows, the selections sorted by expert (moe_route). entries (R,): the
   selection of each row (-1: padding), tiles (R/16,): the local expert of each tile of 16 rows (-1: none).
@@ -965,18 +968,19 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   extra:tuple[Tensor, ...] = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   fxn:Callable[..., UOp]
   group = (rows.cast(dtypes.int32).flatten().contiguous(), tiles.cast(dtypes.int32).flatten().contiguous())
-  rows_out, cols = R if slots else selections, out_features // 2 if act else out_features
+  rows_out, cols = R if slots or sorted_out else selections, out_features // 2 if act else out_features
+  x_div = slots or (-1 if sorted_out else 0)  # sorted_out: x and the output have a row per sorted row
   out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
   if _use_i8_wmma(x.device, ggml_type):
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
-                            expert_words=expert_words, x_div=slots, act=act)
+                            expert_words=expert_words, x_div=x_div, act=act)
     result = Tensor.custom_kernel(out, weight, *q8_quantize(x.contiguous(), int(x_rows), in_features)[:3], *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
   if ggml_type == IQ4_XS: fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
   else: fxn = functools.partial(_q5_linear_f16_wmma_kernel if ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel, ggml_type=ggml_type)
   fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device), out_features=out_features, in_features=in_features, expert_words=expert_words,
-                          x_div=slots, act=act)
+                          x_div=x_div, act=act)
   srcs = (x.cast(dtypes.float16).contiguous(), *extra, *group)
   result = Tensor.custom_kernel(out, weight, *srcs, fxn=fxn)[0]
   return result.reshape(devices, rows_out, cols) if devices > 1 else result
@@ -1019,11 +1023,12 @@ def _scatter_rows_kernel(out:UOp, pos:UOp) -> UOp:
   p = pos[i].load()
   return out[p.valid(p >= 0)].store(i.cast(dtypes.int32)).end(i).sink(arg=KernelInfo(name="scatter_rows", opts_to_apply=()))
 
-def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Tensor]:
+def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   """
   sorts the (token, slot) selections of sel (B, T, k) by local expert, each expert's rows padded to whole tiles.
   returns valid (..., B*T*k) if a selection is an expert of this device, entries (..., R) the selection of each row (-1: padding)
-  and tiles (..., R/MOE_TILE) the local expert of each tile (-1: none). first: the first expert of each device, a leading device axis if sharded
+  tiles (..., R/MOE_TILE) the local expert of each tile (-1: none) and pos (..., B*T*k) the row of each selection (-1: not local).
+  first: the first expert of each device, a leading device axis if sharded
   """
   k, N = sel.shape[-1], int(prod(sel.shape[-3:]))  # sel can have a leading device axis
   tokens, R = N // k, round_up(N + (MOE_TILE-1)*experts, MOE_TILE)
@@ -1044,7 +1049,37 @@ def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Te
   start = Tensor.arange(R // MOE_TILE, dtype=dtypes.int32) * MOE_TILE
   inside = (offsets.unsqueeze(1) <= start.unsqueeze(-1)) & (start.unsqueeze(-1) < (offsets + padded).unsqueeze(1))
   tiles = inside.where(Tensor.arange(experts, dtype=dtypes.int32) + 1, 0).sum(-1) - 1
-  return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32)
+  return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32), pos.cast(dtypes.int32)
+
+@functools.cache
+def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int) -> UOp:
+  # y[t] = the sum over the slots j of token t of probs[t, j] * down[pos[t, j]] (the sorted rows): a workgroup per token, a thread its columns.
+  # the slots of other devices' experts (pos -1) are skipped by the whole workgroup
+  T, D = cast(tuple[int, int], y.shape)
+  threads = 256
+  per = D // threads
+  t, th, j = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(threads, 1, AxisType.LOCAL), UOp.range(k, 2, AxisType.LOOP)
+  p, w = pos[t * k + j].load(), probs[t * k + j].load()
+  accs = UOp.alloc((per,), dtypes.float32, addrspace=AddrSpace.REG)
+  accs = accs.after(accs.store(UOp.stack(*[UOp.const(0, dtypes.float)]*per)))
+  vals = [(p >= 0).where(down[p.valid(p >= 0), th * per + c].load().float() * w, UOp.const(0, dtypes.float)) for c in range(per)]
+  accs = accs.after(accs.store(UOp.stack(*[accs.after(j)[c].load() + v for c, v in enumerate(vals)])).end(j))
+  def plus(c:int) -> UOp: return add[0][t, th * per + c].load().float() if add else UOp.const(0, dtypes.float)
+  return UOp.group(*[y[t, th * per + c].store(accs[c].load() + plus(c)) for c in range(per)]).end(t, th).sink(
+    arg=KernelInfo(name="moe_combine", opts_to_apply=()))
+
+def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None) -> Tensor:
+  """
+  down (..., R, D) the outputs of the sorted rows, pos (..., tokens*k) the row of every selection (-1: none), probs (tokens*k) their weights:
+  (..., tokens, D) the weighted sums of every token's rows (plus add, of that shape). a leading device axis (split) is kept
+  """
+  devices = len(down.device) if isinstance(down.device, tuple) and down.uop.axis == 0 else 1
+  D = int(down.shape[-1])
+  y = Tensor.empty(devices*tokens, D, dtype=dtypes.float32, device=down.device, axis=0 if devices > 1 else None)
+  extra = (add.reshape(-1, D).contiguous(),) if add is not None else ()
+  y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
+                           fxn=functools.partial(_moe_combine_kernel, k=k))[0]
+  return y.reshape(devices, tokens, D) if devices > 1 else y
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********
 
