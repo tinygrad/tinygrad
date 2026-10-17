@@ -1511,15 +1511,17 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
 
 @functools.cache
 def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=4) -> UOp:
-  # RDNA4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and 16*NP pools,
-  # the pool tiles past the pools skip their work
+  # RDNA4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and G of the tiles of 16*NP
+  # pools: it loops over the tiles g, g+G, .. of the pools (the work follows the context, not its max)
   T, H, D = cast(tuple[int, int, int], q.shape)
   P = cast(int, k.shape[0])
-  tt, pt, lane = UOp.range(T // 16, 0, AxisType.GLOBAL), UOp.range(P // (16*NP), 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  G = min(64, P // (16*NP))
+  tt, g, lane = UOp.range(T // 16, 0, AxisType.GLOBAL), UOp.range(G, 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half = lane % 16, lane // 16
-  t0, p0 = tt * 16, pt * (16*NP)
+  tiles = (pools + 16*NP - 1) // (16*NP)
+  active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 2, AxisType.LOOP)
+  t0, p0 = tt * 16, (g + active * G) * (16*NP)
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
-  active = UOp.range((p0 < pools).where(1, 0), 2, AxisType.LOOP)
   kfrags = [[UOp.stack(*(k[p0 + n*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)] for n in range(NP)]
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   # a loop over the heads (unrolled, the loads of all the heads would be hoisted): the sums in registers
@@ -1537,7 +1539,9 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=4) ->
     updates.append(accs[n].store(UOp.stack(*(prev[e].load() + s_reg[e].load().maximum(0) * wt[e] for e in range(8)))))
   done = UOp.group(*updates).end(h)
   stores = [out[t0 + half*8 + e, p0 + n*16 + col].store(accs[n].after(done)[e].load()) for n in range(NP) for e in range(8)]
-  return UOp.group(*stores).end(active).end(tt, pt, lane).sink(arg=KernelInfo(name="indexer_scores", opts_to_apply=()))
+  # a data dependent count of tiles, an upper bound estimate
+  est = Estimates(2*T*H*P*D, P*D*2 + T*H*D*2, T*P*4)
+  return UOp.group(*stores).end(active).end(tt, g, lane).sink(arg=KernelInfo(name="indexer_scores", opts_to_apply=(), estimates=est))
 
 def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
   """q (T, H, D), k (P, D) the pooled keys (P static, the first `pools` used), w (T, H): (T, P) scores, the columns past pools unwritten"""
@@ -1610,15 +1614,17 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:in
 
 @functools.cache
 def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=2) -> UOp:
-  # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). a wave per 16*NP pools, past
-  # the pools nothing
+  # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
+  # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max
   H, D = cast(tuple[int, int], q.shape)
   P = cast(int, k.shape[0])
-  pt, lane = UOp.range(P // (16*NP), 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  G = min(256, P // (16*NP))
+  g, lane = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half = lane % 16, lane // 16
-  p0 = pt * (16*NP)
+  tiles = (pools + 16*NP - 1) // (16*NP)
+  active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 1, AxisType.LOOP)
+  p0 = (g + active * G) * (16*NP)
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
-  active = UOp.range((p0 < pools).where(1, 0), 1, AxisType.LOOP)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   totals = [UOp.const(0, dtypes.float)] * NP
   for ht in range(H // 16):
@@ -1632,7 +1638,9 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:in
       totals[n] = totals[n] + functools.reduce(lambda a, e: a + s_reg[e].load().maximum(0) * wt[e], range(1, 8), s_reg[0].load().maximum(0) * wt[0])
   # the rows of a lane's half, then the other half's (lane ^ 16)
   stores = [out[(p0 + n*16 + col).valid(half.eq(0))].store(tot + _swizzle_xor(tot, 16)) for n, tot in enumerate(totals)]
-  return UOp.group(*stores).end(active).end(pt, lane).sink(arg=KernelInfo(name="indexer_scores_decode", opts_to_apply=()))
+  # a data dependent count of tiles, an upper bound estimate
+  est = Estimates(2*H*P*D, P*D*2, P*4)
+  return UOp.group(*stores).end(active).end(g, lane).sink(arg=KernelInfo(name="indexer_scores_decode", opts_to_apply=(), estimates=est))
 
 DECODE_THREADS = 1024
 
@@ -1647,8 +1655,13 @@ def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpo
   row, t = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(DECODE_THREADS, 1, AxisType.LOCAL)
   code = "{" + _pool_key_code("(@2@)", kpool) + f"""
   const float* _sc = @0@; long _q = @1@; int _t = @3@; int* _idx = @4@; int _w = _t / {WARP_SIZE}, _l = _t % {WARP_SIZE};
+  // the chunks of THREADS pools with pools in them: the work follows the context, not its max
+  int _npc = (int)(((@2@) + {DECODE_THREADS-1}) / {DECODE_THREADS});
   unsigned _keys[{per}];
-  for (int _i = 0; _i < {per}; _i++) {{ long _p = (long)_i*{DECODE_THREADS} + _t; _keys[_i] = _p < {P} ? _pool_key(_sc[_p], _p, _q) : 0u; }}
+  for (int _i = 0; _i < {per}; _i++) {{
+    long _p = (long)_i*{DECODE_THREADS} + _t;
+    _keys[_i] = _i < _npc && _p < {P} ? _pool_key(_sc[_p], _p, _q) : 0u;
+  }}
   __attribute__((shared)) int _hist[{waves}][256]; __attribute__((shared)) int _tot[256];
   __attribute__((shared)) unsigned _sp; __attribute__((shared)) int _sk;
   __attribute__((shared)) int _wc[{per}][{waves}]; __attribute__((shared)) int _wpre[{per}][{waves}]; __attribute__((shared)) int _cb[{per}+1];
@@ -1658,7 +1671,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpo
       int _shift = 24 - 8*_pass;
       for (int _b = _l; _b < 256; _b += {WARP_SIZE}) _hist[_w][_b] = 0;
       __syncthreads();
-      for (int _i = 0; _i < {per}; _i++) {{
+      for (int _i = 0; _i < {per} && _i < _npc; _i++) {{
         unsigned _key = _keys[_i];
         if (_pass == 0 || (_key >> (_shift+8)) == (_prefix >> (_shift+8)))
           __hip_atomic_fetch_add(&_hist[_w][(_key >> _shift) & 255u], 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
@@ -1683,23 +1696,23 @@ def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpo
   }}
   unsigned _th = _prefix > 1u ? _prefix : 1u;
   // in pool order: the picks of every (chunk of THREADS pools, wave), the waves before in a chunk, the chunks before, then the positions
-  for (int _i = 0; _i < {per}; _i++) {{
+  for (int _i = 0; _i < {per} && _i < _npc; _i++) {{
     unsigned _bal = __builtin_amdgcn_ballot_w32(_keys[_i] >= _th);
     if (_l == 0) _wc[_i][_w] = __builtin_popcount(_bal);
   }}
   __syncthreads();
-  for (int _x = _t; _x < {per*waves}; _x += {DECODE_THREADS}) {{
+  for (int _x = _t; _x < _npc*{waves}; _x += {DECODE_THREADS}) {{
     int _i = _x / {waves}, _v = _x % {waves}, _s = 0;
     for (int _u = 0; _u < _v; _u++) _s += _wc[_i][_u];
     _wpre[_i][_v] = _s;
   }}
   if (_t == 0) {{
     int _s = 0;
-    for (int _i = 0; _i < {per}; _i++) {{ _cb[_i] = _s; for (int _v = 0; _v < {waves}; _v++) _s += _wc[_i][_v]; }}
+    for (int _i = 0; _i < _npc; _i++) {{ _cb[_i] = _s; for (int _v = 0; _v < {waves}; _v++) _s += _wc[_i][_v]; }}
     _cb[{per}] = _s;
   }}
   __syncthreads();
-  for (int _i = 0; _i < {per}; _i++) {{
+  for (int _i = 0; _i < {per} && _i < _npc; _i++) {{
     bool _pick = _keys[_i] >= _th;
     unsigned _bal = __builtin_amdgcn_ballot_w32(_pick);
     int _pos = _cb[_i] + _wpre[_i][_w] + __builtin_popcount(_bal & ((1u << _l) - 1u));
