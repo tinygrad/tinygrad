@@ -484,9 +484,22 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   wmma_accs = [list(output_accs) for output_accs in accs]
   # gfx12 moves k2 from the element index to lane bit 4: each lane supplies two groups of four.
   ks = tuple(i%4 + physical_half*4 + (i//4)*8 for i in range(8)) if rdna4 else tuple(range(16))
+  # the tile's activations of the group through LDS (the waves share them): eight halves a thread
+  stage = rdna4 and x.dtype == dtypes.float16 and output_waves >= 4
+  if stage:
+    tile_rows, threads, tid = token_tile, output_waves*32, wave*32 + lane
+    lds_a = UOp.alloc((tile_rows, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)  # padded rows
+    st = []
+    for k in range((tile_rows*4 + threads - 1) // threads):
+      e = tid + k*threads
+      rr, c = (e // 4).minimum(tile_rows-1), e % 4
+      xr = ((r:=rows[token_block*tile_rows + rr].load()).valid(r >= 0) // x_div) if group and x_div > 0 else token_block*tile_rows + rr
+      st += [lds_a[rr.valid(e < tile_rows*4), c*8 + i].store(x[xr, group_rng*32 + c*8 + i]) for i in range(8)]
+    lds_a = lds_a.after(UOp.group(*st).barrier())
   for half in range(2):
-    afrags = tuple(UOp.stack(*(x[input_token, group_rng*32 + half*16 + i].cast(dtypes.float16) for i in ks))
-                   for input_token in x_rows)
+    if stage: afrags = tuple(UOp.stack(*(lds_a[t*16 + lane % 16, half*16 + i].load() for i in ks)) for t in range(len(x_rows)))
+    else: afrags = tuple(UOp.stack(*(x[input_token, group_rng*32 + half*16 + i].cast(dtypes.float16) for i in ks))
+                         for input_token in x_rows)
     for output_tile,output in enumerate(outputs):
       bfrag = UOp.stack(*dequant(expert_base + output*output_words + block*type_words, subgroup, half))
       for tile,afrag in enumerate(afrags):
@@ -674,8 +687,9 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
   token_tile = MOE_TILE if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
-  # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few)
-  layout = _wmma_layout(out, out_features, token_tile, 2 if group else 4, group)
+  # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few), four waves its activations (LDS)
+  tiles, waves = (2, 2) if group else next(((t, w) for t, w in ((4, 4), (2, 4), (4, 2), (2, 2)) if out_features % (16*t*w) == 0), (4, 2))
+  layout = _wmma_layout(out, out_features, token_tile, tiles, group, waves=waves)
   output_waves, _, _, lane, wave, physical_half, _, _, _ = layout
   word_indices = (physical_half, physical_half+2) if rdna4 else tuple(range(4))
   grid = None
