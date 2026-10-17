@@ -709,6 +709,49 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[ggml_type]//raw.dtype.itemsize,
                             layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", rdna4, group, expert_words, x_div, act)
 
+@functools.cache
+def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0, in_features:int=0) -> UOp:
+  # Q8_0 weights (rows of 32 weight blocks of 17 halfwords) times f16 x on RDNA4 WMMA: a workgroup computes token_tile tokens x 128 outputs with
+  # 4 waves, two of the tokens by two of the outputs (4 tiles of 16 outputs each). per group of 32 inputs the workgroup puts the tokens' x and
+  # the dequantized weights (a block a thread) in LDS: a weight is dequantized once for token_tile tokens, x is loaded once for 128 outputs
+  M, N = cast(tuple[int, int], out.shape)
+  K = cast(int, x.shape[-1])
+  x = x.reshape(M, K)
+  OW, TW, OT, groups = 2, 2, 4, K // 32
+  TT = token_tile // (16 * TW)  # token tiles of a wave
+  token_block, output_block = UOp.range(M // token_tile, 0, AxisType.GLOBAL), UOp.range(N // 128, 1, AxisType.GLOBAL)
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(OW * TW, 3, axis_type=AxisType.LOCAL)
+  col, half = lane % 16, lane // 16
+  wt, wo, tid = wave // OW, wave % OW, wave * 32 + lane
+  g = UOp.range(groups, 4, AxisType.LOOP)
+  # the stage: x (token_tile, 32) in eight halves a thread, the weights (128, 32): the block of output tid
+  lds_x = UOp.alloc((token_tile, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  lds_w = UOp.alloc((128, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  st = []
+  for k in range((token_tile * 4 + 127) // 128):
+    e = tid + k * 128
+    r, c = (e // 4).minimum(token_tile - 1), e % 4
+    st += [lds_x[r.valid(e < token_tile * 4), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
+  base = ((output_block * 128 + tid) * groups + g) * 17
+  scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
+  for w in range(16):
+    word = raw[base + 1 + w].load().cast(dtypes.uint32)
+    for b in range(2): st.append(lds_w[tid, w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
+  staged = UOp.group(*st).barrier()
+  lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
+  ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8))
+  accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
+  accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
+  cur:list[list[UOp]] = [[accs[o][t].after(g) for t in range(TT)] for o in range(OT)]
+  for kh in range(2):
+    afr = [UOp.stack(*(lds_x[wt * TT * 16 + t * 16 + col, kh * 16 + i].load() for i in ks)) for t in range(TT)]
+    bfr = [UOp.stack(*(lds_w[wo * OT * 16 + o * 16 + col, kh * 16 + i].load() for i in ks)) for o in range(OT)]
+    cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
+  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).end(g)
+  stores = [out[token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i, output_block * 128 + wo * OT * 16 + o * 16 + col].store(
+              accs[o][t].after(update)[i].load()) for o in range(OT) for t in range(TT) for i in range(8)]
+  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name="q8_gemm", opts_to_apply=()))
+
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
@@ -731,6 +774,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, splits=ksplits)
     srcs = (*xq[:3], *extra)
     out_shape = (ksplits*tokens, out_features)
+  elif layer.ggml_type == Q8_0 and xq is None and local_out % 128 == 0 and in_features % 32 == 0 and _wmma_rdna4(x.device) and \
+       (tt:=next((t for t in (96, 128, 64) if tokens % t == 0), 0)) and getenv("Q8_GEMM", 1):
+    # many tokens: the weights dequantized in LDS for token tiles of tt
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=tt)
+    srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
