@@ -934,6 +934,11 @@ class AMDDevice(Compiled):
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
 
   @functools.cached_property
+  def copy_duplex(self) -> bool:
+    """copies into the device can run on a second engine (queue COPY:1), the ones out of it on the first"""
+    return self.is_am() and getattr(self.iface.dev_impl.sdma, "engines", 1) > 1 and bool(getenv("HCQ_COPY_DUPLEX", 1))
+
+  @functools.cached_property
   def has_copy_queue(self) -> bool:
     self.has_copy_queue = False # queue setup can allocate buffers that check this property
     return self.sdma_queue(0) is not None

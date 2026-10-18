@@ -315,6 +315,9 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION: queues[i] = "ENCDEC:0"
     if c.op is Ops.CALL and c.body.op is Ops.STORE and all(b.device in peers for b in get_call_arg_uops(c)):
       queues[i] = f"COPY:{(peers.index(c.src[1].device) - peers.index(c.src[2].device) - 1) % len(peers) % num_queues}"
+    # a device with two copy engines pulls the copies into it on the second (e.g. from host memory), they run with the ones out of it
+    elif c.op is Ops.CALL and c.body.op is Ops.STORE and len(devs[i]) == 1 and c.src[1].device == devs[i][0] != c.src[2].device and \
+         getattr(Device[devs[i][0]], "copy_duplex", False): queues[i] = "COPY:1"
 
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
