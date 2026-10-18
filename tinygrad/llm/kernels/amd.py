@@ -1947,6 +1947,82 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 # ******** gated delta net: fused recurrent scan ********
 
 @functools.cache
+def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
+                                    end_pos:UOp|None=None, TC:int=16, W:int=8) -> UOp:
+  # _gated_delta_prefill_kernel with W waves a workgroup (W*4 value rows of a head): the operands of TC tokens are staged in LDS once for the
+  # waves (every wave of a head read them all from L2), the waves step through them. the same arithmetic
+  # a value row over L lanes (key_dim/L keys a lane, its dots summed over them), row_tile rows a lane
+  L = getenv("GD_L", 16)
+  batch, heads, tokens, value_dim, row_tile = *core.shape, getenv("GD_RT", 4 if L == 32 else 2)
+  key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
+  batch, heads, tokens, value_dim, key_dim = cast(tuple[int, int, int, int, int], (batch, heads, tokens, value_dim, key_dim))
+  core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
+  q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
+  beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
+  alpha = alpha.reshape(batch*heads, tokens, alpha_dim)
+  S = cast(int, state.shape[0]) if end_pos is not None else 1
+  read_off, write_off = (0, 0) if end_pos is None else ((cast(UOp, start_pos) % S) * (batch*heads), (end_pos % S) * (batch*heads))
+  state = state.reshape(-1, value_dim, key_dim)
+  RW = W * (32 // L) * row_tile  # the rows of a workgroup
+  bh_blk = UOp.range(batch*heads*value_dim//RW, 0, AxisType.GLOBAL)
+  wave, lane = UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  bh, blk_row = bh_blk // (value_dim//RW), (bh_blk % (value_dim//RW))*RW
+  tid = wave*32 + lane
+  kl, rsub, per = lane % L, lane // L, key_dim // L
+  wrow = (wave * (32 // L) + rsub) * row_tile  # the first row of the lane in the workgroup's
+  rows = tuple(blk_row + wrow + i for i in range(row_tile))
+  cols = tuple(kl + i*L for i in range(per))
+  def tree(xs:list[UOp]) -> UOp:
+    while len(xs) > 1: xs = [xs[i] + xs[i+1] if i+1 < len(xs) else xs[i] for i in range(0, len(xs), 2)]
+    return xs[0]
+  def lane_sum(x:UOp) -> UOp:
+    for off in (16, 8, 4, 2, 1):
+      if off < L: x = x + _lane_xor(x, off)
+    return x
+  current = UOp.alloc((row_tile*per,), dtypes.float32, addrspace=AddrSpace.REG)
+  initial = None if start_pos is None else start_pos.eq(0)
+  current = current.after(current.store(UOp.stack(*(state[read_off+bh, row, col].float() if initial is None else
+    initial.where(0, state[read_off+bh, row, col].float()) for row in rows for col in cols))))
+  chunk = UOp.range(tokens // TC, 2, AxisType.LOOP)
+  lds_k, lds_q = (UOp.alloc((TC, key_dim), dtypes.float32, addrspace=AddrSpace.LOCAL) for _ in range(2))
+  lds_a = UOp.alloc((TC, alpha_dim), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds_v = UOp.alloc((TC, RW), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds_s = UOp.alloc((TC, 2), dtypes.float32, addrspace=AddrSpace.LOCAL)  # beta, kq
+  threads, st = W*32, []
+  for src, lds, width in ((k, lds_k, key_dim), (q, lds_q, key_dim), (alpha, lds_a, alpha_dim)):
+    for e0 in range(0, TC*width, threads):
+      e = tid + e0
+      st.append(lds[(e//width).valid(e < TC*width), e % width].store(src[bh, chunk*TC + (e//width).minimum(TC-1), e % width].load()))
+  for e0 in range(0, TC*RW, threads):
+    e = tid + e0
+    st.append(lds_v[(e//RW).valid(e < TC*RW), e % RW].store(v[bh, chunk*TC + (e//RW).minimum(TC-1), blk_row + e % RW].load()))
+  st += [lds_s[tid.valid(tid < TC), 0].store(beta[bh, chunk*TC + tid.minimum(TC-1)].load()),
+         lds_s[tid.valid(tid < TC), 1].store(kq[bh, chunk*TC + tid.minimum(TC-1)].load())]
+  staged = UOp.group(*st).barrier()
+  lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(staged) for x in (lds_k, lds_q, lds_a, lds_v, lds_s))
+  t = UOp.range(TC, 3, AxisType.LOOP)
+  token = chunk*TC + t
+  keys = tuple(lds_k[t, col].load() for col in cols)
+  queries = tuple(lds_q[t, col].load() for col in cols)
+  updates, stores = [], []
+  for row_idx,row in enumerate(rows):
+    previous = tuple(current.after(t)[row_idx*per+i].load() for i in range(per))
+    decayed, bv = tuple(x * lds_a[t, col if alpha_dim > 1 else 0].load() for x,col in zip(previous, cols)), lds_s[t, 0].load()
+    if L == 32:
+      state_k = warp_reduce(sum((x*y for x,y in zip(decayed, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
+      state_q = warp_reduce(sum((x*y for x,y in zip(decayed, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
+    else:
+      state_k = lane_sum(tree([x*y for x,y in zip(decayed, keys)]))
+      state_q = lane_sum(tree([x*y for x,y in zip(decayed, queries)]))
+    delta = (lds_v[t, wrow + row_idx].load() - state_k) * bv
+    updates += [x + delta*y for x,y in zip(decayed, keys)]
+    stores.append(core[bh, token, row.valid(kl.eq(0))].store(state_q + delta*lds_s[t, 1].load()))
+  step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier().end(chunk)
+  state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*per+i].load().cast(state.dtype))
+                  for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
+  return UOp.group(*state_stores).end(lane, wave, bh_blk).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
+
+@functools.cache
 def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
                                 end_pos:UOp|None=None) -> UOp:
   # end_pos: the state is (S, B, H, V, K), the state at a position p is p%S: read at start_pos, written at end_pos
@@ -2343,5 +2419,10 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   end = None if end_pos is None else end_pos.unbind_all()[0] if isinstance(end_pos, UOp) else UOp.const(end_pos, dtypes.weakint)
-  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbind_all()[0], end).call(*contig)
+  sp = None if start_pos is None else start_pos.uop.unbind_all()[0]
+  # many tokens: the waves of a head share the operands of 16 of them through LDS
+  W = getenv("GD_LDS", 4)
+  if W and tokens % 16 == 0 and value_dim % (32*W) == 0 and key_dim % 32 == 0:
+    call = _gated_delta_prefill_lds_kernel(*params, sp, end, W=W).call(*contig)
+  else: call = _gated_delta_prefill_kernel(*params, sp, end).call(*contig)
   return Tensor(contig[0].after(call))

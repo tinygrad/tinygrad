@@ -247,6 +247,31 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           np.testing.assert_allclose(out.numpy(), np.stack(outputs, axis=2), rtol=2e-4, atol=2e-6)
           np.testing.assert_allclose(state.numpy(), expected_state, rtol=2e-4, atol=2e-6)
 
+  def test_gated_delta_lds_scan(self):
+    # a scan of 32 tokens (the workgroups share the operands of 16 tokens through LDS) against the recurrence
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    rng = np.random.default_rng(1)
+    H, T, K, V = 2, 32, 128, 32
+    q, k = (rng.normal(0, 0.1, (1, H, T, K)).astype(np.float32) for _ in range(2))
+    v = rng.normal(size=(1, H, T, V)).astype(np.float32)
+    beta = rng.uniform(0, 1, (1, H, T)).astype(np.float32)
+    initial = rng.normal(0, 0.1, (1, H, V, K)).astype(np.float32)
+    for per_channel in (False, True):
+      alpha = rng.uniform(0.8, 1, (1, H, T, K) if per_channel else (1, H, T)).astype(np.float32)
+      for start in (0, 3):
+        with self.subTest(per_channel=per_channel, start=start):
+          expected_state = np.zeros_like(initial) if start == 0 else initial.copy()
+          outputs = []
+          for t in range(T):
+            expected_state *= alpha[:, :, t, None, :] if per_channel else alpha[:, :, t, None, None]
+            delta = (v[:, :, t] - (expected_state*k[:, :, t, None]).sum(-1)) * beta[:, :, t, None]
+            expected_state += delta[..., None]*k[:, :, t, None]
+            outputs.append((expected_state*q[:, :, t, None]).sum(-1))
+          state = Tensor(initial).contiguous().realize()
+          out = gated_delta_prefill(*map(Tensor, (q, k, v, beta, alpha)), state, Tensor(UOp.variable("start", 0, 3).bind(start)))
+          np.testing.assert_allclose(out.numpy(), np.stack(outputs, axis=2), rtol=1e-3, atol=1e-5)
+          np.testing.assert_allclose(state.numpy(), expected_state, rtol=1e-3, atol=1e-5)
+
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
