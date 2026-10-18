@@ -552,7 +552,8 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, ou
   if group: token_tile = MOE_TILE
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
   if act is not None: output_tiles = 2
-  layout = _wmma_layout(out, out_features, token_tile, output_tiles, group)
+  # grouped experts: eight waves share a tile's activations (through LDS)
+  layout = _wmma_layout(out, out_features, token_tile, output_tiles, group, waves=8 if group else 2)
   output_waves, _, _, lane, wave, half, _, _, _ = layout
   word_indices = (half, half+2) if rdna4 else tuple(range(4))
   local_lut = UOp.alloc((256,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
@@ -700,8 +701,9 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
   token_tile = MOE_TILE if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
-  # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few), four waves its activations (LDS)
-  tiles, waves = (2, 2) if group else next(((t, w) for t, w in ((4, 4), (2, 4), (4, 2), (2, 2)) if out_features % (16*t*w) == 0), (4, 2))
+  # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few), four waves its activations (LDS),
+  # eight for grouped experts (a tile's rows are few, the outputs many)
+  tiles, waves = (2, 8) if group else next(((t, w) for t, w in ((4, 4), (2, 4), (4, 2), (2, 2)) if out_features % (16*t*w) == 0), (4, 2))
   layout = _wmma_layout(out, out_features, token_tile, tiles, group, waves=waves)
   output_waves, _, _, lane, wave, physical_half, _, _, _ = layout
   word_indices = (physical_half, physical_half+2) if rdna4 else tuple(range(4))
