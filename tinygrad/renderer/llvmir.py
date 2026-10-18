@@ -165,7 +165,7 @@ pm_widen_uidx = PatternMatcher([
 class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, Ops.SQRT: lambda: None}
+  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, **{op: lambda: None for op in llvm_intrinsics}}
 
   def __init__(self, target:Target):
     super().__init__(target)
@@ -254,7 +254,6 @@ class AMDLLVMRenderer(LLVMRenderer):
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
   abi = "amdgpu_kernel"
-  code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
