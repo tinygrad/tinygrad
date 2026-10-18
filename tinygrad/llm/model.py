@@ -885,10 +885,28 @@ class Transformer:
     if hc is not None and not isinstance(T:=x.shape[1], int) and amd_custom_kernels_supported(x.device) and \
        all(isinstance(b, (MLATransformerBlock, GatedDeltaNetBlock)) for b in self.blk):
       x = x.pad_to(x.max_shape).contiguous()
+      R = int(x.shape[1])
       # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
-      if sp:=self.sequence_parallel(int(x.shape[1])): x = shard_rows(x, 1)
-      for block in self.blk: x = block(x, start_pos, T)
-      x = all_gather(x.mean(2), 1) if sp else x.mean(2)
+      if (sp:=self.sequence_parallel(R)) and (mb:=getenv("MICRO_BATCHES", 1)) > 1 and self.sequence_parallel(R // mb) and R % mb == 0:
+        # micro batches of rows, every block runs on one then the next: the copies of one overlap the kernels of the next (they don't wait for
+        # them). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
+        n, xs, ts, starts = R // mb, [], [], []
+        for i in range(mb):
+          xs.append(shard_rows(x[:, i*n:(i+1)*n].contiguous(), 1))
+          ts.append((T - i*n).maximum(0).minimum(n))
+          starts.append(start_pos + (T.minimum(i*n) if i else 0))
+        for j, block in enumerate(self.blk):
+          for i in range(mb):
+            # the first batch's block after the last batch's block before it: the kernels are queued in turns, the copies of a batch's block
+            # run with the next batch's block (not its next block, which waits for them)
+            xin = Tensor(xs[i].uop.after(*xs[-1].uop.src[1:])) if i == 0 and j > 0 and getenv("MB_ORDER", 1) else xs[i]
+            xs[i] = block(xin, starts[i], ts[i])
+            if getenv("MB_DEBUG") and j < 2: print("MBDBG", j, i, xs[i].uop.op, [x.op for x in xs[i].uop.src][:4], xin.uop.op, [x.op for x in xin.uop.src][:4])
+        x = Tensor.cat(*[all_gather(xi.mean(2), 1) for xi in xs], dim=1)
+      else:
+        if sp: x = shard_rows(x, 1)
+        for block in self.blk: x = block(x, start_pos, T)
+        x = all_gather(x.mean(2), 1) if sp else x.mean(2)
       if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T)
       x = x[:, :T]
     else:

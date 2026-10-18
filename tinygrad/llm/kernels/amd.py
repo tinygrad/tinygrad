@@ -683,7 +683,8 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     tile_rows, threads, tid = len(input_tokens)*16, output_waves*32, wave*32 + lane
     # two buffers by the parity of the group: a wave fills the next group's while the slower ones still read this one's (a barrier between)
     par = group_rng % 2
-    lds_q = UOp.alloc((2*tile_rows, 8), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    # rows of 10 words (8 used): the 16 rows of a fragment's lanes on different banks (2 words a lane, 8 byte aligned)
+    lds_q = UOp.alloc((2*tile_rows, getenv("I8_LDS_STRIDE", 10)), dtypes.uint32, addrspace=AddrSpace.LOCAL)
     lds_d = UOp.alloc((2*tile_rows,), dtypes.float32, addrspace=AddrSpace.LOCAL)
     st = []
     # every thread loads words of rows and a row's scale, unconditionally (no branches): a padding row reads row 0, the threads of the same
@@ -755,8 +756,19 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
     grid = grid.after(*(grid[tid+i*threads].store(grids[0][tid+i*threads]) for i in range(int(grid.numel())//threads)))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     if ggml_type in SMALL_BLOCK_QUANTS: base += subgroup*SMALL_BLOCK_QUANTS[ggml_type]  # eight independent blocks per 256 weights
-    scale, zero, minimum = _wmma_scale(raw, base, subgroup, half, ggml_type)
     words = tuple(_quant_word(raw, base, subgroup, half*4+i, ggml_type, grid) for i in word_indices)
+    if ggml_type == IQ3_S and getenv("F16_FAST_CVT", 1):
+      # the bytes to halves without floats: with the sign bit flipped a byte is the mantissa of the half 1024+u (0x64 above it, a byte
+      # permute for two), minus 1152 the signed byte. q times the integer sub-scale (at most 15*31) is exact in half, times d rounds once:
+      # the same half as (q*(d*sub-scale)) in float rounded
+      d = raw[base].cast(dtypes.uint16).bitcast(dtypes.half)
+      sub = (1+2*((_load_byte(raw, base, 106+subgroup//2) >> ((subgroup%2)*4)) & 15)).cast(dtypes.half)
+      def halves(word:UOp) -> list[UOp]:
+        u = word ^ 0x80808080
+        pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), u, UOp.const(sel, dtypes.uint32)) for sel in (0x04010400, 0x04030402)]
+        return [((p >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p in pairs for sh in (0, 16)]
+      return tuple((h - 1152) * sub * d for word in words for h in halves(word))
+    scale, zero, minimum = _wmma_scale(raw, base, subgroup, half, ggml_type)
     return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
                  for word in words for b in range(4))
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[ggml_type]//raw.dtype.itemsize,
@@ -2275,12 +2287,12 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
   if start_pos is not None:
-    assert start_pos.uop.is_bound_var
+    # start_pos: a bound variable or an expression of them
     state = Tensor(state.uop.after(start_pos.uop, *([end_pos] if isinstance(end_pos, UOp) else [])))
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   end = None if end_pos is None else end_pos.unbind_all()[0] if isinstance(end_pos, UOp) else UOp.const(end_pos, dtypes.weakint)
-  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbound(), end).call(*contig)
+  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbind_all()[0], end).call(*contig)
   return Tensor(contig[0].after(call))
