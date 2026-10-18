@@ -537,7 +537,7 @@ class HIPRenderer(CStyleLanguage):
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
-  type_map = {**CStyleLanguage.type_map, dtypes.bf16: "hip_bfloat16", **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
+  type_map = {**CStyleLanguage.type_map, **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
@@ -562,8 +562,6 @@ class HIPRenderer(CStyleLanguage):
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", self.render_dtype(dt), self.render_dtype(dt), ocml_ops[op][1])
       for op, dt in dedup((u.op, u.dtype) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
-    if any(dt == dtypes.bfloat16 for dt, _ in used_dtypes):
-      prefix.append("typedef __bf16 hip_bfloat16;")
     if any(dt == dtypes.half for dt, _ in used_dtypes): prefix.append("#define half _Float16")
     if any(dt in dtypes.fp8s for dt, _ in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
