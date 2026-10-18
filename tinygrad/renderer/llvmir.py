@@ -224,11 +224,7 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
-  code_for_op = LLVMRenderer.code_for_op | {Ops.SQRT:lambda:None}
   string_rewrite = base_rewrite
-  extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([
-    (UPat(Ops.SQRT, name="x"), lambda x: UOp.custom_function(f"llvm.sqrt.f{x.dtype.itemsize*8}", dtype=x.dtype).call(*x.src)),
-  ])
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
