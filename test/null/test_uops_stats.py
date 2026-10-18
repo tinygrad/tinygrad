@@ -4,7 +4,7 @@ from tinygrad.helpers import GlobalCounters, Target
 from tinygrad.engine.realize import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo, AddrSpace
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
@@ -101,6 +101,16 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
 class TestUOpsStats(unittest.TestCase):
+  def test_inline_call(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU)
+    val = (p0[p1].load() * p1) + 10
+    i = UOp.range(4, 0)
+    call = p0[p1].store(val).sink().call(buf.after(i), i, name="test")
+    prg = to_program(call.end(i).sink(arg=KernelInfo(optimized=True)), Device[Device.DEFAULT].renderer)
+    self.assertEqual(prg.src[0].arg.estimates.lds, 32)
+    self.assertEqual(prg.src[0].arg.estimates.ops, 8)
+
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)
     prg = to_program(buf.index(1).store(5).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))

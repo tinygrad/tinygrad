@@ -29,31 +29,36 @@ class Estimates:
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
     excluded: set[UOp] = set()
-    uops = list(sink.toposort())
+    uops = list(sink.toposort(enter_calls=True))
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
 
+    call_scopes: dict[UOp, UOp] = {}
+    for u in filter(lambda u: u.op is Ops.CALL, uops):
+      for s in u.body.backward_slice: call_scopes[s]=u
+
     special_mult = prod(cast(sint, u.src[0].ssimplify()) for u in uops if u.op is Ops.SPECIAL)
     @functools.cache
-    def mults(ranges:tuple[UOp,...]):
+    def scope_mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void] + [special_mult])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
+    def mults(u:UOp) -> sint: return scope_mults(tuple(u.ranges)+(tuple(call_scopes[u].ranges) if u in call_scopes else ()))
 
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         if (buf:=u.buf_uop).op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(tuple(u.ranges))
+          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(u)
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
       if u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.dtype.itemsize * mults(tuple(u.ranges))
+        lds += u.max_numel() * u.dtype.itemsize * mults(u)
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(tuple(u.ranges))
+        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(u)
       elif u.op in GroupOp.ALU and u not in excluded:
-        flops += (mults(tuple(u.ranges)) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+        flops += (mults(u) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(tuple(u.ranges))
+        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(u)
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
