@@ -692,20 +692,23 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 
 @functools.cache
-def _iq3s_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, grid_src:UOp, rows:UOp, tiles:UOp, out_features:int, in_features:int,
-                      expert_words:int, x_div:int, act:tuple|None=None) -> UOp:
-  # grouped IQ3_S experts on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer sub-scale
+def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int, expert_words:int,
+                         x_div:int, act:tuple|None=None) -> UOp:
+  # grouped experts (IQ3_S, IQ4_XS) on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer sub-scale
   # accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
   # waves of 2 output tiles (act: the gate and up of 16 columns) by the tile's 4 token tiles. the tile's activations of a block are in LDS
+  grid_src, (rows, tiles) = (srcs[0] if ggml_type == IQ3_S else None), srcs[-2:]
   TOK, WAVES, OT = MOE_TILE, 8, 2
   TT, OUTB, blocks = TOK // 16, WAVES * OT * 16, in_features // 256
-  type_words = QUANT_SIZES[IQ3_S] // raw.dtype.itemsize
+  type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
   output_words = in_features * type_words // GGML_BLOCK_SIZE
   token_block, output_block = UOp.range(rows.shape[0] // TOK, 0, AxisType.GLOBAL), UOp.range(out_features // OUTB, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   col, ph, tid = lane % 16, lane // 16, wave * 32 + lane
-  grid = UOp.alloc((int(grid_src.numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
-  grid = grid.after(UOp.group(*(grid[tid + i*256].store(grid_src[tid + i*256]) for i in range(int(grid.numel()) // 256))).barrier())
+  grid = None
+  if grid_src is not None:
+    grid = UOp.alloc((int(grid_src.numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    grid = grid.after(UOp.group(*(grid[tid + i*256].store(grid_src[tid + i*256]) for i in range(int(grid.numel()) // 256))).barrier())
   expert = tiles[token_block].load()
   b = UOp.range((expert >= 0).where(blocks, 0), 4, AxisType.LOOP)
   expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
@@ -726,18 +729,23 @@ def _iq3s_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, grid_src:UOp, rows:UOp, 
   zero = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
-  # the int32 sums of the block over its sub-blocks, times their integer sub-scales (a 24 bit multiply-add: a dot of 32 int8 products times
-  # 15 is below 2**23, a sub-scale at most 31, 8 of them below 2**31)
+  # the int32 sums of the block over its sub-blocks, times their integer sub-scales (a 24 bit multiply-add: a dot of 32 int8 products of
+  # weights of at most 127 (IQ3_S 15) is below 2**23, a sub-scale at most 32 in magnitude, 8 of them below 2**31)
   ints = [[UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   ints = [[r.after(r.after(b).store(zero)) for r in row] for row in ints]
   dws = [_half(raw[base]) for base in bases]
+  def sub_scale(base:UOp, sb:UOp) -> UOp:
+    # the integer scale of sub-block sb: IQ3_S 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
+    if ggml_type == IQ3_S: return (1 + 2*((_load_byte(raw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
+    header, low = raw[base].load(), raw[base+1].load()
+    return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   sb = UOp.range(8, 5, AxisType.LOOP)
   afr = [[_i8_frag((lds_q[t*16 + col, sb, ph*4 + 2*h].load(), lds_q[t*16 + col, sb, ph*4 + 2*h + 1].load())) for h in range(2)]
          for t in range(TT)]
   sums = []
   for o, base in enumerate(bases):
-    sub = (1 + 2*((_load_byte(raw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
-    bfr = [_i8_frag(tuple(_quant_word(raw, base, sb, h*4 + i, IQ3_S, grid) for i in (ph, ph+2))) for h in range(2)]
+    sub = sub_scale(base, sb)
+    bfr = [_i8_frag(tuple(_quant_word(raw, base, sb, h*4 + i, ggml_type, grid) for i in (ph, ph+2))) for h in range(2)]
     for t in range(TT):
       dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
       dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
@@ -765,7 +773,7 @@ def _iq3s_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, grid_src:UOp, rows:UOp, 
   weights = rows.shape[0] * out_features * in_features
   est = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
-    arg=KernelInfo(name="grouped_iq3_s_k256", opts_to_apply=(), estimates=est))
+    arg=KernelInfo(name=f"grouped_{QUANT_NAMES[ggml_type]}_k256", opts_to_apply=(), estimates=est))
 
 @functools.cache
 def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int,
@@ -1326,11 +1334,14 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   rows_out, cols = R if slots or sorted_out else selections, out_features // 2 if act else out_features
   x_div = slots or (-1 if sorted_out else 0)  # sorted_out: x and the output have a row per sorted row
   out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
-  if ggml_type == IQ3_S and in_features % 256 == 0 and out_features % 256 == 0 and _wmma_rdna4(x.device) and getenv("IQ3_K256", 1):
+  # (IQ4_XS too: as fast as its f16 kernel for the experts' down rows, which read their activations exactly)
+  if ggml_type in (IQ3_S,) + ((IQ4_XS,) if getenv("IQ4_K256") else ()) and in_features % 256 == 0 and out_features % 256 == 0 and \
+     _wmma_rdna4(x.device) and getenv("IQ3_K256", 1):
     # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     xq, xd = q8k_quantize(x.contiguous(), int(x_rows), in_features)
-    fxn = functools.partial(_iq3s_k256_kernel, out_features=out_features, in_features=in_features, expert_words=expert_words, x_div=x_div, act=act)
+    fxn = functools.partial(_grouped_k256_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
+                            expert_words=expert_words, x_div=x_div, act=act)
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
   if _use_i8_wmma(x.device, ggml_type):
