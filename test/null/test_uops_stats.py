@@ -103,7 +103,7 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
 class TestUOpsStats(unittest.TestCase):
   def test_inline_call(self):
     buf = UOp.param(0, dtypes.int32, 4)
-    p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU)
+    p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
     val = (p0[p1].load() * p1) + 10
     i = UOp.range(4, 0)
     call = p0[p1].store(val).sink().call(buf.after(i), i, name="test")
