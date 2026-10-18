@@ -114,10 +114,14 @@ class Linear(nn.Linear):
     if (found:=find_packed(decoded, self.in_features)) is None: return
     self.ggml_type, self.weight = found
     self.shard_axis = decoded.uop.axis
-  def partial(self, x:Tensor) -> Tensor:
-    """row parallel layers return the partial sums of each device, (devices, ..., out_features) sharded on the devices, the others the output"""
+  def partial(self, x:Tensor, half:bool=False) -> Tensor:
+    """
+    row parallel layers return the partial sums of each device, (devices, ..., out_features) sharded on the devices, the others the output.
+    half: the partial sums may be in half (they're sent so)
+    """
     if self.ggml_type is None and self.use_custom_quant and amd_custom_kernels_supported(self.weight.device): self.set_quantized(self.weight)
-    if self.ggml_type in QUANT_SIZES and self.shard_axis == 1 and self.bias is None and isinstance(x.numel(), int): return q8_linear(self, x, False)
+    if self.ggml_type in QUANT_SIZES and self.shard_axis == 1 and self.bias is None and isinstance(x.numel(), int):
+      return q8_linear(self, x, False, half_out=half)
     return self(x)
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
@@ -826,10 +830,10 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
     c = output_block * 128 + wo * OT * 16 + o * 16 + col
     return c.valid(c < N) if N % 128 else c
   stores = [out[token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i, ocol(o)].store(
-              accs[o][t].after(update)[i].load()) for o in range(OT) for t in range(TT) for i in range(8)]
+              accs[o][t].after(update)[i].load().cast(out.dtype)) for o in range(OT) for t in range(TT) for i in range(8)]
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name="q8_gemm", opts_to_apply=()))
 
-def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False) -> Tensor:
+def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
@@ -869,7 +873,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra)
   # split: x has its rows split over the devices (the weight is whole on every device), so has the output
   out_axis = 0 if split and layer.shard_axis is None else None if layer.shard_axis is None else 1-layer.shard_axis
-  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=out_axis)
+  # half_out: q8_gemm stores the sums in half (the others in float, then cast)
+  half_out = half_out and getattr(fxn, "func", None) is _q8_gemm_kernel
+  out = Tensor.empty(out_shape, dtype=dtypes.half if half_out else dtypes.float32, device=x.device, axis=out_axis)
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if ksplits > 1: result = result.reshape(ksplits, tokens, out_features).sum(0)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
@@ -1287,17 +1293,17 @@ def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int) ->
   vals = [(p >= 0).where(down[p.valid(p >= 0), th * per + c].load().float() * w, UOp.const(0, dtypes.float)) for c in range(per)]
   accs = accs.after(accs.store(UOp.stack(*[accs.after(j)[c].load() + v for c, v in enumerate(vals)])).end(j))
   def plus(c:int) -> UOp: return add[0][t, th * per + c].load().float() if add else UOp.const(0, dtypes.float)
-  return UOp.group(*[y[t, th * per + c].store(accs[c].load() + plus(c)) for c in range(per)]).end(t, th).sink(
+  return UOp.group(*[y[t, th * per + c].store((accs[c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
     arg=KernelInfo(name="moe_combine", opts_to_apply=()))
 
-def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None) -> Tensor:
+def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None, out_dtype=dtypes.float32) -> Tensor:
   """
   down (..., R, D) the outputs of the sorted rows, pos (..., tokens*k) the row of every selection (-1: none), probs (tokens*k) their weights:
-  (..., tokens, D) the weighted sums of every token's rows (plus add, of that shape). a leading device axis (split) is kept
+  (..., tokens, D) the weighted sums of every token's rows (plus add, of that shape), summed in float. a leading device axis (split) is kept
   """
   devices = len(down.device) if isinstance(down.device, tuple) and down.uop.axis == 0 else 1
   D = int(down.shape[-1])
-  y = Tensor.empty(devices*tokens, D, dtype=dtypes.float32, device=down.device, axis=0 if devices > 1 else None)
+  y = Tensor.empty(devices*tokens, D, dtype=out_dtype, device=down.device, axis=0 if devices > 1 else None)
   extra = (add.reshape(-1, D).contiguous(),) if add is not None else ()
   y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
                            fxn=functools.partial(_moe_combine_kernel, k=k))[0]

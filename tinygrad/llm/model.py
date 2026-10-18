@@ -240,8 +240,8 @@ _partial_out = [False]
 # and the sublayer's input rows of this device (before the gather): per token work (the router) runs on them, its results are gathered
 _sp_rows:list[Tensor|None] = [None]
 def _out(layer:Linear, x:Tensor) -> Tensor:
-  """a sublayer's output projection: its partial sums if they are kept (_partial_out)"""
-  return layer.partial(x) if _partial_out[0] else layer(x)
+  """a sublayer's output projection: its partial sums if they are kept (_partial_out), in half (they're sent so)"""
+  return layer.partial(x, half=True) if _partial_out[0] else layer(x)
 
 def _identity(x:Tensor) -> Tensor: return x
 
@@ -420,7 +420,8 @@ class FFNBlock:
       shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
       shexp = self.ffn_down_shexp.partial(shexp_act)
     if grouped:
-      out = self._grouped_experts(x, sel, probs, add=shexp)
+      # the partial sums kept (sequence parallel) are sent in half: stored so if nothing is added after
+      out = self._grouped_experts(x, sel, probs, add=shexp, half=_partial_out[0] and (shexp is not None or not hasattr(self, 'ffn_gate_shexp')))
     else:
       if self.ffn_gate_exps.fused:  # one kernel for the gate and up rows, interleaved by 16
         gu = self.ffn_gate_exps(sel, h)
@@ -446,7 +447,7 @@ class FFNBlock:
     elif partial and not keep: out = partial_sum(out)
     return out
 
-  def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor, add:Tensor|None=None) -> Tensor:
+  def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor, add:Tensor|None=None, half:bool=False) -> Tensor:
     """prefill: the selections sorted by expert, every expert reads its weights once for all its tokens. (devices, B, T, D) partials if split"""
     B, T, D = x.shape
     # a symbolic token count runs padded to the max size, the garbage tokens are sliced off
@@ -463,7 +464,8 @@ class FFNBlock:
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
     # down has a row per sorted row (in half if sliced: a token sums many), every token sums its rows weighed by their probabilities
     down = down_exps.grouped(act.contiguous(), entries, tiles, sorted_out=True, out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
-    y = moe_combine(down, pos, probs, int(prod(sel_shape[:-1])), int(sel_shape[-1]), add)
+    y = moe_combine(down, pos, probs, int(prod(sel_shape[:-1])), int(sel_shape[-1]), add,
+                    out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32)
     y = y.reshape(-1, *sel_shape[:-1], D)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
 
