@@ -227,6 +227,29 @@ def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool, split:bool)
   outs = Tensor.custom_kernel(q, scale, xsum, x, *sq, fxn=functools.partial(_q8_quantize_kernel, tokens=local, in_features=in_features))
   return tuple(outs[:3]) + ((outs[4],) if sumsq else ())
 
+def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]) -> tuple[UOp, list[UOp]]:
+  """
+  software pipelining of the loop over rng: the loads in body from the global params that depend on rng are issued an iteration early, into
+  registers (the first ones before the loop). returns body reading the registers and the stores of the next iteration's loads (in the loop)
+  """
+  topo, deps = body.toposort(), set()
+  for u in topo:
+    if u is rng or any(s in deps for s in u.src): deps.add(u)
+  targets_of = {u.src[0] for u in topo if u.op in (Ops.LOAD, Ops.STORE)}
+  def scalar(u:UOp) -> bool: return u.shape == ()
+  targets = [u for u in topo if u in deps and (
+    (u.op is Ops.LOAD and u.src[0].op is Ops.INDEX and u.src[0].src[0] in params) or
+    (u.op is Ops.INDEX and u.src[0] in params and u not in targets_of)) and scalar(u)]
+  # the next iteration's index through a placeholder (the replacement holds rng)
+  hole = UOp.variable("prefetch_index", 0, 1 << 30, rng.dtype)
+  repl, stores = {}, []
+  for t in targets:
+    reg = UOp.alloc((1,), t.dtype, addrspace=AddrSpace.REG)
+    reg = reg.after(reg[0].store(t.substitute({rng: rng.const_like(0)})))
+    repl[t] = cur = reg.after(rng)[0].load()
+    stores.append(reg.after(cur)[0].store(t.substitute({rng: hole}).substitute({hole: (rng + 1).minimum(last)})))
+  return body.substitute(repl), stores
+
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
                    estimates:Estimates|None=None, multi:int=1) -> UOp:
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
@@ -648,8 +671,10 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
   stage_x = bool(group) and ggml_type in GROUP_SCALE_QUANTS and ggml_type not in (Q4_K, Q5_K)
   if stage_x:
     tile_rows, threads, tid = len(input_tokens)*16, output_waves*32, wave*32 + lane
-    lds_q = UOp.alloc((tile_rows, 8), dtypes.uint32, addrspace=AddrSpace.LOCAL)
-    lds_d = UOp.alloc((tile_rows,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    # two buffers by the parity of the group: a wave fills the next group's while the slower ones still read this one's (a barrier between)
+    par = group_rng % 2
+    lds_q = UOp.alloc((2*tile_rows, 8), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    lds_d = UOp.alloc((2*tile_rows,), dtypes.float32, addrspace=AddrSpace.LOCAL)
     st = []
     # every thread loads a word of a row (or a scale)
     for k in range((tile_rows*9 + threads - 1) // threads):
@@ -657,18 +682,19 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
       rr, wi = (e // 9).minimum(tile_rows-1), e % 9
       xr = xrow(token_block*tile_rows + rr)
       ok = e < tile_rows*9
-      st.append(lds_q[rr.valid(ok & (wi < 8)), ((wi%2)*4 + wi//2).minimum(7)].store(xq[xr, g, wi.minimum(7)].load()))
-      st.append(lds_d[rr.valid(ok & wi.eq(8))].store(xd[xr, g].load()))
+      st.append(lds_q[(par*tile_rows + rr).valid(ok & (wi < 8)), ((wi%2)*4 + wi//2).minimum(7)].store(xq[xr, g, wi.minimum(7)].load()))
+      st.append(lds_d[(par*tile_rows + rr).valid(ok & wi.eq(8))].store(xd[xr, g].load()))
     staged = UOp.group(*st).barrier()
     lds_q, lds_d = lds_q.after(staged), lds_d.after(staged)
-    d_x = [[lds_d[t*16 + ph*8 + j].load() for j in range(8)] for t in range(len(tokens))]
+    d_x = [[lds_d[par*tile_rows + t*16 + ph*8 + j].load() for j in range(8)] for t in range(len(tokens))]
   else: d_x = [[xd[r, g].load() for r in tile_rows] for tile_rows in s_rows]
   zero_acc = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
   new_vals = [[[accs[o][t].after(group_rng)[j].load() for j in range(8)] for t in range(len(tokens))] for o in range(len(outputs))]
   # one scale per 32 inputs: both halves accumulate in int32 and the group is scaled once, else every half has its own scale
   halves = ((0, 1),) if ggml_type in GROUP_SCALE_QUANTS else ((0,), (1,))
   for hs in halves:
-    if stage_x: afrags = [[_i8_frag((lds_q[t*16 + lane % 16, ph*4 + 2*half].load(), lds_q[t*16 + lane % 16, ph*4 + 2*half + 1].load()))
+    if stage_x: afrags = [[_i8_frag((lds_q[par*tile_rows + t*16 + lane % 16, ph*4 + 2*half].load(),
+                                     lds_q[par*tile_rows + t*16 + lane % 16, ph*4 + 2*half + 1].load()))
                            for half in hs] for t in range(len(a_rows))]
     else: afrags = [[_i8_frag((xq[r, g, half*4+ph].load(), xq[r, g, half*4+2+ph].load())) for half in hs] for r in a_rows]
     s_x = [[sum((xs[r, g, half].load() for half in hs), UOp.const(0, dtypes.float)) for r in tile_rows] for tile_rows in s_rows]
@@ -686,7 +712,12 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
           sx = s_x[t][j]
           term = scale * dot[j].load().float() if not zero else scale * (dot[j].load().float() - zero*sx)
           new_vals[o][t][j] = new_vals[o][t][j] + d_x[t][j] * (term if ggml_type not in (Q4_K, Q5_K, Q2_K) else term - minimum*sx)
-  update = UOp.group(*(accs[o][t].store(UOp.stack(*new_vals[o][t])) for o in range(len(outputs)) for t in range(len(tokens)))).end(group_rng)
+  update = UOp.group(*(accs[o][t].store(UOp.stack(*new_vals[o][t])) for o in range(len(outputs)) for t in range(len(tokens))))
+  if len(group) and int(getenv("I8_PREFETCH", 1)):
+    # the next group's weights and activations are loaded while this one computes
+    update, prefetch = _prefetched(update, group_rng, n_groups - 1, (raw, xq, xd, xs))
+    update = UOp.group(update, *prefetch)
+  update = update.end(group_rng)
   if act is not None: stores = _act_stores(out, outputs, store_rows, accs, update, act)
   else: stores = [out[row + split * rows, output.valid(output < real_out) if real_out != out_features else output].store(
                     accs[o][t].after(update)[j].load().cast(out.dtype))
