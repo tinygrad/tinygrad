@@ -20,7 +20,7 @@ u_aop = { Ops.ADD: "iadd", Ops.MUL: "imul", Ops.CDIV: "udiv", Ops.CMOD: "umod", 
           Ops.AND: "iand", Ops.XOR: "ixor", Ops.WHERE: "bcsel", Ops.MAX: "umax", Ops.SHL: "ishl", Ops.SHR: "ushr"}
 s_aop = {**u_aop, Ops.CMPLT: "ilt", Ops.CDIV: "idiv", Ops.CMOD: "irem", Ops.MAX: "imax", Ops.SHR: "ishr"}
 f_aop = { Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "flt", Ops.CMPNE: "fneu", Ops.CMPEQ: "feq", Ops.FDIV: "fdiv", Ops.RECIPROCAL: "frcp",
-          Ops.MAX: "fmax", Ops.TRUNC: "ftrunc", Ops.SIN: "fsin", Ops.EXP2: "fexp2", Ops.LOG2: "flog2"}
+          Ops.MAX: "fmax", Ops.TRUNC: "ftrunc", Ops.SIN: "fsin", Ops.EXP2: "fexp2", Ops.LOG2: "flog2", Ops.SQRT: "fsqrt"}
 aop = {**{x:u_aop for x in (dtypes.bool,)+dtypes.uints}, **{x:s_aop for x in dtypes.sints}, **{x:f_aop for x in dtypes.floats}}
 
 def c(t:DType, u:bool=True) -> str: return "u" if t in dtypes.uints and u else ("i" if t in dtypes.ints else ("f" if t in dtypes.floats else "b"))
@@ -259,10 +259,7 @@ class LVPRenderer(NIRRenderer):
   nir_options = mesa.lvp_nir_options
   # gallivm's exp2/log2 have "undefined behavior with infs, 0s and nans", so exp2(log2(0)*y) returns 0 instead of inf
   # https://gitlab.freedesktop.org/mesa/mesa/-/blob/c200b18e876468b51fe80d9660f612dc03a5138e/src/gallium/auxiliary/gallivm/lp_bld_arit.c#L2972
-  code_for_op = {**{k:v for k,v in NIRRenderer.code_for_op.items() if k != Ops.EXP2}, Ops.SQRT:lambda:None}
-  def_rewrite = PatternMatcher([
-    (UPat(Ops.SQRT, src=(UPat.var("x"),)), lambda ctx,x: nalu(ctx.b, "fsqrt", ctx.r[x])),
-  ]) + NIRRenderer.def_rewrite
+  code_for_op = {k:v for k,v in NIRRenderer.code_for_op.items() if k != Ops.EXP2}
 
   param = nir_instr(nc=1, bs=lambda sz: sz * 8, num_components=1, intrins={"ALIGN_MUL":lambda sz: sz, "RANGE":lambda self: self.param_sz},
     srcs=lambda b,self,sz: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, round_up(self.param_idx, sz), dtypes.int))], also=lambda self, sz:

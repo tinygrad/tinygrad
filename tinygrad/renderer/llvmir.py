@@ -77,6 +77,10 @@ float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{fla
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
+llvm_intrinsics = {op: lambda ctx,x,name=name:
+  f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{name}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"
+  for op,name in ((Ops.SQRT, "sqrt"), (Ops.LOG2, "log2"), (Ops.EXP2, "exp2"))}
+
 base_rewrite = PatternMatcher([
   # memory load/store
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: None if x.src[0].addrspace in (None, AddrSpace.ALU) else
@@ -107,6 +111,7 @@ base_rewrite = PatternMatcher([
                f" = insertelement {ldt(x.dtype, x.max_numel())} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
+  (UPat(tuple(llvm_intrinsics), name="x"), lambda ctx,x: llvm_intrinsics[x.op](ctx, x)),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -155,7 +160,7 @@ base_rewrite = PatternMatcher([
 class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
+  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, Ops.SQRT: llvm_intrinsics[Ops.SQRT]}
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + PatternMatcher([
     # GEP sign-extends indices to pointer width, so unsigned indices must be widened first.
@@ -215,10 +220,7 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
-  code_for_op = LLVMRenderer.code_for_op | {Ops.SQRT:lambda:None}
   string_rewrite = base_rewrite
-  extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([
-    (UPat(Ops.SQRT, name="x"), lambda x: UOp.custom_function(f"llvm.sqrt.f{x.dtype.itemsize*8}", dtype=x.dtype).call(*x.src))])
   def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
@@ -244,17 +246,14 @@ barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.b
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
-llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 class AMDLLVMRenderer(LLVMRenderer):
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
   abi = "amdgpu_kernel"
-  code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
+  code_for_op = {**LLVMRenderer.code_for_op, **llvm_intrinsics}
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
-    (UPat(tuple(llvm_intrinsics), name="x"),
-    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
       f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {fp8_index(x.dtype)})"),
