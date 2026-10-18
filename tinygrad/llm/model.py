@@ -1158,7 +1158,7 @@ class Transformer:
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
-      spec_drafts=getenv("SPEC_DRAFTS", 3) if mtp else 0)
+      spec_drafts=getenv("SPEC_DRAFTS", 2) if mtp else 0)
     model = Transformer(config)
     # gate experts loaded with the up rows (fused): one weight of twice the rows
     for name, b in [(f"blk.{i}", b) for i, b in enumerate(model.blk)] + ([("mtp", model.mtp)] if mtp else []):
