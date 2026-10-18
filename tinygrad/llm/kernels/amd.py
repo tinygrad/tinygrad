@@ -1721,26 +1721,31 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   s_reg = s_reg.after(s_reg.store(s_acc))
   lds_s = UOp.alloc((WAVES, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
   lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(s_reg[e].load()) for e in range(8))).barrier())
-  m_reg, l_reg = _reg((8,), -1e30), _reg((8,), 0)
   o_regs = [_reg((8,), 0) for _ in range(KT)]
+  # the softmax of rows e (of both halves) in ES = 8//WAVES of them a wave: its running max and sum, P and the rescale of the rows to LDS
+  ES = 8 // WAVES
+  m_reg, l_reg = _reg((ES,), -1e30), _reg((ES,), 0)
   m_old, l_old = m_reg.after(n_tile), l_reg.after(n_tile)
-  p_vals, m_new, l_new, alpha = [], [], [], []
-  for e in range(8):
+  lds_p = UOp.alloc((16, 16 + 2), dtypes.half, addrspace=AddrSpace.LOCAL)
+  lds_a = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
+  pst, m_new, l_new = [], [], []
+  for i in range(ES):
+    e = wave * ES + i
     s = key_ok.where(sum((lds_s[w, lane, e].load() for w in range(WAVES)), UOp.const(0, dtypes.float)) * scale, UOp.const(-1e30, dtypes.float))
     mx = s
     for sh in (1, 2, 4, 8): mx = mx.maximum(_swizzle_xor(mx, sh))
-    mn = m_old[e].load().maximum(mx)
+    mn = m_old[i].load().maximum(mx)
     p = key_ok.where(((s - mn) * LOG2E).exp2(), UOp.const(0, dtypes.float))
     ps = p
     for sh in (1, 2, 4, 8): ps = ps + _swizzle_xor(ps, sh)
-    a = ((m_old[e].load() - mn) * LOG2E).exp2()
-    p_vals.append(p)
+    a = ((m_old[i].load() - mn) * LOG2E).exp2()
+    pst += [lds_p[half*8 + e, col].store(p.cast(dtypes.half)), lds_a[(half*8 + e).valid(col.eq(0))].store(a)]
     m_new.append(mn)
-    alpha.append(a)
-    l_new.append(l_old[e].load() * a + ps)
-  lds_p = UOp.alloc((WAVES, 16, 16 + 2), dtypes.half, addrspace=AddrSpace.LOCAL)
-  lds_p = lds_p.after(UOp.group(*(lds_p[wave, half*8 + e, col].store(p_vals[e].cast(dtypes.half)) for e in range(8))).barrier())
-  pfrag = UOp.stack(*(lds_p[wave, col, k].load() for k in ks))
+    l_new.append(l_old[i].load() * a + ps)
+  shared = UOp.group(*pst, m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new))).barrier()
+  lds_p, lds_a = lds_p.after(shared), lds_a.after(shared)
+  alpha = [lds_a[half*8 + e].load() for e in range(8)]
+  pfrag = UOp.stack(*(lds_p[col, k].load() for k in ks))
   vkeys = [key_at(k) for k in ks]
   o_new = []
   for dt in range(KT):
@@ -1748,10 +1753,12 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
     vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     prev = o_regs[dt].after(n_tile)
     o_new.append(UOp.wmma(pfrag, vfrag, UOp.stack(*(prev[e].load() * alpha[e] for e in range(8))), *WMMA_ARG))
-  update = UOp.group(m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new)), *(o.store(v) for o, v in zip(o_regs, o_new)))
-  update = update.barrier().end(n_tile)
+  update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier().end(n_tile)
+  # the sums of the rows of every wave (LDS)
+  lds_l = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
   l_fin = l_reg.after(update)
-  stores = [out[tok*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / l_fin[e].load().maximum(1e-30))
+  lds_l = lds_l.after(UOp.group(*(lds_l[(half*8 + wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
+  stores = [out[tok*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30))
             for dt, o in enumerate(o_regs) for e in range(8)]
   # a data dependent count of keys, an upper bound estimate
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*D*4)
