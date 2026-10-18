@@ -1296,25 +1296,25 @@ class Transformer:
     devs = self.token_embd.weight.device
     return isinstance(devs, tuple) and self.config.hc is not None and rows % (16*len(devs)) == 0 and bool(getenv("SEQ_PARALLEL", 1))
 
-  def prefill_chunks(self, chunk_size:int|None=None) -> tuple[int, int]:
-    """the (max, small) prefill chunk sizes: the custom kernels compute chunks padded to a static size, a prompt that fits the small size
-    runs it (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
+  def prefill_chunks(self, chunk_size:int|None=None) -> tuple[int, ...]:
+    """the prefill chunk sizes, ascending: the custom kernels compute chunks padded to a static size, a piece of a prompt runs the smallest
+    one it fits (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
     fast = amd_custom_kernels_supported(self.token_embd.weight.device)
-    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 2048 if fast else 32), self.max_context)
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 4096 if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
-    small = min(chunk_size, getenv("PREFILL_SMALL", 512 if fast else chunk_size))
+    sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048)) if fast else ())]
     if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None and getenv("SEQ_PARALLEL", 1):
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
       def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
-      chunk_size, small = tiled(chunk_size), tiled(small)
-    return chunk_size, small
+      sizes = [tiled(n) for n in sizes]
+    return tuple(sorted(set(sizes)))
 
   def warmup(self):
     """compile and capture every jit a request uses: a prompt of each prefill chunk size (twice: a jit captures on its second call), decoding"""
-    chunk, small = self.prefill_chunks()
-    # the big chunk first: its scratch memory is the most, the other jits share it
-    for n in sorted({1, small + 1 if chunk > small else 1}, reverse=True):
+    sizes = self.prefill_chunks()
+    # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
+    for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
       for _ in range(2):
         self._cached_tokens, self._ckpt_tokens = [], []
         list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
@@ -1359,9 +1359,10 @@ class Transformer:
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
     # the prefill jits are specialized for one chunk size each
-    chunk_size, small = self.prefill_chunks(chunk_size)
+    sizes = self.prefill_chunks(chunk_size)
+    chunk_size = sizes[-1]
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-    v_toks, v_small = UOp.variable("toks", 1, chunk_size), UOp.variable("toks", 1, small)
+    v_toks = {n: UOp.variable("toks", 1, n) for n in sizes}
     # TODO: use UOp.variable for temperature once float variables are supported
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     temp = Tensor([temperature]).to(self.token_embd.weight.device).realize()
@@ -1393,7 +1394,7 @@ class Transformer:
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       # the prompt in chunks (symbolic sizes), then one token at a time (the decode jit)
-      sp, nt = v_start_pos.bind(start_pos), 1 if start_pos >= prompt_len else (v_small if n_toks <= small else v_toks).bind(n_toks)
+      sp, nt = v_start_pos.bind(start_pos), 1 if start_pos >= prompt_len else v_toks[next(n for n in sizes if n_toks <= n)].bind(n_toks)
       # with run ahead, the previous step already submitted this one
       if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
       # the token is polled only if the call wrote it to the token buffer (a replaced __call__ doesn't)

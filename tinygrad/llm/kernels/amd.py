@@ -52,11 +52,18 @@ def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
   if isinstance(device, tuple): device = device[0]
   with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[device], "target")[0] == 12
 
+def _lane_xor(val:UOp, mask:int) -> UOp:
+  """the float of lane ^ mask (wave32): DPP within rows of 16 lanes, permlanex16 across them (RDNA, a few cycles), else a ds_swizzle"""
+  if getenv("LANE_DPP", 1) and 0 < mask < 16: op = f"__builtin_amdgcn_update_dpp(0, __builtin_bit_cast(int, {{0}}), {0x160 | mask}, 15, 15, false)"
+  elif getenv("LANE_DPP", 1) and mask == 16:
+    op = "__builtin_amdgcn_permlanex16(0, __builtin_bit_cast(int, {0}), 0x76543210, 0xfedcba98, false, false)"
+  else: op = f"__builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | mask<<10})"
+  return UOp(Ops.CUSTOM, src=(val,), arg=(f"__builtin_bit_cast(float, {op})", dtypes.float))
+
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
     if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
-    other = UOp(Ops.CUSTOM, src=(val,), arg=
-      (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
+    other = _lane_xor(val, offset)
     val = val.maximum(other) if maximum else val + other
   return val
 
@@ -784,7 +791,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
   x = x.reshape(M, K)
   OW, TW, OT, groups = 2, 2, 4, K // 32
   TT = token_tile // (16 * TW)  # token tiles of a wave
-  token_block, output_block = UOp.range(M // token_tile, 0, AxisType.GLOBAL), UOp.range(N // 128, 1, AxisType.GLOBAL)
+  # outputs past N (a last partial block of 128): their weights are the last row's and they aren't stored
+  token_block, output_block = UOp.range(M // token_tile, 0, AxisType.GLOBAL), UOp.range((N + 127) // 128, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(OW * TW, 3, axis_type=AxisType.LOCAL)
   col, half = lane % 16, lane // 16
   wt, wo, tid = wave // OW, wave % OW, wave * 32 + lane
@@ -797,7 +805,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
     e = tid + k * 128
     r, c = (e // 4).minimum(token_tile - 1), e % 4
     st += [lds_x[r.valid(e < token_tile * 4), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
-  base = ((output_block * 128 + tid) * groups + g) * 17
+  base = (((output_block * 128 + tid).minimum(N - 1)) * groups + g) * 17
   scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
   for w in range(16):
     word = raw[base + 1 + w].load().cast(dtypes.uint32)
@@ -814,7 +822,10 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
     bfr = [UOp.stack(*(lds_w[wo * OT * 16 + o * 16 + col, kh * 16 + i].load() for i in ks)) for o in range(OT)]
     cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
   update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).end(g)
-  stores = [out[token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i, output_block * 128 + wo * OT * 16 + o * 16 + col].store(
+  def ocol(o:int) -> UOp:
+    c = output_block * 128 + wo * OT * 16 + o * 16 + col
+    return c.valid(c < N) if N % 128 else c
+  stores = [out[token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i, ocol(o)].store(
               accs[o][t].after(update)[i].load()) for o in range(OT) for t in range(TT) for i in range(8)]
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name="q8_gemm", opts_to_apply=()))
 
@@ -840,7 +851,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, splits=ksplits)
     srcs = (*xq[:3], *extra)
     out_shape = (ksplits*tokens, out_features)
-  elif layer.ggml_type == Q8_0 and xq is None and local_out % 128 == 0 and in_features % 32 == 0 and _wmma_rdna4(x.device) and \
+  elif layer.ggml_type == Q8_0 and xq is None and (local_out % 128 == 0 or tokens >= 1024) and in_features % 32 == 0 and _wmma_rdna4(x.device) and \
        (tt:=next((t for t in (96, 128, 64) if tokens % t == 0), 0)) and getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt)
@@ -1294,9 +1305,7 @@ def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Te
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********
 
-def _swizzle_xor(val:UOp, mask:int) -> UOp:
-  swizzle = f"__builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | mask<<10})"
-  return UOp(Ops.CUSTOM, src=(val,), arg=(f"__builtin_bit_cast(float, {swizzle})", dtypes.float))
+def _swizzle_xor(val:UOp, mask:int) -> UOp: return _lane_xor(val, mask)
 
 @functools.cache
 def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
