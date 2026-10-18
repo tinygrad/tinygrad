@@ -107,10 +107,14 @@ class Handler(VizHandler):
     dec = tok.stream_decoder()
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
     router = StreamRouter(reasoning, tags)
+    spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
     def log_stats(interrupted:bool=False):
       et = time.perf_counter()
       total = f"total:{et-st:6.2f}s"
-      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+      # speculative decoding: the tokens of a step of the model
+      spec = f"spec:{(t[1]-spec_st[1])/(t[0]-spec_st[0]):4.2f} tok/step  {colored('--', 'BLACK')}  " \
+        if spec_st and (t:=model.spec_stats)[0] > spec_st[0] else ""
+      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  {spec}"
                  f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
     completed = False
     try:
