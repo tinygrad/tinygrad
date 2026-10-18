@@ -901,7 +901,6 @@ class Transformer:
             # run with the next batch's block (not its next block, which waits for them)
             xin = Tensor(xs[i].uop.after(*xs[-1].uop.src[1:])) if i == 0 and j > 0 and getenv("MB_ORDER", 1) else xs[i]
             xs[i] = block(xin, starts[i], ts[i])
-            if getenv("MB_DEBUG") and j < 2: print("MBDBG", j, i, xs[i].uop.op, [x.op for x in xs[i].uop.src][:4], xin.uop.op, [x.op for x in xin.uop.src][:4])
         x = Tensor.cat(*[all_gather(xi.mean(2), 1) for xi in xs], dim=1)
       else:
         if sp: x = shard_rows(x, 1)
