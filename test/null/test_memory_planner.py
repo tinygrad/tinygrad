@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.schedule.memory import memory_plan_rewrite
+from tinygrad.schedule.memory import memory_plan_rewrite, LARGE_BUFFER
 
 global_map = {}
 held_bufs: set[UOp] = set()
@@ -247,6 +247,31 @@ class TestMemoryPlanner(unittest.TestCase):
       copies.append((copy_buf, b(0, pin=True)))
     bs.append([b(100, pin=True)])
     check_assign(bs, copies=copies)
+
+  def test_large_buffers_no_fragmentation(self):
+    # allocated in order the short X1 and X2 leave two holes around Y that Z doesn't fit: placed by size, the arena is the memory live at once
+    M = LARGE_BUFFER * 2
+    bs = [
+      [b(0, size=M), b(1, size=M), b(2, size=M)],
+      [b(1), b(3, size=2*M)],
+    ]
+    check_assign(bs)
+    result = memory_plan_rewrite(_make_linear(bs), held_bufs)
+    self.assertEqual(_get_arena(b(3), _make_linear(bs), result).max_numel(), 3*M)
+
+  def test_shared_arenas(self):
+    # linears given the same arenas use the same arena if it's big enough, a bigger one replaces it
+    arenas:dict = {}
+    big = _make_linear([[b(0, size=4096), b(1, size=4096)], [b(1), b(2, size=4096)]])
+    small = _make_linear([[b(3, size=1024), b(4, size=1024)]])
+    r1 = memory_plan_rewrite(big, held_bufs, arenas)
+    r2 = memory_plan_rewrite(small, held_bufs, arenas)
+    a1, a2 = _get_arena(b(0), big, r1), _get_arena(b(3), small, r2)
+    self.assertIs(a1, a2)
+    huge = _make_linear([[b(5, size=1<<16), b(6, size=1<<16)]])
+    a3 = _get_arena(b(5), huge, memory_plan_rewrite(huge, held_bufs, arenas))
+    self.assertIsNot(a3, a1)
+    self.assertGreaterEqual(a3.max_numel(), 2<<16)
 
 if __name__ == "__main__":
   unittest.main()

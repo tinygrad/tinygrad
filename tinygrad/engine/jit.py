@@ -26,16 +26,19 @@ def _copy_input(u:UOp) -> UOp:
   run_linear(UOp(Ops.LINEAR, src=((new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype)).store_call(u),)))
   return new
 
-@rewrite_group(lambda linear,held_bufs,input_uops,input_vars,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int]) -> UOp:
+@rewrite_group(lambda linear,held_bufs,input_uops,input_vars,scratch=None,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int], scratch:dict|None=None) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
-  linear = memory_plan_rewrite(linear, held_bufs)
-  linear = linear.substitute({u: u.rtag("scratch") for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}, walk=True)
+  linear = memory_plan_rewrite(linear, held_bufs, scratch)
+  # the scratch is freed by free_intermediates, a shared one isn't
+  shared = set(scratch.values()) if scratch is not None else set()
+  linear = linear.substitute({u: u.rtag("scratch") for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs and u not in shared},
+                             walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear
@@ -103,13 +106,15 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buf_uops, var_vals, names, expected_input_info
 
 class _TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, capture_first=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, capture_first=False,
+               scratch:dict|None=None):
     # capture_first: capture on the first call, no eager call first (the one time setup of the function is done, e.g. by another jit of it)
+    # scratch: the memory of the intermediates, shared by the jits given the same dict (they must never run at the same time)
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 1 if capture_first else 0
-    self.prune = prune
+    self.prune, self.scratch = prune, scratch
 
   def add_linear(self, linear:UOp): self._linears.append(linear)
 
@@ -162,7 +167,7 @@ class _TinyJit(Generic[ReturnType]):
       def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals)
+      linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals, self.scratch)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
@@ -181,7 +186,8 @@ class _TinyJit(Generic[ReturnType]):
 
 # overload signatures support both @TinyJit and @TinyJit(prune=True) syntax
 @overload
-def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False, capture_first:bool=False) -> _TinyJit[ReturnType]: ...
+def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False, capture_first:bool=False, scratch:dict|None=None) -> _TinyJit[ReturnType]: ...
 @overload
-def TinyJit(fxn:None=None, *, prune:bool=False, capture_first:bool=False) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
+def TinyJit(fxn:None=None, *, prune:bool=False, capture_first:bool=False,
+            scratch:dict|None=None) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
 def TinyJit(fxn=None, **kwargs): return (lambda f: _TinyJit(f, **kwargs)) if fxn is None else _TinyJit(fxn, **kwargs)

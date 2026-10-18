@@ -15,8 +15,11 @@ def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   return all(not d.startswith(("DISK", "CL", "WEBGPU")) for d in to_tuple(b.device))
 
 LaneKey = tuple[str, int]
+LARGE_BUFFER = 1 << 20  # buffers placed before the others (see memory_plan_rewrite)
 
-def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
+def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[LaneKey, UOp]|None=None) -> UOp:
+  # arenas: the arena of every lane, shared with other linears that never run at the same time (e.g. the jits of a model): an arena that is big
+  # enough is reused, a bigger one replaces it
   if NO_MEMORY_PLANNER: return linear
   if held_bufs is None: held_bufs = set()
 
@@ -43,16 +46,33 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
                   [(last_appearance[b] + 1 + buf_hold.get(b, 0), False, b) for b in first_appearance], key=lambda x: (x[0], x[1]))
   total_memory = sum(nbytes.values()) * 2
 
+  # the large buffers are placed first, knowing all the lifetimes: the largest first, each at the lowest offset free for its lifetime (an online
+  # allocator fragments the arena: its size can be twice the memory live at once). the many small ones are suballocated after them
+  start = {b: first_appearance[b] for b in first_appearance}
+  end = {b: last_appearance[b] + 1 + buf_hold.get(b, 0) for b in first_appearance}
   offsets:dict[UOp, int] = {}
+  large_peak:dict[LaneKey, int] = defaultdict(int)
+  placed:dict[LaneKey, list[tuple[int, int, int, int]]] = defaultdict(list)
+  for buf in sorted((b for b in first_appearance if nbytes[b] >= LARGE_BUFFER), key=lambda b: (-nbytes[b], start[b])):
+    off = 0
+    for lo, hi in sorted((o, o+n) for s, e, o, n in placed[_key(buf)] if s < end[buf] and start[buf] < e):
+      if off + nbytes[buf] <= lo: break
+      off = max(off, hi)
+    placed[_key(buf)].append((start[buf], end[buf], off, nbytes[buf]))
+    offsets[buf], large_peak[_key(buf)] = off, max(large_peak[_key(buf)], off + nbytes[buf])
   peaks:dict[LaneKey, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=block_size, lv2_cnt=32)))
   for _, is_open, buf in events:
-    if is_open: offsets[buf] = peaks[_key(buf)][1].alloc(nbytes[buf])
-    else: peaks[_key(buf)][1].free(offsets[buf])
+    if buf in offsets and nbytes[buf] >= LARGE_BUFFER: continue
+    if is_open: offsets[buf] = peaks[_key(buf)][1].alloc(nbytes[buf]) + large_peak[_key(buf)]
+    else: peaks[_key(buf)][1].free(offsets[buf] - large_peak[_key(buf)])
     peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.max_numel() * buf.dtype.itemsize), peaks[_key(buf)][1])
-  arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
+  arena_sizes = {key: round_up(max(peaks[key][0] if key in peaks else 0, large_peak[key]), block_size)
+                 for key in set(large_peak) | set(peaks)}
 
   # build replace_map: each buffer becomes a SHRINK/BITCAST into a shared per-device-lane arena
-  arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
+  if arenas is None: arenas = {}
+  for key, sz in arena_sizes.items():
+    if key not in arenas or arenas[key].max_numel() < sz: arenas[key] = UOp.new_buffer(key[0], sz, dtypes.int8)
   replace_map = {buf_uop:arenas[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
