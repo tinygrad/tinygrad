@@ -227,12 +227,16 @@ def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool, split:bool)
   outs = Tensor.custom_kernel(q, scale, xsum, x, *sq, fxn=functools.partial(_q8_quantize_kernel, tokens=local, in_features=in_features))
   return tuple(outs[:3]) + ((outs[4],) if sumsq else ())
 
-def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]) -> tuple[UOp, list[UOp]]:
+def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]|None=None) -> tuple[UOp, list[UOp]]:
   """
-  software pipelining of the loop over rng: the loads in body from the global params that depend on rng are issued an iteration early, into
-  registers (the first ones before the loop). returns body reading the registers and the stores of the next iteration's loads (in the loop)
+  software pipelining of the loop over rng: the loads in body from the global params (default: the ones body doesn't store to) that depend on
+  rng are issued an iteration early, into registers (the first ones before the loop). returns body reading the registers and the stores of the
+  next iteration's loads (in the loop)
   """
   topo, deps = body.toposort(), set()
+  if params is None:
+    stored = {u.src[0].src[0] for u in topo if u.op is Ops.STORE and u.src[0].op is Ops.INDEX}
+    params = tuple(u for u in topo if u.op is Ops.PARAM and u not in stored)
   for u in topo:
     if u is rng or any(s in deps for s in u.src): deps.add(u)
   targets_of = {u.src[0] for u in topo if u.op in (Ops.LOAD, Ops.STORE)}
@@ -328,9 +332,10 @@ def _iq_even_signs(signs:UOp) -> UOp:
   return signs | ((parity & 1) << 7)
 
 def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
-  mask = sum(((signs >> i) & 1) * (255 << (8*i)) for i in range(4))
+  # sign bit i to bit 0 of byte i (the shifted copies of the 4 bits don't overlap: no carries), all of the byte's bits for the mask
+  ones = ((signs & 15) * 0x00204081) & 0x01010101
   # Grid magnitudes are nonzero and <128, so each byte can be negated without a carry into its neighbor.
-  return (word ^ mask) + (mask & 0x01010101)
+  return (word ^ (ones * 255)) + ones
 
 def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:UOp|None) -> UOp:
   # Four packed weight bytes, shared by integer-dot decode and FP16 WMMA prefill.
@@ -541,7 +546,12 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
         previous = accs[output_tile][tile].after(group_rng) if half == 0 else wmma_accs[output_tile][tile]
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, *WMMA_ARG)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
-                       for acc,value in zip(output_accs, output_values))).end(group_rng)
+                       for acc,value in zip(output_accs, output_values)))
+  # a long loop: the next group's weights and activations are loaded while this one computes (a short one doesn't pay for the registers)
+  if group and in_features // Q8_GROUP_SIZE >= 32 and int(getenv("F16_PREFETCH", 1)):
+    update, prefetch = _prefetched(update, group_rng, in_features // Q8_GROUP_SIZE - 1)
+    update = UOp.group(update, *prefetch)
+  update = update.end(group_rng)
   if act is not None:
     assert rdna4, "the fused activation needs the RDNA4 accumulator layout"
     stores = _act_stores(out, outputs, tokens, accs, update, act)
@@ -676,14 +686,14 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     lds_q = UOp.alloc((2*tile_rows, 8), dtypes.uint32, addrspace=AddrSpace.LOCAL)
     lds_d = UOp.alloc((2*tile_rows,), dtypes.float32, addrspace=AddrSpace.LOCAL)
     st = []
-    # every thread loads a word of a row (or a scale)
-    for k in range((tile_rows*9 + threads - 1) // threads):
-      e = tid + k*threads
-      rr, wi = (e // 9).minimum(tile_rows-1), e % 9
-      xr = xrow(token_block*tile_rows + rr)
-      ok = e < tile_rows*9
-      st.append(lds_q[(par*tile_rows + rr).valid(ok & (wi < 8)), ((wi%2)*4 + wi//2).minimum(7)].store(xq[xr, g, wi.minimum(7)].load()))
-      st.append(lds_d[(par*tile_rows + rr).valid(ok & wi.eq(8))].store(xd[xr, g].load()))
+    # every thread loads words of rows and a row's scale, unconditionally (no branches): a padding row reads row 0, the threads of the same
+    # scale store the same value
+    def srow(r:UOp) -> UOp: return entries[r].load().maximum(0) // x_div if x_div > 0 else r
+    assert (tile_rows*8) % threads == 0 and threads % tile_rows == 0, "whole words and scales for the threads"
+    for k in range(tile_rows*8 // threads):
+      rr, wi = (e:=tid + k*threads) // 8, (tid + k*threads) % 8
+      st.append(lds_q[par*tile_rows + rr, (wi%2)*4 + wi//2].store(xq[srow(token_block*tile_rows + rr), g, wi].load()))
+    st.append(lds_d[par*tile_rows + tid % tile_rows].store(xd[srow(token_block*tile_rows + tid % tile_rows), g].load()))
     staged = UOp.group(*st).barrier()
     lds_q, lds_d = lds_q.after(staged), lds_d.after(staged)
     d_x = [[lds_d[par*tile_rows + t*16 + ph*8 + j].load() for j in range(8)] for t in range(len(tokens))]
@@ -2054,8 +2064,9 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
   return x
 
 @functools.cache
-def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpool:int) -> UOp:
-  # a workgroup per query row (the query of row r is at q_start+r), thread t holds pool c*THREADS + t of every chunk c of THREADS pools. the
+def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0) -> UOp:
+  # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
+  # of every chunk c of THREADS pools. the
   # key of the k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in
   # order: the picks of every (chunk, wave) (ballots), scans of them for their offsets. the tail of the query's pool after them, the count
   # after the list. the loops over the chunks run over the chunks with pools: the work follows the context, not its max
@@ -2064,7 +2075,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpo
   per, W = (P + THREADS - 1) // THREADS, THREADS // WARP_SIZE
   assert W == WARP_SIZE, "a scan of a chunk's waves is a wave"
   row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  t, q = wave * WARP_SIZE + lane, q_start + row
+  t, q, index = wave * WARP_SIZE + lane, q_start + row, index.shrink(((row0, row0 + rows), None))
   npc = ((pools + THREADS - 1) // THREADS).minimum(per)
   def key(c:UOp) -> UOp:
     # the order preserving key of a complete pool before the query, 0 (the lowest) for the others
@@ -2129,13 +2140,17 @@ def _reg_u32() -> UOp:
   ret = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
   return ret.after(ret.store(ret.const_like(0)))
 
-def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
-  """(rows, top*kpool+kpool+1) int32: for every query row (at q_start+r) the list of the keys it sees (its top pools, its tail), the count last"""
+def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int, row0:int=0, out:Tensor|None=None) -> Tensor:
+  """
+  (rows, top*kpool+kpool+1) int32: for every query row (at q_start+r) the list of the keys it sees (its top pools, its tail), the count last.
+  out: the lists of more rows, the ones of the scores are rows row0.. of it (the others kept)
+  """
   rows = int(scores.shape[0])
-  out = Tensor.empty(rows, top*kpool + kpool + 1, dtype=dtypes.int32, device=scores.device)
+  if out is None: out = Tensor.empty(rows, top*kpool + kpool + 1, dtype=dtypes.int32, device=scores.device)
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
   sc = Tensor(scores.uop.after(q_start, *([pools] if isinstance(pools, UOp) else [])))
-  return Tensor.custom_kernel(out, sc, fxn=functools.partial(_pool_index_kernel, q_start=_unbind(q_start), pools=pu, k=top, kpool=kpool))[0]
+  fxn = functools.partial(_pool_index_kernel, q_start=_unbind(q_start) + row0, pools=pu, k=top, kpool=kpool, row0=row0)
+  return Tensor.custom_kernel(out, sc, fxn=fxn)[0]
 
 def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
   """

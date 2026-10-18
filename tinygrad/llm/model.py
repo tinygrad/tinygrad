@@ -574,8 +574,15 @@ class Indexer:
     if Tq == 1 and idx.n_heads % 16 == 0: return indexer_decode_index(iq[0], pk, weights[0], start_pos, pools, k, idx.kpool).reshape(1, -1)
     # the scores on the tensor cores (rows of 16 queries), a kernel per query picks its pools
     rows = round_up(Tq, 16)
-    scores = indexer_scores(iq.pad(((0, rows-Tq), None, None)), pk, weights.pad(((0, rows-Tq), None)), pools)
-    return pool_index_rows(scores, start_pos, pools, k, idx.kpool)[:Tq]
+    iq, weights = iq.pad(((0, rows-Tq), None, None)), weights.pad(((0, rows-Tq), None))
+    # blocks of rows one after the other: the scores of a block (rows x the max pools) are its memory, not the ones of the chunk
+    block, picks = round_up(min(rows, getenv("INDEXER_ROWS", 1056)), 16), None
+    for r0 in range(0, rows, block):
+      qb = iq[r0:r0+block].contiguous()
+      if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # after the last block's lists: its scores are done
+      if picks is None: picks = Tensor.empty(rows, k*idx.kpool + idx.kpool + 1, dtype=dtypes.int32, device=x.device)
+      picks = pool_index_rows(indexer_scores(qb, pk, weights[r0:r0+block], pools), start_pos, pools, k, idx.kpool, row0=r0, out=picks)
+    return unwrap(picks)[:Tq]
 
   def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
     # x has Tq rows, the first T (default all) are the tokens at start_pos: the mask (B, 1, Tq, S) of the keys every query sees
