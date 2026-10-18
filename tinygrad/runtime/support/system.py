@@ -246,8 +246,9 @@ class PCIDevice:
     if self.iommu and (vfio_fd:=System.vfio) is not None:
       # vfio resets the device when the process closes it: it must be idle by then (a reset with transactions in flight floods the root port with
       # errors). a terminated process exits normally, the devices are finalized (their queues stopped) first
-      if threading.current_thread() is threading.main_thread() and signal.getsignal(signal.SIGTERM) is signal.SIG_DFL:
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+      for sig in (signal.SIGTERM, signal.SIGHUP):
+        if threading.current_thread() is threading.main_thread() and signal.getsignal(sig) is signal.SIG_DFL:
+          signal.signal(sig, lambda signum, _: sys.exit(128 + signum))
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
       iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
