@@ -998,7 +998,8 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
   size = S[axis] // n
   def part(j:int, i:int) -> UOp:
     return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
-  sent = _rotated(lambda j, i: part(j, i).cast(dtypes.half).contiguous(), devs)
+  # the parts are rows of the half partials: copied as views (no kernel to cut them out) when the split axis leads
+  sent = _rotated(lambda j, i: part(j, i) if all(s == 1 for s in S[:axis]) and getenv("RS_VIEWS", 1) else part(j, i).contiguous(), devs)
   # summed in half, in device order: the sums of the allreduce of partial_sum
   parts = [functools.reduce(lambda a, b: a + b, [part(j, i).cast(dtypes.half) if j == i else sent[(j, i)] for j in range(n)]).float()
            for i in range(n)]
