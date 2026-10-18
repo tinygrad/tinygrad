@@ -168,6 +168,11 @@ class LimitBufsContext:
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
   range_idx: itertools.count = field(default_factory=itertools.count)
 
+def stage(ctx:LimitBufsContext, s:UOp) -> UOp:
+  # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
+  end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x for x in s.ranges]
+  return s.substitute(dict(zip(s.ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*s.ranges)
+
 def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
@@ -180,16 +185,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   bufs = root.topovisit(visitor, ctx.buf_cache)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
-    srcs = []
-    for s in root.src:
-      if s.op in GroupOp.Elementwise and s.device is not None:
-        # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
-        orig_ranges = s.ranges
-        end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x
-                      for x in s.ranges]
-        s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
-      srcs.append(s)
-    return root.replace(src=tuple(srcs))
+    return root.replace(src=tuple(stage(ctx, s) if s.op in GroupOp.Elementwise and s.device is not None else s for s in root.src))
 pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs)])
 
 # *****************

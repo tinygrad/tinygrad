@@ -6,6 +6,8 @@ env:
   ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  INFLUXDB_HOST: ${{ secrets.INFLUXDB_HOST }}
+  INFLUXDB_TOKEN: ${{ secrets.INFLUXDB_TOKEN }}
 
 on:
   push:
@@ -81,7 +83,7 @@ jobs:
 
   llmbenchmark:
     name: Benchmark ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -99,11 +101,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
@@ -117,13 +114,13 @@ jobs:
     - name: Run ${{ matrix.model }}
       run: |
         MODEL=${{ matrix.model }}
-        BENCHMARK_LOG=${MODEL//./} JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m $MODEL --benchmark --warmup
+        AM_RESET=1 BENCHMARK_LOG=${MODEL//./} JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m $MODEL --benchmark --warmup
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
   cifarbenchmark:
     name: HLB-CIFAR10 (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -138,11 +135,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
@@ -156,7 +148,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '130' || matrix.dev == 'AMD' && '200' || '3000' }}
-      run: BENCHMARK_LOG=cifar_10steps STEPS=10 python3 examples/hlb_cifar10.py
+      run: AM_RESET=1 BENCHMARK_LOG=cifar_10steps STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || matrix.dev == 'AMD' && '235' || '3000' }}
@@ -170,7 +162,7 @@ jobs:
 
   mlperfbenchmark:
     name: MLPerf (${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -185,18 +177,13 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
-        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+        ln -s "${{ matrix.dev == 'AMD' && '/datasets' || '/raid/datasets' }}/imagenet" extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -205,13 +192,13 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      run: BENCHMARK_LOG=resnet_10steps DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
+      run: AM_RESET=1 BENCHMARK_LOG=resnet_10steps DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
   sdbenchmark:
     name: Stable Diffusion (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -226,11 +213,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
@@ -244,7 +226,7 @@ jobs:
     - name: Run Stable Diffusion
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'METAL' && '720' || matrix.dev == 'AMD' && '550' || '0' }}
-      run: BENCHMARK_LOG=stable_diffusion python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing
+      run: AM_RESET=1 BENCHMARK_LOG=stable_diffusion python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing
     - name: Run SDXL
       if: ${{ matrix.dev != 'NV' }}
       env:
@@ -307,7 +289,7 @@ jobs:
 
   tests:
     name: Tests (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -322,11 +304,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
@@ -339,7 +316,7 @@ jobs:
       run: python3 test/external/process_replay/reset.py
     - name: Test tiny
       run: |
-        DEBUG=2 python -m pytest -rA test/test_tiny.py
+        AM_RESET=1 DEBUG=2 python -m pytest -rA test/test_tiny.py
         if [[ "${{ matrix.dev }}" == "NV" ]]; then
           DEBUG=2 DEV=CUDA python -m pytest -rA test/test_tiny.py
         fi
