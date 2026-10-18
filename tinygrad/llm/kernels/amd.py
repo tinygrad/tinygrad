@@ -922,32 +922,52 @@ def shard_rows(x:Tensor, axis:int) -> Tensor:
   """a tensor on every device split on axis: each device keeps its part, nothing is copied"""
   return Tensor(x.uop._shard(axis, UOp.range(len(cast(tuple, x.device)), 0, AxisType.DEVICE)).unshard(axis))
 
+@functools.cache
+def _peer_to_peer(devs:tuple[str, ...]) -> bool:
+  """
+  the copies between the devices go straight over the links: every device can map the memory of the others (its bar is in their address
+  range). with only some, one device's link would carry the copies of all the others: through host memory, every device on its own link
+  """
+  from tinygrad.device import Device
+  with Context(ALLOW_DEVICE_USAGE=1):
+    # P2P=2: whenever every copy has a device that can be mapped by the other (testing)
+    reach = [Device[d].peer_reachable for d in devs]
+    return len({Device[d].peer_group for d in devs}) == 1 and (all(reach) or (getenv("P2P", 1) == 2 and sum(reach) >= len(devs) - 1)) and \
+      bool(getenv("P2P", 1))
+
+def _copy(x:UOp, devs:tuple[str, ...], src:str, dst:str, staged:UOp|None=None) -> UOp:
+  # peer to peer if the devices can, else through host memory (staged: x already copied there)
+  from tinygrad.schedule.allreduce import _host_of
+  if _peer_to_peer(devs): return x.copy_to_device(dst)
+  return (staged if staged is not None else x.copy_to_device(_host_of(src))).copy_to_device(dst)
+
 def reduce_scatter(p:Tensor, axis:int) -> Tensor:
   """
   the sum over the leading device axis of p (devices, *S), split on it, as S split on axis (of S): device i sums part i of every device's
-  partial. the parts cross in half through host memory, every device on its own link, the sums in float
+  partial. the parts cross in half (peer to peer, or through host memory: every device on its own link), the sums in float
   """
-  from tinygrad.schedule.allreduce import _host_of
   devs = cast(tuple[str, ...], p.device)
   n, S, local = len(devs), p.shape[1:], _per_device(_materialized(p, dtypes.half))
-  size, host = S[axis] // n, _host_of(devs[0])
+  size = S[axis] // n
   def part(j:int, i:int) -> UOp:
     return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
   # summed in half, in device order: the sums of the allreduce of partial_sum
   parts = [functools.reduce(lambda a, b: a + b, [part(j, i).cast(dtypes.half) if j == i else
-                            part(j, i).cast(dtypes.half).contiguous().copy_to_device(host).copy_to_device(devs[i]) for j in range(n)]).float()
+                            _copy(part(j, i).cast(dtypes.half).contiguous(), devs, devs[j], devs[i]) for j in range(n)]).float()
            for i in range(n)]
   return Tensor(UOp.mstack(*[x.contiguous() for x in parts]).unshard(axis))
 
 def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
-  """a tensor split on axis over the devices, whole on every device: every part goes through host memory once (in dtype)"""
+  """
+  a tensor split on axis over the devices, whole on every device (in dtype): every part goes peer to peer, or through host memory once
+  """
   from tinygrad.schedule.allreduce import _host_of
   devs = cast(tuple[str, ...], x.device)
   local = _per_device(_materialized(x, dtype or x.dtype))
   mine = [local.mselect(i).contiguous() for i in range(len(devs))]
-  staged = [m.copy_to_device(_host_of(devs[0])) for m in mine]
-  whole = [Tensor.cat(*[Tensor(mine[i] if i == j else staged[i].copy_to_device(devs[j])) for i in range(len(devs))], dim=axis).uop
-           for j in range(len(devs))]
+  staged = [None if _peer_to_peer(devs) else m.copy_to_device(_host_of(devs[i])) for i, m in enumerate(mine)]
+  whole = [Tensor.cat(*[Tensor(mine[i] if i == j else _copy(mine[i], devs, devs[i], devs[j], staged[i])) for i in range(len(devs))],
+                      dim=axis).uop for j in range(len(devs))]
   return Tensor(UOp.mstack(*whole))
 
 def host_allgather(x:Tensor) -> Tensor|None:
