@@ -81,11 +81,6 @@ class CallLLVMRenderer(CPULLVMRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     self.compiler = CallJIT(CPULLVMCompiler(target.arch.split(',')))
-    self.extra_matcher = PatternMatcher([
-      # ISA multiply-adds must stay fused even when the host has no FMA instruction.
-      (UPat.var("a", dtype=dtypes.floats)*UPat.var("b")+UPat.var("c"), lambda a,b,c:
-       UOp.custom_function(f"llvm.fma.f{a.dtype.itemsize*8}", dtype=a.dtype).call(a, b, c) if a.dtype == b.dtype == c.dtype else None),
-    ]) + self.extra_matcher
 
   def _render_fn(self, name, args, kernel, prefix=None):
     if name == self.entry_name:
