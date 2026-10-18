@@ -33,10 +33,6 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS) else get_call_arg_uops(call)[0].device
-  # a copy is pushed by its src, or pulled by its dst when only the src memory is reachable by peers
-  if call.body.op is Ops.STORE and isinstance(runs_on, str) and isinstance(dst:=call.src[1].device, str) and \
-    all_devices_in((runs_on, dst), HCQ_DEVS) and Device[dst].peer_group == Device[runs_on].peer_group and \
-    not Device[dst].peer_reachable and Device[runs_on].peer_reachable: runs_on = dst
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
   return devs
@@ -150,9 +146,7 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   from tinygrad.runtime.ops_disk import is_disk_read
   dev, host, usb_memcpys = Device[device], Device[device].host, getattr(Device[device], "is_usb", False)
   mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
-  # a device maps the memory of the others in its peer group, when they are reachable
-  def mappable_by(d:str) -> bool: return Device[d].peer_group == dev.peer_group and (d == device or Device[d].peer_reachable)
-  if device != host and not all(mappable_by(d) or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
+  if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
     stage = UOp.alloc(src.max_shape, src.dtype, int.from_bytes(call.key[:8], "little"), device=host)
     return UOp(Ops.LINEAR, src=(stage.store_call(src), dst.store_call(stage)))
 
@@ -309,7 +303,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   # assign to queues
   peers = sorted({Device.canonicalize(d) for c in l.src if c.op is Ops.CALL and c.body.op is Ops.STORE
                   for b in get_call_arg_uops(c) for d in to_tuple(b.device) if d.split(":")[0] == "AMD"})
-  num_queues = max(1, getenv("HCQ_NUM_SDMA", min(len(peers), 8) if ALL2ALL >= 1 else 1))
+  num_queues = max(1, getenv("HCQ_NUM_SDMA", min(len(peers), 8, *(getattr(Device[d], "copy_queues", 8) for d in peers)) if ALL2ALL >= 1 else 1))
   queues = ["COMPUTE:0" if c.op is Ops.CALL and c.body.op is Ops.PROGRAM else "COPY:0" for c in l.src]
   for i, c in enumerate(l.src):
     if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION: queues[i] = "ENCDEC:0"

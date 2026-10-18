@@ -1,19 +1,8 @@
 import functools, itertools
-from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv, Context
+from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
 from tinygrad.uop.ops import UOp
 
 # *** allreduce implementation ***
-def _host_of(device:str) -> str:
-  from tinygrad.device import Device
-  with Context(ALLOW_DEVICE_USAGE=1): return Device[device].host
-
-def _allreduce_hub(devices:tuple[str, ...]) -> int|None:
-  from tinygrad.device import Device
-  with Context(ALLOW_DEVICE_USAGE=1):
-    reachable = [Device[d].peer_reachable for d in devices]
-    if all(reachable) or len({Device[d].peer_group for d in devices}) != 1: return None
-  return reachable.index(True) if any(reachable) else None
-
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
@@ -37,31 +26,6 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
     summed = {i: fold([owned[i], *(owned[j].copy_to_device(d[i]) for j in rank if j != i)]) for rank in zip(*boxes) for i in rank}
     gathered = [UOp.mstack(*(summed[box[k]].copy_to_device(d[j]) for box in boxes for j in box)) for k in range(hdev)]
     return UOp.usum(*[c.pad(((s, numel - e),)) for (s, e), c in zip(cs, gathered)]).reshape(shape)
-
-  # hub: when peers can't map the memory of some devices, reduce on a device every peer reaches. the others push to it, then pull the result
-  if all_int(buf.shape) and (hub:=_allreduce_hub(buf.device)) is not None and isinstance(device, tuple) and \
-     numel * buf.dtype.itemsize >= getenv("ALLREDUCE_HOST_RS", 1 << 20):
-    # large: a reduce-scatter through host memory, every device on its own link. the partials go to the host, device i pulls range i of the
-    # others and sums it, pushes it back, then every device pulls the ranges of the others
-    host, d, fold = _host_of(buf.device[0]), buf.device, functools.partial(functools.reduce, lambda x, y: x.alu(op, y))
-    flat = buf.reshape((numel,))
-    # aligned ranges: the kernels cutting them are vectorized
-    step = -(-numel // ndev // 1024) * 1024 if numel >= 1024 * ndev else -(-numel // ndev)
-    bounds = [(min(numel, step * i), min(numel, step * (i + 1))) for i in range(ndev)]
-    # the ranges are cut on the devices: the host only holds whole buffers
-    ranges = [[flat.mselect(j).shrink((r,)).contiguous() for r in bounds] for j in range(ndev)]
-    range_sums = [fold([ranges[j][i] if j == i else ranges[j][i].copy_to_device(host).copy_to_device(d[i]) for j in range(ndev)])
-                  for i in range(ndev)]
-    result = [r.copy_to_device(host) for r in range_sums]
-    gathered = [UOp.usum(*[(range_sums[i] if i == j else result[i].copy_to_device(d[j])).pad(((s, numel - e),)) for i, (s, e) in enumerate(bounds)])
-                for j in range(ndev)]
-    return UOp.mstack(*gathered).reshape(shape)
-  if all_int(buf.shape) and (hub:=_allreduce_hub(buf.device)) is not None:
-    hub_dev = buf.device[hub]
-    total = functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i) if i == hub else buf.mselect(i).copy_to_device(hub_dev) for i in range(ndev)])
-    # large results go through host memory once: the devices pull them over their own links, not all over the hub's
-    if numel * buf.dtype.itemsize >= getenv("ALLREDUCE_HOST_STAGE", 1 << 20): total = total.copy_to_device(_host_of(hub_dev))
-    return total.copy_to_device(device).shrink_to(shape)
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:

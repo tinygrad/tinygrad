@@ -718,12 +718,6 @@ class PCIIface(PCIIfaceBase):
                      va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
-  @functools.cached_property
-  def peer_reachable(self) -> bool:
-    # peers reach the vram through its bar, it must be in the physical address range of the gpus (44 bits on gfx11/12)
-    bar_start, bar_size = self.pci_dev.bar_info(self.vram_bar)
-    return self.dev_impl.is_hive() or not (bar_start + bar_size - 1) & ~self.dev_impl.gmc.address_space_mask
-
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
     return ([(self.dev_impl.paddr2xgmi(p), sz) for p, sz in paddrs], AddrSpace.PEER) if self.dev_impl.is_hive() else super().p2p_paddrs(paddrs)
 
@@ -932,6 +926,11 @@ class AMDDevice(Compiled):
       (1 << 20) if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
+
+  @functools.cached_property
+  def copy_queues(self) -> int:
+    """the copy queues the device has: am brings up one per sdma engine"""
+    return getattr(self.iface.dev_impl.sdma, "engines", 1) if self.is_am() else 8
 
   @functools.cached_property
   def copy_duplex(self) -> bool:

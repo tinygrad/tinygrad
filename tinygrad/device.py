@@ -388,9 +388,6 @@ class Compiled:
   def has_copy_queue(self) -> bool: return True
 
   @property
-  def peer_reachable(self) -> bool: return getattr(getattr(self, 'iface', None), 'peer_reachable', True) # its peer_group can map its memory
-
-  @property
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
 
   @property
