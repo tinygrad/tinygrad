@@ -1,7 +1,7 @@
 import gc, itertools, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid, _use_i8_wmma
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.helpers import not_support_multi_device
 
@@ -32,6 +32,8 @@ class QuantLinearMixin:
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
         wmma = custom and (32 if symbolic else tokens) % 16 == 0 and out_features % 16 == 0
+        # the int8 tensor cores take the activations quantized as the decode kernels, the fp16 ones in half
+        if wmma and _use_i8_wmma(Device.DEFAULT, ggml_type) and out_features % 32 == 0 and not symbolic: wmma = False
         if wmma: reference_x = x.astype(np.float16).astype(np.float32)
         if custom and not wmma:
           grouped = reference_x.reshape(tokens, -1, 32)

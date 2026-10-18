@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4)
+                                      QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4, _use_i8_wmma)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -74,7 +74,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
 
   def test_mixed_quant_linear_wmma_tiles(self):
     with patch("tinygrad.llm.kernels.amd.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      for typ in HALFWORD_QUANTS:
+      # the formats of the int8 tensor cores quantize the activations
+      for typ in (t for t in HALFWORD_QUANTS if not _use_i8_wmma(Device.DEFAULT, t)):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=(16, 32, 64), bias=True)
 
   def test_wmma_dequantization_basis(self):
@@ -86,7 +87,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     for typ, size in QUANT_SIZES.items():
       with self.subTest(ggml_type=typ):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
-        blocks = packed.reshape(-1, 18) if typ == 20 else packed
+        blocks = packed.reshape(-1, 18) if typ == 20 else packed.reshape(-1, 34) if typ == 8 else packed  # a scale in every block
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
         blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
         if typ in (10, 12, 13):
