@@ -108,15 +108,6 @@ class CallLLVMRenderer(CPULLVMRenderer):
 class CallClangRenderer(ClangRenderer):
   compiler: CallJIT
   kernel_typedef = "__attribute__((noinline, optnone)) void"
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
-     f"{f.arg.name}({', '.join(ctx[y] for y in x.src[1:])})" if f.arg.name.startswith("__builtin_") else None),
-  ]) + ClangRenderer.string_rewrite
-  extra_matcher = PatternMatcher([
-    (UPat.var("a", dtype=dtypes.floats)*UPat.var("b")+UPat.var("c"), lambda a,b,c:
-     UOp.custom_function("__builtin_fma" + ("f" if a.dtype == dtypes.float32 else ""), dtype=a.dtype).call(a, b, c)
-     if a.dtype == b.dtype == c.dtype and a.dtype in (dtypes.float32, dtypes.float64) else None),
-  ]) + ClangRenderer.extra_matcher
 
   def __init__(self, target:Target):
     super().__init__(target)
