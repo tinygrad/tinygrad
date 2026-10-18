@@ -6,8 +6,7 @@ when USE_HW=1.
 """
 import ctypes, unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from tinygrad.helpers import Target
-from test.amd.hw.helpers import USE_HW, assemble
+from test.amd.hw.helpers import USE_HW, assemble, run_code_hw
 from test.mockgpu.amd.emu import run_asm
 
 WAVE64 = 64
@@ -37,56 +36,7 @@ def _run_wave64_emu(instructions: list, out_reg: int = 1) -> list[int]:
   return list(out_buf)
 
 def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
-  from tinygrad.device import Device, TinyELF, Buffer
-  from tinygrad.runtime.support.compiler_amd import HIPCompiler
-
-  dev = Device["AMD"]
-  compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
-  code = _wave64_code(instructions, out_reg)
-  byte_str = ', '.join(f'0x{b:02x}' for b in code)
-  asm_src = f""".text
-.globl test
-.p2align 8
-.type test,@function
-test:
-.byte {byte_str}
-
-.rodata
-.p2align 6
-.amdhsa_kernel test
-  .amdhsa_next_free_vgpr 256
-  .amdhsa_next_free_sgpr 96
-  .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_kernarg_size 8
-  .amdhsa_group_segment_fixed_size 65536
-  .amdhsa_private_segment_fixed_size 65536
-  .amdhsa_enable_private_segment 1
-.end_amdhsa_kernel
-
-.amdgpu_metadata
----
-amdhsa.version:
-  - 1
-  - 0
-amdhsa.kernels:
-  - .name: test
-    .symbol: test.kd
-    .kernarg_segment_size: 8
-    .group_segment_fixed_size: 65536
-    .private_segment_fixed_size: 65536
-    .kernarg_segment_align: 8
-    .wavefront_size: 64
-    .sgpr_count: 96
-    .vgpr_count: 256
-    .max_flat_workgroup_size: 1024
-...
-.end_amdgpu_metadata
-"""
-  lib = compiler.compile(asm_src)
-  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
-  out_gpu = Buffer(dev.device, WAVE64 * 4, preallocate=True)
-  prg(out_gpu._buf, global_size=(1, 1, 1), local_size=(WAVE64, 1, 1), wait=True)
-  out = out_gpu.as_memoryview()
+  out = run_code_hw(_wave64_code(instructions, out_reg), WAVE64, WAVE64 * 4, wave32=False)
   return [int.from_bytes(out[i*4:(i+1)*4], 'little') for i in range(WAVE64)]
 
 def run_wave64(instructions: list, out_reg: int = 1) -> list[int]:

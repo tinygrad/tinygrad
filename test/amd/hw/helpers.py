@@ -202,23 +202,23 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
 
   # rsrc2: USER_SGPR_COUNT=2, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z=1, LDS_SIZE=128 (64KB)
   rsrc2 = 0x19c | (128 << 15)
-  scratch_size = 0x10000  # 64KB per lane, matches .amdhsa_private_segment_fixed_size in run_program_hw
+  scratch_size = 0x10000  # 64KB per lane, matches .amdhsa_private_segment_fixed_size in run_code_hw
   result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2, scratch_size)
   assert result == 0, f"run_asm failed with {result}"
 
   return parse_output(bytes(out_buf), n_lanes)
 
-def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
-  """Run instructions on real AMD hardware via HIPCompiler and the AMD runtime."""
-  from tinygrad.device import Device, TinyELF, Buffer
+def run_code_hw(code: bytes, n_lanes: int, out_bytes: int, wave32: bool = True) -> memoryview:
+  """Run machine code on real AMD hardware via HIPCompiler and the HCQ2 runtime. The output buffer address is the first kernarg."""
+  from tinygrad.device import Device, Buffer
+  from tinygrad.dtype import dtypes
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+  from tinygrad.engine.realize import run_linear
   from tinygrad.helpers import Target
 
   dev = Device["AMD"]
   compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
-
-  prologue, epilogue = get_prologue_epilogue(n_lanes)
-  code = assemble(prologue + instructions + epilogue)
 
   byte_str = ', '.join(f'0x{b:02x}' for b in code)
   asm_src = f""".text
@@ -233,7 +233,7 @@ test:
 .amdhsa_kernel test
   .amdhsa_next_free_vgpr 256
   .amdhsa_next_free_sgpr 96
-  .amdhsa_wavefront_size32 1
+  .amdhsa_wavefront_size32 {1 if wave32 else 0}
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_kernarg_size 8
   .amdhsa_group_segment_fixed_size 65536
@@ -253,7 +253,7 @@ amdhsa.kernels:
     .group_segment_fixed_size: 65536
     .private_segment_fixed_size: 65536
     .kernarg_segment_align: 8
-    .wavefront_size: 32
+    .wavefront_size: {32 if wave32 else 64}
     .sgpr_count: 96
     .vgpr_count: 256
     .max_flat_workgroup_size: 1024
@@ -262,16 +262,21 @@ amdhsa.kernels:
 """
 
   lib = compiler.compile(asm_src)
-  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
 
-  buf_sz = _out_bytes(n_lanes)
-  out_gpu = Buffer(dev.device, buf_sz, preallocate=True)
+  out_gpu = Buffer(dev.device, out_bytes).ensure_allocated()
   assert out_gpu._buf % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu._buf:x}"
-  prg(out_gpu._buf, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
+  sink = UOp.sink(UOp.param(0, dtypes.uint32, (out_bytes // 4,)), UOp.special(n_lanes, "lidx0"), arg=KernelInfo("test"))
+  body = UOp(Ops.LINEAR, src=())
+  prg = UOp(Ops.PROGRAM, arg=ProgramInfo.from_sink(sink, Target("AMD", arch=dev.arch)),
+           src=(sink, body, UOp(Ops.SOURCE, arg=asm_src), UOp(Ops.BINARY, arg=lib)))
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
 
-  out_buf = out_gpu.as_memoryview()
+  return out_gpu.as_memoryview()
 
-  return parse_output(bytes(out_buf), n_lanes)
+def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
+  """Run instructions on real AMD hardware."""
+  prologue, epilogue = get_prologue_epilogue(n_lanes)
+  return parse_output(bytes(run_code_hw(assemble(prologue + instructions + epilogue), n_lanes, _out_bytes(n_lanes))), n_lanes)
 
 def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgprs: int = N_VGPRS, ulp_tolerance: int = 0) -> list[str]:
   """Compare two WaveStates and return list of differences.
