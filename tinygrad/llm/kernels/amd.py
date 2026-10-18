@@ -667,6 +667,107 @@ def _i8_frag(words:tuple[UOp, ...]) -> UOp:
   return UOp.stack(*(((w >> (8*i)) & 0xff).cast(dtypes.uint8).bitcast(dtypes.int8) for w in words for i in range(4)))
 
 @functools.cache
+def _q8k_quantize_kernel(q:UOp, scale:UOp, x:UOp, tokens:int, in_features:int) -> UOp:
+  # int8 groups of 32 with one scale per 256 inputs (q8_K, as the CPU dots of IQ formats): a wave a (token, block), eight inputs a lane
+  blocks = in_features // 256
+  token_block, lane = UOp.range(tokens*blocks, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, block = token_block // blocks, token_block % blocks
+  values = [x.reshape(tokens, in_features)[token, block*256 + lane*8 + i].load().float() for i in range(8)]
+  local = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
+  d = UOp(Ops.CUSTOM, src=(warp_reduce(local, maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
+  words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
+  group = block*8 + lane//4
+  stores = [q[token, group, (lane%4)*2 + w].store(words[w]) for w in range(2)] + [scale[token, block.valid(lane.eq(0))].store(d)]
+  return UOp.group(*stores).end(token_block, lane).sink(arg=KernelInfo(name="q8k_quantize", opts_to_apply=()))
+
+def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]:
+  """int8 groups of 32 (as q8_quantize) and one scale per 256 inputs"""
+  q = Tensor.empty(tokens, in_features//32, 8, dtype=dtypes.uint32, device=x.device)
+  scale = Tensor.empty(tokens, in_features//256, dtype=dtypes.float32, device=x.device)
+  outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features))
+  return outs[0], outs[1]
+
+# a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
+MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
+
+@functools.cache
+def _iq3s_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, grid_src:UOp, rows:UOp, tiles:UOp, out_features:int, in_features:int,
+                      expert_words:int, x_div:int, act:tuple|None=None) -> UOp:
+  # grouped IQ3_S experts on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer sub-scale
+  # accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
+  # waves of 2 output tiles (act: the gate and up of 16 columns) by the tile's 4 token tiles. the tile's activations of a block are in LDS
+  TOK, WAVES, OT = MOE_TILE, 8, 2
+  TT, OUTB, blocks = TOK // 16, WAVES * OT * 16, in_features // 256
+  type_words = QUANT_SIZES[IQ3_S] // raw.dtype.itemsize
+  output_words = in_features * type_words // GGML_BLOCK_SIZE
+  token_block, output_block = UOp.range(rows.shape[0] // TOK, 0, AxisType.GLOBAL), UOp.range(out_features // OUTB, 1, AxisType.GLOBAL)
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
+  col, ph, tid = lane % 16, lane // 16, wave * 32 + lane
+  grid = UOp.alloc((int(grid_src.numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  grid = grid.after(UOp.group(*(grid[tid + i*256].store(grid_src[tid + i*256]) for i in range(int(grid.numel()) // 256))).barrier())
+  expert = tiles[token_block].load()
+  b = UOp.range((expert >= 0).where(blocks, 0), 4, AxisType.LOOP)
+  expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
+  def xrow(r:UOp) -> UOp: return rows[r].load().maximum(0) // x_div if x_div > 0 else r
+  # the tile's int8 activations of the block: rows of 8 groups of 8 words (a group's words at (w%2)*4+w//2, a stride of 10 words)
+  lds_q = UOp.alloc((TOK, 8, 10), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  lds_d = UOp.alloc((TOK,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  st = []
+  for k in range(TOK * 64 // 256):
+    e = tid + k * 256
+    rr, gi, wi = e // 64, (e // 8) % 8, e % 8
+    st.append(lds_q[rr, gi, (wi % 2) * 4 + wi // 2].store(xq[xrow(token_block * TOK + rr), b * 8 + gi, wi].load()))
+  st.append(lds_d[tid % TOK].store(xd[xrow(token_block * TOK + tid % TOK), b].load()))
+  staged = UOp.group(*st).barrier()
+  lds_q, lds_d = lds_q.after(staged), lds_d.after(staged)
+  outputs = [output_block * OUTB + wave * OT * 16 + o * 16 + col for o in range(OT)]
+  bases = [expert_base + output * output_words + b * type_words for output in outputs]
+  zero = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
+  accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
+  accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
+  # the int32 sums of the block over its sub-blocks, times their integer sub-scales (a 24 bit multiply-add: a dot of 32 int8 products times
+  # 15 is below 2**23, a sub-scale at most 31, 8 of them below 2**31)
+  ints = [[UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
+  ints = [[r.after(r.after(b).store(zero)) for r in row] for row in ints]
+  dws = [_half(raw[base]) for base in bases]
+  sb = UOp.range(8, 5, AxisType.LOOP)
+  afr = [[_i8_frag((lds_q[t*16 + col, sb, ph*4 + 2*h].load(), lds_q[t*16 + col, sb, ph*4 + 2*h + 1].load())) for h in range(2)]
+         for t in range(TT)]
+  sums = []
+  for o, base in enumerate(bases):
+    sub = (1 + 2*((_load_byte(raw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
+    bfr = [_i8_frag(tuple(_quant_word(raw, base, sb, h*4 + i, IQ3_S, grid) for i in (ph, ph+2))) for h in range(2)]
+    for t in range(TT):
+      dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
+      dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+      dreg = dreg.after(dreg.store(dot))
+      prev = ints[o][t].after(sb)
+      sums.append(ints[o][t].store(UOp.stack(*[UOp(Ops.CUSTOMI, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32))
+                                                for j in range(8)])))
+  done = UOp.group(*sums).end(sb)
+  new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + ints[o][t].after(done)[j].load().float() * (dws[o] * lds_d[t*16 + ph*8 + j].load())
+                      for j in range(8))) for t in range(TT)] for o in range(OT)]
+  # (a barrier after the block's reads: the next block's stage doesn't overwrite what a slower wave still reads)
+  update = UOp.group(*(accs[o][t].store(new[o][t]) for o in range(OT) for t in range(TT))).barrier().end(b)
+  def row(t:int, j:int) -> UOp: return token_block * TOK + t * 16 + ph * 8 + j
+  def out_row(r:UOp) -> UOp:
+    # x_div > 0: the output row is the sorted row, 0: the selection, -1: the sorted row (the padding rows aren't stored)
+    if x_div > 0: return r
+    return (e:=rows[r].load()).valid(e >= 0) if x_div == 0 else r.valid(rows[r].load() >= 0)
+  def val(o:int, t:int, j:int) -> UOp: return accs[o][t].after(update)[j].load()
+  if act is not None:
+    stores = [out[out_row(row(t, j)), output_block * (OUTB // 2) + wave * 16 + col].store(_gated(val(0, t, j), val(1, t, j), act).cast(out.dtype))
+              for t in range(TT) for j in range(8)]
+  else:
+    stores = [out[out_row(row(t, j)), output].store(val(o, t, j).cast(out.dtype))
+              for o, output in enumerate(outputs) for t in range(TT) for j in range(8)]
+  weights = rows.shape[0] * out_features * in_features
+  est = Estimates(2*weights, weights*type_words*2//GGML_BLOCK_SIZE, weights*type_words*2//GGML_BLOCK_SIZE)
+  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
+    arg=KernelInfo(name="grouped_iq3_s_k256", opts_to_apply=(), estimates=est))
+
+@functools.cache
 def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int,
                                  expert_words:int=0, x_div:int=0, act:tuple|None=None, splits:int=1) -> UOp:
   # RDNA4 int8 WMMA on q8 activations: the weights are their packed bytes, the scales apply per 16 inputs (see _wmma_scale), like the decode.
@@ -1225,6 +1326,13 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   rows_out, cols = R if slots or sorted_out else selections, out_features // 2 if act else out_features
   x_div = slots or (-1 if sorted_out else 0)  # sorted_out: x and the output have a row per sorted row
   out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
+  if ggml_type == IQ3_S and in_features % 256 == 0 and out_features % 256 == 0 and _wmma_rdna4(x.device) and getenv("IQ3_K256", 1):
+    # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
+    x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
+    xq, xd = q8k_quantize(x.contiguous(), int(x_rows), in_features)
+    fxn = functools.partial(_iq3s_k256_kernel, out_features=out_features, in_features=in_features, expert_words=expert_words, x_div=x_div, act=act)
+    result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
+    return result.reshape(devices, rows_out, cols) if devices > 1 else result
   if _use_i8_wmma(x.device, ggml_type):
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,

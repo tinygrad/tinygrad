@@ -272,6 +272,29 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           np.testing.assert_allclose(out.numpy(), np.stack(outputs, axis=2), rtol=1e-3, atol=1e-5)
           np.testing.assert_allclose(state.numpy(), expected_state, rtol=1e-3, atol=1e-5)
 
+  def test_grouped_iq3_s(self):
+    # grouped IQ3_S experts (prefill): every sorted row is the weights of its expert times its token's activations, quantized to int8 with a
+    # scale per 256 inputs (as llama.cpp's q8_K for the IQ formats)
+    if not amd_custom_kernels_supported(Tensor.empty(1).device) or not _wmma_rdna4(Tensor.empty(1).device): self.skipTest("RDNA4 required")
+    from tinygrad.llm.kernels.amd import moe_route, moe_grouped_linear
+    rng = np.random.default_rng(3)
+    T, E, K, IN, OUT = 96, 16, 4, 512, 256
+    packed = rng.integers(0, 256, (E*OUT*IN//256, 110), dtype=np.uint8)
+    packed[:, :2] = np.array([0.01], dtype=np.float16).view(np.uint8)
+    raw = Tensor(packed.flatten().view(np.uint16)).realize()  # 110 byte blocks: halfwords
+    weight = ggml_data_to_tensor(Tensor(packed.flatten()), E*OUT*IN, 21).reshape(E, OUT, IN).numpy()
+    x = rng.standard_normal((T, IN)).astype(np.float32)
+    sel = rng.integers(0, E, (1, T, K)).astype(np.int32)
+    _, entries, tiles, _ = moe_route(Tensor(sel), Tensor([0], dtype=dtypes.int32), E)
+    out = moe_grouped_linear(raw, 21, E, Tensor(x), entries, tiles, slots=K).numpy()
+    blocks = x.reshape(T, -1, 256)
+    d = np.maximum(np.abs(blocks).max(-1, keepdims=True) / 127, 1e-8)
+    xq = (np.clip(np.rint(blocks / d), -127, 127) * d).reshape(T, IN)
+    rows = entries.numpy().reshape(-1)
+    for r in np.nonzero(rows >= 0)[0]:
+      t, k = divmod(int(rows[r]), K)
+      np.testing.assert_allclose(out[r], weight[sel[0, t, k]] @ xq[t], rtol=1e-3, atol=1e-3)
+
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
