@@ -276,6 +276,20 @@ class HyperConnection:
     self.fn = Linear(self.count * config.dim, (2 + self.count) * self.count, bias=False)
     self.base, self.scale = {"weight": Tensor.zeros((2 + self.count) * self.count)}, {"weight": Tensor.zeros(3)}
 
+  def pre_split(self, xs:Tensor, norm:nn.RMSNorm) -> tuple[Tensor, Tensor, Tensor]:
+    """the streams' rows split over the devices (static rows): the coefficients post, comb and the normed sublayer input of every device's rows"""
+    flat = xs.flatten(2)
+    n, features = int(math.prod(flat.shape[:-1])), int(flat.shape[-1])
+    *xq, sq = q8_quantize(flat, n, features, sumsq=True, split=True)
+    mix = q8_linear(self.fn, flat, xq=tuple(xq), split=True)
+    _, post, comb, hn = hc_pre(mix, sq, self.base["weight"], self.scale["weight"], xs, unwrap(norm.weight), self.count, self.iters, self.eps,
+                               self.norm_eps, norm.eps, features, True)
+    return hn, post, comb
+
+  def post_split(self, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
+    """the sublayer output (every device's rows) added to the streams mixed by comb"""
+    return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
+
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor], norm:Callable[[Tensor], Tensor]|None=None, rows:bool=False) -> Tensor:
     """
     mHC: the sublayer sees the norm of a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed
@@ -470,6 +484,58 @@ class FFNBlock:
       h =     x + self._attention(self.attn_norm(x), start_pos, *(() if T is None else (T,)))
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos, T)
+
+  # the phases of a sublayer on a micro batch (see micro_batch_blocks): functions, scheduled once
+  def _phase_pre(self, hc:HyperConnection, norm:nn.RMSNorm, xs:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    @function(precompile=True, allow_implicit=True)
+    def _pre(xs:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+      hn, post, comb = hc.pre_split(xs, norm)
+      return hn.contiguous(), post.contiguous(), comb.contiguous()
+    return _pre(xs)
+  def _phase_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    @function(precompile=True, allow_implicit=True)
+    def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+      x = all_gather(hn, 1, dtypes.half)
+      _partial_out[0], _sp_rows[0] = True, hn
+      try: out = self._attention(x.float(), start_pos, T) if sub == "attn" else self._feed_forward(x.float())
+      finally: _partial_out[0], _sp_rows[0] = False, None
+      # partial sums, or the whole output
+      return (reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
+    return _sub(hn, start_pos, T)
+  def _phase_post(self, hc:HyperConnection, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
+    @function(precompile=True, allow_implicit=True)
+    def _post(out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor: return hc.post_split(out, post, comb, xs).contiguous()
+    return _post(out, post, comb, xs)
+
+def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list) -> list[Tensor]:
+  """
+  the blocks on micro batches of rows (sequence parallel streams, a batch starts at the end of the tokens before it). a sublayer is three
+  phases: the coefficients and its normed input (then gathered), its compute (its partial sums then scattered), its output added to the streams.
+  queued in turns: the compute of every batch, then for every batch its output added and the next sublayer's input. the copies of a batch
+  run with the work of the other one (not its own next phase, which waits for them)
+  """
+  last:Tensor|None = None
+  def ordered(x:Tensor) -> Tensor: return x if last is None or not getenv("MB_ORDER", 1) else Tensor(x.uop.after(*last.uop.src[1:]))
+  subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
+                                                                           (block.hc_ffn, block.ffn_norm, "ffn"))]
+  for block in blocks: block._init_state(xs[0])
+  pres:list = [None]*len(xs)
+  for i in range(len(xs)):
+    pres[i] = subs[0][0]._phase_pre(subs[0][1], subs[0][2], ordered(xs[i]))
+    last = pres[i][0]
+  for k, (block, hc, norm, sub) in enumerate(subs):
+    outs = []
+    for i in range(len(xs)):
+      hn = pres[i][0]
+      outs.append(block._phase_sub(sub, ordered(hn), starts[i], ts[i]))
+      last = outs[-1]
+    for i in range(len(xs)):
+      xs[i] = block._phase_post(hc, outs[i], ordered(pres[i][1]), pres[i][2], xs[i])
+      last = xs[i]
+      if k + 1 < len(subs):
+        pres[i] = subs[k+1][0]._phase_pre(subs[k+1][1], subs[k+1][2], xs[i])
+        last = pres[i][0]
+  return xs
 
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -887,20 +953,16 @@ class Transformer:
       x = x.pad_to(x.max_shape).contiguous()
       R = int(x.shape[1])
       # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
-      if (sp:=self.sequence_parallel(R)) and (mb:=getenv("MICRO_BATCHES", 1)) > 1 and self.sequence_parallel(R // mb) and R % mb == 0:
-        # micro batches of rows, every block runs on one then the next: the copies of one overlap the kernels of the next (they don't wait for
-        # them). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
+      mb = getenv("MICRO_BATCHES", 1)
+      if (sp:=self.sequence_parallel(R)) and (mb > 1 or getenv("MB_PHASES", 1)) and self.sequence_parallel(R // mb) and R % mb == 0:
+        # the blocks in phases (micro_batch_blocks), on micro batches of rows if MICRO_BATCHES > 1 (the copies of one overlap the kernels of
+        # the next). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
         n, xs, ts, starts = R // mb, [], [], []
         for i in range(mb):
           xs.append(shard_rows(x[:, i*n:(i+1)*n].contiguous(), 1))
           ts.append((T - i*n).maximum(0).minimum(n))
           starts.append(start_pos + (T.minimum(i*n) if i else 0))
-        for j, block in enumerate(self.blk):
-          for i in range(mb):
-            # the first batch's block after the last batch's block before it: the kernels are queued in turns, the copies of a batch's block
-            # run with the next batch's block (not its next block, which waits for them)
-            xin = Tensor(xs[i].uop.after(*xs[-1].uop.src[1:])) if i == 0 and j > 0 and getenv("MB_ORDER", 1) else xs[i]
-            xs[i] = block(xin, starts[i], ts[i])
+        xs = micro_batch_blocks(self.blk, xs, starts, ts)
         x = Tensor.cat(*[all_gather(xi.mean(2), 1) for xi in xs], dim=1)
       else:
         if sp: x = shard_rows(x, 1)
