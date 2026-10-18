@@ -6,6 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMa
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.renderer.tc import TensorCore
 from tinygrad.device import Compiler
+import functools
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
 def with_storage(x:UOp, dt:DType) -> UOp:
@@ -35,23 +36,24 @@ class Estimates:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
 
     special_mult = prod(cast(sint, u.src[0].ssimplify()) for u in uops if u.op is Ops.SPECIAL)
-    def mults(u:UOp):
+    @functools.cache
+    def mults(ranges:tuple[UOp,...]):
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in u.ranges if r.dtype is not dtypes.void] + [special_mult])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         if (buf:=u.buf_uop).op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(u)
+          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(tuple(u.ranges))
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
       if u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.dtype.itemsize * mults(u)
+        lds += u.max_numel() * u.dtype.itemsize * mults(tuple(u.ranges))
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(u)
+        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(tuple(u.ranges))
       elif u.op in GroupOp.ALU and u not in excluded:
-        flops += (mults(u) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+        flops += (mults(tuple(u.ranges)) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(u)
+        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(tuple(u.ranges))
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
