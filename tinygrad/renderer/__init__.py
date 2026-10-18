@@ -38,7 +38,7 @@ class Estimates:
     special_mult = prod(cast(sint, u.src[0].ssimplify()) for u in uops if u.op is Ops.SPECIAL)
     @functools.cache
     def mults(ranges:tuple[UOp,...]):
-      mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in u.ranges if r.dtype is not dtypes.void] + [special_mult])
+      mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void] + [special_mult])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
     for u in uops:
