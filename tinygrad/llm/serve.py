@@ -73,6 +73,7 @@ class Request:
     self.ids, self.log, self.max_tokens, self.temperature = ids, log, max_tokens, temperature
     self.cancelled = False
     self.finish_reason = "stop"
+    self.error: Exception|None = None
     self.out: queue.Queue[int|None] = queue.Queue()
 
 class Handler(VizHandler):
@@ -92,12 +93,15 @@ class Handler(VizHandler):
     dec = tok.stream_decoder()
     router = StreamRouter(reasoning)
     req = Request(ids, log, max_tokens, temperature)
-    self.server.worker.waiting.put(req)
+    self.server.waiting.put(req)
     try:
       yield chunk({"role":"assistant", "content":""})
       while (next_id := req.out.get()) is not None:
         out.append(next_id)
         for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
+      if req.error is not None:
+        yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
+        return
       finish_reason = req.finish_reason
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
@@ -145,6 +149,7 @@ class Handler(VizHandler):
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
         for c in chunks:
+          if "error" in c: return self.send_data(json.dumps(c).encode(), status_code=500)
           if not c["choices"]: continue
           choice = c["choices"][0]
           if (delta := choice.get("delta", {})):
@@ -160,18 +165,23 @@ class Handler(VizHandler):
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
-class Worker:
-  def __init__(self, model:Transformer, tok:SimpleTokenizer):
-    self.model, self.tok = model, tok
+class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
+  daemon_threads = True
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
+    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     self.waiting: queue.Queue[Request] = queue.Queue()
-    threading.Thread(target=self.run, daemon=True, name="LLMWorker").start()
+    super().__init__(server_address, Handler)
 
-  def run(self):
+  def serve_forever(self, poll_interval:float=0.5):
+    # inference runs here, not on a worker thread: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
+    threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
     while True:
       req = self.waiting.get()
       try:
         for next_id in self.generate(req): req.out.put(next_id)  # TODO: batch decodes across requests (batched_step)
-      except Exception: traceback.print_exc()
+      except Exception as e:
+        traceback.print_exc()
+        req.error = e
       req.out.put(None)
 
   def generate(self, req:Request):
@@ -192,10 +202,3 @@ class Worker:
     total = f"total:{et-st:6.2f}s"
     stderr_log(f"gen:{n/(et-pt) if n > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
                f"out:{n:5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if req.cancelled else total}\n")
-
-class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
-  daemon_threads = True
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
-    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
-    super().__init__(server_address, Handler)
-    self.worker = Worker(model, tok)

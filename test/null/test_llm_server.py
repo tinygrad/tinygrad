@@ -250,7 +250,7 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(data["data"][0]["object"], "model")
 
   def test_concurrent_requests(self):
-    # the server accepts and tokenizes a second request while the first is generating, but the worker runs them one at a time
+    # the server accepts and tokenizes a second request while the first is generating, but the inference loop runs them one at a time
     gate, generating, encoded, calls = threading.Event(), threading.Event(), threading.Event(), []
     def gated_generate(ids, **kwargs):
       calls.append(ids)
@@ -277,7 +277,7 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(results, {"first":"Hello", "second":"Hello"})
 
   def test_disconnect_stops_generation(self):
-    # after the client goes away the worker must stop at the req.cancelled
+    # after the client goes away the inference loop must stop at the req.cancelled check
     gate, done, generated_tokens = threading.Event(), threading.Event(), []
     def gated_generate(ids, **kwargs):
       for tid in (300, 301, 302, 999):
@@ -295,6 +295,29 @@ class TestLLMServer(unittest.TestCase):
       gate.set()
       self.assertTrue(done.wait(2))
     self.assertEqual(generated_tokens, [300, 301, 302])
+
+  def test_model_generation_failure(self):
+    from openai import APIError, InternalServerError
+    def failing_generate(ids, **kwargs):
+      yield 300
+      raise RuntimeError("fake generate error")
+    client = self.client.with_options(max_retries=0)  # the default client retries 500s, which would just rerun the failure
+    with patch.object(self.mock_model, "generate", side_effect=failing_generate):
+      # non-streaming: a 500 instead of a 200 with finish_reason "stop"
+      with self.assertRaises(InternalServerError):
+        client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}])
+      # streaming: the client raises on the error chunk instead of returning the partial text
+      with self.assertRaises(APIError):
+        for _ in client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}], stream=True): pass
+
+  def test_generate_runs_on_serving_thread(self):
+    threads = []
+    def generate(ids, **kwargs):
+      threads.append(threading.current_thread())
+      yield from (300, 999)
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      self.client.chat.completions.create(model="test-model", messages=[{"role":"user","content":"Hello"}])
+    self.assertEqual(threads, [self.server_thread])
 
 class TestLLMToolCalls(unittest.TestCase):
   """Tool calling through the OpenAI-compatible HTTP API."""
