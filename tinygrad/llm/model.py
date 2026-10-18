@@ -511,30 +511,22 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list) -> li
   """
   the blocks on micro batches of rows (sequence parallel streams, a batch starts at the end of the tokens before it). a sublayer is three
   phases: the coefficients and its normed input (then gathered), its compute (its partial sums then scattered), its output added to the streams.
-  queued in turns: the compute of every batch, then for every batch its output added and the next sublayer's input. the copies of a batch
-  run with the work of the other one (not its own next phase, which waits for them)
+  a sublayer of a batch runs after the one of the batch before it: it reads the state and the cache it writes (implicit, not graph inputs)
   """
-  last:Tensor|None = None
-  def ordered(x:Tensor) -> Tensor: return x if last is None or not getenv("MB_ORDER", 1) else Tensor(x.uop.after(*last.uop.src[1:]))
+  def after(x:Tensor, dep:Tensor|None) -> Tensor: return x if dep is None else Tensor(x.uop.after(*dep.uop.src[1:]))
   subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
                                                                            (block.hc_ffn, block.ffn_norm, "ffn"))]
   for block in blocks: block._init_state(xs[0])
-  pres:list = [None]*len(xs)
+  done:list[Tensor] = []
   for i in range(len(xs)):
-    pres[i] = subs[0][0]._phase_pre(subs[0][1], subs[0][2], ordered(xs[i]))
-    last = pres[i][0]
-  for k, (block, hc, norm, sub) in enumerate(subs):
-    outs = []
-    for i in range(len(xs)):
-      hn = pres[i][0]
-      outs.append(block._phase_sub(sub, ordered(hn), starts[i], ts[i]))
-      last = outs[-1]
-    for i in range(len(xs)):
-      xs[i] = block._phase_post(hc, outs[i], ordered(pres[i][1]), pres[i][2], xs[i])
-      last = xs[i]
-      if k + 1 < len(subs):
-        pres[i] = subs[k+1][0]._phase_pre(subs[k+1][1], subs[k+1][2], xs[i])
-        last = pres[i][0]
+    for k, (block, hc, norm, sub) in enumerate(subs):
+      if k == 0: hn, post, comb = block._phase_pre(hc, norm, xs[i])
+      # (the batch before it ran this sublayer: its output's call, sublayer k of every batch is kept in done)
+      out = block._phase_sub(sub, after(hn, done[k] if i else None), starts[i], ts[i])
+      if i == 0: done.append(out)
+      else: done[k] = out
+      xs[i] = block._phase_post(hc, out, post, comb, xs[i])
+      if k + 1 < len(subs): hn, post, comb = subs[k+1][0]._phase_pre(subs[k+1][1], subs[k+1][2], xs[i])
   return xs
 
 class TransformerBlock(FFNBlock):
