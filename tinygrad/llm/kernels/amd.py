@@ -199,6 +199,7 @@ def iq4_half_lut(device:str|tuple[str, ...]|None) -> Tensor:
 @functools.cache
 def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in_features:int) -> UOp:
   groups = in_features//Q8_GROUP_SIZE
+  if groups % 8 == 0 and getenv("Q8Q_WIDE", 1): return _q8_quantize_wide(q, scale, xsum, x, *sq, tokens=tokens, in_features=in_features)
   token_group, lane = UOp.range(tokens*groups, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group = token_group//groups, token_group%groups
   value = x.reshape(tokens, groups, 32)[token, group, lane].load().float()
@@ -216,6 +217,30 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, 
   # optionally the sum of squares of each group, for an rms norm applied after a linear layer
   if sq: stores += (sq[0][token, group.valid(lane.eq(0))].store(warp_reduce(value*value, full_wave=True)),)
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
+
+def _q8_quantize_wide(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in_features:int) -> UOp:
+  # as _q8_quantize_kernel, a wave quantizes 8 groups: a lane eight neighboring inputs (wide loads), four lanes a group. the same values: the
+  # max and the integer sums don't depend on the order, the sums of squares add in the order of the full wave butterfly (16, 8, 4, 2, 1 apart)
+  groups = in_features//Q8_GROUP_SIZE
+  token_g8, lane = UOp.range(tokens*(groups//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = token_g8//(groups//8), (token_g8 % (groups//8))*8 + lane//4, lane % 4
+  values = [x.reshape(tokens, in_features)[token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
+  for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
+  d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
+  words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
+  qs = functools.reduce(lambda a, b: a + b, [qv.float() for qv in quants])
+  qs = qs + _lane_xor(qs, 1)
+  stores:list[UOp] = [q[token, group, sub*2 + w].store(words[w]) for w in range(2)]
+  stores += [scale[token, group.valid(sub.eq(0))].store(d), xsum[token, group, (sub//2).valid((sub%2).eq(0))].store(qs)]
+  if sq:
+    sqs = [v*v for v in values]
+    sqs = [a + _lane_xor(a, 2) for a in sqs]  # 16 apart: the lane two over
+    sqs = [a + _lane_xor(a, 1) for a in sqs]  # 8 apart
+    for k in (4, 2, 1): sqs = [sqs[i] + sqs[i ^ k] for i in range(8)]
+    stores.append(sq[0][token, group.valid(sub.eq(0))].store(sqs[0]))
+  return UOp.group(*stores).end(token_g8, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
 def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:bool=False) -> tuple[Tensor, ...]:
   """
