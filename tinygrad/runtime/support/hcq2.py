@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Con
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx
-from tinygrad.dtype import dtypes, AddrSpace, truncate, to_dtype
+from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
 
@@ -123,7 +123,7 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
-  ret = {None: dtypes.void, ctypes.c_void_p: dtypes.u64}.get(fn.restype) or to_dtype(fn.restype.__name__[2:]) # void, void*, c_int -> int
+  ret = dtypes.void if fn.restype is None else getattr(dtypes, fn.restype.__name__[2:], dtypes.u64) # void, c_int -> int, pointers -> u64
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.i32) if isinstance(a, int) else a for a in args])
 
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
