@@ -155,7 +155,8 @@ def main():
   # load the model
   st = time.perf_counter()
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
-    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
+    # serving: the weights are read while the warmup compiles
+    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard, defer_load=bool(args.serve))
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "

@@ -265,6 +265,24 @@ def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tu
   (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + aliases
   return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(mb, dtype, devs))
 
+def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
+  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
+  pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
+  # (an empty tensor is just its memory: allocated now)
+  if now:=[t for t in ts if t.numel() == 0 or t.uop.base.op is Ops.ALLOC]: Tensor.realize(*now)
+  for t in ts:
+    if t.numel() == 0 or any(t is x for x in now): continue
+    axis = t.uop.axis if isinstance(t.device, tuple) else None
+    shape = cast(tuple[int, ...], t.uop.shard_shape if axis is not None else t.shape)
+    u = UOp.new_buffer(cast(str|tuple[str, ...], t.device), prod(shape), t.dtype)
+    buf = u.buffer
+    for b in (buf.bufs if isinstance(buf, MultiBuffer) else [buf]): b.ensure_allocated()
+    lazy, u = t.uop, u.reshape(shape) if axis is None else u.reshape(shape).unshard(axis)
+    t.replace(Tensor(u))
+    pairs.append((u, lazy))
+  def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
+  if pairs: pending.append(compute)
+
 def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   """n int32 in host memory that the host polls: a (1, n) tensor every device reads and writes directly"""
   mv, t = _host_buffer(devs, 4*n, dtypes.int32)
@@ -960,6 +978,8 @@ class Transformer:
     # a jit for every token count of a call (the max size of a symbolic chunk, 1 for decoding): static padded shapes of a small chunk don't pay
     # for a big one
     self.jits:dict[int, Any] = {}
+    self._pending_load:list[Callable[[], None]] = []  # the work left of loading (from_gguf defer_load)
+    self._loaded = False  # the weights are loaded (from_gguf)
     self._scratch:dict = {}  # the memory of the jits' intermediates: they run one at a time
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -1109,8 +1129,11 @@ class Transformer:
     def lazy(v) -> list[Tensor]:
       if isinstance(v, Tensor): return [v] if not v.uop.is_realized else []
       return [t for x in v for t in lazy(x)] if isinstance(v, (list, tuple)) else []
-    # (and the parameters not realized yet, e.g. a model initialized but not loaded)
-    Tensor.realize(*[t for h in holders for v in vars(h).values() for t in lazy(v)], *lazy(nn.state.get_parameters(self)))
+    # (and the parameters of a model initialized but not loaded. a loaded one's are: the quantized weights' are their decoding, not used)
+    todo = [t for h in holders for v in vars(h).values() for t in lazy(v)] + ([] if self._loaded else lazy(nn.state.get_parameters(self)))
+    # with the weights still to read: their memory now, their values after
+    if self._pending_load: _realize_later(todo, self._pending_load)
+    else: Tensor.realize(*todo)
     self._states_ready = True
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -1132,7 +1155,8 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0)), shard:int=1) -> tuple[Transformer, dict]:
+                realize=bool(getenv("REALIZE", 0)), shard:int=1, defer_load:bool=False) -> tuple[Transformer, dict]:
+    """defer_load: the weights are read later (warmup compiles meanwhile), before the first call"""
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
@@ -1195,7 +1219,8 @@ class Transformer:
       mv, raw = _host_buffer(devices, int(data.nbytes()))
       mv[:] = data.to("CPU").data()
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
-    state_dict = gguf_shard(entries, devices, shard_map, units_map, pads if shard > 1 else {}, fuse)
+    pending:list[Callable[[], None]] = []
+    state_dict = gguf_shard(entries, devices, shard_map, units_map, pads if shard > 1 else {}, fuse, pending if defer_load else None)
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
 
     # all state items should be float16, not float32
@@ -1297,6 +1322,7 @@ class Transformer:
         del b.ffn_up_exps
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    model._pending_load, model._loaded = pending, True
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
@@ -1332,7 +1358,13 @@ class Transformer:
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
                     for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
-    Tensor.realize(*small, *tables)
+    # with the weights still to read: the small ones' memory now, their values after
+    if self._pending_load: _realize_later(small, self._pending_load)
+    Tensor.realize(*tables, *([] if self._pending_load else small))
+
+  def _finish_load(self):
+    """the work left of loading (deferred): the weights read, the values computed from them"""
+    while self._pending_load: self._pending_load.pop(0)()
 
   def sequence_parallel(self, rows:int) -> bool:
     """the hyper-connection streams of a prefill chunk of `rows` are split over the devices: tiles of 16 rows on every device"""
@@ -1357,6 +1389,7 @@ class Transformer:
     """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
     sizes = self.prefill_chunks()
     if getenv("WARMUP_PARALLEL", 1): self._capture_parallel(sizes)
+    self._finish_load()
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
       self._cached_tokens, self._ckpt_tokens = [], []
@@ -1381,7 +1414,8 @@ class Transformer:
       self._spec_init()
       if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
       calls.append((self._spec_jit, functools.partial(self._spec_call, 0, 0, 1, temp)))
-    capture_parallel(calls)
+    # the weights are read (and what's computed from them) while the jits compile
+    capture_parallel(calls, self._finish_load)
 
   def _recurrent_states(self) -> list[tuple[Tensor, bool]]:
     # the state that isn't indexed by position: the recurrent and conv states (slotted: the ones of the last positions, a position p's in slot
@@ -1420,6 +1454,7 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
+    self._finish_load()
     # the prefill jits are specialized for one chunk size each
     sizes = self.prefill_chunks(chunk_size)
     chunk_size = sizes[-1]

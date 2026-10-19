@@ -1,5 +1,5 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload
-import functools, os, io, pickle, itertools, threading, warnings
+import functools, os, io, pickle, itertools, threading, warnings, time
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
@@ -246,16 +246,19 @@ def _exit_child(code:int):
   worker.terminate_worker_pool()
   os._exit(code)
 
-def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]]) -> list[bool]:
+def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[], None]|None=None) -> list[bool]:
   """
   the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
   jit is captured and compiled but nothing runs, the parent takes the compiled jit (linked and run on its first call there). the jits share
   their scratch (the biggest arena of each lane). a jit that can't be captured so is left to capture on its call. returns which were
+  meanwhile: the parent's work while they compile (e.g. the data the jits read, made in the buffers they use)
   """
   todo = [k for k, (j, _) in enumerate(calls) if j.cnt == 1 and j.captured is None and j.fxn is not None]
-  if not todo or not hasattr(os, "fork"): return [False] * len(calls)
+  if not todo or not hasattr(os, "fork"):
+    if meanwhile is not None: meanwhile()
+    return [False] * len(calls)
   every, calls = list(calls), [calls[k] for k in todo]
-  reg, start = _prefork_buffers(), next(UOp.unique_num)
+  st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
   children:list[tuple[int, int]] = []
   for i, (jit, call) in enumerate(calls):
     r, w = os.pipe()
@@ -286,9 +289,10 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]]) -> list
     with os.fdopen(children[k][1], "rb") as f: datas[k] = f.read()
   threads = [threading.Thread(target=read, args=(k,)) for k in range(len(children))]
   for t in threads: t.start()
+  if meanwhile is not None: meanwhile()
   for t in threads: t.join()
   oks = [os.waitpid(pid, 0)[1] == 0 and len(datas[k]) > 0 for k, (pid, _) in enumerate(children)]
-  if DEBUG >= 1: print(f"capture_parallel: {sum(oks)}/{len(oks)} captured, {[len(d) for d in datas]} bytes")
+  if DEBUG >= 1: print(f"capture_parallel: {sum(oks)}/{len(oks)} captured, {[len(d) for d in datas]} bytes in {time.perf_counter()-st:.2f}s")
 
   # the arenas: the biggest of every lane, shared
   loaded = [pickle.loads(d) if ok else None for d, ok in zip(datas, oks)]
@@ -308,4 +312,5 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]]) -> list
       out.append(arena_at[i] if i in arena_at else UOp(op, tuple(out[j] for j in src), arg, tag))
     ret, lin, names, info = _Unpickler(rest, reg, out).load()
     jit.captured, jit.cnt = CapturedJit(ret, out[lin], names, info), 2
+  if DEBUG >= 1: print(f"capture_parallel: taken in {time.perf_counter()-st:.2f}s")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

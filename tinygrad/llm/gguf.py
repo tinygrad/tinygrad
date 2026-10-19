@@ -406,11 +406,13 @@ def _run_gather(fxn:Callable, *bufs:UOp):
   run_linear(UOp(Ops.LINEAR, src=(fxn(*[UOp.placeholder_like(b, slot=i) for i,b in enumerate(bufs)]).call(*bufs),)), update_stats=False)
 
 def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
-                   units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str]) -> dict[str, Tensor]|None:
+                   units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str],
+                   defer:list[Callable[[], None]]|None=None) -> dict[str, Tensor]|None:
   """
   _direct_load in parallel: every device's tensors are file reads (os.preadv, threads) into host buffers of the device, then copies to its
   buffer, the devices in turn. tensors split by columns (an expert's slices of the down projection, the parts of a row parallel weight) are
   read whole into device memory and gathered there (a kernel). the same bytes as _direct_load
+  defer: the device memory is allocated (the tensors are made), the bytes are read by the function added to it
   """
   import os, time, concurrent.futures
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
@@ -539,70 +541,73 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
             skip = 0
           views = rest
     for at, ln in zeros: mv[at:at+ln] = bytes(ln)
-  with Context(ALLOW_DEVICE_USAGE=1):
-    bufs = [Buffer(d, t).ensure_allocated() for d,t in zip(devices, totals)]
-    tmps = [Buffer(d, round_up(tmp_size, align)).ensure_allocated() for d in devices] if tmp_size else []
-    stages = [[Buffer(d, STAGE, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in range(K)] for d in devices]
-    mvs = [[s.as_memoryview(allow_zero_copy=True) for s in ss] for ss in stages]
-    pool = concurrent.futures.ThreadPoolExecutor(getenv("LOAD_THREADS", 16))
-    # per device: the next job to fill, the next job to issue, the timeline (the device signals it: the value of the last work issued),
-    # per host buffer: its job and fill, or the timeline value of its copy (free once reached). the temp buffer is written once the gather
-    # before read it, a gather runs once the copies before it are done. nothing waits holding the gil (fills run meanwhile)
-    nxt, done = [0]*n, [0]*n
-    tls = [Device[d].timeline.host.view(fmt='Q') for d in devices]
-    fills:list[list[Any]] = [[None]*K for _ in range(n)]
-    busy:list[list[int]] = [[0]*K for _ in range(n)]
-    last_copy, last_gather = [0]*n, [0]*n
-    unit_tables:dict[tuple, Buffer] = {}
-    def gather(i:int, job:tuple):
-      _, name, kind, args, dst0, nb, src_nb = job
-      word = _gather_word(nb, src_nb, *((args[3],) if kind == "units" else (args[1], args[2])))
-      dst = UOp.from_buffer(bufs[i].view(nb, dst0).ensure_allocated(), word, devices[i])
-      src = UOp.from_buffer(tmps[i].view(src_nb, 0).ensure_allocated(), word, devices[i])
-      if kind == "units":
-        E, rows, slices, blk, us = args
-        if (ut:=unit_tables.get((i, tuple(us)))) is None:
-          ut = unit_tables[(i, tuple(us))] = Buffer(devices[i], 4*len(us), initial_value=struct.pack(f"<{len(us)}i", *us)).ensure_allocated()
-        _run_gather(functools.partial(_units_gather_kernel, rows=rows, slices=slices), dst, src, UOp.from_buffer(ut, dtypes.int32, devices[i]))
-      else:
-        outer, row, part, di = args
-        _run_gather(functools.partial(_part_gather_kernel, outer=outer, off=di*part//word.itemsize), dst, src)
-    while any(done[i] < len(jobs[i]) for i in range(n)):
-      progressed = False
-      for i in range(n):
-        cur = tls[i][0]
-        # fill the free host buffers with the next copy jobs
-        for k in range(K):
-          if fills[i][k] is None and cur >= busy[i][k] and nxt[i] < len(jobs[i]) and (job:=jobs[i][nxt[i]])[0] == "copy":
-            fills[i][k], nxt[i], progressed = (job, pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1, True
-        if done[i] >= len(jobs[i]): continue
-        job = jobs[i][done[i]]
-        if job[0] == "gather":
-          if cur < last_copy[i]: continue
-          gather(i, job)
-          last_gather[i] = tls[i][1]
-          nxt[i] = max(nxt[i], done[i] + 1)
+  with Context(ALLOW_DEVICE_USAGE=1): bufs = [Buffer(d, t).ensure_allocated() for d,t in zip(devices, totals)]
+  def fill_all():
+    with Context(ALLOW_DEVICE_USAGE=1):
+      tmps = [Buffer(d, round_up(tmp_size, align)).ensure_allocated() for d in devices] if tmp_size else []
+      stages = [[Buffer(d, STAGE, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in range(K)] for d in devices]
+      mvs = [[s.as_memoryview(allow_zero_copy=True) for s in ss] for ss in stages]
+      pool = concurrent.futures.ThreadPoolExecutor(getenv("LOAD_THREADS", 16))
+      # per device: the next job to fill, the next job to issue, the timeline (the device signals it: the value of the last work issued),
+      # per host buffer: its job and fill, or the timeline value of its copy (free once reached). the temp buffer is written once the gather
+      # before read it, a gather runs once the copies before it are done. nothing waits holding the gil (fills run meanwhile)
+      nxt, done = [0]*n, [0]*n
+      tls = [Device[d].timeline.host.view(fmt='Q') for d in devices]
+      fills:list[list[Any]] = [[None]*K for _ in range(n)]
+      busy:list[list[int]] = [[0]*K for _ in range(n)]
+      last_copy, last_gather = [0]*n, [0]*n
+      unit_tables:dict[tuple, Buffer] = {}
+      def gather(i:int, job:tuple):
+        _, name, kind, args, dst0, nb, src_nb = job
+        word = _gather_word(nb, src_nb, *((args[3],) if kind == "units" else (args[1], args[2])))
+        dst = UOp.from_buffer(bufs[i].view(nb, dst0).ensure_allocated(), word, devices[i])
+        src = UOp.from_buffer(tmps[i].view(src_nb, 0).ensure_allocated(), word, devices[i])
+        if kind == "units":
+          E, rows, slices, blk, us = args
+          if (ut:=unit_tables.get((i, tuple(us)))) is None:
+            ut = unit_tables[(i, tuple(us))] = Buffer(devices[i], 4*len(us), initial_value=struct.pack(f"<{len(us)}i", *us)).ensure_allocated()
+          _run_gather(functools.partial(_units_gather_kernel, rows=rows, slices=slices), dst, src, UOp.from_buffer(ut, dtypes.int32, devices[i]))
         else:
-          kf = next((k for k in range(K) if fills[i][k] is not None and fills[i][k][0] is job), None)
-          if kf is None or not fills[i][kf][1].done() or (job[4] == "tmp" and cur < last_gather[i]): continue
-          k = kf
-          fills[i][k][1].result()
-          target = bufs[i] if job[4] == "buf" else tmps[i]
-          # (a copy at a time: a linear of the same structure is compiled once)
-          target.view(job[3], job[5]).ensure_allocated().copy_from(stages[i][k].view(job[3], 0).ensure_allocated())
-          fills[i][k], busy[i][k] = None, tls[i][1]
-          if job[4] == "tmp": last_copy[i] = tls[i][1]
-        done[i], progressed = done[i] + 1, True
-      if not progressed:
-        pending = [x[1] for row in fills for x in row if x is not None and not x[1].done()]
-        if pending: concurrent.futures.wait(pending, timeout=0.0005, return_when=concurrent.futures.FIRST_COMPLETED)
-        else: time.sleep(0.0002)
-    for d in devices: Device[d].synchronize()
-    pool.shutdown()
-    mvs.clear()
-    stages.clear()
-    tmps.clear()
-  for fd in fds.values(): os.close(fd)
+          outer, row, part, di = args
+          _run_gather(functools.partial(_part_gather_kernel, outer=outer, off=di*part//word.itemsize), dst, src)
+      while any(done[i] < len(jobs[i]) for i in range(n)):
+        progressed = False
+        for i in range(n):
+          cur = tls[i][0]
+          # fill the free host buffers with the next copy jobs
+          for k in range(K):
+            if fills[i][k] is None and cur >= busy[i][k] and nxt[i] < len(jobs[i]) and (job:=jobs[i][nxt[i]])[0] == "copy":
+              fills[i][k], nxt[i], progressed = (job, pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1, True
+          if done[i] >= len(jobs[i]): continue
+          job = jobs[i][done[i]]
+          if job[0] == "gather":
+            if cur < last_copy[i]: continue
+            gather(i, job)
+            last_gather[i] = tls[i][1]
+            nxt[i] = max(nxt[i], done[i] + 1)
+          else:
+            kf = next((k for k in range(K) if fills[i][k] is not None and fills[i][k][0] is job), None)
+            if kf is None or not fills[i][kf][1].done() or (job[4] == "tmp" and cur < last_gather[i]): continue
+            k = kf
+            fills[i][k][1].result()
+            target = bufs[i] if job[4] == "buf" else tmps[i]
+            # (a copy at a time: a linear of the same structure is compiled once)
+            target.view(job[3], job[5]).ensure_allocated().copy_from(stages[i][k].view(job[3], 0).ensure_allocated())
+            fills[i][k], busy[i][k] = None, tls[i][1]
+            if job[4] == "tmp": last_copy[i] = tls[i][1]
+          done[i], progressed = done[i] + 1, True
+        if not progressed:
+          pending = [x[1] for row in fills for x in row if x is not None and not x[1].done()]
+          if pending: concurrent.futures.wait(pending, timeout=0.0005, return_when=concurrent.futures.FIRST_COMPLETED)
+          else: time.sleep(0.0002)
+      for d in devices: Device[d].synchronize()
+      pool.shutdown()
+      mvs.clear()
+      stages.clear()
+      tmps.clear()
+    for fd in fds.values(): os.close(fd)
+  if defer is not None: defer.append(fill_all)
+  else: fill_all()
   packed:dict[str, Tensor] = {}
   for name, parts in plan.items():
     (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [bufs[i].view(nb, offsets[name][i]).ensure_allocated() for i,(nb,_) in enumerate(parts)]
@@ -641,21 +646,23 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
-               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None) -> dict[str, Tensor]:
+               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None, defer:list[Callable[[], None]]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   a tensor (E, rows, cols) in `units` (slices, per device unit lists) is cut in E*slices units: unit e*slices+j is expert e's rows j*rows/slices..
   (its columns for the down projection). every device gets its units in order, a tensor (devices*units, unit rows, unit cols)
   pads: a sharded tensor is zero padded on its shard axis to this size (gguf_pad)
   fuse: gate -> up tensors in units to load as one gate tensor, their unit rows interleaved by 16 (if loaded straight from the file)
+  defer: the bytes are read later, by the function added to it (if loaded straight from the file)
   """
   pads, fuse = pads or {}, fuse or {}
   n, packed, shard_map, units, shapes = len(devices), {}, shard_map or {}, units or {}, {}
   for name, (_, shape, _) in entries.items():
     if name in units: shapes[name] = (n*len(units[name][1][0]), shape[1] // units[name][0], shape[2]) if not name.endswith("down_exps.weight") else \
       (n*len(units[name][1][0]), shape[1], shape[2] // units[name][0])
-  load = _parallel_load if getenv("GGUF_LOAD2", 1) else _direct_load
-  if (direct:=load(entries, devices, shard_map, units, pads, fuse)) is not None:
+  direct = _parallel_load(entries, devices, shard_map, units, pads, fuse, defer) if getenv("GGUF_LOAD2", 1) else \
+           _direct_load(entries, devices, shard_map, units, pads, fuse)
+  if direct is not None:
     packed, entries_left = direct, {}
     for g, u in fuse.items():
       shapes[g] = (shapes[g][0], 2*shapes[g][1], shapes[g][2])
