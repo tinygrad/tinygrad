@@ -984,7 +984,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
   elif tokens >= 64 and tokens % 16 == 0 and xq is not None and layer.ggml_type in GROUP_SCALE_QUANTS and layer.shard_axis is None and \
-       _wmma_rdna4(x.device) and not split:
+       _wmma_rdna4(x.device) and (not split or (isinstance(x.device, tuple) and (tokens // len(x.device)) % 16 == 0 and getenv("I8_SPLIT", 1))):
     # many tokens already quantized (a few outputs, e.g. a hyper-connection's): the int8 tensor cores, the inputs split over workgroups
     ksplits = next(s for s in (16, 8, 4, 2, 1) if (in_features // Q8_GROUP_SIZE) % s == 0 and in_features // Q8_GROUP_SIZE // s >= 8)
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, splits=ksplits)
@@ -1012,7 +1012,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   half_out = half_out and getattr(fxn, "func", None) is _q8_gemm_kernel
   out = Tensor.empty(out_shape, dtype=dtypes.half if half_out else dtypes.float32, device=x.device, axis=out_axis)
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
-  if ksplits > 1: result = result.reshape(ksplits, tokens, out_features).sum(0)
+  if ksplits > 1:
+    # (split: every device's rows of the partial outputs of the input splits)
+    if split: result = result.reshape(n:=len(cast(tuple, x.device)), ksplits, tokens // n, out_features).sum(1).reshape(tokens, out_features)
+    else: result = result.reshape(ksplits, tokens, out_features).sum(0)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1:
     if not reduce: return result.reshape(splits, *x.shape[:-1], out_features)  # the partial sums, sharded on the device axis
