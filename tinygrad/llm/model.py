@@ -9,7 +9,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax, moe_combine_scatter
+  all_gather, sharded_argmax, moe_combine_scatter, kda_conv
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
@@ -889,40 +889,48 @@ class GatedDeltaNetBlock(FFNBlock):
     rp, wp = start_pos % S, (start_pos + T) % S
     def parity(s:Tensor, p:UOp) -> Tensor: return s.shrink(((p, p+1),) + (None,)*(s.ndim-1))
     # qkv conv, conv_state is reset when starting from position 0
-    def conv(states:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
+    def conv(states:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp, tuple[Tensor, Tensor]]:
       # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
       # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
       state = parity(states, rp).reshape(states.shape[1:])
-      window = initial.where(0, state).cat(proj.cast(state.dtype), dim=1)
+      window = (masked:=initial.where(0, state)).cat(proj.cast(state.dtype), dim=1)
       window = window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
       # the last conv_kernel-1 columns of the window become the next conv state
       store = parity(states, wp).uop.store(window[:, T:T+self.ssm_conv_kernel-1].cast(state.dtype).unsqueeze(0).uop)
-      return functools.reduce(lambda a,b: a+b, (window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
+      return functools.reduce(lambda a,b: a+b, (window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store, \
+        (masked, proj.pad_to((B, T_pad, proj.shape[-1])))
+    # the convolutions, norms and layouts of q, k and v in a kernel (and the dot of q and k)
+    fused = is_kda and B == 1 and self.num_v_heads == self.num_k_heads and self.head_k_dim == self.head_v_dim and self.head_k_dim % 32 == 0 and \
+      not symbolic and amd_custom_kernels_supported(x.device) and bool(getenv("KDA_CONV", 1))
+    kq = None
     if is_kda:
-      convs = [conv(state, proj(x), w["weight"]) for state, proj, w in
-               zip(self.conv_states, (self.attn_q, self.attn_k, self.attn_v), (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v))]
-      (q, k, v), conv_state_stores = [o for o,_ in convs], tuple(s for _,s in convs)
+      weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
+      convs = [conv(state, proj(x), w) for state, proj, w in zip(self.conv_states, (self.attn_q, self.attn_k, self.attn_v), weights)]
+      (q, k, v), conv_state_stores = [o for o,_,_ in convs], tuple(s for _,s,_ in convs)
+      if fused: q, k, v, kq = kda_conv([w[0] for _,_,w in convs], [w[1] for _,_,w in convs], weights, self.head_k_dim, self.head_k_dim**-0.5)
     else:
-      conv_out, conv_state_store = conv(self.conv_state, self.attn_qkv(x), self.ssm_conv1d["weight"])
+      conv_out, conv_state_store, _ = conv(self.conv_state, self.attn_qkv(x), self.ssm_conv1d["weight"])
       conv_state_stores = (conv_state_store,)
       q, k, v = conv_out.split(list(self.qkv_dims), dim=-1)
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
-    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim) for z in (q, k))
-    # l2 norm x/sqrt(sum(x²)+1e-6) as in the FLA kernels, then the v heads share the k heads
-    q, k = ((z.rmsnorm(eps=1e-6/self.head_k_dim) / self.head_k_dim**0.5).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
-    v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
-    # layout the per-step operands to broadcast against the (B, H, V, K) state
-    q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
-    q = q * self.head_k_dim**-0.5
+    if not fused:
+      q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim) for z in (q, k))
+      # l2 norm x/sqrt(sum(x²)+1e-6) as in the FLA kernels, then the v heads share the k heads
+      q, k = ((z.rmsnorm(eps=1e-6/self.head_k_dim) / self.head_k_dim**0.5).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
+      v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
+      # layout the per-step operands to broadcast against the (B, H, V, K) state
+      q, k, v = (z.transpose(1, 2).float() for z in (q, k, v))
+      q = q * self.head_k_dim**-0.5
+    beta = beta.transpose(1, 2).float()
     alpha = log_alpha.transpose(1, 2).exp()  # per-channel decay for kda, per-head otherwise (B, H, T, K|1)
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     state = Tensor(self.recurrent_state.uop.after(*conv_state_stores))  # carry the conv write into this graph
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
-      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos), end_pos=start_pos + T).transpose(1, 2)
+      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos), end_pos=start_pos + T, kq=kq).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)

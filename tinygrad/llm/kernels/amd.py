@@ -2595,8 +2595,48 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps).call(*contig)
   return Tensor(contig[0].after(call))
 
+def _kda_conv_kernel(q:UOp, k:UOp, v:UOp, kq:UOp, sq:UOp, sk:UOp, sv:UOp, pq:UOp, pk:UOp, pv:UOp, cq:UOp, ck:UOp, cv:UOp, taps:int,
+                     qscale:float) -> UOp:
+  """
+  the short convolutions of q, k and v (their windows: the conv states s (taps-1, H*K) then the projections p (T, H*K), weights (H*K, taps))
+  and their silu, q and k l2 normed (q scaled by qscale): (H, T, K) floats, and kq (H, T) the dot of q and k. a wave per head and token, a
+  lane 4 channels
+  """
+  H, T, K = cast(tuple[int, int, int], q.shape)
+  per = K // WARP_SIZE
+  t, h, lane = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(H, 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  def conv(st:UOp, pr:UOp, cw:UOp, j:int) -> UOp:
+    c = h * K + lane * per + j
+    def win(r:UOp) -> UOp:  # the window's row r: the state's, then the projection's
+      return (r < taps - 1).where(st[r.valid(r < taps - 1), c].load().float(), pr[(r - (taps - 1)).valid(r >= taps - 1), c].load().float())
+    x = functools.reduce(lambda a, b: a + b, [win(t + i) * cw[c, i].load().float() for i in range(taps)])
+    return x * (1 + (x * -LOG2E).exp2()).reciprocal()
+  qs, ks, vs = ([conv(st, pr, cw, j) for j in range(per)] for st, pr, cw in ((sq, pq, cq), (sk, pk, ck), (sv, pv, cv)))
+  def total(xs:list[UOp]) -> UOp: return warp_reduce(functools.reduce(lambda a, b: a + b, xs), full_wave=True)
+  qn, kn = (total([x * x for x in qs]) + 1e-6).rsqrt() * qscale, (total([x * x for x in ks]) + 1e-6).rsqrt()
+  qs, ks = [x * qn for x in qs], [x * kn for x in ks]
+  dot = total([a * b for a, b in zip(qs, ks)])
+  stores = [o[h, t, lane * per + j].store(xs[j]) for o, xs in ((q, qs), (k, ks), (v, vs)) for j in range(per)]
+  stores.append(kq[h, t.valid(lane.eq(0))].store(dot))
+  return UOp.group(*stores).end(t, h, lane).sink(arg=KernelInfo(name="kda_conv", opts_to_apply=()))
+
+def kda_conv(states:list[Tensor], projs:list[Tensor], weights:list[Tensor], dim:int, qscale:float) -> tuple[Tensor, ...]:
+  """
+  the short convolutions of q, k and v (_kda_conv_kernel): their conv states (1, taps-1, heads*dim), projections (1, T, heads*dim) and weights,
+  the heads split over the devices: q, k, v (1, heads, T, dim), kq (1, heads, T)
+  """
+  T, taps = int(projs[0].shape[1]), int(weights[0].shape[-1])
+  devs = projs[0].device
+  n, axis = (len(devs), 0) if isinstance(devs, tuple) else (1, None)
+  heads = int(projs[0].uop.shard_shape[-1] if axis is not None else projs[0].shape[-1]) // dim
+  outs = [Tensor.empty(heads * n, T, dim, dtype=dtypes.float32, device=devs, axis=axis) for _ in range(3)]
+  kq = Tensor.empty(heads * n, T, dtype=dtypes.float32, device=devs, axis=axis)
+  res = Tensor.custom_kernel(*outs, kq, *[x.reshape(x.shape[1], x.shape[2]).contiguous() for x in states + projs],
+                             *[c.contiguous() for c in weights], fxn=functools.partial(_kda_conv_kernel, taps=taps, qscale=qscale))
+  return tuple(x.unsqueeze(0) for x in res[:4])
+
 def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None,
-                        end_pos:UOp|None=None) -> Tensor:
+                        end_pos:UOp|None=None, kq:Tensor|None=None) -> Tensor:
   """
   the scan of the (B, H, T, ...) tokens updating the recurrent state in place. end_pos: the state is (2, B, H, V, K), the state at position p
   is p%2: the scan reads the state of start_pos and writes the one of end_pos (the other one keeps the state before)
@@ -2612,7 +2652,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   if start_pos is not None:
     # start_pos: a bound variable or an expression of them
     state = Tensor(state.uop.after(start_pos.uop, *([end_pos] if isinstance(end_pos, UOp) else [])))
-  core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
+  core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous() if kq is None else kq
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
