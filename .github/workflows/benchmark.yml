@@ -83,7 +83,7 @@ jobs:
 
   llmbenchmark:
     name: Benchmark ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -91,7 +91,7 @@ jobs:
         model: ['llama3.2:3b-f16', 'qwen3.8:27b', 'olmoe']
         # qwen3.8:27b doesn't fit on mac
         exclude: [{ dev: 'METAL', model: 'qwen3.8:27b' }, { dev: 'AMD', model: 'olmoe' }, { dev: 'NV', model: 'olmoe' }]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -103,7 +103,7 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe nvidia
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -120,7 +120,7 @@ jobs:
 
   cifarbenchmark:
     name: HLB-CIFAR10 (DEV=${{ matrix.dev }})
-    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -137,7 +137,7 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe nvidia
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -162,7 +162,7 @@ jobs:
 
   mlperfbenchmark:
     name: MLPerf (${{ matrix.dev }})
-    runs-on: "${{ matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
+    runs-on: "${{ matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -179,11 +179,11 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe nvidia
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
-        ln -s "${{ matrix.dev == 'AMD' && '/datasets' || '/raid/datasets' }}/imagenet" extra/datasets/imagenet
+        ln -s /datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -198,7 +198,7 @@ jobs:
 
   sdbenchmark:
     name: Stable Diffusion (DEV=${{ matrix.dev }})
-    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || 'tinyboxgreen' }}"
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -215,7 +215,7 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe nvidia
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |

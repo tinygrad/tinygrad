@@ -481,13 +481,14 @@ Compiled.pm_link = PatternMatcher([])
 class LinkCtx: inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
+  if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
   dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
 
   # a placeholder is named as is, or by the device it's on. the rest are allocated where they live
-  owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name))) if b.arg.name else None
+  owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name)))
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
   elif (r:=dev.link_buffer(b)) is not None: pass
-  elif not ctx.use_rt or b.arg.name is None: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
+  elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
   else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
