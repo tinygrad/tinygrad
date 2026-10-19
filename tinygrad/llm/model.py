@@ -1053,7 +1053,8 @@ class Transformer:
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
     k, host = self.config.spec_drafts, self._spec_host
-    if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, scratch=self._scratch)
+    if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False),
+                                                                scratch=self._scratch)
     v_mtp, v_j, v_pos = UOp.variable("mtp_pos", 0, self.max_context-1), UOp.variable("spec_j", 0, k), UOp.variable("start_pos", 0, self.max_context-1)
     v_par, v_chain = UOp.variable("spec_par", 0, 1), tuple(UOp.variable(f"spec_pos{i}", 0, self.max_context-1) for i in range(k-1))
     def launch(mtp_pos:int, j:int, par:int) -> bool:
@@ -1080,13 +1081,29 @@ class Transformer:
         self._cached_tokens, self._spec_row = tokens[:-1], row + i
         yield sampled[i]
 
+  def _init_states(self):
+    """the states and caches of the blocks, realized (the jits capture on their first call: not the one time setup)"""
+    if getattr(self, "_states_ready", False): return
+    devs = self.token_embd.weight.device
+    x = Tensor.empty(1, 1, self.config.dim, device=devs)
+    holders:list = []
+    for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
+      b._init_state(x)
+      holders += [b] + ([idx] if (idx:=getattr(b, "indexer", None)) is not None else [])
+    def lazy(v) -> list[Tensor]:
+      if isinstance(v, Tensor): return [v] if not v.uop.is_realized else []
+      return [t for x in v for t in lazy(x)] if isinstance(v, (list, tuple)) else []
+    Tensor.realize(*[t for h in holders for v in vars(h).values() for t in lazy(v)])
+    self._states_ready = True
+
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
     key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
     if (jit:=self.jits.get(key)) is None:
-      # once a jit ran the model (its states and caches are set up), a new one captures on its first call
-      jit = self.jits[key] = TinyJit(self._forward_effects, capture_first=any(j.cnt > 0 for j in self.jits.values()), scratch=self._scratch)
+      # the states and caches are set up before: a jit captures on its first call
+      self._init_states()
+      jit = self.jits[key] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
     return jit(tokens, start_pos, temperature)[0]
 
   def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> tuple[Tensor, ...]:
@@ -1318,13 +1335,12 @@ class Transformer:
     return tuple(sorted(set(sizes)))
 
   def warmup(self):
-    """compile and capture every jit a request uses: a prompt of each prefill chunk size (twice: a jit captures on its second call), decoding"""
+    """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
     sizes = self.prefill_chunks()
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
-      for _ in range(2):
-        self._cached_tokens, self._ckpt_tokens = [], []
-        list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
+      self._cached_tokens, self._ckpt_tokens = [], []
+      list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
     if self._ckpt_tokens: self._checkpoint(self._ckpt_tokens, save=False)  # and a checkpoint's restore
     self._cached_tokens, self._ckpt_tokens = [], []
 
