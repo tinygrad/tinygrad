@@ -273,9 +273,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+  @recursive_property
+  def _slice_ops(self) -> int:
+    # the ops in backward_slice, a bit each (memoized: a lookup instead of a walk of the slice)
+    m = 0
+    for x in self.src_without_body: m |= x._slice_ops | (1 << x.op.value)
+    return m
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool: return self.op in ops or any(self._slice_ops >> op.value & 1 for op in ops)
 
   @recursive_property
   def _defines_slice(self) -> frozenset[UOp]:
