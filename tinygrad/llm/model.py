@@ -1093,7 +1093,8 @@ class Transformer:
     def lazy(v) -> list[Tensor]:
       if isinstance(v, Tensor): return [v] if not v.uop.is_realized else []
       return [t for x in v for t in lazy(x)] if isinstance(v, (list, tuple)) else []
-    Tensor.realize(*[t for h in holders for v in vars(h).values() for t in lazy(v)])
+    # (and the parameters not realized yet, e.g. a model initialized but not loaded)
+    Tensor.realize(*[t for h in holders for v in vars(h).values() for t in lazy(v)], *lazy(nn.state.get_parameters(self)))
     self._states_ready = True
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
