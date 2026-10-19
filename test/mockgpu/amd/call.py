@@ -19,8 +19,6 @@ from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
-ASM_CALL_NOT_SUPPORTED = 1
-
 class CallModule(CPUExecutable):
   def __init__(self, lib:bytes, functions:dict[str, int]):
     self.functions = functions
@@ -326,7 +324,7 @@ def decode_cfg(insts:dict[int, Inst]):
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
-         user_data_count:int, backend:str, name:str="") -> UOp|int:
+         user_data_count:int, backend:str, name:str="") -> UOp:
   view = to_mv(lib, lib_sz)
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
@@ -342,12 +340,12 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
   entries.append((code, prg))
   return prg
 
-dispatch_cache:dict[tuple, list[tuple[bytes, UOp|int]]] = {}
+dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
 
-def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str="") -> UOp|int:
+def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str="") -> UOp:
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
-    if inst_st.startswith(("s_getpc", "s_setpc")): return ASM_CALL_NOT_SUPPORTED
+    if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"ASM_CALL does not support {inst_st}")
   renderer = backend_renderer(backend)
   cfg, regions = decode_cfg(insts)
   # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
