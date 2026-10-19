@@ -1,4 +1,4 @@
-import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools
+import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools, errno
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
@@ -30,10 +30,10 @@ class DiskDevice(Compiled):
       self.mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
-      try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0))
-      except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
+      try: self.fd, rdonly = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0)), False
+      except OSError as e: self.fd = os.open(filename, os.O_RDONLY if (rdonly:=e.errno in (errno.EROFS, errno.EACCES)) else os.O_RDWR|os.O_CREAT)
       if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < size: os.ftruncate(self.fd, size)
-      self.mem = mmap.mmap(self.fd, size)
+      self.mem = mmap.mmap(self.fd, size, access=mmap.ACCESS_COPY if rdonly else mmap.ACCESS_DEFAULT)
       self.info.host.view()[:16] = struct.pack("2Q", self.fd, mv_address(memoryview(self.mem)))
     self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
