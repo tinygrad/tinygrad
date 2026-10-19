@@ -1154,7 +1154,6 @@ class TestF64Ops(unittest.TestCase):
     total = p0 + p1 + p2
     self.assertAlmostEqual(total, two_over_pi, places=14)
 
-  @unittest.skip("depends on native fma")
   def test_v_fma_f64_sin_kernel_step84(self):
     """V_FMA_F64: exact values from sin(2.0) kernel step 84 that shows 1-bit difference."""
     # From test_sin_f64 failure trace at step 84:
