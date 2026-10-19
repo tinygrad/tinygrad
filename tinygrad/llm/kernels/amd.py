@@ -1158,14 +1158,21 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
     return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
   if getenv("RS_RING", 1):
     # around the ring: in step k device j adds its part of the sum of device t=j-k to what it got (the sum of the parts of t+1..j-1) and
-    # sends it to j+1 (the links between neighbours are the fast ones). device t adds its own last
-    got:dict[tuple[int, int], UOp] = {}
-    for k in range(1, n):
-      for j in range(n):
-        t = (j - k) % n
-        mine = part(j, t) if k == 1 else (got[(t, j)] + part(j, t).cast(dtypes.half)).contiguous()
-        got[(t, (j+1) % n)] = mine.copy_to_device(devs[(j+1) % n])
-    return Tensor(UOp.mstack(*[(got[(t, t)] + part(t, t).cast(dtypes.half)).float().contiguous() for t in range(n)]).unshard(axis))
+    # sends it to j+1 (the links between neighbours are the fast ones). device t adds its own last. the parts in pieces (RS_SPLIT), a ring
+    # each: one's copy runs while another's sum is computed
+    pieces = getenv("RS_SPLIT", 2) if size % (getenv("RS_SPLIT", 2) * 16) == 0 and all(s == 1 for s in S[:axis]) else 1
+    def piece(u:UOp, pc:int) -> UOp:
+      return u if pieces == 1 else u.shrink(tuple((0, s) if a != axis else (pc*(size//pieces), (pc+1)*(size//pieces)) for a, s in enumerate(u.shape)))
+    outs = []
+    for pc in range(pieces):
+      got:dict[tuple[int, int], UOp] = {}
+      for k in range(1, n):
+        for j in range(n):
+          t = (j - k) % n
+          mine = piece(part(j, t), pc) if k == 1 else (got[(t, j)] + piece(part(j, t), pc).cast(dtypes.half)).contiguous()
+          got[(t, (j+1) % n)] = mine.copy_to_device(devs[(j+1) % n])
+      outs.append([(got[(t, t)] + piece(part(t, t), pc).cast(dtypes.half)).float() for t in range(n)])
+    return Tensor(UOp.mstack(*[functools.reduce(lambda a, b: a.cat(b, dim=axis), [o[t] for o in outs]).contiguous() for t in range(n)]).unshard(axis))
   # the parts are rows of the half partials: copied as views (no kernel to cut them out) when the split axis leads
   sent = _rotated(lambda j, i: part(j, i) if all(s == 1 for s in S[:axis]) and getenv("RS_VIEWS", 1) else part(j, i).contiguous(), devs)
   # summed in half, in device order: the sums of the allreduce of partial_sum
@@ -1189,7 +1196,8 @@ def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
   """a tensor split on axis over the devices, whole on every device (in dtype): every part goes to the others peer to peer"""
   devs = cast(tuple[str, ...], x.device)
   local = _per_device(_materialized(x, dtype or x.dtype))
-  mine, n = [local.mselect(i).contiguous() for i in range(len(devs))], len(devs)
+  # (the parts are sent from the buffer)
+  mine, n = [local.mselect(i) for i in range(len(devs))], len(devs)
   sent = _ring(mine, devs) if getenv("AG_RING", 1) else _rotated(lambda i, j: mine[i], devs)
   whole = [Tensor.cat(*[Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)], dim=axis).uop for j in range(n)]
   return Tensor(UOp.mstack(*whole))
@@ -1453,20 +1461,23 @@ def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Te
   return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32), pos.cast(dtypes.int32)
 
 @functools.cache
-def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by_selection:bool=False) -> UOp:
+def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by_selection:bool=False, row0:int=0,
+                        add_rows:tuple[int, ...]=()) -> UOp:
   # y[t] = the sum over the slots j of token t of probs[t, j] * down[pos[t, j]] (the sorted rows): a workgroup per token, a thread its columns.
-  # the slots of other devices' experts (pos -1) are skipped by the whole workgroup
+  # the slots of other devices' experts (pos -1) are skipped by the whole workgroup. the tokens from row0 (of the inputs), each add from its row
   T, D = cast(tuple[int, int], y.shape)
   threads = 256
   per = D // threads
   t, th, j = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(threads, 1, AxisType.LOCAL), UOp.range(k, 2, AxisType.LOOP)
-  p, w = pos[t * k + j].load(), probs[t * k + j].load()
-  if by_selection: p = (p >= 0).where(t * k + j, -1)  # down has a row per selection
+  p, w = pos[(t + row0) * k + j].load(), probs[(t + row0) * k + j].load()
+  if by_selection: p = (p >= 0).where((t + row0) * k + j, -1)  # down has a row per selection
   accs = UOp.alloc((per,), dtypes.float32, addrspace=AddrSpace.REG)
   accs = accs.after(accs.store(UOp.stack(*[UOp.const(0, dtypes.float)]*per)))
   vals = [(p >= 0).where(down[p.valid(p >= 0), th * per + c].load().float() * w, UOp.const(0, dtypes.float)) for c in range(per)]
   accs = accs.after(accs.store(UOp.stack(*[accs.after(j)[c].load() + v for c, v in enumerate(vals)])).end(j))
-  def plus(c:int) -> UOp: return add[0][t, th * per + c].load().float() if add else UOp.const(0, dtypes.float)
+  def plus(c:int) -> UOp:
+    return functools.reduce(lambda a, b: a + b, [a[t + (add_rows[i] if add_rows else 0), th * per + c].load().float() for i, a in enumerate(add)],
+                            UOp.const(0, dtypes.float))
   return UOp.group(*[y[t, th * per + c].store((accs[c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
     arg=KernelInfo(name="moe_combine", opts_to_apply=()))
 
@@ -1483,6 +1494,40 @@ def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Te
   y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
                            fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection))[0]
   return y.reshape(devices, tokens, D) if devices > 1 else y
+
+def _lanes(t:Tensor) -> list[UOp]:
+  """every device's buffer of t (split on the devices or the same on all): a kernel's output as it is, else one made (a copy)"""
+  devs = cast(tuple[str, ...], t.device)
+  u = t.uop
+  while u.op is Ops.RESHAPE: u = u.src[0]
+  if not (u.op is Ops.AFTER and u.src[0].op in (Ops.UNSHARD, Ops.BUFFER)): u = _materialized(t, t.dtype).uop
+  base = u.src[0].src[0].after(*u.src[1:]) if u.src[0].op is Ops.UNSHARD else u
+  return [base.mselect(j) for j in range(len(devs))]
+
+def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None) -> Tensor:
+  """
+  moe_combine by selection, its partial sums (every device's experts) summed over the devices and split on the tokens (1, tokens, D), around
+  the ring with the combining: in step s device j combines its rows of the tokens of device t=j-s plus what it got (the sum of the devices
+  t+1..j-1) and sends them on, the copy runs while the next ones are combined. device t's own last, the sum in float
+  """
+  devs = cast(tuple[str, ...], down.device)
+  n, D = len(devs), int(down.shape[-1])
+  size = tokens // n
+  dl = [x.reshape(-1, D) for x in _lanes(down)]
+  pl, wl = [x.reshape(-1) for x in _lanes(pos)], [x.reshape(-1) for x in _lanes(probs.float())]
+  al = [x.reshape(-1, D) for x in _lanes(add)] if add is not None else None
+  got:dict[tuple[int, int], Tensor] = {}
+  final:list[UOp] = []
+  for step in range(1, n+1):
+    for j in range(n):
+      t = (j - step) % n
+      adds = ([Tensor(al[j])] if al is not None else []) + ([got[(t, j)]] if step > 1 else [])
+      out = Tensor.empty(size, D, dtype=dtypes.half if step < n else dtypes.float32, device=devs[j])
+      y = Tensor.custom_kernel(out, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]), *adds, fxn=functools.partial(_moe_combine_kernel, k=k,
+                               by_selection=True, row0=t*size, add_rows=((t*size,) if al is not None else ()) + ((0,) if step > 1 else ())))[0]
+      if step < n: got[(t, (j+1) % n)] = y.to(devs[(j+1) % n])
+      else: final.append(y.reshape(1, size, D).uop)
+  return Tensor(UOp.mstack(*final).unshard(1))
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********
 

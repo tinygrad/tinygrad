@@ -9,7 +9,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax
+  all_gather, sharded_argmax, moe_combine_scatter
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
@@ -503,6 +503,10 @@ class FFNBlock:
     # than the sorted ones, padded to tiles), every token sums its rows weighed by their probabilities
     tokens, k = int(prod(sel_shape[:-1])), int(sel_shape[-1])
     down = down_exps.grouped(act.contiguous(), entries, tiles, selections=tokens*k, out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
+    # sequence parallel: summed over the devices and split on the tokens around the ring as they're combined
+    if half and gate_exps.expert_parallel and _sp_rows[0] is not None and isinstance(T, int) and tokens % len(cast(tuple, x.device)) == 0 and \
+       tokens == T and getenv("MOE_SCATTER", 1):
+      return moe_combine_scatter(down, pos, probs, tokens, k, add)
     y = moe_combine(down, pos, probs, tokens, k, add, out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32,
                     by_selection=True)
     y = y.reshape(-1, *sel_shape[:-1], D)[:, :, :x.shape[1] if isinstance(T, int) else T]
@@ -538,10 +542,14 @@ class FFNBlock:
     def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
       x = all_gather(hn, 1, dtypes.half)
       _partial_out[0], _sp_rows[0] = True, hn
-      try: out = self._attention(x.float(), start_pos, T) if sub == "attn" else self._feed_forward(x.float())
+      # (in half: the layers' kernels read it so, a cast to float and back is two copies)
+      xin = x if getenv("SUB_HALF_IN", 1) else x.float()
+      try: out = self._attention(xin, start_pos, T) if sub == "attn" else self._feed_forward(xin)
       finally: _partial_out[0], _sp_rows[0] = False, None
       # partial sums, or the whole output
-      return (reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
+      # (summed and split already: moe_combine_scatter)
+      done = out.ndim == hn.ndim and token_sharded(out)
+      return (out if done else reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
     return _sub(hn, start_pos, T)
   def _phase_post(self, hc:HyperConnection, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
     @function(precompile=True, allow_implicit=True)

@@ -164,6 +164,13 @@ def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not dst.on_disk(): return None
   return call.replace(src=(dst.store(src),) + call.src[1:])
 
+def copy_kernel_to_view_store(call:UOp, dst:UOp, src:UOp, r:UOp, off:UOp):
+  # dst[off+i] = src[i] across devices: a STORE to the view of the destination (a copy writes a range)
+  if dst.device == src.device or not isinstance(off.arg, int) or off.arg < 0: return None
+  n, args = int(r.vmax) + 1, list(call.src[1:])
+  args[dst.arg.slot] = args[dst.arg.slot].shrink(((off.arg, off.arg + n),))
+  return call.replace(src=(UOp.param(dst.arg.slot, dst.dtype, n, dst.device).store(src),) + tuple(args))
+
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
   if dst.device == src.device and not dst.on_disk(): return None
@@ -184,6 +191,11 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
+
+  # a copy into a range of the destination: a STORE to that view
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r") + UPat.cvar("off"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_view_store),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
