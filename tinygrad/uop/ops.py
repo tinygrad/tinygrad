@@ -940,7 +940,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _reshape_shrink_view(self) -> tuple[UOp, int]|None:
     # self is the elements off.. of the first non movement op under its reshapes and shrinks (contiguous: one range), None for other views
     if self.op not in (Ops.RESHAPE, Ops.SHRINK):
-      return (self, 0) if (self.op in GroupOp.Defines or (self.op is Ops.MSELECT and self.src[0].op in GroupOp.Defines)) and all_int(self.shape) else None
+      base = self.op in GroupOp.Defines or (self.op is Ops.MSELECT and self.src[0].op in GroupOp.Defines)
+      return (self, 0) if base and all_int(self.shape) else None
     if (inner:=self.src[0]._reshape_shrink_view()) is None or not all_int(shape:=self.src[0].shape): return None
     if self.op is Ops.RESHAPE: return inner if all_int(self.shape) else None
     marg = self.marg
