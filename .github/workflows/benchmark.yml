@@ -264,9 +264,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (NV)
-      if: ${{ matrix.dev == 'NV' }}
-      run: sudo modprobe -a nvidia nvidia_uvm
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
