@@ -1183,10 +1183,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
-            spec:BufferSpec|None=None, bind_on_realize:bool=False):
+            spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
     ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
-                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize))
+                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
@@ -1317,12 +1317,12 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
   def param(i:int, n:str, a:UOp) -> UOp:
     if a.addrspace in (None, AddrSpace.ALU): return UOp.param(i, a.commit_dtype(dtypes.int), name=n, addrspace=AddrSpace.ALU)
     return UOp.param(i, a.dtype, 1 if a.op is Ops.INDEX else a.max_numel(), a.device, name=n, addrspace=a.addrspace)
-  def outlined(*args, **kwargs) -> UOp:
+  def outlined(*args, name:str|None=None, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
     f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots,
                       init_ctx=CountCtx, walk=True)
-    with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values(), name=fn.__name__)
+    with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values(), name=name or fn.__name__)
   return functools.wraps(fn)(outlined)
 
 @dataclass(frozen=True)

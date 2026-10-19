@@ -7,7 +7,7 @@ from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.autogen import hip
 from tinygrad.runtime.support.hcq2 import ccall
 from tinygrad.runtime.support.c import init_c_var
-from tinygrad.runtime.ops_cuda import CUDAQueue, CUDADevice, check
+from tinygrad.runtime.ops_cuda import cuda_submit, CUDADevice, check
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 HIPIFY = dict(CUdevice=hip.hipDevice_t, CUcontext=hip.hipCtx_t, CUstream=hip.hipStream_t, CUdeviceptr=hip.hipDeviceptr_t, CUmodule=hip.hipModule_t,
@@ -27,8 +27,8 @@ def hipify(c:UOp, f:UOp) -> UOp|None:
   return ccall(fn, *args)
 
 Compiled.pm_encode += PatternMatcher([
-  (UPat.sink(arg=KernelInfo("hip_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
-  (UPat.sink(arg=KernelInfo("hip_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
+  (UPat.sink(arg=KernelInfo("hip_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
+  (UPat.sink(arg=KernelInfo("hip_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
 ])
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="c"), hipify)])
 

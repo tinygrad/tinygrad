@@ -2,62 +2,61 @@ from __future__ import annotations
 import ctypes, functools, mmap, struct, time
 from typing import Any
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
-from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
+from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import get_call_kernel_args
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx
 from tinygrad.runtime.support.c import init_c_var
-from tinygrad.runtime.support.hcq2 import HWQueue, ccall, layout_args, pack_args, encode_cmdbuf
+from tinygrad.runtime.support.hcq2 import ccall, layout_args, patch, make_program
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if DEV.target("CUDA").interface == "MOCK": import test.mockgpu.cuda.cuda  # noqa: F401  # pylint: disable=unused-import
 
 def check(status:int):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {cuda.enum_cudaError_enum.get(status, 'unknown')}")
 
-def as_int(handle) -> int: return unwrap(ctypes.cast(handle, ctypes.c_void_p).value)
-
-def host_stamp(slot:int): ctypes.c_uint64.from_address(slot).value = time.perf_counter_ns()
-def extern(ptr:int, meta=None) -> Buffer: return Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(ptr, meta))
-
 # *****************
-# queue
+# runtime
 
-@uopfunc
-def cuda_run(cmdbuf:UOp, rt_vars:UOp, cmds:tuple, copy:bool) -> UOp: # rt_vars: [ctx, compute stream, copy stream, status]
-  words, h = cmdbuf.bitcast(dtypes.uint64), ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
-  for fn, *args in cmds:
-    s = rt_vars.after(h).index(2 if copy else 1).load() # the stream after the last call
-    h = ccall(fn, *[s if a is None else cmdbuf.index(a[0]) if isinstance(a, tuple) else words.index(a).load() for a in args])
-  return rt_vars.after(h).index(3).store(h.cast(dtypes.uint64)).sink()
+def cu_launch_kernel(ctx:CUDADevice, call:UOp, prg:UOp) -> tuple:
+  rows = layout_args(get_call_kernel_args(call, prg, (ctx.device,)), 48)
+  buf = UOp.alloc((max([o + w.dtype.itemsize for o, w in rows], default=48),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device).rtag("kernargs")
+  addr = buf.getaddr(HCQ_RUNTIME_DEV.device) # [extra: buffer pointer, &args, buffer size, &size, end][size][args]
+  hdr = layout_args([UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr+48, 2, addr+40, ctx.launch_end, buf.max_numel()-48)])
+  func = (p:=make_program(prg, 8, ctx.device)).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
+  return (cuda.cuLaunchKernel, func, *prg.arg.global_size, *prg.arg.local_size, 0, None, 0, patch(buf, hdr + rows).index(0))
 
-class CUDAQueue(HWQueue):
-  dev:CUDADevice
-  def call(self, fn, *args): # the values go in the cmdbuf as words
-    vals = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]
-    self.cmds.append((fn, *[a if a is None or isinstance(a, tuple) else self.q(a.cast(dtypes.uint64)) // 8 - 1 for a in vals]))
-  def extern(self, tag) -> UOp: return UOp.alloc((1,), dtypes.uint64, 0, device=self.devs[0]).rtag(tag).getaddr(self.dev.host)
+pm_cuda = PatternMatcher([ # None is the stream
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cu_launch_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
+   lambda ctx, dst, src: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), src.max_numel() * src.dtype.itemsize, None)),
+  (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
+   lambda ctx, dst, src, n: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), n.val, None)),
+  (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="sig"), UPat(name="val"))),
+   lambda ctx, sig, val: (cuda.cuStreamWaitValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WAIT_VALUE_GEQ)),
+  (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
+   lambda ctx, sig, val: (cuda.cuStreamWriteValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
+  (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][stamp]
+   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.alloc((1,), dtypes.uint64, 0, device=ctx.device).rtag(ctx.tag("stamp")).getaddr(ctx.host),
+                     sig[1:2].getaddr(ctx.device))),
+])
 
-  def exec(self, call:UOp, prg:UOp):
-    obj, rows = prg.to_elf(), layout_args(get_call_kernel_args(call, prg, self.devs), 8)
-    size = max([o + w.dtype.itemsize for o, w in rows], default=8) - 8
-    addr = UOp(Ops.LINEAR, src=tuple(pack_args([(0, UOp.const(size, dtypes.uint64))] + rows, 8 + size)), arg="kernargs").getaddr(self.devs)
-    # extra: [buffer pointer, &args, buffer size, &size, end]
-    self.call(cuda.cuLaunchKernel, self.extern((self.dev.tag("function"), obj.lib, obj.name)), *prg.arg.global_size, *prg.arg.local_size, 0, None, 0,
-              (self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr + 8, 2, addr, self.dev.launch_end)]) - 40,))
+def cuda_submit(s:UOp) -> UOp:
+  (call, *deps), q = s.src, s.src[0].src[1]
+  rt_vars = UOp.param(0, dtypes.uint64, 3, q.device, name="rt_vars") # [ctx, compute stream, copy stream]
+  h = ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
+  for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
+    stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
+    h = ccall(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
+  return h.sink().call(UOp.alloc((3,), dtypes.uint64, 0, device=q.device).rtag(Device[q.device].tag("cuda")).after(*deps), name=call.body.arg.name)
 
-  def copy(self, dst:UOp, src:UOp, sz:int): self.call(cuda.cuMemcpyAsync, dst.getaddr(self.devs), src.getaddr(self.devs), sz, None)
-  def wait(self, sig:UOp, val:UOp): self.call(cuda.cuStreamWaitValue64_v2, None, sig.getaddr(self.devs), val, cuda.CU_STREAM_WAIT_VALUE_GEQ)
-  def signal(self, sig:UOp, val:UOp): self.call(cuda.cuStreamWriteValue64_v2, None, sig.getaddr(self.devs), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)
-  def timestamp(self, sig:UOp): self.call(cuda.cuLaunchHostFunc, None, self.extern(self.dev.tag("stamp")), sig[1:2].getaddr(self.devs)) # [sig][stamp]
-
-  def encode(self) -> UOp:
-    self.cmds:list[tuple] = []
-    rt_vars = UOp.alloc((4,), dtypes.uint64, 0, device=self.devs[0]).rtag(self.dev.tag("cuda"))
-    return cuda_run(encode_cmdbuf(self, self.lin), rt_vars, tuple(self.cmds), self.queue.startswith("COPY"))
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
+  (UPat.sink(arg=KernelInfo("cuda_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
+])
 
 # *****************
 # device
@@ -82,15 +81,10 @@ class CUDAAllocator(Allocator['CUDADevice']):
     if (status:=api.cuMemHostRegister_v2(host.addr, buf.nbytes, 0)) != cuda.CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:
       check(status) # another device pinned it already
     addr = init_c_var(api.CUdeviceptr, lambda x: check(api.cuMemHostGetDevicePointer_v2(ctypes.byref(x), host.addr, 0))).value
-    return BufferStorage(addr, host.addr if status == cuda.CUDA_SUCCESS else None)
+    return BufferStorage(addr, status == cuda.CUDA_SUCCESS)
   def _unmap(self, mapping:BufferStorage):
-    if mapping.meta: check(self.dev.api.cuMemHostUnregister(mapping.meta))
+    if mapping.meta: check(self.dev.api.cuMemHostUnregister(unwrap(mapping.host).addr))
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
-
-Compiled.pm_encode += PatternMatcher([
-  (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
-  (UPat.sink(arg=KernelInfo("cuda_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: CUDAQueue(s).encode()),
-])
 
 class CUDADevice(Compiled):
   api:Any = cuda
@@ -106,8 +100,9 @@ class CUDADevice(Compiled):
     super().__init__(device, CUDAAllocator(self), self.renderers, None, arch=self.get_arch(device_id))
     Compiled.pm_bufferize += PatternMatcher([
       (UPat(Ops.ALLOC, tag=self.tag("cuda")), lambda d=self: d.handles),
-      (UPat(Ops.ALLOC, tag=self.tag("stamp")), lambda d=self: d.stamp),
-      (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.function(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == d.tag("function") else None)])
+      (UPat(Ops.ALLOC, tag=self.tag("stamp")), lambda d=self: d.stamp)])
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
+      p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
 
   def get_arch(self, device_id:int) -> str:
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major:=ctypes.c_int()), ctypes.byref(minor:=ctypes.c_int()), device_id))
@@ -115,18 +110,20 @@ class CUDADevice(Compiled):
 
   @functools.cached_property
   def handles(self) -> Buffer:
-    return Buffer(HCQ_RUNTIME_DEV.device, 32, initial_value=struct.pack("4Q", *[as_int(h) for h in (self.context, *self.streams)], 0))
+    return Buffer(HCQ_RUNTIME_DEV.device, 24, initial_value=b"".join(map(bytes, (self.context, *self.streams))))
 
   @functools.cached_property
-  def stamp(self) -> Buffer: return extern(as_int(fn:=cuda.CUhostFn(host_stamp)), fn)
+  def stamp(self) -> Buffer:
+    fn = cuda.CUhostFn(lambda slot: ctypes.memmove(slot, struct.pack("Q", time.perf_counter_ns()), 8))
+    return Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(int.from_bytes(bytes(fn), "little"), fn))
 
   @functools.cache
-  def function(self, lib:bytes, name:str) -> Buffer:
+  def function(self, lib:bytes, name:str) -> bytes:
     if DEBUG >= 5 and self.api is cuda: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode()).split("\n"))]))
     check(self.api.cuCtxSetCurrent(self.context))
     check(self.api.cuModuleLoadData(ctypes.byref(module:=self.api.CUmodule()), lib))
     check(self.api.cuModuleGetFunction(ctypes.byref(func:=self.api.CUfunction()), module, name.encode()))
-    return extern(as_int(func))
+    return bytes(func)
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(self.api.cuDeviceGetCount(ctypes.byref(x)))).value
 

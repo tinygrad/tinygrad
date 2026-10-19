@@ -72,10 +72,12 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "ur
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CDIV: "sdiv", Ops.CMOD: "srem", Ops.SHR: "ashr"}
-flags = " nsz arcp contract afn"
+flags = " nsz contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
+
+llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 
 base_rewrite = PatternMatcher([
   # memory load/store
@@ -107,6 +109,8 @@ base_rewrite = PatternMatcher([
                f" = insertelement {ldt(x.dtype, x.max_numel())} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
+  (UPat(tuple(llvm_intrinsics), name="x"),
+   lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -152,16 +156,21 @@ base_rewrite = PatternMatcher([
    ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
 
+pm_widen_uidx = PatternMatcher([
+  # GEP sign-extends indices to pointer width, so unsigned indices must be widened first.
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.uint32), name="i")),
+        allow_any_len=True, name="x"), lambda x,i: x.replace(src=(x.src[0], i.cast(dtypes.int64), *x.src[2:]))),
+])
+
 class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
+  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, **{op: lambda: None for op in llvm_intrinsics}}
 
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + PatternMatcher([
-    # GEP sign-extends indices to pointer width, so unsigned indices must be widened first.
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.uint32), name="i")),
-          allow_any_len=True, name="x"), lambda x,i: x.replace(src=(x.src[0], i.cast(dtypes.int64), *x.src[2:]))),
-  ])
+  def __init__(self, target:Target):
+    super().__init__(target)
+    self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
+      pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU)}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
@@ -240,18 +249,13 @@ class CPULLVMRenderer(LLVMRenderer):
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
-# https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
-llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 class AMDLLVMRenderer(LLVMRenderer):
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
   abi = "amdgpu_kernel"
-  code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
-    (UPat(tuple(llvm_intrinsics), name="x"),
-    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
       f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {fp8_index(x.dtype)})"),
@@ -259,11 +263,6 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{('fp8', 'bf8')[fp8_index(y.dtype)]}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
-  extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
-    # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
-    (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
-    (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
-  ])
   def asm(self, prg: UOp, lin: UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
@@ -297,6 +296,13 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     self.string_rewrite += PatternMatcher([
       (UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna:
         render_wmma_amd(ctx, wmma, cdna, rdna4))
+    ])
+    self.extra_matcher = self.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
+      # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
+      (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
+      (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
+      (UPat.var("a", dtype=(dtypes.f16,dtypes.bf16)).cast((dtypes.f16, dtypes.bf16), name="b"),
+        lambda a,b: a.float().cast(b.dtype) if a.dtype != b.dtype else None),
     ])
     if self.is_cdna: self.extra_matcher += tc.pm_validate_wmma_cdna
     if target.arch in {"gfx1100", "gfx1151"}: self.extra_matcher += tc.pm_validate_wmma_rdna3

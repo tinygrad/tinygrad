@@ -100,7 +100,7 @@ class TestHCQ2Fence(unittest.TestCase):
 
   def test_a_schedule_waits_for_its_previous_run(self):
     slots = UOp.alloc((4,), dtypes.uint64, device="CPU").rtag("slots")
-    program = lower_and_compile(lower_hcq(hcq2.make_fence({"CPU": slots}, {"CPU": 1})))
+    program = lower_and_compile(lower_hcq(fence:=hcq2.make_fence({"CPU": slots}, {"CPU": 1}), *hcq2.announce({"CPU": slots}, {"CPU": 1}, fence)))
     linked = hcq2.hcq_link(program, allow_cache=False)
     (i,) = [i for i, p in enumerate(program.src[0].without_after.src[1:]) if p.without_after.tag == "slots"]
     slots_mv = linked.src[0].without_after.src[1 + i].buffer.host.view(fmt='Q')
@@ -198,7 +198,8 @@ class TestHostCalls(unittest.TestCase):
     self.assertEqual(self._run(addr, self._buf(1), b), [b.buffer.get_buf("CPU") + 4])
 
   def test_sink_calls_function(self): # a bare sink with args calls a function that writes one arg and takes the address of the other
-    def sink(o:UOp, b:UOp): return addr_of(UOp.param(0, dtypes.uint64, 1), UOp.param(1, dtypes.uint8, 16)).sink().call(o, b, name="sink")
+    def sink(o:UOp, b:UOp):
+      return addr_of(UOp.param(0, dtypes.uint64, 1, name="o"), UOp.param(1, dtypes.uint8, 16, name="b")).sink().call(o, b, name="sink")
     outs, b = [self._buf(1) for _ in range(2)], self._buf(16, dtypes.uint8)
     for out in outs: self.assertEqual(self._run(sink, out, b), [b.buffer.get_buf("CPU")]) # the second run reuses the program
 
