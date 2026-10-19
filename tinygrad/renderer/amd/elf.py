@@ -2,7 +2,7 @@
 import ctypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import ceildiv, round_up
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, AxisType
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
@@ -36,13 +36,15 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
 
   # ** scan sink for metadata
   sink, param_sizes, lds_size, gids = prg.src[0], {}, 0, set()
+  is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
+  wave32 = not is_cdna
   for u in sink.toposort():
     if u.op is Ops.PARAM: param_sizes[u.arg.slot] = u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8
     elif u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
+    elif u.op is Ops.RANGE and u.axis_type is AxisType.WARP and u.src[0].arg == 64: wave32 = True
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
-  is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
 
   # ** pad text to ISA alignment
   padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()
@@ -54,7 +56,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   accum_offset = round_up(max_vgpr, 4) if max_accvgpr > 0 else 0
   next_free_vgpr = round_up(accum_offset + max_accvgpr, 8) if max_accvgpr > 0 else round_up(max_vgpr, 8)
   next_free_sgpr = round_up(max_sgpr, 8)
-  vgpr_granule = max(0, (next_free_vgpr + 7) // 8 - 1)
+  vgpr_granule = max(0, ceildiv(next_free_vgpr, 8 if is_cdna or wave32 else 4) - 1)
   # CDNA: add 6 for VCC(2) + FLAT_SCRATCH(2) + XNACK_MASK(2), next_free_sgpr is unused in RDNA.
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
@@ -75,7 +77,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
                             int(1 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
                             int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
   desc.kernel_code_properties = (1 << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR_SHIFT |
-                                 (0 if is_cdna else 1) << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32_SHIFT)
+                                 int(wave32) << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32_SHIFT)
   if is_cdna and max_accvgpr > 0:
     desc.compute_pgm_rsrc3 = max(0, accum_offset // 4 - 1) << amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT
   rodata = bytes(desc)
