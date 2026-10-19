@@ -916,6 +916,10 @@ class AMDDevice(Compiled):
     name, queue, idx = t.rsplit('_', 2)
     return getattr(self.compute_queue_n(int(idx)) if queue == 'compute' else self.sdma_queue(int(idx)), name)
 
+  def prefetch_peer_access(self):
+    """behind the iommu the peers reach the vram through the bar, mapped in the background (seconds): before they use it"""
+    if self.is_am() and getattr(pci:=self.iface.pci_dev, "iommu", False): pci.map_bar_iova(self.iface.vram_bar)
+
   @property
   def compute_queue(self) -> AMDQueueDesc: return self.compute_queue_n(0)
 

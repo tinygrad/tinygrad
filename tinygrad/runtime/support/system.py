@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools, signal, threading
-import fcntl
+import fcntl, concurrent.futures
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
 from tinygrad.runtime.autogen import libc, pci, vfio
@@ -275,11 +275,16 @@ class PCIDevice:
   def dma_free(self, paddr:int, size:int):
     if self.iommu: System.dma_unmap(paddr, size)
 
-  @functools.cache
   def bar_iova(self, bar:int) -> int:
     """behind the iommu: the io address where the peers reach the bar (mapped in the container once)"""
+    return self.map_bar_iova(bar).result()
+
+  @functools.cache
+  def map_bar_iova(self, bar:int) -> concurrent.futures.Future:
+    """maps the bar for the peers in the background (seconds for a big bar: the iommu pins every page), bar_iova waits for it"""
     size = self.bar_info(bar)[1]
-    return System.dma_map(self.map_bar(bar, size=size).addr, size, System.iova_bars.alloc(size, 1 << 30))
+    mmio, iova = self.map_bar(bar, size=size), System.iova_bars.alloc(size, 1 << 30)
+    return _bar_mapper().submit(System.dma_map, mmio.addr, size, iova)
 
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
@@ -326,6 +331,9 @@ class USBPCIDevice(PCIDevice):
     return USBMMIOInterface(self.usb, self.bar_info(bar)[0] + off, size or self.bar_info(bar)[1], fmt)
   def resize_bar(self, bar_idx:int): pass # already resized
 
+@functools.cache
+def _bar_mapper() -> concurrent.futures.ThreadPoolExecutor: return concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="bar_mapper")
+
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
@@ -354,7 +362,9 @@ class PCIIfaceBase:
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = self.pci_dev.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
-      mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], aspace=AddrSpace.SYS, snooped=True, uncached=True)
+      # behind the iommu the io addresses are contiguous: one range (big pages)
+      ranges = [(paddrs[0], size)] if getattr(self.pci_dev, "iommu", False) else [(paddr, 0x1000) for paddr in paddrs]
+      mapping = self.dev_impl.mm.map_range(vaddr, size, ranges, aspace=AddrSpace.SYS, snooped=True, uncached=True)
       return BufferStorage(vaddr, PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), memview)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access, zero=zero)
@@ -390,7 +400,7 @@ class PCIIfaceBase:
         # one io address range for every device that maps it (they share the container)
         if (m:=System.host_maps.get(host_key:=(lo, size))) is None: m = System.host_maps[host_key] = [System.dma_map(lo, size), 0]
         m[1] += 1
-        paddrs = [(m[0] + i, 0x1000) for i in range(0, size, 0x1000)]
+        paddrs = [(m[0], size)]  # (contiguous: big pages)
       else:
         if self.remote is None: System.lock_memory(lo, size)
         paddrs = [(x, 0x1000) for x in (b.meta if self.remote is not None else System.system_paddrs(lo, size))]

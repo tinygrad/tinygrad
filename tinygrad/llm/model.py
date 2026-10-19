@@ -11,7 +11,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   all_gather, sharded_argmax
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
-from tinygrad.helpers import unwrap, round_up, to_tuple, prod
+from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
 
 class ExpertGating(enum.IntEnum):
@@ -60,12 +60,10 @@ class ExpertWeights:
     if self.weight.uop.axis not in (None, 0) or (found:=find_packed(self.weight, self.in_features)) is None: return
     n = len(devices) if self.expert_parallel else 1
     self.ggml_type, self.weight, self.local_experts = found[0], found[1], self.num_experts // n
-    # sliced: the selections are mapped to the local slices of every device (slice_table), the ids are local
-    first = Tensor([0 if self.slices else i*self.local_experts for i in range(n)], dtype=dtypes.int32)
-    self.first = (first.shard(devices, 0) if n > 1 else first.to(devices[0] if len(devices) == 1 else devices)).realize()
-    if self.slices:
-      tables = [expert_slice_table(units, self.experts, self.slices) for units in unwrap(expert_slicing(self.experts, self.slices, n))]
-      self.slice_table = Tensor(tables, dtype=dtypes.int32).shard(devices, 0).realize()
+    # sliced: the selections are mapped to the local slices of every device (slice_table), the ids are local. the same for every layer (one
+    # tensor), realized with the model's small weights (prepare)
+    self.first = _expert_first(tuple(0 if self.slices else i*self.local_experts for i in range(n)), devices)
+    if self.slices: self.slice_table = _slice_table(self.experts, self.slices, devices)
   def select_slices(self, sel:Tensor, probs:Tensor) -> tuple[Tensor, Tensor]:
     """sliced: the selections (B, T, k) of experts to the local slices of every device (devices, B, T, k*w) (-1: none), their probabilities"""
     E, w = self.slice_table.shape[-2:]
@@ -93,6 +91,17 @@ class ExpertWeights:
       return out.shrink(tuple((0, s) for s in out.shape[:-4])+tuple((0, s) for s in sel.shape)+((0, out.shape[-1]),))
     ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
+
+@functools.cache
+def _expert_first(first:tuple[int, ...], devices:tuple[str, ...]) -> Tensor:
+  # (from host memory: no peer copies)
+  t = Tensor(list(first), dtype=dtypes.int32, device="CPU")
+  return t.shard(devices, 0) if len(first) > 1 else t.to(devices[0] if len(devices) == 1 else devices)
+
+@functools.cache
+def _slice_table(experts:int, slices:int, devices:tuple[str, ...]) -> Tensor:
+  tables = [expert_slice_table(units, experts, slices) for units in unwrap(expert_slicing(experts, slices, len(devices)))]
+  return Tensor(tables, dtype=dtypes.int32, device="CPU").shard(devices, 0)
 
 def expert_slicing(experts:int, slices:int, n:int) -> list[list[int]]|None:
   """
@@ -1314,7 +1323,9 @@ class Transformer:
         packed.add(id(g.weight))
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
-    Tensor.realize(*small)
+    tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
+                    for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
+    Tensor.realize(*small, *tables)
 
   def sequence_parallel(self, rows:int) -> bool:
     """the hyper-connection streams of a prefill chunk of `rows` are split over the devices: tiles of 16 rows on every device"""
@@ -1337,6 +1348,8 @@ class Transformer:
 
   def warmup(self):
     """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
+    # the devices' access to each other is set up while the jits are built
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): getattr(Device[d], "prefetch_peer_access", lambda: None)()
     sizes = self.prefill_chunks()
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
