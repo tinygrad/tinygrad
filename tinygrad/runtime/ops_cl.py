@@ -1,14 +1,14 @@
 from __future__ import annotations
 import ctypes, hashlib, functools
-from tinygrad.runtime.autogen import opencl as cl
+from tinygrad.runtime.autogen import opencl as cl, libc
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, HostAllocator, Compiled, Compiler, CompileError, MMIOInterface, HCQ_RUNTIME_DEV
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, HostAllocator, Compiled, Compiler, CompileError, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.support.hcq2 import ccall, cstruct, layout_args, patch, make_program
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, encode_cmdbuf, make_program
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
 BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
@@ -39,37 +39,44 @@ class CLCompiler(Compiler):
 # *****************
 # queue
 
-def launch(ctx:tuple[CLDevice, UOp, UOp], call:UOp, prg:UOp) -> UOp:
-  (dev, rt, h), args, z = ctx, get_call_kernel_args(call, prg, (ctx[0].device,)), UOp.const(0, dtypes.uint64)
-  kernel = (p:=make_program(prg, 8, dev.device)).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
-  imgs = {i: ccall(cl.clCreateImage, rt.index(0).load(), UOp.const(cl.CL_MEM_READ_WRITE, dtypes.uint64),
-                   cstruct(cl.cl_image_format, image_channel_order=cl.CL_RGBA,
-                           image_channel_data_type={2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize]).index(0),
-                   cstruct(cl.cl_image_desc, image_type=cl.CL_MEM_OBJECT_IMAGE2D, image_width=shape[1], image_height=shape[0], buffer=args[i],
-                           image_row_pitch=round_up(shape[1], 256 if OSX else 1) * 4 * dt.itemsize).index(0), z, z)
-          for i, (_, _, dt, shape) in enumerate(prg.to_elf().signature) if is_image_shape(shape)}
-  dims = [UOp.const(d, dtypes.uint64) for d in (*[g * l for g, l in zip(prg.arg.global_size, prg.arg.local_size)], *prg.arg.local_size)]
-  rows = layout_args([imgs.get(i, a) for i, a in enumerate(args)] + dims) # [args][global][local]
-  buf = patch(UOp.alloc((rows[-1][0] + 8,), dtypes.uint8, device=HCQ_RUNTIME_DEV.device).rtag("kernargs"), rows).after(h)
-  sets = [ccall(cl.clSetKernelArg, kernel, i, UOp.const(w.dtype.itemsize, dtypes.uint64), buf.index(o)) for i, (o, w) in enumerate(rows[:len(args)])]
-  h = ccall(cl.clEnqueueNDRangeKernel, rt.after(*sets).index(1).load(), kernel, 3, z, buf.index(rows[-6][0]), buf.index(rows[-3][0]), 0, z, z)
-  for i in imgs: h = ccall(cl.clReleaseMemObject, buf.after(h).bitcast(dtypes.uint64).index(rows[i][0] // 8).load())
-  return h
+@uopfunc
+def cl_run(cmdbuf:UOp, cmds:tuple) -> UOp: # one in-order queue, every call after the last
+  for fn, *args in cmds:
+    h = ccall(fn, *[cmdbuf.index(a[0]) if isinstance(a, tuple) else cmdbuf.bitcast(dtypes.uint64).index(a).load() for a in args])
+    if fn is cl.clCreateImage: h = cmdbuf.bitcast(dtypes.uint64).index(args[-1][0] // 8).store(h) # the image replaces its errcode
+    cmdbuf = cmdbuf.after(h)
+  return cmdbuf.sink()
 
-pm_cl = PatternMatcher([ # ctx: (device, rt_vars, the last command), the queue is in order so a wait is nothing
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), launch),
-  (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: sig.after(ctx[2]).index(0).store(val)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][event]
-   lambda ctx, sig: ccall(cl.clEnqueueMarkerWithWaitList, ctx[1].after(ctx[2]).index(1).load(), 0, UOp.const(0, dtypes.uint64),
-                          sig[1:2].getaddr(ctx[0].device))),
-])
+class CLQueue(HWQueue):
+  def q64(self, *vals) -> int: return self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v.cast(dtypes.uint64) for v in vals])
+  def call(self, fn, *args): self.cmds.append((fn, *[a if isinstance(a, tuple) else self.q64(a) // 8 - 1 for a in args])) # args go in as words
+  def handle(self, i:int) -> UOp: return UOp.alloc((2,), dtypes.uint64, 0, device=self.devs[0]).rtag(self.dev.tag("cl")).index(i).load()
 
-def cl_submit(s:UOp) -> UOp:
-  (call, *deps), q = s.src, s.src[0].src[1]
-  dev, h = Device[q.device], (rt:=UOp.param(0, dtypes.uint64, 2, q.device, name="rt_vars")) # [context, queue]
-  for u in call.body.src: h = h if (x:=pm_cl.rewrite(u, ctx=(dev, rt, h))) is None else x
-  return h.sink().call(UOp.alloc((2,), dtypes.uint64, 0, device=q.device).rtag(dev.tag("cl")).after(*deps), name=call.body.arg.name)
+  def exec(self, call:UOp, prg:UOp):
+    args, images = get_call_kernel_args(call, prg, self.devs), []
+    kernel = (p:=make_program(prg, 8, self.devs[0])).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
+    for i, (_, _, dt, shape) in enumerate(prg.to_elf().signature):
+      if is_image_shape(shape): # [format][desc][errcode]
+        desc = (cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], 0, 0, round_up(shape[1], 256 if OSX else 1) * 4 * dt.itemsize, 0, 0, args[i])
+        end = self.q64(cl.CL_RGBA | {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize] << 32, *desc, 0)
+        self.call(cl.clCreateImage, self.handle(0), cl.CL_MEM_READ_WRITE, (end - 88,), (end - 80,), 0, (end - 8,))
+        images.append((end - 8) // 8)
+      else: end = self.q64(args[i])
+      self.call(cl.clSetKernelArg, kernel, i, args[i].dtype.itemsize, (end - 8,))
+    end = self.q64(*[g * l for g, l in zip(prg.arg.global_size, prg.arg.local_size)], *prg.arg.local_size) # [global][local]
+    self.call(cl.clEnqueueNDRangeKernel, self.handle(1), kernel, 3, 0, (end - 48,), (end - 24,), 0, 0, 0)
+    self.cmds += [(cl.clReleaseMemObject, w) for w in images]
+
+  def wait(self, sig:UOp, val:UOp, eq=False): pass # the queue is in order
+  def signal(self, sig:UOp, val:UOp): self.call(libc.memcpy, sig.getaddr(self.devs), (self.q64(val) - 8,), 8) # synchronize finishes the queue
+  def timestamp(self, sig:UOp): self.call(cl.clEnqueueMarkerWithWaitList, self.handle(1), 0, 0, sig[1:2].getaddr(self.devs)) # [sig][event]
+
+  def encode(self) -> UOp:
+    self.cmds:list[tuple] = []
+    return cl_run(encode_cmdbuf(self, self.lin), tuple(self.cmds))
+
+Compiled.pm_encode += PatternMatcher([(UPat.sink(arg=KernelInfo("cl_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"),
+                                       lambda s: CLQueue(s).encode())])
 
 # *****************
 # device
@@ -91,8 +98,6 @@ class CLAllocator(HostAllocator):
     with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"):
       check(cl.clEnqueueReadBuffer(self.dev.queue, ctypes.cast(src, cl.cl_mem), False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
       self.dev.synchronize()
-
-Compiled.pm_encode += PatternMatcher([(UPat.sink(arg=KernelInfo("cl_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cl_submit)])
 
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
