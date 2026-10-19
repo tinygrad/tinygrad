@@ -237,7 +237,7 @@ jobs:
 
   multigpubenchmark:
     name: Multi-GPU Benchmarks (DEV=${{ matrix.dev }})
-    runs-on: "${{ matrix.dev == 'AMD' && '6x7900xtx' || 'tinyboxgreen' }}"
+    runs-on: "${{ matrix.dev == 'AMD' && '6x7900xtx' || '6x4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -259,8 +259,8 @@ jobs:
       run: |
         mkdir -p weights
         mkdir -p extra/datasets
-        ln -s "${{ matrix.dev == 'AMD' && '/weights' || '/raid/weights' }}/LLaMA-3" weights/LLaMA-3
-        ln -s "${{ matrix.dev == 'AMD' && '/datasets' || '/raid/datasets' }}/imagenet" extra/datasets/imagenet
+        ln -s /weights/LLaMA-3 weights/LLaMA-3
+        ln -s /datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -279,6 +279,9 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Test benchmark allreduce
+      if: ${{ matrix.dev == 'NV' }}
+      run: python test/external/external_benchmark_multitensor_allreduce.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -360,9 +363,6 @@ jobs:
       run: IGNORE_BEAM_CACHE=1 CCACHE=0 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Train MNIST
       run: time TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
-    - name: Test benchmark allreduce
-      if: ${{ matrix.dev == 'NV' }}
-      run: python test/external/external_benchmark_multitensor_allreduce.py
     # TODO: HEVC decode timing test
     # - name: HEVC Decode Benchmark
     #   if: ${{ matrix.dev == 'NV' }}
