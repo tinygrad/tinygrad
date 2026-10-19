@@ -56,6 +56,8 @@ def ins_name(c:UOp) -> str|None: return c.body.arg.name if c.op is Ops.CALL and 
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL and ins_name(c) is None]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
 
+def is_slots(buf:UOp) -> bool: return (b:=hcq2.unwrap_view(buf)[0]).op is Ops.ALLOC and b.arg.name == "slots"
+
 def word(u:UOp) -> tuple[UOp, int]:
   if u.op is Ops.INDEX: return (v:=hcq2.unwrap_view(u.src[0]))[0], v[1] + u.src[1].val * u.dtype.itemsize
   return hcq2.unwrap_view(u)
@@ -64,8 +66,8 @@ T = 5 # the timeline value the last submitted batch of every device signals
 def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[list, dict, dict]:
   qs, cs, mem = queues(batch), calls(batch), defaultdict(int)
   for d in batch.arg.aux.device:
-    mem[word(hcq2.timeline((d,)))] = (done or {}).get(d, T)
-    mem[word(hcq2.timeline((d,)).index(1))] = T
+    mem[word(hcq2.timeline(d))] = (done or {}).get(d, T)
+    mem[word(hcq2.timeline(d).index(1))] = T
   def val(u:UOp) -> int:
     if u.op is Ops.CONST: return u.val
     if u.op is Ops.LOAD: return mem[word(u.src[0])]
@@ -80,11 +82,11 @@ def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[
         if sig != target if name == "wait_eq" else sig < target: continue
       elif name == "store":
         mem[w:=word(c.src[1])] = val(c.src[2])
-        if w[0].tag == "timeline": log.append(w[0].device)
+        if w[0].arg.name == "timeline": log.append(w[0].device)
       elif c in cs: log.append(cs.index(c))
       cmds.pop(0)
       break
-    else: return log, {q: len(cmds) for q, cmds in qs.items()}, {d: mem[word(hcq2.timeline((d,)))] for d in batch.arg.aux.device}
+    else: return log, {q: len(cmds) for q, cmds in qs.items()}, {d: mem[word(hcq2.timeline(d))] for d in batch.arg.aux.device}
 
 def rotations(batch:UOp) -> list[list]: return [(qs:=list(queues(batch)))[i:] + qs[:i] for i in range(len(queues(batch)))]
 def orders(batch:UOp) -> set[tuple[int, ...]]: return {tuple(x for x in run(batch, prio=p)[0] if isinstance(x, int)) for p in rotations(batch)}
@@ -94,44 +96,44 @@ class TestHCQ2Deps(unittest.TestCase):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
     for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([view], [0], 0)
-      self.assertEqual(tracker.access_resources([b.mselect(1)], [], 1), [])
-      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((16, 24),))], [], 2), [])
-      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((12, 20),))], [], 3), [0])
+      tracker.access_resources([(view, True)], 0)
+      self.assertEqual(tracker.access_resources([(b.mselect(1), False)], 1), [])
+      self.assertEqual(tracker.access_resources([(b.mselect(0).shrink(((16, 24),)), False)], 2), [])
+      self.assertEqual(tracker.access_resources([(b.mselect(0).shrink(((12, 20),)), False)], 3), [0])
 
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    for write in ([], [0]):
+    for write in (False, True):
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([b.shrink(((0, 4),))], write, 0)
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 8),))], [0], 1), [])
-      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
+      tracker.access_resources([(b.shrink(((0, 4),)), write)], 0)
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 8),)), True)], 1), [])
+      self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
 
   def test_partial_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    for write in ([], [0]):
+    for write in (False, True):
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([b], write, 0)
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 1), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
+      tracker.access_resources([(b, write)], 0)
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 1), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((12, 16),)), True)], 3), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), False)], 4), [1])
 
   def test_write_waits_for_all_readers(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     tracker = hcq2.DepsTracker()
-    self.assertEqual(tracker.access_resources([b], [], 0), [])
-    self.assertEqual(tracker.access_resources([b], [], 1), [])
-    self.assertEqual(tracker.access_resources([b], [0], 2), [0, 1])
-    self.assertEqual(tracker.access_resources([b], [], 3), [2])
+    self.assertEqual(tracker.access_resources([(b, False)], 0), [])
+    self.assertEqual(tracker.access_resources([(b, False)], 1), [])
+    self.assertEqual(tracker.access_resources([(b, True)], 2), [0, 1])
+    self.assertEqual(tracker.access_resources([(b, False)], 3), [2])
 
   def test_aliases_do_not_wait_on_themselves(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    for write in ([0], [1], [0, 1]):
+    for whole, part in ((True, False), (False, True), (True, True)):
       tracker = hcq2.DepsTracker()
-      tracker.access_resources([b], [0], 0)
-      self.assertEqual(tracker.access_resources([b, b.shrink(((4, 12),))], write, 1), [0])
-      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 2), [1])
+      tracker.access_resources([(b, True)], 0)
+      self.assertEqual(tracker.access_resources([(b, whole), (b.shrink(((4, 12),)), part)], 1), [0])
+      self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 2), [1])
 
 class TestHCQ2Schedule(unittest.TestCase):
   def setUp(self):
@@ -200,7 +202,7 @@ class TestHCQ2Profile(unittest.TestCase):
 
   def test_slots_addressed_by_the_device(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
-                          lambda buf: buf.getaddr(Device["NULL"].host) if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
+                          lambda buf: buf.getaddr(Device["NULL"].host) if is_slots(buf) else None)])
     with patch.object(Compiled, "pm_lower", pm + Compiled.pm_lower): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
@@ -219,14 +221,14 @@ class TestHCQ2Link(unittest.TestCase):
   def test_eager_templates_compile_once(self): self.assertIs(compiled_chain(3)[1], compiled_chain(3)[1])
 
   def test_repeated_word_loops(self): # for (i..10) cmdbuf[off[i]] = var
-    var, offs = UOp.alloc((1,), dtypes.uint32, device="CPU").rtag("var"), [4 * i * i for i in range(10)]
+    var, offs = UOp.alloc((1,), dtypes.uint32, device="CPU", name="var"), [4 * i * i for i in range(10)]
     var = hcq2.patch(var, [], bytes(4)) # initialize at link: the allocator may return a reused buffer
     hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0", deps=())
     lowered = lower_hcq(var.after(hcq2.encode_cmdbuf(hq, device="CPU")).index(0).store(var.index(0).load() + 1))
     self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
     linked = hcq2.hcq_link(lower_and_compile(lowered), allow_cache=False)
     args = zip(lowered.src[0].without_after.src[1:], linked.src[0].without_after.src[1:])
-    cmdbuf = next(b.buffer for p, b in args if p.without_after.tag == "cmdbuf_copy_0")
+    cmdbuf = next(b.buffer for p, b in args if p.without_after.arg.name == "cmdbuf_copy_0")
     for step in range(3):
       run_linear(linked, jit=True)
       self.assertEqual([cmdbuf.host.view(fmt="I")[o // 4] for o in offs], [step] * 10)

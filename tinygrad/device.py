@@ -6,18 +6,20 @@ import importlib, inspect, functools, itertools, pathlib, os, contextlib, re, at
 from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, to_name, HCQ_RUNTIME_DEV, to_tuple
+from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
+  from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
-HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL"))
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL", "CL"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
-UVM_DEVS = frozenset(("QCOM", "METAL")) # the host maps their memory, so copies are host memcpys
+UVM_DEVS = frozenset(("QCOM", "METAL", "CL")) # cl uses host memcpys
+
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -371,7 +373,8 @@ class Compiled:
   # hcq2
   pm_encode:Any = None
   pm_lower:Any = None
-  pm_bufferize:Any = None # one for all devices: each adds the rules of the placeholders it owns, its tags start with its name
+  pm_link:Any = None
+  link_bufs:dict[str, Any] = {}
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
@@ -405,7 +408,7 @@ class Compiled:
   def rt_buffer(self, spec:BufferSpec) -> Buffer:
     return Buffer(self.device, self.rt_allocator(spec).size, options=spec, preallocate=True)
 
-  def tag(self, *parts:str) -> str: return to_name(self.device, *parts) # of the placeholders it owns
+  def link_buffer(self, b:UOp) -> Buffer|None: return None
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]

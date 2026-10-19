@@ -63,15 +63,11 @@ runs:
         echo "OMP_NUM_THREADS=1" >> "$GITHUB_ENV"
         # no buffers should be over 300MB in CI
         echo "MAX_BUFFER_SIZE=300000000" >> "$GITHUB_ENV"
-        if [[ "$RUNNER_OS" != "Windows" ]]; then
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            sudo install -d -o "$USER" /opt/venv /opt/python
-          fi
-          echo "VIRTUAL_ENV=/opt/venv/${{ inputs.python-version }}" >> "$GITHUB_ENV"
-          echo "UV_PYTHON_INSTALL_DIR=/opt/python" >> "$GITHUB_ENV"
-        else
-          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          sudo install -d -o "$USER" /opt/venv /opt/python
         fi
+        echo "VIRTUAL_ENV=/opt/venv/${{ inputs.python-version }}" >> "$GITHUB_ENV"
+        echo "UV_PYTHON_INSTALL_DIR=/opt/python" >> "$GITHUB_ENV"
 
     - name: Set up uv
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
@@ -131,12 +127,7 @@ runs:
       run: uv cache prune --ci
     - name: Configure venv
       shell: bash
-      run: |
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          echo "$VIRTUAL_ENV/Scripts" >> "$GITHUB_PATH"
-        else
-          echo "$VIRTUAL_ENV/bin" >> "$GITHUB_PATH"
-        fi
+      run: echo "$VIRTUAL_ENV/bin" >> "$GITHUB_PATH"
 
     # ******************* apt *******************
     - name: Setup apt
