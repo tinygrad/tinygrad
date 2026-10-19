@@ -270,16 +270,22 @@ def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
   pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
   # (an empty tensor is just its memory: allocated now)
   if now:=[t for t in ts if t.numel() == 0 or t.uop.base.op is Ops.ALLOC]: Tensor.realize(*now)
+  # one allocation of the devices of a group (one each is slow: a device's page tables are flushed after every one), the tensors' views of it
+  groups:dict[str|tuple[str, ...], list[Tensor]] = {}
   for t in ts:
-    if t.numel() == 0 or any(t is x for x in now): continue
-    axis = t.uop.axis if isinstance(t.device, tuple) else None
-    shape = cast(tuple[int, ...], t.uop.shard_shape if axis is not None else t.shape)
-    u = UOp.new_buffer(cast(str|tuple[str, ...], t.device), prod(shape), t.dtype)
-    buf = u.buffer
-    for b in (buf.bufs if isinstance(buf, MultiBuffer) else [buf]): b.ensure_allocated()
-    lazy, u = t.uop, u.reshape(shape) if axis is None else u.reshape(shape).unshard(axis)
-    t.replace(Tensor(u))
-    pairs.append((u, lazy))
+    if t.numel() > 0 and not any(t is x for x in now): groups.setdefault(cast(str|tuple[str, ...], t.device), []).append(t)
+  for devs, grp in groups.items():
+    def shard(t:Tensor) -> tuple[int, ...]:
+      return cast(tuple[int, ...], t.uop.shard_shape if isinstance(devs, tuple) and t.uop.axis is not None else t.shape)
+    sizes = [round_up(prod(shard(t)) * t.dtype.itemsize, 256) for t in grp]
+    big = [Buffer(d, sum(sizes)).ensure_allocated() for d in to_tuple(devs)]
+    for t, off in zip(grp, itertools.accumulate([0] + sizes[:-1])):
+      views = [b.view(prod(shape:=shard(t)) * t.dtype.itemsize, off).ensure_allocated() for b in big]
+      if isinstance(devs, tuple): (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
+      u = UOp.from_buffer(mb if isinstance(devs, tuple) else views[0], t.dtype, devs).reshape(shape)
+      lazy, u = t.uop, u.unshard(t.uop.axis) if isinstance(devs, tuple) and t.uop.axis is not None else u
+      t.replace(Tensor(u))
+      pairs.append((u, lazy))
   def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
   if pairs: pending.append(compute)
 

@@ -35,6 +35,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:d
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs, scratch)
+  if _forked_capture and scratch is not None and _forked_capture[0].scratch is scratch: _forked_capture[2](scratch)
   # the scratch is freed by free_intermediates, a shared one isn't
   shared = set(scratch.values()) if scratch is not None else set()
   linear = linear.substitute({u: u.rtag("scratch") for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs and u not in shared},
@@ -226,6 +227,15 @@ class _Unpickler(pickle.Unpickler):
     kind, v = pid
     return self.reg[v] if kind == "b" else self.out[v] if kind == "u" else Tensor(self.out[v])
 
+def _send(wfd:int, data:bytes):
+  # a message: its length, then it
+  view = memoryview(len(data).to_bytes(8, "little") + data)
+  while len(view): view = view[os.write(wfd, view):]
+
+def _send_arenas(wfd:int, scratch:dict):
+  # the sizes of the arenas first (the parent makes the shared ones, it links the jits as they come)
+  _send(wfd, pickle.dumps({k:u.max_numel() for k,u in scratch.items()}))
+
 def _send_capture(wfd:int, reg:dict[int, Any], jit:_TinyJit, ret, linear:UOp, names, info):
   # the compiled jit as uop records in order (the uops by index: no recursion), the buffers of the parent by id, the arenas by size
   roots = [linear, *[t.uop for t in get_parameters(ret)], *[u for x in info for u in (x[0], *x[1])], *(jit.scratch or {}).values()]
@@ -235,9 +245,7 @@ def _send_capture(wfd:int, reg:dict[int, Any], jit:_TinyJit, ret, linear:UOp, na
   recs, rest = io.BytesIO(), io.BytesIO()
   _Pickler(recs, reg, None).dump([(u.op, tuple(idx[x] for x in u.src), u.arg, u.tag) for u in nodes])
   _Pickler(rest, reg, idx).dump((ret, idx[linear], names, info))
-  data = pickle.dumps((arenas, recs.getvalue(), rest.getvalue()), protocol=pickle.HIGHEST_PROTOCOL)
-  view = memoryview(data)
-  while len(view): view = view[os.write(wfd, view):]
+  _send(wfd, pickle.dumps((arenas, recs.getvalue(), rest.getvalue()), protocol=pickle.HIGHEST_PROTOCOL))
   os.close(wfd)
   _exit_child(0)
 
@@ -273,7 +281,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       device_mod.FORKED_COMPILE, worker.worker_pool = True, None
       PARALLEL.value = max(1, PARALLEL.value // len(calls))
       UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)
-      _forked_capture[:] = [jit, functools.partial(_send_capture, w, reg, jit)]
+      _forked_capture[:] = [jit, functools.partial(_send_capture, w, reg, jit), functools.partial(_send_arenas, w)]
       try: call()
       except BaseException:
         import traceback, sys
@@ -283,34 +291,47 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     os.close(w)
     children.append((pid, r))
 
-  # read the pipes at once (a child blocks on a full pipe)
-  datas:list[bytes] = [b""] * len(children)
+  # read the pipes at once (a child blocks on a full pipe): the arena sizes, then the jit
+  msgs:list[list[bytes]] = [[] for _ in children]
+  got = threading.Condition()
+  def put(k:int, data:bytes):
+    with got:
+      msgs[k].append(data)
+      got.notify_all()
   def read(k:int):
-    with os.fdopen(children[k][1], "rb") as f: datas[k] = f.read()
-  threads = [threading.Thread(target=read, args=(k,)) for k in range(len(children))]
+    with os.fdopen(children[k][1], "rb") as f:
+      while len(head:=f.read(8)) == 8: put(k, f.read(int.from_bytes(head, "little")))
+    put(k, b"") # (the end)
+  threads = [threading.Thread(target=read, args=(k,), daemon=True) for k in range(len(children))]
   for t in threads: t.start()
   if meanwhile is not None: meanwhile()
-  for t in threads: t.join()
-  oks = [os.waitpid(pid, 0)[1] == 0 and len(datas[k]) > 0 for k, (pid, _) in enumerate(children)]
-  if DEBUG >= 1: print(f"capture_parallel: {sum(oks)}/{len(oks)} captured, {[len(d) for d in datas]} bytes in {time.perf_counter()-st:.2f}s")
 
-  # the arenas: the biggest of every lane, shared
-  loaded = [pickle.loads(d) if ok else None for d, ok in zip(datas, oks)]
+  # the arenas: the biggest of every lane, shared (made before any jit is linked)
+  with got: got.wait_for(lambda: all(len(m) >= 1 for m in msgs))
   sizes:dict[Any, int] = {}
-  for (jit, _), x in zip(calls, loaded):
-    for k, (_, n) in (x[0].items() if x is not None else []): sizes[k] = max(sizes.get(k, 0), n)
-  for (jit, _), x in zip(calls, loaded):
-    if x is None or jit.scratch is None: continue
+  for m in msgs:
+    for k, n in (pickle.loads(m[0]).items() if m[0] else []): sizes[k] = max(sizes.get(k, 0), n)
+  for jit, _ in calls:
+    if jit.scratch is None: continue
     for k, n in sizes.items():
       if k not in jit.scratch or jit.scratch[k].max_numel() < n: jit.scratch[k] = UOp.new_buffer(k[0], n, dtypes.int8)
-  for (jit, _), x in zip(calls, loaded):
-    if x is None: continue
-    arenas, recs, rest = x
-    arena_at = {i: (jit.scratch or {})[k] for k, (i, _) in arenas.items()}
+
+  # every jit as it comes: taken and linked
+  oks, left = [False] * len(children), set(range(len(children)))
+  while left:
+    with got: got.wait_for(lambda: any(len(msgs[k]) >= 2 or msgs[k][-1] == b"" for k in left))
+    k = next(k for k in left if len(msgs[k]) >= 2 or msgs[k][-1] == b"")
+    left.discard(k)
+    if os.waitpid(children[k][0], 0)[1] != 0 or len(msgs[k]) < 2 or not msgs[k][1]: continue
+    jit = calls[k][0]
+    arenas, recs, rest = pickle.loads(msgs[k][1])
+    arena_at = {i: (jit.scratch or {})[key] for key, (i, _) in arenas.items()}
     out:list[UOp] = []
     for i, (op, src, arg, tag) in enumerate(_Unpickler(recs, reg, out).load()):
       out.append(arena_at[i] if i in arena_at else UOp(op, tuple(out[j] for j in src), arg, tag))
     ret, lin, names, info = _Unpickler(rest, reg, out).load()
     jit.captured, jit.cnt = CapturedJit(ret, out[lin], names, info), 2
-  if DEBUG >= 1: print(f"capture_parallel: taken in {time.perf_counter()-st:.2f}s")
+    _ = jit.captured.linear  # linked
+    oks[k] = True
+    if DEBUG >= 1: print(f"capture_parallel: jit {k} taken in {time.perf_counter()-st:.2f}s")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]
