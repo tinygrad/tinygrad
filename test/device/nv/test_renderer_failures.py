@@ -27,4 +27,19 @@ class TestPTXFailures(unittest.TestCase):
     reference = a.pad((1,1)).matmul(b, dtype=dtypes.float).numpy()
     np.testing.assert_allclose(result, reference, atol=1e-2, rtol=1e-2)
 
+class TestPTXCompilerVersion(unittest.TestCase):
+  def test_ptx_version_mapping(self):
+    from tinygrad.runtime.support.compiler_cuda import PTXCompiler
+    mapping = {
+      'sm_75': '7.5', 'sm_80': '7.5', 'sm_86': '7.5',
+      'sm_89': '7.8', 'sm_90': '7.8',
+      'sm_100': '8.7', 'sm_101': '8.7', 'sm_103': '8.7',
+      'sm_120': '8.7', 'sm_121': '8.7',
+      'sm_107': '9.4',
+    }
+    for arch, expected_version in mapping.items():
+      ptx = PTXCompiler(arch).compile(".version VERSION\n.target TARGET\n").decode()
+      self.assertIn(f".version {expected_version}", ptx, f"Failed for {arch}")
+      self.assertIn(f".target {arch}", ptx, f"Failed for {arch}")
+
 if __name__ == "__main__": unittest.main()
