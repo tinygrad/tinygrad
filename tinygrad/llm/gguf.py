@@ -412,7 +412,7 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
   buffer, the devices in turn. tensors split by columns (an expert's slices of the down projection, the parts of a row parallel weight) are
   read whole into device memory and gathered there (a kernel). the same bytes as _direct_load
   """
-  import os, concurrent.futures
+  import os, time, concurrent.futures
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
   n = len(devices)
   if not getenv("GGUF_DIRECT", 1) or not all(d.split(":")[0] == "AMD" for d in devices): return None
@@ -500,10 +500,26 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
           zeros.append((base + z0 - start, z1 - z0))
       else:
         flush()
-        # the whole tensor into the temp buffer, a host buffer at a time, then the gather to the device's part
+        # the tensor (or the experts used) into the temp buffer, a host buffer at a time, then the gather to the device's part
         _, src_off, src_nb = locs[name]
-        for o in range(0, src_nb, STAGE): jobs.append(("copy", [(fd, src_off + o, [(0, sz:=min(STAGE, src_nb - o))])], [], sz, "tmp", o))
-        jobs.append(("gather", name, fill[1], fill[2], base, nb, src_nb))
+        args = fill[2]
+        if fill[1] == "units" and (ebytes:=src_nb // args[0]) <= STAGE:
+          # only the experts of the device's units (contiguous in the file): compacted in the temp buffer, the units renumbered in them
+          ex = sorted(set(u // args[2] for u in args[4]))
+          pos = {e: j for j, e in enumerate(ex)}
+          args = (*args[:4], [pos[u // args[2]]*args[2] + u % args[2] for u in args[4]])
+          for e0 in range(0, len(ex), per:=max(1, STAGE // ebytes)):
+            ereads:list[tuple] = []
+            at = 0
+            for j in range(e0, min(len(ex), e0 + per)):  # runs of consecutive experts in one read
+              if ereads and ex[j] == ex[j-1] + 1: ereads[-1][2][0] = (ereads[-1][2][0][0], ereads[-1][2][0][1] + ebytes)
+              else: ereads.append((fd, src_off + ex[j]*ebytes, [(at, ebytes)]))
+              at += ebytes
+            jobs.append(("copy", ereads, [], at, "tmp", e0*ebytes))
+          src_nb = len(ex) * ebytes
+        else:
+          for o in range(0, src_nb, STAGE): jobs.append(("copy", [(fd, src_off + o, [(0, sz:=min(STAGE, src_nb - o))])], [], sz, "tmp", o))
+        jobs.append(("gather", name, fill[1], args, base, nb, src_nb))
     flush()
     return jobs
   jobs = [device_jobs(i) for i in range(n)]
@@ -529,19 +545,14 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     stages = [[Buffer(d, STAGE, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in range(K)] for d in devices]
     mvs = [[s.as_memoryview(allow_zero_copy=True) for s in ss] for ss in stages]
     pool = concurrent.futures.ThreadPoolExecutor(getenv("LOAD_THREADS", 16))
-    # per device: the next job to fill, the next job to finish, per host buffer its job and fill, the host buffers copied from (the device
-    # syncs before one is refilled)
+    # per device: the next job to fill, the next job to issue, the timeline (the device signals it: the value of the last work issued),
+    # per host buffer: its job and fill, or the timeline value of its copy (free once reached). the temp buffer is written once the gather
+    # before read it, a gather runs once the copies before it are done. nothing waits holding the gil (fills run meanwhile)
     nxt, done = [0]*n, [0]*n
-    inflight:list[list[Any]] = [[None]*K for _ in range(n)]
-    used:list[list[bool]] = [[False]*K for _ in range(n)]
-    def start_fills(i:int):
-      for k in range(K):
-        if inflight[i][k] is not None or nxt[i] >= len(jobs[i]) or jobs[i][nxt[i]][0] != "copy": continue
-        if used[i][k]:
-          Device[devices[i]].synchronize()
-          used[i] = [False]*K
-        job = jobs[i][nxt[i]]
-        inflight[i][k], nxt[i] = (job, pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1
+    tls = [Device[d].timeline.host.view(fmt='Q') for d in devices]
+    fills:list[list[Any]] = [[None]*K for _ in range(n)]
+    busy:list[list[int]] = [[0]*K for _ in range(n)]
+    last_copy, last_gather = [0]*n, [0]*n
     unit_tables:dict[tuple, Buffer] = {}
     def gather(i:int, job:tuple):
       _, name, kind, args, dst0, nb, src_nb = job
@@ -557,30 +568,35 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
         outer, row, part, di = args
         _run_gather(functools.partial(_part_gather_kernel, outer=outer, off=di*part//word.itemsize), dst, src)
     while any(done[i] < len(jobs[i]) for i in range(n)):
+      progressed = False
       for i in range(n):
-        start_fills(i)
-        # the jobs of device i in order: a copy when its fill is done, a gather when the copies before it are issued
-        while done[i] < len(jobs[i]):
-          job = jobs[i][done[i]]
-          if job[0] == "gather":
-            if any(x is not None for x in inflight[i]): break
-            # the copies to the temp buffer and the gather are on different queues: the gather after the copies, the next copies after it
-            Device[devices[i]].synchronize()
-            gather(i, job)
-            Device[devices[i]].synchronize()
-            nxt[i] = max(nxt[i], done[i] + 1)
-          else:
-            k = next((k for k in range(K) if inflight[i][k] is not None and inflight[i][k][0] is job), None)
-            if k is None or not inflight[i][k][1].done(): break
-            inflight[i][k][1].result()
-            target = bufs[i] if job[4] == "buf" else tmps[i]
-            target.view(job[3], job[5]).ensure_allocated().copy_from(stages[i][k].view(job[3], 0).ensure_allocated())
-            inflight[i][k], used[i][k] = None, True
-          done[i] += 1
-          start_fills(i)
-      # wait for a fill the next jobs wait for (the first job of a device)
-      heads = [x[1] for i in range(n) if done[i] < len(jobs[i]) for x in inflight[i] if x is not None and x[0] is jobs[i][done[i]]]
-      if heads and not any(f.done() for f in heads): concurrent.futures.wait(heads, return_when=concurrent.futures.FIRST_COMPLETED)
+        cur = tls[i][0]
+        # fill the free host buffers with the next copy jobs
+        for k in range(K):
+          if fills[i][k] is None and cur >= busy[i][k] and nxt[i] < len(jobs[i]) and (job:=jobs[i][nxt[i]])[0] == "copy":
+            fills[i][k], nxt[i], progressed = (job, pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1, True
+        if done[i] >= len(jobs[i]): continue
+        job = jobs[i][done[i]]
+        if job[0] == "gather":
+          if cur < last_copy[i]: continue
+          gather(i, job)
+          last_gather[i] = tls[i][1]
+          nxt[i] = max(nxt[i], done[i] + 1)
+        else:
+          kf = next((k for k in range(K) if fills[i][k] is not None and fills[i][k][0] is job), None)
+          if kf is None or not fills[i][kf][1].done() or (job[4] == "tmp" and cur < last_gather[i]): continue
+          k = kf
+          fills[i][k][1].result()
+          target = bufs[i] if job[4] == "buf" else tmps[i]
+          # (a copy at a time: a linear of the same structure is compiled once)
+          target.view(job[3], job[5]).ensure_allocated().copy_from(stages[i][k].view(job[3], 0).ensure_allocated())
+          fills[i][k], busy[i][k] = None, tls[i][1]
+          if job[4] == "tmp": last_copy[i] = tls[i][1]
+        done[i], progressed = done[i] + 1, True
+      if not progressed:
+        pending = [x[1] for row in fills for x in row if x is not None and not x[1].done()]
+        if pending: concurrent.futures.wait(pending, timeout=0.0005, return_when=concurrent.futures.FIRST_COMPLETED)
+        else: time.sleep(0.0002)
     for d in devices: Device[d].synchronize()
     pool.shutdown()
     mvs.clear()

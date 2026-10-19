@@ -120,7 +120,14 @@ class _System:
     # the addresses of its pages for the devices: physical, or behind the iommu an io address range
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
-    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
+    if iommu and not contiguous and size >= (2 << 20) and (not vaddr or vaddr % (2 << 20) == 0):
+      # behind the iommu the pages are pinned by it: private huge pages (17x faster to populate than shared small ones)
+      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|flags, 0)
+      libc.madvise(va, size, libc.MADV_HUGEPAGE)
+      libc.madvise(va, size, libc.MADV_POPULATE_WRITE)
+      System.lock_memory(va, size)
+    else:
+      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
     if not iommu: return MMIOInterface(va, size), self.system_paddrs(va, round_up(size, mmap.PAGESIZE))
     iova = self.dma_map(va, size:=round_up(size, mmap.PAGESIZE))
     return MMIOInterface(va, size), [iova + i for i in range(0, size, mmap.PAGESIZE)]
