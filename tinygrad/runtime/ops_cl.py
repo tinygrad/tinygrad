@@ -1,10 +1,10 @@
 from __future__ import annotations
-import ctypes, hashlib, functools
+import ctypes, hashlib, functools, weakref
 from tinygrad.runtime.autogen import opencl as cl, libc
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import BufferStorage, BufferSpec, HostAllocator, Compiled, Compiler, CompileError, MMIOInterface
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, HostAllocator, Compiled, Compiler, CompileError, MMIOInterface
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
@@ -67,7 +67,7 @@ class CLQueue(HWQueue):
 
   def wait(self, sig:UOp, val:UOp, eq=False): pass # the queue is in order
   def signal(self, sig:UOp, val:UOp): self.call(libc.memcpy, sig.getaddr(self.devs), (self.q64(val) - 8,), 8) # synchronize finishes the queue
-  def timestamp(self, sig:UOp): self.call(cl.clEnqueueMarkerWithWaitList, self.dev.handles[1], 0, 0, sig[1:2].getaddr(self.devs)) # [sig][event]
+  def timestamp(self, sig:UOp): self.call(cl.clEnqueueMarkerWithWaitList, self.dev.handles[1], 0, 0, sig.getaddr(self.devs)) # [event][time]
 
   def encode(self) -> UOp:
     self.cmds:list[tuple] = []
@@ -116,6 +116,9 @@ class CLDevice(Compiled):
       check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
       arch += f",IMAGE_PITCH_ALIGNMENT={ipa.value}"
     super().__init__(device, CLAllocator(self), [OpenCLRenderer], None, arch=arch)
+    self.profile_slots = weakref.WeakSet[Buffer]()
+    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="slots", name="b"), lambda b, d=self: # with stamps
+      d.profile_slots.add(x:=Buffer(d.host, n:=b.nbytes(), initial_value=bytes(n))) or x if b.device == d.device and b.max_numel() > 4 else None)])
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
 
@@ -127,10 +130,8 @@ class CLDevice(Compiled):
     return bytes(checked(cl.clCreateKernel, program, name.encode()))
 
   def count(self) -> int: return len(unwrap(self.device_ids))
-  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None): check(cl.clFinish(self.queue))
-
-  def collect_prof(self):
-    for addr in [b.host.addr + i * 8 for (b, _), e in self.prof_ents.items() for i in (e.st_id, e.en_id)]:
-      check(cl.clGetEventProfilingInfo(ev:=ctypes.cast(cl.cl_event.from_address(addr), cl.cl_event), cl.CL_PROFILING_COMMAND_END, 8, addr, None))
-      check(cl.clReleaseEvent(ev))
-    super().collect_prof()
+  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
+    check(cl.clFinish(self.queue)) # then resolve the pending stamps: [event, 0]
+    for s, i in [(s, i) for b in list(self.profile_slots) for s in [b.host.view(fmt='Q')] for i in range(4, len(s), 2) if s[i]]:
+      check(cl.clGetEventProfilingInfo(ev:=ctypes.cast(s[i], cl.cl_event), cl.CL_PROFILING_COMMAND_END, 8, s.addr + i * 8 + 8, None))
+      s[i] = (check(cl.clReleaseEvent(ev)), 0)[1]
