@@ -274,6 +274,11 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
 
+  def test_unsigned_add_lt(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      x = Tensor.arange(10, dtype=dt) + Tensor([dt.max-4], dtype=dt)
+      self.assertEqual((x < 3).tolist(), [i in (5, 6, 7) for i in range(10)])
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
