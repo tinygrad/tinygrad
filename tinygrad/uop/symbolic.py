@@ -387,6 +387,8 @@ def simplify_valid(valid:UOp) -> UOp|None:
 
 def reduce_mul_chain(r:UOp) -> UOp|None:
   if r.arg[0] not in {Ops.ADD, Ops.MAX}: return None
+  # max(x*m) = max(x)*m needs x*m monotone in x, and an unsigned multiply wraps
+  if r.arg[0] is Ops.MAX and dtypes.is_unsigned(r.dtype): return None
   inside, outside = [], []
   for m in r.src[0].split_uop(Ops.MUL):
     m_parents = m.backward_slice
