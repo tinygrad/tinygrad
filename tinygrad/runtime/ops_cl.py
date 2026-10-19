@@ -116,11 +116,14 @@ class CLDevice(Compiled):
       check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
       arch += f",IMAGE_PITCH_ALIGNMENT={ipa.value}"
     super().__init__(device, CLAllocator(self), [OpenCLRenderer], None, arch=arch)
-    self.profile_slots = weakref.WeakSet[Buffer]()
-    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="slots", name="b"), lambda b, d=self: # with stamps
-      d.profile_slots.add(x:=Buffer(d.host, n:=b.nbytes(), initial_value=bytes(n))) or x if b.device == d.device and b.max_numel() > 4 else None)])
+    self.stamps = weakref.WeakSet[Buffer]()
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
+
+  def link_buffer(self, b:UOp) -> Buffer|None: # slots with stamps hold events until synchronize reads their times
+    if b.arg.name != "slots" or b.max_numel() <= 4: return None
+    self.stamps.add(buf:=Buffer(self.host, b.nbytes(), initial_value=bytes(b.nbytes())))
+    return buf
 
   @functools.cache
   def function(self, src:bytes, name:str) -> bytes:
@@ -132,6 +135,6 @@ class CLDevice(Compiled):
   def count(self) -> int: return len(unwrap(self.device_ids))
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     check(cl.clFinish(self.queue)) # then resolve the pending stamps: [event, 0]
-    for s, i in [(s, i) for b in list(self.profile_slots) for s in [b.host.view(fmt='Q')] for i in range(4, len(s), 2) if s[i]]:
+    for s, i in [(s, i) for b in list(self.stamps) for s in [b.host.view(fmt='Q')] for i in range(4, len(s), 2) if s[i]]:
       check(cl.clGetEventProfilingInfo(ev:=ctypes.cast(s[i], cl.cl_event), cl.CL_PROFILING_COMMAND_END, 8, s.addr + i * 8 + 8, None))
       s[i] = (check(cl.clReleaseEvent(ev)), 0)[1]
