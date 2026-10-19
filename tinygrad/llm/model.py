@@ -3,7 +3,7 @@ import array, enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel
+from tinygrad.engine.jit import capture_parallel, _TinyJit
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -286,8 +286,9 @@ def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
       lazy, u = t.uop, u.unshard(t.uop.axis) if isinstance(devs, tuple) and t.uop.axis is not None else u
       t.replace(Tensor(u))
       pairs.append((u, lazy))
+  # (a jit: compiled with the model's jits, see _capture_parallel)
   def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
-  if pairs: pending.append(compute)
+  if pairs: pending.append(TinyJit(compute, capture_first=True))
 
 def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   """n int32 in host memory that the host polls: a (1, n) tensor every device reads and writes directly"""
@@ -1411,18 +1412,21 @@ class Transformer:
     if isinstance(devs, tuple): host_allreduce(devs)  # (the device memory the jits use is made here: not in the processes)
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
     temp = Tensor([0.0]).to(devs).realize()
-    v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), []
+    v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), cast(list[tuple[Any, Callable[[], Any]]], [])
     for n in sizes:
       if n not in self.jits: self.jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
       sp, nt = v_start_pos.bind(0), UOp.variable("toks", 1, n).bind(n)
       calls.append((self.jits[n], functools.partial(self, self._token_buf[:, sp:sp+nt], sp, temp)))
+    # the computations left of loading (their jits) too: run after the weights are read
+    calls += [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)]
     if self.config.spec_drafts > 0:
       self._spec_init()
       if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
       calls.append((self._spec_jit, functools.partial(self._spec_call, 0, 0, 1, temp)))
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile():
-      self._finish_load()
+      # (the jits of the computations left run after: they're compiled meanwhile)
+      while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
       if self.has_recurrent_block and getenv("CHECKPOINT", 1): self._checkpoint([0], save=True), self._checkpoint([0], save=False)
     capture_parallel(calls, meanwhile)
 

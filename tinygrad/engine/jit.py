@@ -235,9 +235,11 @@ def _send(wfd:int, data:bytes):
 def _send_arenas(wfd:int, scratch:dict):
   # the sizes of the arenas first (the parent makes the shared ones, it links the jits as they come)
   _send(wfd, pickle.dumps({k:u.max_numel() for k,u in scratch.items()}))
+  _forked_capture.append("arenas sent")
 
 def _send_capture(wfd:int, reg:dict[int, Any], jit:_TinyJit, ret, linear:UOp, names, info):
   # the compiled jit as uop records in order (the uops by index: no recursion), the buffers of the parent by id, the arenas by size
+  if "arenas sent" not in _forked_capture: _send_arenas(wfd, {})
   roots = [linear, *[t.uop for t in get_parameters(ret)], *[u for x in info for u in (x[0], *x[1])], *(jit.scratch or {}).values()]
   nodes = list(UOp.sink(*roots).toposort(enter_calls=True))[:-1]
   idx = {u:i for i,u in enumerate(nodes)}
