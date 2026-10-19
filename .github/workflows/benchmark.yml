@@ -237,7 +237,7 @@ jobs:
 
   multigpubenchmark:
     name: Multi-GPU Benchmarks (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'AMD' && '6x7900xtx' || 'tinyboxgreen' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -252,11 +252,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
@@ -264,8 +259,8 @@ jobs:
       run: |
         mkdir -p weights
         mkdir -p extra/datasets
-        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
-        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+        ln -s "${{ matrix.dev == 'AMD' && '/weights' || '/raid/weights' }}/LLaMA-3" weights/LLaMA-3
+        ln -s "${{ matrix.dev == 'AMD' && '/datasets' || '/raid/datasets' }}/imagenet" extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -274,7 +269,7 @@ jobs:
     - name: reset process replay
       run: python3 test/external/process_replay/reset.py
     - name: Run LLaMA-3 8B on 4 GPUs with BEAM
-      run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
+      run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model /weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
     - name: Run full CIFAR training steps w 6 GPUS
       run: time BENCHMARK_LOG=cifar_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run MLPerf resnet eval on training data
