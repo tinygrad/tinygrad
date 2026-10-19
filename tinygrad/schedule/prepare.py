@@ -181,6 +181,11 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def _stacked_buffers(x:UOp) -> bool:
+  # the values of the devices stacked, each materialized (a buffer, or a STAGE: materialized by itself), reshaped: a multi device value
+  while x.op is Ops.RESHAPE: x = x.src[0]
+  return x.op is Ops.MSTACK and all(s.has_buffer_identity(after_ok=True) or s.op is Ops.STAGE for s in x.src)
+
 def _store_target(dst:UOp) -> bool:
   # a buffer, or a contiguous view of one (a copy writes the range)
   if dst.has_buffer_identity(after_ok=True): return True
@@ -249,7 +254,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
   (UPat(Ops.STAGE, src=(UPat.var("x"),)),
-   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY or _stacked_buffers(x) else None),
 
   # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
   (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),

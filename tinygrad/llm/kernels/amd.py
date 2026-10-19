@@ -1199,8 +1199,9 @@ def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
   # (the parts are sent from the buffer)
   mine, n = [local.mselect(i) for i in range(len(devs))], len(devs)
   sent = _ring(mine, devs) if getenv("AG_RING", 1) else _rotated(lambda i, j: mine[i], devs)
-  whole = [Tensor.cat(*[Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)], dim=axis).uop for j in range(n)]
-  return Tensor(UOp.mstack(*whole))
+  # (every device's whole a buffer: its readers don't each make one)
+  whole = [Tensor.cat(*[Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)], dim=axis) for j in range(n)]
+  return Tensor(UOp.mstack(*[w.contiguous().uop for w in whole]))
 
 def host_allgather(x:Tensor) -> Tensor|None:
   """x (devices, n) floats, a row on every device: the whole (devices, n) on every device, through the host mailbox (None: not supported)"""
