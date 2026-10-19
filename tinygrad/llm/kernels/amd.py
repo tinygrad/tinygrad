@@ -1425,7 +1425,7 @@ def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Te
   return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32), pos.cast(dtypes.int32)
 
 @functools.cache
-def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int) -> UOp:
+def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by_selection:bool=False) -> UOp:
   # y[t] = the sum over the slots j of token t of probs[t, j] * down[pos[t, j]] (the sorted rows): a workgroup per token, a thread its columns.
   # the slots of other devices' experts (pos -1) are skipped by the whole workgroup
   T, D = cast(tuple[int, int], y.shape)
@@ -1433,6 +1433,7 @@ def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int) ->
   per = D // threads
   t, th, j = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(threads, 1, AxisType.LOCAL), UOp.range(k, 2, AxisType.LOOP)
   p, w = pos[t * k + j].load(), probs[t * k + j].load()
+  if by_selection: p = (p >= 0).where(t * k + j, -1)  # down has a row per selection
   accs = UOp.alloc((per,), dtypes.float32, addrspace=AddrSpace.REG)
   accs = accs.after(accs.store(UOp.stack(*[UOp.const(0, dtypes.float)]*per)))
   vals = [(p >= 0).where(down[p.valid(p >= 0), th * per + c].load().float() * w, UOp.const(0, dtypes.float)) for c in range(per)]
@@ -1441,7 +1442,8 @@ def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int) ->
   return UOp.group(*[y[t, th * per + c].store((accs[c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
     arg=KernelInfo(name="moe_combine", opts_to_apply=()))
 
-def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None, out_dtype=dtypes.float32) -> Tensor:
+def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None, out_dtype=dtypes.float32,
+                by_selection:bool=False) -> Tensor:
   """
   down (..., R, D) the outputs of the sorted rows, pos (..., tokens*k) the row of every selection (-1: none), probs (tokens*k) their weights:
   (..., tokens, D) the weighted sums of every token's rows (plus add, of that shape), summed in float. a leading device axis (split) is kept
@@ -1451,7 +1453,7 @@ def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Te
   y = Tensor.empty(devices*tokens, D, dtype=out_dtype, device=down.device, axis=0 if devices > 1 else None)
   extra = (add.reshape(-1, D).contiguous(),) if add is not None else ()
   y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
-                           fxn=functools.partial(_moe_combine_kernel, k=k))[0]
+                           fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection))[0]
   return y.reshape(devices, tokens, D) if devices > 1 else y
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********

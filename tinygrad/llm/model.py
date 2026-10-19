@@ -462,10 +462,12 @@ class FFNBlock:
     else:
       gate, up = (e.grouped(x.reshape(-1, D), entries, tiles, slots=k) for e in (gate_exps, self.ffn_up_exps))
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-    # down has a row per sorted row (in half if sliced: a token sums many), every token sums its rows weighed by their probabilities
-    down = down_exps.grouped(act.contiguous(), entries, tiles, sorted_out=True, out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
-    y = moe_combine(down, pos, probs, int(prod(sel_shape[:-1])), int(sel_shape[-1]), add,
-                    out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32)
+    # down has a row per selection (in half if sliced: a token sums many; the selections of other devices' experts aren't written: fewer rows
+    # than the sorted ones, padded to tiles), every token sums its rows weighed by their probabilities
+    tokens, k = int(prod(sel_shape[:-1])), int(sel_shape[-1])
+    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=tokens*k, out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
+    y = moe_combine(down, pos, probs, tokens, k, add, out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32,
+                    by_selection=True)
     y = y.reshape(-1, *sel_shape[:-1], D)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
 
