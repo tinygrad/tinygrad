@@ -67,8 +67,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.CAST, dtype=dtypes.uint32, src=(UPat(Ops.INDEX, name="x"),)), lambda ctx,x: ctx[x] if is_packed(x) else None),
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),
     (UPat.cvar("c").cast(dtypes.bool), lambda c: "true" if c.val else "false"),
-    (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)),
-     lambda c: f"bitcast<u32>({c.val})" if c.val < 0 else f"{c.val&0xFFFFFFFF}u"),
+    (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)), lambda c: f"{c.val&0xFFFFFFFF}u"),
     # a negative const must state its type: contextual conversion of a bare abstract int rejects it in a u32 position
     (UPat.cvar("c").cast(dtypes.int32, name="x"), lambda ctx,x,c: f"i32({v})" if (v:=truncate[x.dtype](c.val)) < 0 else f"{v}"),
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x:
