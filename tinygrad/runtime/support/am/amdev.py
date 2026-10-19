@@ -65,7 +65,7 @@ class AMFirmware:
 
     # PFP, ME, MEC firmware
     # the MEC stack of every pipe that runs (AM_GFX.mec_pipes)
-    mec_pipes = getenv("AM_MEC_PIPES", 2) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
     for (fw_name, fw_cnt) in ([('PFP', 1), ('ME', 1)] if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else []) + [('MEC', mec_pipes)]:
       blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", versioned_header="struct_gfx_firmware_header")
 

@@ -276,7 +276,7 @@ class AM_GFX(AM_IP):
   def init_sw(self):
     self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
     # the pipes of MEC1 that run (a compute queue on each): queues 0 and 1 (pm4, aql) of a pipe, the kiq's after them
-    self.mec_pipes = getenv("AM_MEC_PIPES", 2) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    self.mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
     self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2 * self.mec_pipes + self.adev.is_vf)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 

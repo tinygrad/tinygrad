@@ -959,8 +959,8 @@ class Transformer:
       x = x.pad_to(x.max_shape).contiguous()
       R = int(x.shape[1])
       # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
-      # big chunks in two micro batches (on queues of their own: the copies of one run with the kernels of the other)
-      mb = getenv("MICRO_BATCHES", 2 if R >= getenv("MB_MIN_ROWS", 4032) else 1)
+      # micro batches (on queues of their own, AM_MEC_PIPES: the copies of one run with the kernels of the other)
+      mb = getenv("MICRO_BATCHES", 1)
       if (sp:=self.sequence_parallel(R)) and (mb > 1 or getenv("MB_PHASES", 1)) and self.sequence_parallel(R // mb) and R % mb == 0:
         # the blocks in phases (micro_batch_blocks), on micro batches of rows if MICRO_BATCHES > 1 (the copies of one overlap the kernels of
         # the next). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
@@ -1307,7 +1307,7 @@ class Transformer:
     """the prefill chunk sizes, ascending: the custom kernels compute chunks padded to a static size, a piece of a prompt runs the smallest
     one it fits (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
     fast = amd_custom_kernels_supported(self.token_embd.weight.device)
-    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 8192 if fast else 32), self.max_context)
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 4096 if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
     sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048), 4096) if fast else ())]
     if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None and getenv("SEQ_PARALLEL", 1):
