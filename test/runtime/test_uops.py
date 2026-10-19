@@ -127,6 +127,10 @@ class TestFloatUOps(TestUOps):
   def test_sin(self): self._test_uop_fxn(Ops.SIN, lambda a: math.sin(a))
   def test_recip(self): self._test_uop_fxn(Ops.RECIPROCAL, lambda a: 1/a if a != 0 else float('inf'))
   def test_sqrt(self): self._test_uop_fxn(Ops.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
+  def test_sqrt_edgecases(self):
+    for a, expected in [(-math.inf, math.nan), (-1., math.nan), (0., 0.), (4., 2.), (math.inf, math.inf), (math.nan, math.nan)]:
+      with self.subTest(a=a):
+        np.testing.assert_equal(_test_single_value([a], Ops.SQRT, (dtypes.float32,)), expected)
 
   def test_add(self): self._test_bop_fxn(Ops.ADD, lambda a,b: a+b)
   def test_mul(self): self._test_bop_fxn(Ops.MUL, lambda a,b: a*b)

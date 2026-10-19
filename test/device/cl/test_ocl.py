@@ -1,19 +1,7 @@
 import unittest
-from unittest.mock import patch
 from tinygrad import Device
-from tinygrad.device import Buffer, TinyELF
-from tinygrad.helpers import Target
-from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
-
-@unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
-class TestCLCompileCache(unittest.TestCase):
-  def test_compile_cached(self):
-    device = Device[Device.DEFAULT]
-    src = "__kernel void cached_test(__global int* a) { a[0] = 1; }"
-    obj = TinyELF(src.encode(), "cached_test", Target("CL"), ())
-    device.runtime(obj)
-    with patch.object(CLCompiler, 'compile', side_effect=RuntimeError("compile should not be called on cache hit")):
-      device.runtime(obj)
+from tinygrad.device import Buffer
+from tinygrad.runtime.ops_cl import CLDevice, CLAllocator
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):
@@ -28,7 +16,7 @@ class TestCLError(unittest.TestCase):
   def test_invalid_kernel_name(self):
     device = Device[Device.DEFAULT]
     with self.assertRaises(RuntimeError) as err:
-      device.runtime(TinyELF(b"__kernel void test(__global int* a) { a[0] = 1; }", "", Target("CL"), ()))
+      device.function(b"__kernel void test(__global int* a) { a[0] = 1; }", "")
     assert str(err.exception) == "OpenCL Error -46: CL_INVALID_KERNEL_NAME"
 
   def test_unaligned_copy(self):

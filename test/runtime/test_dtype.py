@@ -78,7 +78,8 @@ class TestDType(unittest.TestCase):
 
   def test_const_kernel(self):
     if not get_available_cast_dtypes(self.DTYPE): raise unittest.SkipTest("dtype does not run here")
-    _assert_eq(Tensor.ones((4,4), dtype=self.DTYPE).clone(), self.DTYPE, np.ones((4,4)))
+    for value in ([1, 1e-5] if dtypes.is_float(self.DTYPE) else [1]):
+      _assert_eq(Tensor.full((4,4), value, dtype=self.DTYPE).clone(), self.DTYPE, np.full((4,4), truncate[self.DTYPE](value)))
 
   def test_same_size_ops(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
