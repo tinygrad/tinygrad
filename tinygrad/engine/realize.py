@@ -6,6 +6,7 @@ from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCount
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
+import tinygrad.device as device_mod
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
@@ -285,6 +286,7 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) ->
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
+  if device_mod.FORKED_COMPILE: raise RuntimeError("nothing runs in a process that only compiles")
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)

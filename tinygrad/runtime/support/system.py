@@ -128,6 +128,8 @@ class _System:
       System.lock_memory(va, size)
     else:
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
+    # the devices' memory isn't a forked process's (not copied for it, it can't touch it)
+    libc.madvise(va, size, libc.MADV_DONTFORK)
     if not iommu: return MMIOInterface(va, size), self.system_paddrs(va, round_up(size, mmap.PAGESIZE))
     iova = self.dma_map(va, size:=round_up(size, mmap.PAGESIZE))
     return MMIOInterface(va, size), [iova + i for i in range(0, size, mmap.PAGESIZE)]

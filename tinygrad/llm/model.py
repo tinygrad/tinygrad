@@ -3,6 +3,7 @@ import array, enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
+from tinygrad.engine.jit import capture_parallel
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -1061,18 +1062,22 @@ class Transformer:
     q8_quantize_cache_clear()  # don't keep the graph alive
     return self._spec_out.assign(tok.reshape(1, k+1).cat(*drafts, dim=1).cast(dtypes.int32))
 
-  def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
-    """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
-    k, host = self.config.spec_drafts, self._spec_host
+  def _spec_call(self, mtp_pos:int, j:int, par:int, temperature:Tensor):
+    """a step of speculative decoding (forward_spec, its jit)"""
+    k, pos = self.config.spec_drafts, mtp_pos + j
     if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False),
                                                                 scratch=self._scratch)
     v_mtp, v_j, v_pos = UOp.variable("mtp_pos", 0, self.max_context-1), UOp.variable("spec_j", 0, k), UOp.variable("start_pos", 0, self.max_context-1)
     v_par, v_chain = UOp.variable("spec_par", 0, 1), tuple(UOp.variable(f"spec_pos{i}", 0, self.max_context-1) for i in range(k-1))
+    self._spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature, *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
+
+  def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
+    """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
+    k, host = self.config.spec_drafts, self._spec_host
     def launch(mtp_pos:int, j:int, par:int) -> bool:
-      if (pos:=mtp_pos + j) + k + 1 >= self.max_context: return False
+      if mtp_pos + j + k + 1 >= self.max_context: return False
       host[k+1:3*k+2] = array.array('i', [-1] * (2*k+1))
-      self._spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature,
-                     *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
+      self._spec_call(mtp_pos, j, par, temperature)
       return True
     # the first step catches up on the last prompt token's position only (j=0), its hidden state is row 0 (parity 0)
     host[0], mtp_pos, j, par = tokens[-1], len(tokens) - 1, 0, 1
@@ -1351,12 +1356,32 @@ class Transformer:
   def warmup(self):
     """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
     sizes = self.prefill_chunks()
+    if getenv("WARMUP_PARALLEL", 1): self._capture_parallel(sizes)
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
       self._cached_tokens, self._ckpt_tokens = [], []
       list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
     if self._ckpt_tokens: self._checkpoint(self._ckpt_tokens, save=False)  # and a checkpoint's restore
     self._cached_tokens, self._ckpt_tokens = [], []
+
+  def _capture_parallel(self, sizes:tuple[int, ...]):
+    """the jits of the prefill chunk sizes and of speculative decoding compiled at the same time (in forked processes), called as generate does"""
+    if not (devs:=self.token_embd.weight.device) or not amd_custom_kernels_supported(devs): return
+    self._init_states()
+    from tinygrad.llm.kernels.amd import host_allreduce
+    if isinstance(devs, tuple): host_allreduce(devs)  # (the device memory the jits use is made here: not in the processes)
+    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
+    temp = Tensor([0.0]).to(devs).realize()
+    v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), []
+    for n in sizes:
+      if n not in self.jits: self.jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+      sp, nt = v_start_pos.bind(0), UOp.variable("toks", 1, n).bind(n)
+      calls.append((self.jits[n], functools.partial(self, self._token_buf[:, sp:sp+nt], sp, temp)))
+    if self.config.spec_drafts > 0:
+      self._spec_init()
+      if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
+      calls.append((self._spec_jit, functools.partial(self._spec_call, 0, 0, 1, temp)))
+    capture_parallel(calls)
 
   def _recurrent_states(self) -> list[tuple[Tensor, bool]]:
     # the state that isn't indexed by position: the recurrent and conv states (slotted: the ones of the last positions, a position p's in slot
