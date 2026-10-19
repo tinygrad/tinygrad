@@ -70,7 +70,6 @@ class CPULLVMCompiler(LLVMCompiler):
     if cpu == "native":
       cpu = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode()
       featstr = (featstr + "," if featstr else "") + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
-    self.has_fp16 = {f[1:]:f[0] == "+" for f in featstr.split(",") if f}.get("f16c", False)
     # +reserve-x18 here does the same thing as -ffixed-x18 in ClangCompiler, see comments there for why it's needed on arm osx
     super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + featstr, cache_key)
 

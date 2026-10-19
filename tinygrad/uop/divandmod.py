@@ -98,7 +98,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   # (x//c+a)//d -> (x+a*c)//(c*d) for c>0, d>0
-  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if d.vmin>0 else None),
+  ((UPat.var("x", dtypes.weakint)//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if d.vmin>0 else None),
   # (x+c)//d -> (x+c%d)//d + c//d ; (x+c)%d -> (x+c%d)%d  (split the multiple of d out of the const, holds for any d!=0)
   (UPat((Ops.FLOORDIV, Ops.FLOORMOD), src=(UPat.var("x", dtypes.weakint)+UPat.cvar("c"), UPat.cvar("d")), name="n"),
     lambda n,x,c,d: None if d.val==0 or c.val%d.val==c.val else
