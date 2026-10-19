@@ -182,7 +182,10 @@ class AMDev:
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
+    # the boot's version: the MEC firmware is loaded for a number of pipes (AM_MEC_PIPES), a boot for another number is a full one
+    pipes = getenv("AM_MEC_PIPES", 1) if self.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    self.boot_version = AMDev.Version ^ ((pipes - 1) << 16)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == self.boot_version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
@@ -221,7 +224,7 @@ class AMDev:
       self.smu.set_clocks(level=levels[perf])
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
       self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
-      self.reg("regSCRATCH_REG7").write(AMDev.Version)
+      self.reg("regSCRATCH_REG7").write(self.boot_version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")

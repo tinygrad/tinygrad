@@ -1150,6 +1150,16 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
   size = S[axis] // n
   def part(j:int, i:int) -> UOp:
     return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
+  if getenv("RS_RING", 1):
+    # around the ring: in step k device j adds its part of the sum of device t=j-k to what it got (the sum of the parts of t+1..j-1) and
+    # sends it to j+1 (the links between neighbours are the fast ones). device t adds its own last
+    got:dict[tuple[int, int], UOp] = {}
+    for k in range(1, n):
+      for j in range(n):
+        t = (j - k) % n
+        mine = part(j, t) if k == 1 else (got[(t, j)] + part(j, t).cast(dtypes.half)).contiguous()
+        got[(t, (j+1) % n)] = mine.copy_to_device(devs[(j+1) % n])
+    return Tensor(UOp.mstack(*[(got[(t, t)] + part(t, t).cast(dtypes.half)).float().contiguous() for t in range(n)]).unshard(axis))
   # the parts are rows of the half partials: copied as views (no kernel to cut them out) when the split axis leads
   sent = _rotated(lambda j, i: part(j, i) if all(s == 1 for s in S[:axis]) and getenv("RS_VIEWS", 1) else part(j, i).contiguous(), devs)
   # summed in half, in device order: the sums of the allreduce of partial_sum
@@ -1157,12 +1167,24 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
            for i in range(n)]
   return Tensor(UOp.mstack(*[x.contiguous() for x in parts]).unshard(axis))
 
+def _ring(mine:list[UOp], devs:tuple[str, ...]) -> dict[tuple[int, int], UOp]:
+  """
+  part i (on device i) on every other device j, around the ring: in step k device j sends the part it got in step k-1 to device j+1 (the
+  links between neighbours are the fast ones: every copy is on one). a step's copies wait for the ones before (their data)
+  """
+  n, got = len(devs), cast(dict[tuple[int, int], UOp], {})
+  for k in range(1, n):
+    for j in range(n):
+      i = (j - k + 1) % n  # the part device j forwards in step k
+      got[(i, (j+1) % n)] = (mine[j] if k == 1 else got[(i, j)]).copy_to_device(devs[(j+1) % n])
+  return got
+
 def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
   """a tensor split on axis over the devices, whole on every device (in dtype): every part goes to the others peer to peer"""
   devs = cast(tuple[str, ...], x.device)
   local = _per_device(_materialized(x, dtype or x.dtype))
   mine, n = [local.mselect(i).contiguous() for i in range(len(devs))], len(devs)
-  sent = _rotated(lambda i, j: mine[i], devs)
+  sent = _ring(mine, devs) if getenv("AG_RING", 1) else _rotated(lambda i, j: mine[i], devs)
   whole = [Tensor.cat(*[Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)], dim=axis).uop for j in range(n)]
   return Tensor(UOp.mstack(*whole))
 
