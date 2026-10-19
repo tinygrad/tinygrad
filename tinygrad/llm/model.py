@@ -1420,8 +1420,11 @@ class Transformer:
       self._spec_init()
       if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
       calls.append((self._spec_jit, functools.partial(self._spec_call, 0, 0, 1, temp)))
-    # the weights are read (and what's computed from them) while the jits compile
-    capture_parallel(calls, self._finish_load)
+    # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
+    def meanwhile():
+      self._finish_load()
+      if self.has_recurrent_block and getenv("CHECKPOINT", 1): self._checkpoint([0], save=True), self._checkpoint([0], save=False)
+    capture_parallel(calls, meanwhile)
 
   def _recurrent_states(self) -> list[tuple[Tensor, bool]]:
     # the state that isn't indexed by position: the recurrent and conv states (slotted: the ones of the last positions, a position p's in slot

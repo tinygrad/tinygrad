@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload
 import functools, os, io, pickle, itertools, threading, warnings, time
 from tinygrad.tensor import Tensor, all_tensors
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
@@ -293,10 +293,12 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
 
   # read the pipes at once (a child blocks on a full pipe): the arena sizes, then the jit
   msgs:list[list[bytes]] = [[] for _ in children]
+  arrived:list[list[float]] = [[] for _ in children]
   got = threading.Condition()
   def put(k:int, data:bytes):
     with got:
       msgs[k].append(data)
+      arrived[k].append(time.perf_counter() - st)
       got.notify_all()
   def read(k:int):
     with os.fdopen(children[k][1], "rb") as f:
@@ -305,6 +307,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
   threads = [threading.Thread(target=read, args=(k,), daemon=True) for k in range(len(children))]
   for t in threads: t.start()
   if meanwhile is not None: meanwhile()
+  if DEBUG >= 1: print(f"capture_parallel: the work meanwhile done at {time.perf_counter()-st:.2f}s")
 
   # the arenas: the biggest of every lane, shared (made before any jit is linked)
   with got: got.wait_for(lambda: all(len(m) >= 1 for m in msgs))
@@ -315,6 +318,9 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     if jit.scratch is None: continue
     for k, n in sizes.items():
       if k not in jit.scratch or jit.scratch[k].max_numel() < n: jit.scratch[k] = UOp.new_buffer(k[0], n, dtypes.int8)
+  # (allocated while the processes compile: the links don't)
+  for b in dedup(u.buffer for jit, _ in calls for u in (jit.scratch or {}).values()):
+    for x in (b.bufs if isinstance(b, MultiBuffer) else [b]): x.ensure_allocated()
 
   # every jit as it comes: taken and linked
   oks, left = [False] * len(children), set(range(len(children)))
@@ -333,5 +339,5 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     jit.captured, jit.cnt = CapturedJit(ret, out[lin], names, info), 2
     _ = jit.captured.linear  # linked
     oks[k] = True
-    if DEBUG >= 1: print(f"capture_parallel: jit {k} taken in {time.perf_counter()-st:.2f}s")
+    if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

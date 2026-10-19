@@ -107,7 +107,7 @@ def store_hazard_boundary(s:UOp):
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(): return None
+  if not src.reaches(base:=target.base): return None
   # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}

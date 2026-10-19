@@ -278,6 +278,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   @recursive_property
+  def _defines_slice(self) -> frozenset[UOp]:
+    sets = [s.defines_slice for s in self.src_without_body]
+    if not sets: return frozenset()
+    return sets[0] if all(x is sets[0] for x in sets[1:]) else frozenset().union(*sets)
+  @property
+  def defines_slice(self) -> frozenset[UOp]:
+    """the PARAMs, BUFFERs and ALLOCs in toposort() (memoized: whether a graph reads a buffer, without a toposort of it)"""
+    return self._defines_slice | {self} if self.op in GroupOp.Defines else self._defines_slice
+  def reaches(self, x:UOp) -> bool: return x in self.defines_slice if x.op in GroupOp.Defines else x in self.toposort()
+
+  @recursive_property
   def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
   # NOTE: self is added outside the cache, a cached self-reference is a cycle the refcounter can't free
   @property
