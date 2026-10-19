@@ -215,7 +215,7 @@ class MetalDevice(Compiled):
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
     super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
-    Compiled.placeholders |= {to_name(self.device, "handles"): lambda b: self.handles}
+    Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([
       (UPat(Ops.BUFFER, name="b").store(UPat(Ops.LINEAR, name="cmds")), lambda b, cmds, d=self: d.new_icb(b.buffer, cmds.src))])
 

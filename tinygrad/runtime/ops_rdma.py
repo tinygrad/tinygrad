@@ -81,7 +81,7 @@ def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
   for nic, q in zip(nics, qps.values()):
     bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
     bufs |= {name: Buffer(nic.device, 8, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
-    Compiled.placeholders |= {to_name(nic.device, *pair, n): b for n, b in bufs.items()}
+    Compiled.link_bufs |= {to_name(nic.device, *pair, n): b for n, b in bufs.items()}
   for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
   return qps
 

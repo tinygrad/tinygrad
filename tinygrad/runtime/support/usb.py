@@ -434,7 +434,7 @@ Compiled.pm_lower += PatternMatcher([
 # 6. bufferize
 
 def usb_reset(dev):
-  host = Compiled.placeholders[to_name(dev.device, "usb_host")]
+  host = Compiled.link_bufs[to_name(dev.device, "usb_host")]
   for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (host, 16, 8)): buf.host.view(off, n)[:] = bytes(n)
   for t in map(libusb.struct_libusb_transfer.from_address, host.host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 
@@ -444,7 +444,7 @@ def setup_usb_rules(dev): # placeholders the gpu owns
   words = [ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())] + [0] + [ctypes.addressof(t) for t in xfers]
   host = Buffer("CPU", HOST_SIZE, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
   go = Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4), allocator=dev.allocator)
-  Compiled.placeholders |= {to_name(dev.device, n): b for n, b in (("usb_host", host), ("usb_go", go), ("usb_asm24", dev.iface.ctrl))}
+  Compiled.link_bufs |= {to_name(dev.device, n): b for n, b in (("usb_host", host), ("usb_go", go), ("usb_asm24", dev.iface.ctrl))}
   dev.error_state = host.view(8, 40) # the link's error word
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

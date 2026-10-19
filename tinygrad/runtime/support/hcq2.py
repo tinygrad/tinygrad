@@ -137,7 +137,7 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
 def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
   use_rt, bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  return UOp.param(slots[b], b.dtype, b.max_numel(), b.device, name=None if use_rt else "lt_input") # an "lt_input" is bound at link
+  return UOp.param(slots[b], b.dtype, b.max_numel(), b.device, name=None if use_rt else "lt_input")
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b))])
 
 def unwrap_call(call:UOp) -> UOp|None:
@@ -429,7 +429,7 @@ pm_lift_deps = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="u"), lambda a, u: a.src[0].after(*dedup([*a.src[1:], *u.src[1:]]))),
 ])
 
-def _needs_arg(u:UOp, root:bool) -> bool: # an "lt_input" is lifted to the root, like an alloc
+def _needs_arg(u:UOp, root:bool) -> bool:
   if u.op in (Ops.BUFFER, Ops.ALLOC): return u.addrspace is AddrSpace.GLOBAL
   return u.op is Ops.PARAM and (u.is_variable != root or u.arg.name == "lt_input")
 
@@ -474,7 +474,7 @@ pm_lower_call = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="cal
 
 # **** link: allocs to buffers, addresses to consts
 
-Compiled.placeholders |= {"timeline": lambda b: Device[b.device].timeline}
+Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
@@ -484,7 +484,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
   dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
 
   # a placeholder is named as is, or by the device it's on. the rest are allocated where they live
-  owned = Compiled.placeholders.get(b.arg.name, Compiled.placeholders.get(to_name(b.device, b.arg.name))) if b.arg.name else None
+  owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name))) if b.arg.name else None
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
   elif (r:=dev.link_buffer(b)) is not None: pass
   elif not ctx.use_rt or b.arg.name is None: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)

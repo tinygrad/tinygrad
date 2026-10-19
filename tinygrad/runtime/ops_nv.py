@@ -653,7 +653,7 @@ class NVDevice(Compiled):
       gpput=self.gpfifo_buf.view(4, gpput_off).ensure_allocated(),
       doorbell=Buffer("CPU", 4, options=BufferSpec(external_ptr=self.gpu_mmio.addr + 0x90), preallocate=True),
       put_value=Buffer("CPU", 8, initial_value=bytes(8)), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
-    Compiled.placeholders |= {to_name(self.device, n, name): getattr(fifo, n) for n in ("ring", "gpput", "doorbell", "put_value")}
+    Compiled.link_bufs |= {to_name(self.device, n, name): getattr(fifo, n) for n in ("ring", "gpput", "doorbell", "put_value")}
     return fifo
 
   def _query_gpu_info(self, *reqs):

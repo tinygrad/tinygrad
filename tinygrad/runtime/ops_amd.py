@@ -859,7 +859,7 @@ class AMDDevice(Compiled):
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
     rings = {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
-    Compiled.placeholders |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())} | rings
+    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())} | rings
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
@@ -869,7 +869,7 @@ class AMDDevice(Compiled):
       self.prof_slots, self.prof_read = getenv("PROF_SLOTS", 32), 0
       self.pmc_sched:list[PMCSample] = []
       self.sqtt_ses, self.sqtt_win = self.se_cnt * self.xccs, (getenv("SQTT_BUFFER_SIZE", 256) << 20) // self.prof_slots # mb, per shader engine
-      Compiled.placeholders |= {to_name(self.device, n): lambda b, n=n: getattr(self, n) for n in ("prof_log", "pmc_buf", "sqtt_buf", "sqtt_wptrs")}
+      Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: getattr(self, n) for n in ("prof_log", "pmc_buf", "sqtt_buf", "sqtt_wptrs")}
     if self.pmc_enabled:
       self.pmc_counters = import_pmc(self.target)
       # validate counters: SQ for SIMD busy/instruction counts, LDS stats, GRBM for GPU cycles, L2 cache hits/misses

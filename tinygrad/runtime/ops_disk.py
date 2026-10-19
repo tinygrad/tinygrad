@@ -166,5 +166,5 @@ def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None:
 @functools.cache
 def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, options=BufferSpec(cpu_access=True), initial_value=bytes(STAGE_SZ))
 
-Compiled.placeholders |= {"disk_info": lambda b: cast(DiskDevice, Device[b.device]).info, "disk_stage": lambda b: _stage(b.device),
-                          "uring_rings": lambda b: unwrap(uring())[2], "uring_sqes": lambda b: unwrap(uring())[3]}
+Compiled.link_bufs |= {"disk_info": lambda b: cast(DiskDevice, Device[b.device]).info, "disk_stage": lambda b: _stage(b.device),
+                       "uring_rings": lambda b: unwrap(uring())[2], "uring_sqes": lambda b: unwrap(uring())[3]}

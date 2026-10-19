@@ -373,7 +373,7 @@ class Compiled:
   pm_encode:Any = None
   pm_lower:Any = None
   pm_link:Any = None
-  placeholders:dict[str, Any] = {} # by name, or to_name(device, name) for the ones a device owns: a Buffer, or a function of the ALLOC for a lazy one
+  link_bufs:dict[str, Any] = {}
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
@@ -407,7 +407,7 @@ class Compiled:
   def rt_buffer(self, spec:BufferSpec) -> Buffer:
     return Buffer(self.device, self.rt_allocator(spec).size, options=spec, preallocate=True)
 
-  def link_buffer(self, b:UOp) -> Buffer|None: return None # the memory of an unowned ALLOC on the device, if not allocated
+  def link_buffer(self, b:UOp) -> Buffer|None: return None
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]

@@ -339,7 +339,7 @@ class QCOMDevice(Compiled):
     dummy = Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), preallocate=True, allocator=self.allocator)
     border_color = Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), initial_value=bytes(0x1000), allocator=self.allocator)
     stack = {to_name(self.device, "stack"): lambda b: self._ensure_stack_size(b.max_numel())}
-    Compiled.placeholders |= stack | {to_name(self.device, "dummy"): dummy, to_name(self.device, "border_color"): border_color}
+    Compiled.link_bufs |= stack | {to_name(self.device, "dummy"): dummy, to_name(self.device, "border_color"): border_color}
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> BufferStorage:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP

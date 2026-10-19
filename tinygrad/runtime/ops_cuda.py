@@ -103,7 +103,7 @@ class CUDADevice(Compiled):
     handles = Buffer(HCQ_RUNTIME_DEV.device, 24, initial_value=b"".join(map(bytes, (self.context, *self.streams))))
     fn = cuda.CUhostFn(lambda slot: ctypes.memmove(slot, struct.pack("Q", time.perf_counter_ns()), 8))
     stamp = Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(int.from_bytes(bytes(fn), "little"), fn))
-    Compiled.placeholders |= {to_name(self.device, "handles"): handles, to_name(self.device, "stamp"): stamp}
+    Compiled.link_bufs |= {to_name(self.device, "handles"): handles, to_name(self.device, "stamp"): stamp}
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
 
