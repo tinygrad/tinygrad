@@ -221,7 +221,8 @@ def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   out_gpu = Buffer(dev.device, buf_sz, preallocate=True)
   assert out_gpu._buf % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu._buf:x}"
   lds = UOp.placeholder((65536,), dtypes.uint8, 0, AddrSpace.LOCAL)
-  sink = UOp.sink(UOp.param(0, dtypes.uint32, (buf_sz // 4,)), UOp.special(n_lanes, "lidx0"), lds, arg=KernelInfo("test"))
+  scratch = UOp.alloc((512,), dtypes.uint8, name="scratch", addrspace=AddrSpace.GLOBAL)
+  sink = UOp.sink(UOp.param(0, dtypes.uint32, (buf_sz // 4,)), UOp.special(n_lanes, "lidx0"), lds, scratch, arg=KernelInfo("test"))
   body = UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in prologue + instructions + epilogue))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
   run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)

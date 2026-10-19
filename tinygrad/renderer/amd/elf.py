@@ -35,12 +35,13 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  sink, param_sizes, lds_size, gids = prg.src[0], {}, 0, set()
+  sink, param_sizes, lds_size, scratch_size, gids = prg.src[0], {}, 0, 0, set()
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
   wave32 = not is_cdna
   for u in sink.toposort():
     if u.op is Ops.PARAM: param_sizes[u.arg.slot] = u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8
     elif u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
+    elif u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL and u.arg.name == "scratch": scratch_size += u.max_numel() * u.dtype.itemsize
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
     elif u.op is Ops.RANGE and u.axis_type is AxisType.WARP and u.src[0].arg == 64: wave32 = True
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
@@ -61,6 +62,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
   desc.group_segment_fixed_size = lds_size
+  desc.private_segment_fixed_size = scratch_size
   for sz in (param_sizes[i] for i in sorted(param_sizes)): desc.kernarg_size = round_up(desc.kernarg_size, sz) + sz
   desc.kernel_code_entry_byte_offset = -len(text)
 
@@ -72,7 +74,8 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_DX10_CLAMP_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)
-  desc.compute_pgm_rsrc2 = (2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
+  desc.compute_pgm_rsrc2 = (int(scratch_size > 0) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT |
+                            2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
                             int(0 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X_SHIFT |
                             int(1 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
                             int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
