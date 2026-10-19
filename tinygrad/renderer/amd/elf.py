@@ -56,7 +56,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   accum_offset = round_up(max_vgpr, 4) if max_accvgpr > 0 else 0
   next_free_vgpr = round_up(accum_offset + max_accvgpr, 8) if max_accvgpr > 0 else round_up(max_vgpr, 8)
   next_free_sgpr = round_up(max_sgpr, 8)
-  vgpr_granule = max(0, ceildiv(next_free_vgpr, 8 if is_cdna or wave32 else 4) - 1)
+  vgpr_granule = max(0, (next_free_vgpr - 1) // (8 if is_cdna or wave32 else 4))
   # CDNA: add 6 for VCC(2) + FLAT_SCRATCH(2) + XNACK_MASK(2), next_free_sgpr is unused in RDNA.
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
