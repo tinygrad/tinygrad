@@ -7,7 +7,7 @@ from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Con
 from tinygrad.helpers import DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
-from tinygrad.uop.ops import pm_renumber_slots, CountCtx
+from tinygrad.uop.ops import pm_renumber_slots, CountCtx, CallInfo
 from tinygrad.dtype import dtypes, AddrSpace, truncate, to_dtype
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
@@ -305,6 +305,8 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
                   for b in get_call_arg_uops(c) for d in to_tuple(b.device) if d.split(":")[0] == "AMD"})
   num_queues = max(1, getenv("HCQ_NUM_SDMA", min(len(peers), 8, *(getattr(Device[d], "copy_queues", 8) for d in peers)) if ALL2ALL >= 1 else 1))
   queues = ["COMPUTE:0" if c.op is Ops.CALL and c.body.op is Ops.PROGRAM else "COPY:0" for c in l.src]
+  # the kernels of a call tagged with a compute queue run there (the queues wait for each other's dependencies)
+  queues = [c.arg.queue if q == "COMPUTE:0" and isinstance(c.arg, CallInfo) and c.arg.queue else q for c, q in zip(l.src, queues)]
   for i, c in enumerate(l.src):
     if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION: queues[i] = "ENCDEC:0"
     if c.op is Ops.CALL and c.body.op is Ops.STORE and all(b.device in peers for b in get_call_arg_uops(c)):
@@ -313,6 +315,11 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     elif c.op is Ops.CALL and c.body.op is Ops.STORE and len(devs[i]) == 1 and c.src[1].device == devs[i][0] != c.src[2].device and \
          getattr(Device[devs[i][0]], "copy_duplex", False): queues[i] = "COPY:1"
 
+  # the copies of a call on a copy queue run there
+  for i, c in enumerate(l.src):
+    if c.op is Ops.CALL and c.body.op is Ops.STORE and queues[i].startswith("COPY") and isinstance(c.arg, CallInfo) and c.arg.queue and \
+       devs[i] and int(c.arg.queue.split(":")[1]) < getattr(Device[devs[i][0]], "copy_queues", 1):
+      queues[i] = "COPY:" + c.arg.queue.split(":")[1]
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
     nodes:dict[str, list] = {}

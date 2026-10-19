@@ -1,6 +1,6 @@
 from collections import defaultdict
 from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up, to_tuple
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, CallInfo
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
 
@@ -14,7 +14,7 @@ def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   # CL and WEBGPU do not support views, see explanation in contiguous_view_offset
   return all(not d.startswith(("DISK", "CL", "WEBGPU")) for d in to_tuple(b.device))
 
-LaneKey = tuple[str, int]
+LaneKey = tuple[str, int, int]
 LARGE_BUFFER = 1 << 20  # buffers placed before the others (see memory_plan_rewrite)
 
 def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[LaneKey, UOp]|None=None) -> UOp:
@@ -27,16 +27,20 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
   first_appearance:dict[UOp, int] = {}
   last_appearance:dict[UOp, int] = {}
   copy_bufs: set[UOp] = set()
+  queues:dict[UOp, set[int]] = defaultdict(set)
   for i, si in enumerate(linear.src):
     si_bufs = [b for src in si.src[1:] for b in _collect_bufs(src) if _can_plan(b, held_bufs)]
+    q = int(si.arg.queue.split(":")[1]) if isinstance(si.arg, CallInfo) and si.arg.queue else 0
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
+      queues[b].add(q)
     if si.src[0].op is Ops.STORE: copy_bufs.update(si_bufs)
   if not first_appearance: return linear
 
-  # separate copy and compute buffers into different lanes to avoid introducing dependencies (copy->compute->copy)
-  def _key(b:UOp): return (b.device, 1 if b in copy_bufs else 0)
+  # separate copy and compute buffers into different lanes to avoid introducing dependencies (copy->compute->copy), and the buffers of the
+  # calls of different queues (they run at the same time, a buffer of two of them in its own lane)
+  def _key(b:UOp): return (b.device, 1 if b in copy_bufs else 0, next(iter(queues[b])) if len(queues[b]) == 1 else -1)
   buf_hold = {b: last_appearance[b] - first_appearance[b] + 1 for b in first_appearance if b in copy_bufs}
 
   # suballocation: build sorted open/close events, then alloc/free in order

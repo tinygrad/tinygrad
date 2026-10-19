@@ -2,7 +2,7 @@ import time, inspect
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import GroupOp, remove_all_tags, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import GroupOp, remove_all_tags, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo, CallInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
@@ -97,19 +97,25 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None, queue:str|None=None):
   linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
            **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
               if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU}}
+  # a call on a queue: its kernels run there
+  if queue is None and isinstance(linear_call.arg, CallInfo): queue = linear_call.arg.queue
   def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds, queue)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
     subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.name is None and v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
-  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+  def queued(si:UOp) -> UOp:
+    # (the copies of a call on compute queue i on copy queue i)
+    if queue is None or si.op is not Ops.CALL or not isinstance(si.arg, CallInfo) or si.arg.queue: return si
+    return si.replace(arg=replace(si.arg, queue=queue.replace("COMPUTE", "COPY") if si.body.op is Ops.STORE else queue))
+  return linear.replace(src=tuple(queued(apply_binds(si)) for si in linear.src))
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here

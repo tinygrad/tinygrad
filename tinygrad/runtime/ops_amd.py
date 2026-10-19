@@ -429,7 +429,9 @@ class AMDComputeQueue(HWQueue):
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
     ib = UOp.alloc((16,), dtypes.uint8, device=self.dev.host).rtag(to_name("ib", self.queue))
-    return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.dev.compute_queue))
+    return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.desc()))
+
+  def desc(self) -> AMDQueueDesc: return self.dev.compute_queue_n(int(self.queue.split(":")[1]))  # COMPUTE:i
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
   def kernel_barrier(self): pass # the aql packets have the barrier bit set
@@ -467,7 +469,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
     aql = encode_cmdbuf(self, name="aql", device=self.dev.host)
-    return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self, self.dev.compute_queue), unit=64, doorbell_lag=1)
+    return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self, self.desc()), unit=64, doorbell_lag=1)
 
 # *****************
 # SDMA
@@ -750,7 +752,7 @@ class PCIIface(PCIIfaceBase):
       doorbell_index = self.dev_impl.sdma.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr, gart._buf+wptr, idx)))
     else:
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr,
-        gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
+        gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, 4*idx + (is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), is_aql)))
 
     put_value = Buffer(host:=self.dev.host, 8, initial_value=bytes(8))
     doorbell = Buffer(host, 8, options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
@@ -763,7 +765,7 @@ class PCIIface(PCIIfaceBase):
     else: d.iface.dev_impl.ih.interrupt_handler()
 
     if reset and d.iface.dev_impl.recover(force=True):
-      for q, ip in [(d.compute_queue, d.iface.dev_impl.gfx), *[(q, d.iface.dev_impl.sdma) for q in d.sdma_queues.values()]]:
+      for q, ip in [*[(q, d.iface.dev_impl.gfx) for q in d.compute_queues.values()], *[(q, d.iface.dev_impl.sdma) for q in d.sdma_queues.values()]]:
         for b in (q.put_value, q.read_ptr, q.write_ptr): b.host.view(fmt='Q')[0] = 0
         ip.setup_ring(*q.params)
       for tl in (x.timeline.host.view(fmt='Q') for x in (d, Device[d.host])): tl[0] = tl[1] # the host waits on this device too
@@ -912,10 +914,20 @@ class AMDDevice(Compiled):
   def queue_buffer(self, tag):
     if not isinstance(tag, str) or not (t:=tag.removeprefix(self.tag(""))).startswith(("ring_", "write_ptr_", "doorbell_", "put_value_")): return None
     name, queue, idx = t.rsplit('_', 2)
-    return getattr(self.compute_queue if queue == 'compute' else self.sdma_queue(int(idx)), name)
+    return getattr(self.compute_queue_n(int(idx)) if queue == 'compute' else self.sdma_queue(int(idx)), name)
+
+  @property
+  def compute_queue(self) -> AMDQueueDesc: return self.compute_queue_n(0)
 
   @functools.cached_property
-  def compute_queue(self) -> AMDQueueDesc:
+  def compute_queues(self) -> dict[int, AMDQueueDesc]: return {}
+
+  def compute_queue_n(self, idx:int) -> AMDQueueDesc:
+    """compute queue idx (am: on MEC pipe idx, they run concurrently)"""
+    if idx not in self.compute_queues: self.compute_queues[idx] = self._create_compute_queue(idx)
+    return self.compute_queues[idx]
+
+  def _create_compute_queue(self, idx:int) -> AMDQueueDesc:
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, hwreg_size_per_cu = 0x4000, 0x1000
     lds_size_per_cu = self.iface.props["lds_size_in_kb"] << 10 if self.target[:2] == (9,5) else 0x10000
@@ -925,7 +937,7 @@ class AMDDevice(Compiled):
     return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
       (1 << 20) if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
-      debug_memory_size=round_up(self.wave_cnt * 32, 64))
+      debug_memory_size=round_up(self.wave_cnt * 32, 64), idx=idx)
 
   @functools.cached_property
   def copy_queues(self) -> int:

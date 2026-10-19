@@ -10,7 +10,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, sharded_argmax
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
-from tinygrad.uop.ops import resolve
+from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
 
@@ -509,6 +509,15 @@ class FFNBlock:
     def _post(out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor: return hc.post_split(out, post, comb, xs).contiguous()
     return _post(out, post, comb, xs)
 
+def _on_queue(ts:tuple[Tensor, ...], queue:str) -> tuple[Tensor, ...]:
+  """the outputs of a function call, its kernels on the compute queue `queue` (its copies on the copy queue of that index)"""
+  def call_of(u:UOp) -> UOp: return u.src[1] if u.op is Ops.AFTER and u.src[1].op is Ops.CALL else call_of(u.src[0])
+  call = call_of(ts[0].uop)
+  def requeue(u:UOp) -> UOp:
+    if u.op is Ops.AFTER and u.src[1] is call: return u.replace(src=(u.src[0], call.replace(arg=replace(call.arg, queue=queue)), *u.src[2:]))
+    return u.replace(src=(requeue(u.src[0]), *u.src[1:]))
+  return tuple(Tensor(requeue(t.uop)) for t in ts)
+
 def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list) -> list[Tensor]:
   """
   the blocks on micro batches of rows (sequence parallel streams, a batch starts at the end of the tokens before it). a sublayer is three
@@ -516,19 +525,20 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list) -> li
   a sublayer of a batch runs after the one of the batch before it: it reads the state and the cache it writes (implicit, not graph inputs)
   """
   def after(x:Tensor, dep:Tensor|None) -> Tensor: return x if dep is None else Tensor(x.uop.after(*dep.uop.src[1:]))
+  def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]: return _on_queue(outs, f"COMPUTE:{i}") if i and getenv("MB_QUEUES", 1) else outs
   subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
                                                                            (block.hc_ffn, block.ffn_norm, "ffn"))]
   for block in blocks: block._init_state(xs[0])
   done:list[Tensor] = []
   for i in range(len(xs)):
     for k, (block, hc, norm, sub) in enumerate(subs):
-      if k == 0: hn, post, comb = block._phase_pre(hc, norm, xs[i])
+      if k == 0: hn, post, comb = queued(i, *block._phase_pre(hc, norm, xs[i]))
       # (the batch before it ran this sublayer: its output's call, sublayer k of every batch is kept in done)
-      out = block._phase_sub(sub, after(hn, done[k] if i else None), starts[i], ts[i])
+      out = queued(i, block._phase_sub(sub, after(hn, done[k] if i else None), starts[i], ts[i]))[0]
       if i == 0: done.append(out)
       else: done[k] = out
-      xs[i] = block._phase_post(hc, out, post, comb, xs[i])
-      if k + 1 < len(subs): hn, post, comb = subs[k+1][0]._phase_pre(subs[k+1][1], subs[k+1][2], xs[i])
+      xs[i] = queued(i, block._phase_post(hc, out, post, comb, xs[i]))[0]
+      if k + 1 < len(subs): hn, post, comb = queued(i, *subs[k+1][0]._phase_pre(subs[k+1][1], subs[k+1][2], xs[i]))
   return xs
 
 class TransformerBlock(FFNBlock):
@@ -947,7 +957,8 @@ class Transformer:
       x = x.pad_to(x.max_shape).contiguous()
       R = int(x.shape[1])
       # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
-      mb = getenv("MICRO_BATCHES", 1)
+      # big chunks in two micro batches (on queues of their own: the copies of one run with the kernels of the other)
+      mb = getenv("MICRO_BATCHES", 2 if R >= getenv("MB_MIN_ROWS", 4032) else 1)
       if (sp:=self.sequence_parallel(R)) and (mb > 1 or getenv("MB_PHASES", 1)) and self.sequence_parallel(R // mb) and R % mb == 0:
         # the blocks in phases (micro_batch_blocks), on micro batches of rows if MICRO_BATCHES > 1 (the copies of one overlap the kernels of
         # the next). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
@@ -1294,9 +1305,9 @@ class Transformer:
     """the prefill chunk sizes, ascending: the custom kernels compute chunks padded to a static size, a piece of a prompt runs the smallest
     one it fits (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
     fast = amd_custom_kernels_supported(self.token_embd.weight.device)
-    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 4096 if fast else 32), self.max_context)
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 8192 if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
-    sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048)) if fast else ())]
+    sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048), 4096) if fast else ())]
     if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None and getenv("SEQ_PARALLEL", 1):
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
