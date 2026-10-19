@@ -1350,8 +1350,6 @@ class Transformer:
 
   def warmup(self):
     """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
-    # the devices' access to each other is set up while the jits are built
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): getattr(Device[d], "prefetch_peer_access", lambda: None)()
     sizes = self.prefill_chunks()
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):

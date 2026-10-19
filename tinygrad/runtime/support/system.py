@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools, signal, threading
-import fcntl, concurrent.futures
+import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
 from tinygrad.runtime.autogen import libc, pci, vfio
@@ -282,16 +282,21 @@ class PCIDevice:
   def dma_free(self, paddr:int, size:int):
     if self.iommu: System.dma_unmap(paddr, size)
 
-  def bar_iova(self, bar:int) -> int:
-    """behind the iommu: the io address where the peers reach the bar (mapped in the container once)"""
-    return self.map_bar_iova(bar).result()
-
   @functools.cache
-  def map_bar_iova(self, bar:int) -> concurrent.futures.Future:
-    """maps the bar for the peers in the background (seconds for a big bar: the iommu pins every page), bar_iova waits for it"""
+  def bar_iova(self, bar:int) -> tuple[int, MMIOInterface, set[int]]:
+    """behind the iommu: the io address range of the bar for the peers, its mapping and the chunks of it mapped (bar_iova_map)"""
     size = self.bar_info(bar)[1]
-    mmio, iova = self.map_bar(bar, size=size), System.iova_bars.alloc(size, 1 << 30)
-    return _bar_mapper().submit(System.dma_map, mmio.addr, size, iova)
+    return System.iova_bars.alloc(size, 1 << 30), self.map_bar(bar, size=size), set()
+
+  def bar_iova_map(self, bar:int, off:int, size:int) -> int:
+    """the io address of the bar's bytes off.. for the peers: the chunks (1GB) they're in are mapped once (the iommu takes ~70ms per GB)"""
+    iova, mmio, mapped = self.bar_iova(bar)
+    for c in range(off >> 30, (off + max(size, 1) - 1 >> 30) + 1):
+      if c not in mapped:
+        n = min(1 << 30, self.bar_info(bar)[1] - (c << 30))
+        System.dma_map(mmio.addr + (c << 30), n, iova + (c << 30))
+        mapped.add(c)
+    return iova + off
 
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
@@ -337,9 +342,6 @@ class USBPCIDevice(PCIDevice):
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
     return USBMMIOInterface(self.usb, self.bar_info(bar)[0] + off, size or self.bar_info(bar)[1], fmt)
   def resize_bar(self, bar_idx:int): pass # already resized
-
-@functools.cache
-def _bar_mapper() -> concurrent.futures.ThreadPoolExecutor: return concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="bar_mapper")
 
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
@@ -392,7 +394,8 @@ class PCIIfaceBase:
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
     # the peers reach the vram through its bar: its bus address, or behind the iommu the io address it's mapped at
-    base = self.pci_dev.bar_iova(self.vram_bar) if getattr(self.pci_dev, "iommu", False) else self.pci_dev.bar_info(self.vram_bar)[0]
+    if getattr(self.pci_dev, "iommu", False): return [(self.pci_dev.bar_iova_map(self.vram_bar, p, sz), sz) for p, sz in paddrs], AddrSpace.SYS
+    base = self.pci_dev.bar_info(self.vram_bar)[0]
     return [(p + base, sz) for p, sz in paddrs], AddrSpace.SYS
 
   def map(self, b:Buffer) -> BufferStorage:
