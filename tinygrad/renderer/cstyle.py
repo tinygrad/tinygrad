@@ -299,11 +299,16 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) \
     + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
+  def render_ptr(self, u:UOp):
+    if self.target.device == "CPU" and u.max_numel() > 1: return f"(({self._render_dtype(u.dtype, u.max_numel())}_unaligned*)({self[u]}))"
+    return super().render_ptr(u)
+
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
     alignment = 2**int(math.log2(dt.itemsize * count)) if not dtypes.is_bool(dt) else 1
     vec = self._render_dtype(dt, count, AddrSpace.REG)
-    return f"typedef {self.render_dtype(dt)} {vec} __attribute__((aligned({alignment}),ext_vector_type({count})));"
+    return f"typedef {self.render_dtype(dt)} {vec} __attribute__((aligned({alignment}),ext_vector_type({count})));" + \
+           (f"\ntypedef {vec} {vec}_unaligned __attribute__((aligned({dt.itemsize})));" if self.target.device == "CPU" else "")
 
   def _render_defines(self, uops) -> list[str]: return [self.render_vector_prefix(dt, count) for dt, count in uops_to_dtypes(uops) if count > 1]
   def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)
