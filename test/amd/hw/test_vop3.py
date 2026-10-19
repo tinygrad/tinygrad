@@ -4,7 +4,7 @@ Includes: v_fma_f32, v_div_scale_f32, v_div_fmas_f32, v_div_fixup_f32,
           v_alignbit_b32, v_bfe_i32, v_mad_u64_u32, v_readlane_b32, v_writelane_b32
 """
 import unittest
-from tinygrad.helpers import OSX, Context
+from tinygrad.helpers import OSX
 from test.amd.hw.helpers import *
 
 class TestFMA(unittest.TestCase):
