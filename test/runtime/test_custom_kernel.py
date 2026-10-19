@@ -4,7 +4,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
-from tinygrad.helpers import getenv, DEV
+from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
@@ -592,7 +592,7 @@ class TestCustomKernel(unittest.TestCase):
 
   @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
                        Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
-  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "AMD", "ASM_CALL does not support s_getpc/s_setpc")
+  @unittest.skipIf(getenv("ASM_CALL"), "ASM_CALL doesn't support direct pc read and write")
   def test_binary(self):
     payload = bytes(range(256))
     def kernel(out:UOp):

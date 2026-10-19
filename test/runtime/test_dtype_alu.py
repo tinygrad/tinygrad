@@ -286,6 +286,11 @@ class TestDTypeALU(unittest.TestCase):
     x = Tensor([2**31-2], dtype=dtypes.int32)
     self.assertEqual(((x//2+2**29)//2).tolist(), [805306367])
 
+  def test_unsigned_mul_max(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      x = Tensor([dt.max//2, dt.max//2+1], dtype=dt)
+      self.assertEqual((x*2).max().item(), dt.max-1)
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
