@@ -91,7 +91,7 @@ jobs:
         model: ['llama3.2:3b-f16', 'qwen3.8:27b', 'olmoe']
         # qwen3.8:27b doesn't fit on mac
         exclude: [{ dev: 'METAL', model: 'qwen3.8:27b' }, { dev: 'AMD', model: 'olmoe' }, { dev: 'NV', model: 'olmoe' }]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
