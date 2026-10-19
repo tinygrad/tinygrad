@@ -130,6 +130,7 @@ class TransformerConfig:
   sliding_window_pattern: int = 0
   hc: HCConfig|None = None
   indexer: IndexerConfig|None = None
+  spec_drafts: int = 0
 
 class HyperConnection:
   def __init__(self, config:TransformerConfig):
@@ -210,17 +211,17 @@ class FFNBlock:
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
-  def __call__(self, x: Tensor, start_pos: int|UOp):
+  def __call__(self, x: Tensor, start_pos: int|UOp, src:UOp|None=None):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp):
+    def _run(x:Tensor, start_pos:int|UOp, src:UOp|None):
       if self.config.hc is not None:
         xs = self.hc_attn(x, lambda h: self._attention(self.attn_norm(h), start_pos))
         return self.hc_ffn(xs, lambda h: self._feed_forward(self.ffn_norm(h))).contiguous()
-      h =     x + self._attention(self.attn_norm(x), start_pos)
+      h =     x + self._attention(self.attn_norm(x), *((start_pos,) if src is None else (start_pos, src)))
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
-    return _run(x, start_pos)
+    return _run(x, start_pos, src)
 
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -391,7 +392,7 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp, src:UOp|None=None) -> Tensor:
     B, T, _ = x.shape
     # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
@@ -411,13 +412,14 @@ class GatedDeltaNetBlock(FFNBlock):
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
-    conv_state = initial.where(0, self.conv_state)
+    conv_state = initial.where(0, self.conv_state if src is None else self.conv_slots[src])
     # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
     # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
     conv_window = conv_state.cat(self.attn_qkv(x).cast(conv_state.dtype), dim=1)
     conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels)).contiguous()
     # the last conv_kernel-1 columns of the window become the next conv state
-    conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
+    conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop) if src is None else \
+      self.conv_slots.uop.store(Tensor.stack(*(conv_window[:, t+1:t+self.ssm_conv_kernel] for t in range(T))).uop)
 
     conv_out = functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
@@ -435,23 +437,25 @@ class GatedDeltaNetBlock(FFNBlock):
     alpha = log_alpha.transpose(1, 2).exp()  # per-channel decay for kda, per-head otherwise (B, H, T, K|1)
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
-    state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
+    state = Tensor((self.recurrent_state if src is None else self.state_slots).uop.after(conv_state_store))  # carry the conv write into this graph
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
-      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
+      core = gated_delta_prefill(q, k, v, beta, alpha, state, *((Tensor(start_pos),) if src is None else (None, Tensor(src)))).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)
-      state = initial.where(0, state.float())
-      outs = []
+      state = initial.where(0, (state if src is None else state[src]).float())
+      outs, states = [], []
       for t in range(T_pad):
         s1 = state * alpha[:, :, t]  # decay the state
         delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
         state = s1 + delta * k[:, :, t]
         outs.append((state * q[:, :, t]).sum(-1))
+        states.append(state)
 
       # store the updated recurrent state in place, then read the stacked outputs after the write
-      state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
+      if src is None: state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
+      else: state_store = self.state_slots.uop.store(Tensor.stack(*states).cast(self.state_slots.dtype).uop)
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store))
 
     # output; undo the padding before the output projection
@@ -463,6 +467,25 @@ class GatedDeltaNetBlock(FFNBlock):
     if not hasattr(self, "conv_state"):
       self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
       self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).clone()
+
+  def spec_seed(self, slots:int) -> list[Tensor]:
+    if not hasattr(self, "state_slots"):
+      self.conv_slots = Tensor.zeros(slots, *self.conv_state.shape, dtype=self.conv_state.dtype, device=self.conv_state.device).clone()
+      self.state_slots = Tensor.zeros(slots, *self.recurrent_state.shape, dtype=self.recurrent_state.dtype,
+                                      device=self.recurrent_state.device).clone()
+    return [self.conv_slots.assign(self.conv_state.unsqueeze(0).expand(self.conv_slots.shape)),
+            self.state_slots.assign(self.recurrent_state.unsqueeze(0).expand(self.state_slots.shape))]
+  def spec_commit(self, slot:int) -> list[Tensor]:
+    return [self.conv_state.assign(self.conv_slots[slot]), self.recurrent_state.assign(self.state_slots[slot])]
+
+class MTPBlock(TransformerBlock):
+  def __init__(self, config:TransformerConfig):
+    super().__init__(config)
+    self.eh_proj = Linear(2*config.dim, config.dim, bias=False)
+    self.enorm, self.hnorm = nn.RMSNorm(config.dim, config.norm_eps), nn.RMSNorm(config.dim, config.norm_eps)
+    self.shared_head_norm = nn.RMSNorm(config.dim, config.norm_eps)
+  def predict(self, emb:Tensor, h:Tensor, start_pos:int|UOp) -> Tensor:
+    return self.shared_head_norm(self(self.eh_proj(self.enorm(emb).cat(self.hnorm(h), dim=-1)), start_pos))
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
@@ -478,25 +501,74 @@ class Transformer:
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
+    if config.spec_drafts: self.mtp = MTPBlock(config)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
+    self.spec_jit = TinyJit(self.forward_spec)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     for block in self.blk: x = block(x, start_pos)
     if hc is not None: x = x.mean(2)
+    if self.config.spec_drafts:
+      if not hasattr(self, "_spec_carry"): self._spec_carry = Tensor.zeros(1, 1, self.config.dim, device=x.device).contiguous().realize()
+      T, hn = x.shape[1], self.output_norm(x.realize())
+      m = self.mtp.predict(self.token_embd(tokens.to(x.device)).float(), self._spec_carry.cat(hn, dim=1).shrink((None, (0, T), None)), start_pos)
+      m[:, :1, :1].contiguous().realize()
+      self._spec_carry.assign(hn.shrink((None, (T-1, T), None))).realize()
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)
+    return self._sample(logits, temperature)
+
+  def _sample(self, logits:Tensor, temperature:Tensor) -> Tensor:
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
+    temperature = temperature.to(logits.device)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
+
+  def forward_spec(self, mtp_pos:UOp, j:UOp, temperature:Tensor) -> Tensor:
+    k, start_pos = self.config.spec_drafts, mtp_pos + j
+    m = self.mtp.predict(self.token_embd(self._spec_g).float(), self._spec_hn, mtp_pos).shrink((None, (j, j+1), None))
+    drafts:list[Tensor] = []
+    for i in range(k):
+      drafts.append(self.output(m).argmax(-1).cast(dtypes.int32))
+      if i < k-1: m = self.mtp.predict(self.token_embd(drafts[-1]).float(), m, start_pos+i+1)
+    x = self.token_embd(self._spec_g.shrink((None, (j, j+1))).cat(*drafts, dim=1)).float()
+    for block in self.blk: x = block(x, start_pos, j if isinstance(block, GatedDeltaNetBlock) else None)
+    hn = self.output_norm(x)
+    out, hn = self._sample(self.output(hn), temperature).squeeze(-1).cast(dtypes.int32).cat(*drafts, dim=1), hn.contiguous()
+    Tensor.realize(out, hn)
+    Tensor.realize(self._spec_hn.assign(hn), self._spec_g.assign(out[:, :k+1]))
+    return out
+
+  def _spec_generate(self, tokens:list[int], temperature:Tensor):
+    k = self.config.spec_drafts
+    v_mtp, v_j = UOp.variable("mtp_pos", 0, self.max_context-1), UOp.variable("spec_j", 0, k)
+    if not hasattr(self, "_spec_hn"):
+      self._spec_hn = Tensor.zeros(1, k+1, self.config.dim, device=self._spec_carry.device).contiguous()
+      self._spec_g = Tensor.zeros(1, k+1, dtype=dtypes.int32, device=self._spec_carry.device).contiguous()
+    Tensor.realize(self._spec_hn.assign(self._spec_carry.pad((None, (0, k), None))),
+                   self._spec_g.assign(Tensor([[tokens[-1]] + [0]*k], dtype=dtypes.int32, device=self._spec_g.device)),
+                   *[t for b in self.blk if isinstance(b, GatedDeltaNetBlock) for t in b.spec_seed(k+1)])
+    mtp_pos, j, given = len(tokens) - 1, 0, 1
+    try:
+      while mtp_pos + j + k + 1 < self.max_context:
+        out = [int(t) for t in self.spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), temperature).numpy()[0]]
+        mtp_pos, j = mtp_pos + j + 1, next((i for i in range(k) if out[k+1+i] != out[i]), k)
+        for given, tok in enumerate(out[k+1:k+1+j] + [out[j]], 1):
+          tokens.append(tok)
+          self._cached_tokens = tokens[:-1]
+          yield tok
+    finally:
+      Tensor.realize(self._spec_carry.assign(self._spec_hn[:, given-1:given]),
+                     *[t for b in self.blk if isinstance(b, GatedDeltaNetBlock) for t in b.spec_commit(given-1)])
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -556,6 +628,8 @@ class Transformer:
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
     if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
+    spec_drafts = getenv("SPEC_DRAFTS", 0) if arch in ('qwen35', 'qwen35moe') and kv.get(f'{arch}.nextn_predict_layers', 0) else 0
+    if spec_drafts: state_dict = {re.sub(rf"^blk\.{num_blocks}\.(nextn\.)?", "mtp.", k):v for k,v in state_dict.items()}
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
@@ -606,7 +680,8 @@ class Transformer:
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer)
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer,
+      spec_drafts=spec_drafts)
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
@@ -637,7 +712,8 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    out, prompt_len = None, len(tokens)
+    out, prompt_len, spec = None, len(tokens), self.config.spec_drafts > 0
+    if start_pos == 0 and hasattr(self, "_spec_carry"): self._spec_carry.assign(Tensor.zeros_like(self._spec_carry)).realize()
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
@@ -648,3 +724,6 @@ class Transformer:
       tokens.append(int(out.item()))
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]
+      if spec:
+        yield from self._spec_generate(tokens, temp)
+        spec, start_pos, out = False, len(tokens)-1, Tensor([[tokens[-1]]], dtype="int32")

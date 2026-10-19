@@ -192,18 +192,21 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor, 
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str) -> UOp:
   chunks = out.shape[2]
-  # One wave per output/chunk; group neighboring rows to amortize workgroup scheduling.
+  # One wave per output/chunk, of every token when there are few (shared weight loads); group neighboring rows to amortize workgroup scheduling.
+  multi = out.shape[0] if out.shape[0] <= 4 else 1
   rows = math.gcd(out_features, 4)
-  row = UOp.range(out.shape[0]*out_features//rows, 0, AxisType.GLOBAL)
+  row = UOp.range(out.shape[0]//multi*out_features//rows, 0, AxisType.GLOBAL)
   wave = UOp.range(rows, 3, AxisType.LOCAL)
   token_output = row*rows+wave
   chunk, lane = UOp.range(chunks, 1, AxisType.GLOBAL), UOp.range(32, 2, AxisType.LOCAL)
-  token, output = token_output // out_features, token_output % out_features
+  output = token_output % out_features
+  tokens = [token_output // out_features] if multi == 1 else [UOp.const(t, dtypes.weakint) for t in range(multi)]
   group = lane+chunk*32
-  value = (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
-  total = warp_reduce(value, full_wave=True)
-  return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(row, wave, chunk, lane).sink(
-    arg=KernelInfo(name=name, opts_to_apply=()))
+  def total(token:UOp) -> UOp:
+    value = (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
+    return warp_reduce(value, full_wave=True)
+  stores = [out[token, output, chunk.valid(lane.eq(0))].store(total(token).cast(out.dtype)) for token in tokens]
+  return UOp.group(*stores).end(row, wave, chunk, lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
@@ -736,14 +739,17 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   T_real, q_start = q.shape[2], None
   D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
   decode = resolve(T_real == 1, False)
+  rows = T_real if isinstance(T_real, int) and T_real < BLOCK_M else 0
   # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
-  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode else
+  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode or rows else
     D >= 64 and 2*(2*BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
   if not supported:
     k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
     mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
     return q.float().scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
   if decode: return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, cast(int, N))
+  if rows: return Tensor.cat(*[amd_flash_attention_decode(q[:, :, i:i+1].half(), assigned_kv, valid_end-(rows-1-i), cast(int, N))
+                               for i in range(rows)], dim=2)
   if isinstance(T_real, UOp):
     # symbolic chunk: pad the queries to the static tile; garbage rows are sliced off
     T_pad = q.max_shape[2]
@@ -759,7 +765,8 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 # ******** gated delta net: fused recurrent scan ********
 
 @functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
+def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
+                                src:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim, row_tile = *core.shape, 4
   key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
   assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
@@ -767,14 +774,16 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
   q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
   beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
-  alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
+  alpha = alpha.reshape(batch*heads, tokens, alpha_dim)
+  state = state.reshape(batch*heads, value_dim, key_dim) if src is None else state.reshape(state.shape[0], batch*heads, value_dim, key_dim)
   bh_row, lane = UOp.range(batch*heads*value_dim//row_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   bh, row_base = bh_row // (value_dim//row_tile), (bh_row % (value_dim//row_tile))*row_tile
   rows, cols = tuple(row_base+i for i in range(row_tile)), tuple(lane + i*32 for i in range(key_dim//32))
+  def at(slot:UOp|None, row:UOp, col:UOp) -> UOp: return state[bh, row, col] if slot is None else state[slot, bh, row, col]
   current = UOp.alloc((row_tile*key_dim//32,), dtypes.float32, addrspace=AddrSpace.REG)
   initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if initial is None else
-    initial.where(0, state[bh, row, col].float()) for row in rows for col in cols))))
+  current = current.after(current.store(UOp.stack(*(at(src, row, col).float() if initial is None else
+    initial.where(0, at(src, row, col).float()) for row in rows for col in cols))))
   token = UOp.range(tokens, 2, AxisType.LOOP)
   keys = tuple(k[bh, token, col].load() for col in cols)
   queries = tuple(q[bh, token, col].load() for col in cols)
@@ -787,25 +796,32 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
     delta = (v[bh, token, row].load() - state_k) * bv
     updates += [x + delta*y for x,y in zip(decayed, keys)]
     stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q + delta*kq[bh, token]))
+  if src is not None:
+    stores += [at(token, row, col).store(updates[row_idx*key_dim//32+i].cast(state.dtype))
+               for row_idx,row in enumerate(rows) for i,col in enumerate(cols)]
   step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
+  if src is not None: return step.end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
   state_stores = (state[bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
-def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None) -> Tensor:
+def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None,
+                        src:Tensor|None=None) -> Tensor:
   batch, heads, tokens, key_dim = q.shape
   value_dim = v.shape[-1]
-  assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens) and state.shape == (batch, heads, value_dim, key_dim)
+  assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens)
+  assert state.shape[-4:] == (batch, heads, value_dim, key_dim) and (src is None) == (state.ndim == 4)
   assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, key_dim))
   assert key_dim % 32 == 0 and value_dim % 4 == 0
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
-  if start_pos is not None:
-    assert start_pos.uop.is_bound_var
-    state = Tensor(state.uop.after(start_pos.uop))
+  for var in (start_pos, src):
+    if var is not None:
+      assert var.uop.is_bound_var
+      state = Tensor(state.uop.after(var.uop))
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbound()).call(*contig)
+  call = _gated_delta_prefill_kernel(*params, *(None if var is None else var.uop.unbound() for var in (start_pos, src))).call(*contig)
   return Tensor(contig[0].after(call))
