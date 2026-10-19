@@ -1,4 +1,4 @@
-import time, inspect
+import time, inspect, weakref
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
@@ -238,8 +238,14 @@ def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
   if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
   return ctx.allocs.get(b)
 
+# a body's canonical form (a function is called many times: canonicalized once). None: the body is canonical (no reference to the key kept)
+_canonical_bodies:weakref.WeakKeyDictionary[UOp, UOp|None] = weakref.WeakKeyDictionary()
 def canonicalize_call_body(c:UOp):
-  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=CallifyCtx, bottom_up=True),)+c.src[1:])
+  if c.body in _canonical_bodies: body = _canonical_bodies[c.body]
+  else:
+    r = graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=CallifyCtx, bottom_up=True)
+    _canonical_bodies[c.body] = body = None if r is c.body else r
+  return c.replace(src=(c.body if body is None else body,)+c.src[1:])
 
 pm_canonicalize_alloc = PatternMatcher([
   # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc

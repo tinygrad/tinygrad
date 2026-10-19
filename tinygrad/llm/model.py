@@ -259,7 +259,9 @@ def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tu
   devs = to_tuple(devs)
   host = Buffer(devs[0], nbytes, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
   if len(devs) == 1: return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(host, dtype))
-  (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + [Buffer(d, nbytes, opaque=BufferStorage(host.get_buf(d))) for d in devs[1:]]
+  # the other devices' buffers are the host's mappings on them (external: not freed with them)
+  aliases = [Buffer(d, nbytes, opaque=BufferStorage(a:=host.get_buf(d)), options=BufferSpec(external_ptr=a)) for d in devs[1:]]
+  (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + aliases
   return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(mb, dtype, devs))
 
 def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:

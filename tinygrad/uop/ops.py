@@ -925,6 +925,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # by relevant CL runtimes at time of writing.
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in to_tuple(dev)): return None
 
+    # reshapes and contiguous shrinks of a buffer (most views): the offset directly
+    if (fast:=self._reshape_shrink_view()) is not None and fast[0].op is not Ops.BITCAST: return fast
     rng = UOp.range(self.numel(), 0)
     out = graph_rewrite(self.flatten().index(rng), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX or len(out.src)-1 != len((b:=out.src[0]).shape): return None
@@ -934,6 +936,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     osz, isz = b.element_size(), b.src[0].element_size()
     if (offset*osz) % isz or (self.numel()*osz) % isz: return b, offset
     return b.src[0].flatten()[offset*osz//isz:(offset+self.numel())*osz//isz].contiguous_view()
+
+  def _reshape_shrink_view(self) -> tuple[UOp, int]|None:
+    # self is the elements off.. of the first non movement op under its reshapes and shrinks (contiguous: one range), None for other views
+    if self.op not in (Ops.RESHAPE, Ops.SHRINK):
+      return (self, 0) if (self.op in GroupOp.Defines or (self.op is Ops.MSELECT and self.src[0].op in GroupOp.Defines)) and all_int(self.shape) else None
+    if (inner:=self.src[0]._reshape_shrink_view()) is None or not all_int(shape:=self.src[0].shape): return None
+    if self.op is Ops.RESHAPE: return inner if all_int(self.shape) else None
+    marg = self.marg
+    if not all(isinstance(x, int) for se in marg for x in se): return None
+    # contiguous: the dims before the last cut one keep one element
+    cut = [i for i, ((st, en), n) in enumerate(zip(marg, shape)) if (st, en) != (0, n)]
+    if cut and any(en - st != 1 for st, en in marg[:cut[-1]]): return None
+    return inner[0], inner[1] + sum(st * sd for (st, _), sd in zip(marg, strides_for_shape(shape)))
 
   def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
 

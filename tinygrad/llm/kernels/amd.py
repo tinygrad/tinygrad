@@ -1037,7 +1037,7 @@ class HostAllreduce:
     with Context(ALLOW_DEVICE_USAGE=1):
       host = Buffer(devs[0], nbytes, options=BufferSpec(host=True, uncached=True, cpu_access=True)).ensure_allocated()
       host.as_memoryview(allow_zero_copy=True)[:] = bytes(nbytes)
-      mbox = [host] + [Buffer(d, nbytes, opaque=BufferStorage(host.get_buf(d))) for d in devs[1:]]
+      mbox = [host] + [Buffer(d, nbytes, opaque=BufferStorage(a:=host.get_buf(d)), options=BufferSpec(external_ptr=a)) for d in devs[1:]]
       # the epoch of every workgroup, then the index of the device
       counters = [Buffer(d, (self.groups+1)*4, initial_value=bytes(self.groups*4)+i.to_bytes(4, "little")) for i,d in enumerate(devs)]
     self.mbox, self.counter = multi(mbox, dtypes.uint64), multi(counters, dtypes.int32)
