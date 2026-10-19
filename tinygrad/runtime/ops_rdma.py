@@ -81,12 +81,12 @@ def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
   for nic, q in zip(nics, qps.values()):
     bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
     bufs |= {name: Buffer(nic.device, 8, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
-    Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=to_name(nic.device, *pair, n)), lambda b=b: b) for n, b in bufs.items()])
+    Compiled.placeholders |= {to_name(nic.device, *pair, n): b for n, b in bufs.items()}
   for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
   return qps
 
 def rdma_mem(nic:str, pair:tuple[str, str], name:str, size:int, dtype:DType=dtypes.uint8) -> UOp:
-  return UOp.alloc((size,), dtype, 0, device=nic).rtag(to_name(nic, *pair, name))
+  return UOp.alloc((size,), dtype, 0, device=nic, name=to_name(*pair, name))
 def rdma_ring(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp:
   return rdma_mem(nic, pair, "rq" if is_recv else "sq", RING_ENTRIES * (WQE_SIZE if is_recv else WQE_SIZE + 8))
 def rdma_cq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rcq" if is_recv else "scq", CQ_ENTRIES * 32)
@@ -101,8 +101,8 @@ def is_rdma(call:UOp) -> bool: return rdma_wire(call) is not None
 
 def queue_of(call:UOp) -> tuple[tuple[str, str], bool]:
   (dst, src), wire = get_call_arg_uops(call), unwrap(rdma_wire(call))
-  gpu = to_tuple((dst if wire is src else src).device)[0]
-  return (min(gpu, wire.tag), max(gpu, wire.tag)), wire is src
+  gpu, peer = to_tuple((dst if wire is src else src).device)[0], wire.base.arg.name
+  return (min(gpu, peer), max(gpu, peer)), wire is src
 
 def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the ops of each copy of a submit on one queue
   (pair, is_recv), nic = queue_of(calls[0]), cast(RDMADevice, Device[unwrap(rdma_wire(calls[0])).device])

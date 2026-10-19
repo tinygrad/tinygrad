@@ -207,14 +207,14 @@ class USBMMIOInterface(MMIOInterface):
 HALF, CHUNK, SLOT, STREAM = 0x40000, 0x40000 - 512, 0x4000, 1 << 20 # sram half, payload, slot, stream
 HOST_SIZE = 64 + 2 * HALF + STREAM # link, staging, zeros
 
-def usb_host(dev:str) -> UOp: return UOp.alloc((HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.device).rtag(to_name(dev, "usb_host"))
+def usb_host(dev:str) -> UOp: return UOp.alloc((HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.device, name=to_name(dev, "usb_host"))
 def usb_link(dev:str) -> UOp: return usb_host(dev)[:48].bitcast(dtypes.uint64) # handle, context, prev chunks, two transfers, error state
 def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + 2 * HALF]
 def usb_zeros(dev:str) -> UOp: return usb_host(dev)[64 + 2 * HALF:]
 
-def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev).rtag(to_name(dev, "usb_go")) # chunk + 1: read armed
+def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev, name="usb_go") # chunk + 1: read armed
 
-def usb_asm24(dev:str) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=dev).rtag(to_name(dev, "usb_asm24")) # sys, cq, sram
+def usb_asm24(dev:str) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=dev, name="usb_asm24") # sys, cq, sram
 def usb_fence(dev:str) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # gpu chunks done
 def usb_cq(dev:str) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue
 def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
@@ -277,8 +277,8 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp: # kernargs: poke on change
     return stored
   link, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
   v = v.bitcast({d.itemsize: d for d in dtypes.uints}[v.dtype.itemsize]) # bitcast to uint raw bits
-  if str(unwrap_view(b)[0].tag).startswith("kernargs"):
-    cache = UOp.alloc((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.device).rtag("usb_arg_cache")
+  if str(unwrap_view(b)[0].arg.name).startswith("kernargs"):
+    cache = UOp.alloc((int(idx.vmax - idx.vmin) + 1,), v.dtype, device=HCQ_RUNTIME_DEV.device, name="usb_arg_cache")
     return usb_patch(link, addr, v, patch(cache, [], bytes(v.dtype.itemsize * cache.max_numel())).index(idx - idx.vmin))
   return usb_poke_word(link, addr, v)
 
@@ -363,7 +363,7 @@ def chunks(nbytes:int, chunk_sz:int) -> list[tuple[UOp|int, int]]: # (index, byt
 def usb_table(hosts:list[tuple[UOp, int]], n:int, win:int, dev:str) -> UOp: # [address, bytes] per chunk
   rows = [(16 * (k + r) + o, w) for host, k in hosts for r, nb in chunks(host.nbytes(), win)
           for o, w in ((0, usb_hostaddr(host, dev) + UOp.const(r, dtypes.uint64) * win), (8, UOp.const(nb, dtypes.uint64)))]
-  return patch(UOp.alloc((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.device).rtag("usb_table"), rows)
+  return patch(UOp.alloc((2 * n,), dtypes.uint64, device=HCQ_RUNTIME_DEV.device, name="usb_table"), rows)
 
 def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: chunk id of the copy and of its run
   dst, src = call.src[1:]
@@ -433,25 +433,18 @@ Compiled.pm_lower += PatternMatcher([
 # *****************
 # 6. bufferize
 
-@functools.cache
-def _host_block(dev) -> Buffer:
+def usb_reset(dev):
+  host = Compiled.placeholders[to_name(dev.device, "usb_host")]
+  for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (host, 16, 8)): buf.host.view(off, n)[:] = bytes(n)
+  for t in map(libusb.struct_libusb_transfer.from_address, host.host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
+
+def setup_usb_rules(dev): # placeholders the gpu owns
   xfers = [libusb.libusb_alloc_transfer(0).contents for _ in range(2)]
   for t in xfers: t.dev_handle, t.endpoint, t.type, t.timeout = dev.iface.pci_dev.usb.usb.handle, 0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, 10000
   words = [ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())] + [0] + [ctypes.addressof(t) for t in xfers]
-  return Buffer("CPU", HOST_SIZE, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
-
-@functools.cache
-def _go(dev) -> Buffer:
-  return Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4))
-
-def usb_reset(dev):
-  for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (_host_block(dev), 16, 8)): buf.host.view(off, n)[:] = bytes(n)
-  for t in map(libusb.struct_libusb_transfer.from_address, _host_block(dev).host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
-
-def setup_usb_rules(dev):
-  Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag=dev.tag("usb_host")), lambda d=dev: _host_block(d)), # placeholders the gpu owns
-                                           (UPat(Ops.ALLOC, tag=dev.tag("usb_go")), lambda d=dev: _go(d)),
-                                           (UPat(Ops.ALLOC, tag=dev.tag("usb_asm24")), lambda d=dev: d.iface.ctrl)])
-  dev.error_state = _host_block(dev).view(8, 40) # the link's error word
+  host = Buffer("CPU", HOST_SIZE, options=BufferSpec(nolru=True), initial_value=struct.pack('5Q', *words).ljust(HOST_SIZE, b'\0'))
+  go = Buffer(dev.device, 4, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), initial_value=bytes(4), allocator=dev.allocator)
+  Compiled.placeholders |= {to_name(dev.device, n): b for n, b in (("usb_host", host), ("usb_go", go), ("usb_asm24", dev.iface.ctrl))}
+  dev.error_state = host.view(8, 40) # the link's error word
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

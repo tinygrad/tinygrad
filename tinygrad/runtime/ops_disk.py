@@ -121,8 +121,8 @@ def is_disk_read(c:UOp) -> bool:
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lin = s.without_after.body
   if not (copies:=[c for c in lin.src if is_disk_read(c)]): return None
-  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
-  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
+  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device, name="uring_rings")
+  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device, name="uring_sqes")
 
   # [mmap address, bytes] per copy in a table: an arg each would hit ctypes' 1024 limit
   words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.device), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
@@ -131,12 +131,12 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
 
   # [chunks read, chunks copied] at the start of the gpu's stage
   dev = s.without_after.src[1].device
-  counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev).rtag("disk_stage")[:16].bitcast(dtypes.uint64)
+  counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev, name="disk_stage")[:16].bitcast(dtypes.uint64)
 
   # cpu part
   done, off, gpu_ops = s, 0, collections.defaultdict[UOp, list[UOp]](list)
   for disk, grp in itertools.groupby(range(len(copies)), lambda k: to_tuple(copies[k].src[2].device)[0]):
-    file, ks = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info"), list(grp)
+    file, ks = UOp.alloc((2,), dtypes.uint64, 0, device=disk, name="disk_info"), list(grp)
     done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts.after(done), rings, sqes)
 
   # gpu part
@@ -166,6 +166,5 @@ def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None:
 @functools.cache
 def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, options=BufferSpec(cpu_access=True), initial_value=bytes(STAGE_SZ))
 
-Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="disk_info", name="b"), lambda b: cast(DiskDevice, Device[b.device]).info),
-  (UPat(Ops.ALLOC, tag="disk_stage", name="b"), lambda b: _stage(b.device)),
-  (UPat(Ops.ALLOC, tag="uring_rings"), lambda: unwrap(uring())[2]), (UPat(Ops.ALLOC, tag="uring_sqes"), lambda: unwrap(uring())[3])])
+Compiled.placeholders |= {"disk_info": lambda b: cast(DiskDevice, Device[b.device]).info, "disk_stage": lambda b: _stage(b.device),
+                          "uring_rings": lambda b: unwrap(uring())[2], "uring_sqes": lambda b: unwrap(uring())[3]}
