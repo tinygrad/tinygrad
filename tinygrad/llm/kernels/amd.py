@@ -1146,7 +1146,13 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
   partial. the parts cross in half (peer to peer), the sums in float
   """
   devs = cast(tuple[str, ...], p.device)
-  n, S, local = len(devs), p.shape[1:], _per_device(_materialized(p, dtypes.half))
+  n, S = len(devs), p.shape[1:]
+  # partials that are a kernel's half output split on the devices are taken as they are (no kernel to copy them)
+  u = p.uop
+  while u.op is Ops.RESHAPE: u = u.src[0]
+  direct = p.dtype == dtypes.half and u.op is Ops.AFTER and u.src[0].op is Ops.UNSHARD and u.src[0].src[0].max_numel() == prod(S) and \
+    bool(getenv("RS_DIRECT", 1))
+  local = _per_device(Tensor(u)) if direct else _per_device(_materialized(p, dtypes.half))
   size = S[axis] // n
   def part(j:int, i:int) -> UOp:
     return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
