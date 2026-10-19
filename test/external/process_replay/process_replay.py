@@ -38,6 +38,7 @@ SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE"
 # uncomment this to disable by default
 #SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
+if REF == "update_benchmark" and "[pr]" not in os.getenv("COMMIT_MESSAGE", "").lower(): SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
