@@ -279,6 +279,13 @@ class TestDTypeALU(unittest.TestCase):
       x = Tensor.arange(10, dtype=dt) + Tensor([dt.max-4], dtype=dt)
       self.assertEqual((x < 3).tolist(), [i in (5, 6, 7) for i in range(10)])
 
+  def test_div_add_div_no_overflow(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      x = Tensor([dt.max-1], dtype=dt)
+      self.assertEqual(((x//2+1)//2).tolist(), [(dt.max+1)//4])
+    x = Tensor([2**31-2], dtype=dtypes.int32)
+    self.assertEqual(((x//2+2**29)//2).tolist(), [805306367])
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
