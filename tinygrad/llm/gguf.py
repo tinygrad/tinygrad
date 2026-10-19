@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, round_up, getenv, Context, unwrap
+from tinygrad.helpers import prod, round_up, getenv, Context, unwrap, dedup
 from tinygrad.nn.state import TensorIO
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
@@ -465,7 +465,7 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     for i,(nb, _) in enumerate(parts):
       offsets[name].append(totals[i])
       totals[i] += round_up(nb, align)
-  fds = {path: os.open(path, os.O_RDONLY) for path, _, _ in locs.values()}
+  fds = {path: os.open(path, os.O_RDONLY) for path in dedup(path for path, _, _ in locs.values())}
   STAGE, K = getenv("LOAD_STAGE", 256 << 20), getenv("LOAD_STAGES", 3)
   # every device's jobs in order: ("copy", reads, zeros, size, target, offset) a host buffer filled by reads (fd, src, [(at, len)]) and zero
   # ranges then copied to the buffer or the temp buffer, ("gather", ...) a kernel from the temp buffer
