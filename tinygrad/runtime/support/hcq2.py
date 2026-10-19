@@ -49,13 +49,13 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
 
 # **** commands
 
-def timeline(dev:str) -> UOp: return UOp.alloc((2,), dtypes.u64, 0, device=dev).rtag("timeline")
+def timeline(dev:str) -> UOp: return UOp.alloc((2,), dtypes.u64, 0, device=dev, name="timeline")
 def timeline_value(dev:str) -> UOp: return timeline(dev).index(1).load()
 
 def make_program(prg:UOp, size:int, device:str) -> UOp:
   slot = int.from_bytes(prg.key[:8], "little")
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
-  return UOp.alloc((size,), dtypes.u8, slot, device=device).rtag("program")
+  return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
 def make_submit(*cmds, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
   kind = to_name(dev.split(":")[0], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
@@ -91,10 +91,9 @@ def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s,
 # **** patchers
 
 def _is_link_patch(w:UOp) -> bool:
-  if w.op is Ops.GETADDR: return not ((base:=unwrap_lane(w.src[0])[0]).op is Ops.PARAM and base.tag is None) # an input's is runtime
-  if w.op is Ops.PARAM: return w.tag is not None
+  if w.op is Ops.GETADDR: return not ((base:=unwrap_lane(w.src[0])[0]).op is Ops.PARAM and base.arg.name != "lt_input") # an input's is runtime
   if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
-  if w.op in {Ops.LOAD, Ops.CALL}: return False
+  if w.op in {Ops.LOAD, Ops.CALL, Ops.PARAM}: return False
   if w.op is Ops.PROGRAM: return True
   return all(_is_link_patch(s) for s in w.src)
 
@@ -130,7 +129,7 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
   flds = {n: (o, {d.itemsize: d for d in dtypes.uints}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)}
   rows = [(flds[n][0], UOp.const(v, flds[n][1])) for n, v in fields.items()]
-  buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.u8, device=HCQ_RUNTIME_DEV.device).rtag(struct_t.__name__)
+  buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.u8, device=HCQ_RUNTIME_DEV.device, name=struct_t.__name__)
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
 # **** prep: params, unwrap multi, staging copies
@@ -138,8 +137,7 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
 def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
   use_rt, bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  param = UOp.param(slots[b], b.dtype, b.max_numel(), b.device)
-  return param if use_rt else param.replace(tag="lt_input")
+  return UOp.param(slots[b], b.dtype, b.max_numel(), b.device, name=None if use_rt else "lt_input")
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b))])
 
 def unwrap_call(call:UOp) -> UOp|None:
@@ -156,8 +154,8 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   from tinygrad.runtime.ops_rdma import rdma_nic_for
   if None in (nics:=[rdma_nic_for(Device[d], Device[min(devs)]) for d in devs]): return None
 
-  # wires: a placeholder per nic in place of the far gpu, tagged by it
-  wires = [UOp.alloc(src.max_shape, src.dtype, 0, device=unwrap(nic).device).rtag(peer) for nic, peer in zip(nics, devs[::-1])]
+  # wires: a placeholder per nic in place of the far gpu, named by it
+  wires = [UOp.alloc(src.max_shape, src.dtype, 0, device=unwrap(nic).device, name=peer) for nic, peer in zip(nics, devs[::-1])]
   send = call.replace(src=wires[1].store_call(src).src)
   return UOp(Ops.LINEAR, src=(send, call.replace(src=dst.store_call(wires[0]).src)))
 
@@ -231,7 +229,7 @@ class BatchCtx:
 
     # a slot is [signal][timestamp], 16 bytes: the queue signals, the timeline, then two per call if profiling
     self.slots = {dev: UOp.alloc((2 * (len(qs) + 1 + (2 * len(self.batch) if self.profile else 0)),), dtypes.u64, device=dev,
-                                 spec=BufferSpec(host=True, uncached=True, cpu_access=True)).rtag("slots") for dev, qs in self.queues.items()}
+                                 spec=BufferSpec(host=True, uncached=True, cpu_access=True), name="slots") for dev, qs in self.queues.items()}
 
   def slot(self, dev:str, i:int) -> UOp: return self.slots[dev].shrink(((2 * i, 2 * i + 2),)) # not a slice: 10x the cost
   def queue_signal(self, dev:str, queue:str) -> UOp: return self.slot(dev, self.queues[dev].index(queue))
@@ -409,7 +407,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
     bufs.append((offs, encode_cmdbuf(hq, name=lname)))
   views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
 
-  buf = UOp.alloc((len(stream),), dtypes.u8, device=device or hq.devs[0]).rtag(to_name(name, hq.queue)).after(*hq.deps)
+  buf = UOp.alloc((len(stream),), dtypes.u8, device=device or hq.devs[0], name=to_name(name, hq.queue)).after(*hq.deps)
   words = UOp.sink(*[w for _, w in patches]).substitute(views).src
   return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*[b for _, b in bufs])
 
@@ -432,12 +430,13 @@ pm_lift_deps = PatternMatcher([
 ])
 
 def _needs_arg(u:UOp, root:bool) -> bool:
-  return u.addrspace is AddrSpace.GLOBAL if u.op in (Ops.BUFFER, Ops.ALLOC) else u.op is Ops.PARAM and u.is_variable != root
+  if u.op in (Ops.BUFFER, Ops.ALLOC): return u.addrspace is AddrSpace.GLOBAL
+  return u.op is Ops.PARAM and (u.is_variable != root or u.arg.name == "lt_input")
 
 def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:
     return UOp.param(slot, u.commit_dtype(dtypes.i32), name=u.arg.name if u.is_variable else None, addrspace=AddrSpace.ALU).cast(u.dtype)
-  return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.device, name=f"{u.tag}_{slot}" if isinstance(u.tag, str) else None)
+  return UOp.param(slot, u.dtype, u.max_numel(), HCQ_RUNTIME_DEV.device, name=f"{u.arg.name}_{slot}" if u.op is Ops.ALLOC and u.arg.name else None)
 
 def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
   body, args = graph_rewrite(call.body, pm_lift_deps + pm_renumber_slots, init_ctx=CountCtx, walk=True, name="lift deps"), list(call.src[1:])
@@ -451,7 +450,8 @@ def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
   return call.replace(src=(body, *args, *UOp.sink(*new).substitute(own, walk=True).src))
 
 pm_lift = PatternMatcher([
-  (UPat(Ops.PARAM, name="u"), lambda u: u.replace(arg=replace(u.arg, device=None)) if u.arg.name else None), # of a lowered function
+  # a param of a lowered function, an "lt_input" keeps its device
+  (UPat(Ops.PARAM, name="u"), lambda u: u.replace(arg=replace(u.arg, device=None)) if u.arg.name not in (None, "lt_input") else None),
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lift), # lift allocs and getaddrs
 ])
 
@@ -474,18 +474,20 @@ pm_lower_call = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="cal
 
 # **** link: allocs to buffers, addresses to consts
 
-Compiled.pm_bufferize = PatternMatcher([(UPat(Ops.ALLOC, tag="timeline", name="b"), lambda b: Device[b.device].timeline)])
+Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
-class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx: inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
 
-  # a device owns the placeholders it names, the rest are allocated where they live
-  if (r:=cast(Buffer|None, Compiled.pm_bufferize.rewrite(b, ctx))) is not None: pass
-  elif not ctx.use_rt or b.tag is None: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
+  # a placeholder is named as is, or by the device it's on. the rest are allocated where they live
+  owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name))) if b.arg.name else None
+  if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
+  elif (r:=dev.link_buffer(b)) is not None: pass
+  elif not ctx.use_rt or b.arg.name is None: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
   else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
@@ -509,7 +511,7 @@ pm_resolve_link = PatternMatcher([
   (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
   # an alloc and a link time input become buffers
   (UPat(Ops.ALLOC, name="b"), bufferize_buf),
-  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs.get(b)),
+  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b.arg.slot] if b.arg.name == "lt_input" else None),
   # the address of a buffer is a const
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   # math on consts is a const
@@ -550,11 +552,11 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
   if allow_cache and (linked:=link_linear_cache.get(linear)) is not None: return linked
 
   # if we have any link time buffers, do not cache this linear
-  cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
+  cache = allow_cache and not any(u.op is Ops.PARAM and u.arg.name == "lt_input" for u in linear.toposort())
 
-  inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
-  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=(ctx:=LinkCtx(inputs, allow_cache and not cache)), walk=True, name="link")
+  ctx = LinkCtx(input_uops or [], allow_cache and not cache)
+  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked

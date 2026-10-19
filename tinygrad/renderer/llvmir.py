@@ -1,4 +1,4 @@
-import math, struct
+import struct
 from tinygrad.renderer import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
@@ -21,8 +21,7 @@ def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, Addr
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
-    if math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
-    return truncate[dtype](x)
+    return "0x" + struct.pack(">d", truncate[dtype](x)).hex()
   return int(x)
 
 def lcast(input_type:DType, output_type:DType):
