@@ -4,7 +4,7 @@ Includes: v_fma_f32, v_div_scale_f32, v_div_fmas_f32, v_div_fixup_f32,
           v_alignbit_b32, v_bfe_i32, v_mad_u64_u32, v_readlane_b32, v_writelane_b32
 """
 import unittest
-from tinygrad.helpers import OSX
+from tinygrad.helpers import OSX, Context
 from test.amd.hw.helpers import *
 
 class TestFMA(unittest.TestCase):
@@ -1184,7 +1184,7 @@ class TestF64Ops(unittest.TestCase):
     # run_program with USE_HW=1 will verify exact bit match with hardware
     st = run_program(instructions, n_lanes=1)
     result_bits = st.vgpr[0][6] | (st.vgpr[0][7] << 32)
-    self.assertNotEqual(result_bits, 0, "Result should not be zero")
+    self.assertAlmostEqual(i642f(result_bits), a*b+c, delta=math.ulp(a*b))
 
 
 class TestMad64More(unittest.TestCase):
