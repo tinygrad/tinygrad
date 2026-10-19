@@ -378,10 +378,25 @@ class AMDComputeQueue(HWQueue):
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = amd_build_program(self.dev, prg, self.devs)
-
-    prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
+    data = _amd_program_image(prg.src[3].arg, self.dev.target, self.dev.iface.props['lds_size_in_kb'])[0]
     args_addr = self.kernargs(call, prg, data)
+    if self.dev.prof_enabled or self.dev.sqtt_enabled or getenv("AMD_SERIAL_KERNELS"):
+      return self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], args_addr)
+    # the packets of a launch are the program's on the device, but the kernargs address: made once, with a placeholder for it
+    if (tmpl:=self.dev.exec_templates.get(key:=(prg, self.devs))) is None:
+      start, pstart = len(self.blob), len(self.patches)
+      self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], ph:=UOp.variable("_kernargs_addr", 0, 2**62, dtypes.uint64))
+      words = [(cast(int, o) - start, w, ph in w.toposort()) for o, w in self.patches[pstart:]]
+      tmpl = self.dev.exec_templates[key] = (bytes(self.blob[start:]), words, ph)
+      del self.blob[start:], self.patches[pstart:]
+    blob, words, ph = tmpl
+    start = len(self.blob)
+    self.blob += blob
+    def sub(w:UOp) -> UOp: return args_addr if w is ph else w.replace(src=tuple(sub(x) for x in w.src)) if ph in w.backward_slice else w
+    self.patches += [(start + o, sub(w) if has else w) for o, w, has in words]
+
+  def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
+    prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     scratch_addr = UOp.alloc((data.private_segment_size,), dtypes.uint8, 0, device=self.devs[0]).rtag(self.dev.tag("scratch")).getaddr(self.devs)
 
     user_regs:list = []
@@ -515,10 +530,12 @@ class AMDProgramData:
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int # noqa: E702
 
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
-  data, image = _amd_program_image(dev, prg.src[3].arg)
+  data, image = _amd_program_image(prg.src[3].arg, dev.target, dev.iface.props['lds_size_in_kb'])
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
-def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
+@functools.lru_cache(maxsize=4096)
+def _amd_program_image(lib:bytes, target:tuple, lds_kb:int) -> tuple[AMDProgramData, bytes]:
+  # (a program is launched on every device of every call: its image once)
   image, sections, relocs = elf_loader(lib)
   rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
   for off, sym, typ, addent in relocs:
@@ -526,12 +543,12 @@ def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
     image[off:off+8] = struct.pack('<q', sym - off + addent)
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(
     bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
-  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
+  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (lds_kb*1024)//512:
     raise RuntimeError("Too many resources requested: group_segment_size")
   edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
 
   data = AMDProgramData(desc_offset=rodata, entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
-    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
+    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
     rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3, wave32=bool(desc.kernel_code_properties & 0x400),
     private_segment_size=desc.private_segment_fixed_size,
     group_segment_size=desc.group_segment_fixed_size, kernargs_segment_size=desc.kernarg_size, enable_dispatch_ptr=edp,
@@ -868,6 +885,7 @@ class AMDDevice(Compiled):
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, PROFILE > 0 and (PMC > 0 or SQTT > 0)
+    self.exec_templates:dict[tuple[UOp, tuple[str, ...]], tuple[bytes, list[tuple[int, UOp, bool]], UOp]] = {} # AMDComputeQueue.exec
     if self.prof_enabled:
       self.iface.require_profile_mode()
       self.prof_slots, self.prof_read = getenv("PROF_SLOTS", 32), 0

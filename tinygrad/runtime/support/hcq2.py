@@ -67,7 +67,11 @@ def make_submit(*cmds, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a sub
 
 def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
 
+_link_patch_memo:weakref.WeakKeyDictionary[UOp, bool] = weakref.WeakKeyDictionary()
 def _is_link_patch(w:UOp) -> bool:
+  if (r:=_link_patch_memo.get(w)) is None: r = _link_patch_memo[w] = _is_link_patch_uncached(w)
+  return r
+def _is_link_patch_uncached(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not ((base:=unwrap_lane(w.src[0])[0]).op is Ops.PARAM and base.tag is None) # an input's is runtime
   if w.op is Ops.PARAM: return w.tag is not None
   if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
@@ -76,8 +80,12 @@ def _is_link_patch(w:UOp) -> bool:
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
-  groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
+  grouped:dict[tuple, list[tuple[int|UOp, UOp]]] = {}
+  for o, w in rows:
+    key = (w.dtype, o % w.dtype.itemsize if isinstance(o, int) else o.vmin % w.dtype.itemsize, _is_link_patch(w),
+           () if isinstance(o, int) else tuple(o.ranges))
+    grouped.setdefault(key, []).append((o, w))
+  groups = list(grouped.items())
 
   # a link patch writes the bare buffer after the blob, a runtime patch writes it after its deps
   dep = [buf.without_after.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
