@@ -3,7 +3,7 @@
 Exercises generated CDNA pcode end-to-end in the emulator and compares against
 gfx950 hardware when USE_HW=1.
 """
-import ctypes, unittest
+import ctypes, struct, unittest
 import tinygrad.runtime.autogen.amd.cdna.ins as cdna
 from tinygrad.renderer.amd.dsl import NULL
 from test.amd.hw.helpers import USE_HW, assemble
@@ -33,17 +33,21 @@ def _run_emu(instructions: list, out_reg: int = 2, lanes: int = 1) -> list[int]:
   return list(out_buf)
 
 def _run_hw(instructions: list, out_reg: int = 2, lanes: int = 1) -> list[int]:
-  from tinygrad import Tensor, Device, dtypes
+  from tinygrad.device import Device, Buffer
+  from tinygrad.dtype import dtypes, AddrSpace
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.engine.realize import run_linear
 
   dev = Device["AMD"]
   if dev.arch != "gfx950": raise unittest.SkipTest("requires gfx950 hardware")
-  out = Tensor.zeros(lanes, dtype=dtypes.uint32, device=dev.device).contiguous().realize()
-  sink = UOp.sink(UOp.param(0, dtypes.uint32, (lanes,)), UOp.special(lanes, "lidx0"), arg=KernelInfo("test"))
-  prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in _code(instructions, out_reg)))))
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(out.uop.buf_uop),)), wait=True)
-  return out.tolist()
+  out_gpu = Buffer(dev.device, lanes * 4, preallocate=True)
+  lds = UOp.placeholder((65536,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(UOp.param(0, dtypes.uint32, (lanes,)), UOp.special(lanes, "lidx0"), lds, arg=KernelInfo("test"))
+  body = UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in _code(instructions, out_reg)))
+  prg = UOp(Ops.PROGRAM, src=(sink, body))
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
+  out = out_gpu.as_memoryview()
+  return list(struct.unpack(f"<{lanes}I", out))
 
 def run_cdna_lanes(instructions: list, out_reg: int = 2, lanes: int = 64) -> list[int]:
   emu = _run_emu(instructions, out_reg, lanes)
