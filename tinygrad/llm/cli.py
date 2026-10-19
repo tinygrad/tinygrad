@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -101,7 +101,19 @@ models = {
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
   "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
+  "glm-5.3": "zai-org/GLM-5.3",
 }
+
+def fetch_hf_repo(repo:str) -> pathlib.Path:
+  info = json.loads(fetch(f'https://huggingface.co/api/models/{repo}').read_text())
+  # Pin all files to the same revision, and reuse tinygrad's download cache.
+  base, subdir = f'https://huggingface.co/{repo}/resolve/{info["sha"]}', f'huggingface/{repo}/{info["sha"]}'
+  config = fetch(f'{base}/config.json', 'config.json', subdir=subdir)
+  for file in info['siblings']:
+    name = file['rfilename']
+    if name.endswith('.safetensors') or name in ('model.safetensors.index.json', 'tokenizer.json', 'tokenizer_config.json', 'chat_template.jinja'):
+      fetch(f'{base}/{name}', config.parent/name)
+  return config.parent
 
 class FallbackTemplate:
   # minimal jinja2.Template-compatible chat template without jinja2, no tool calling support
@@ -141,7 +153,8 @@ from tinygrad.llm.serve import LLMServer
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
+  parser.add_argument("--model", "-m", default=list(models.keys())[0],
+                      help=f"Model choice ({', '.join(models.keys())}), HF repository, or local GGUF file/checkpoint directory")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
@@ -155,7 +168,10 @@ def main():
   # load the model
   st = time.perf_counter()
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
-    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
+    source = models.get(args.model, args.model)
+    path = pathlib.Path(source)
+    if not path.exists(): path = fetch_hf_repo(source) if re.fullmatch(r'[\w.-]+/[\w.-]+', source) else fetch(source)
+    model, kv = (Transformer.from_hf if path.is_dir() else Transformer.from_gguf)(path, args.max_context, shard=args.shard)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
