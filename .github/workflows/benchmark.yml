@@ -601,16 +601,3 @@ jobs:
         trap - EXIT
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
-
-  llvmspeed:
-    name: LLVM Speed
-    runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 10
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Speed Test
-      run: DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py
-    - name: Speed Test (BEAM=2)
-      run: IGNORE_BEAM_CACHE=1 BEAM=2 DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py
