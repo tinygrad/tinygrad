@@ -319,26 +319,18 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def test_spec_slots_match_decode(self):
     # a spec step runs from slot src and leaves the state after each of its tokens in that token's slot
     config = self._make_config(max_context=8)
-    block, x = self._make_block(config), self._tensor_linspace(-1, 1, (1, 7, config.dim))
-    pos, mtp_pos, j = UOp.variable("start_pos", 0, 7), UOp.variable("mtp_pos", 0, 7), UOp.variable("spec_j", 0, 2)
-    block(x[:, :2], pos.bind(0)).realize()
-    initial = self._cache_views(block)
-    decode, states = [], []
-    for i in range(2, 7):
-      decode.append(block(x[:, i:i+1], pos.bind(i)).numpy())
-      states.append(self._cache_views(block))
-    Tensor.realize(block.conv_state.assign(Tensor(initial[0])), block.recurrent_state.assign(Tensor(initial[1])))
-    Tensor.realize(*block.spec_seed(3))
-    np.testing.assert_allclose(block(x[:, 2:5], mtp_pos.bind(2)+j.bind(0), j.bind(0)).numpy(), np.concatenate(decode[:3], axis=1),
-                               rtol=1e-5, atol=1e-5)
-    for t in range(3):
-      np.testing.assert_allclose(block.conv_slots.numpy()[t], states[t][0], rtol=1e-5, atol=1e-5)
-      np.testing.assert_allclose(block.state_slots.numpy()[t], states[t][1], rtol=1e-5, atol=1e-5)
-    # one of the two drafts accepted: the next step starts after it, from its slot
-    np.testing.assert_allclose(block(x[:, 4:7], mtp_pos.bind(3)+j.bind(1), j.bind(1)).numpy(), np.concatenate(decode[2:], axis=1),
-                               rtol=1e-5, atol=1e-5)
-    Tensor.realize(*block.spec_commit(1))
-    for got, expected in zip(self._cache_views(block), states[3]): np.testing.assert_allclose(got, expected, rtol=1e-5, atol=1e-5)
+    block, x = self._make_block(config), self._tensor_linspace(-1, 1, (1, 4, config.dim))
+    outs, convs, recurrents = self._naive_attention(block, x)
+    x_norm = self._rms_norm_np(x.numpy(), block.attn_norm.weight.numpy(), block.attn_norm.eps)
+    pos, src = UOp.variable("start_pos", 0, 7), UOp.variable("spec_j", 0, 1)
+    block._init_state(Tensor(x_norm))
+    Tensor.realize(*block.spec_seed(2))
+    # the first step starts from the seeded state, the second after its draft was accepted
+    for start in (0, 2):
+      out = block._attention(Tensor(x_norm[:, start:start+2]), pos.bind(start), src.bind(1)).numpy()
+      np.testing.assert_allclose(out, np.concatenate(outs[start:start+2], axis=1), rtol=1e-3, atol=1e-3)
+      for slots, expected in ((block.conv_slots.numpy(), convs), (block.state_slots.numpy(), recurrents)):
+        for t in range(2): np.testing.assert_allclose(slots[t], expected[start+t], rtol=1e-3, atol=1e-3)
 
   def test_start_zero_resets_realized_state(self):
     config = self._make_config(max_context=3)

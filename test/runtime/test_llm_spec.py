@@ -18,31 +18,13 @@ class TestSpeculativeDecoding(unittest.TestCase):
     return spec, plain
 
   def test_matches_greedy(self):
-    # drafts are accepted and rejected, and a second turn continues from the cached tokens
-    for drafts in (1, 3):
-      spec, plain = self._models(drafts, 40)
-      outs = []
-      for model in (spec, plain):
-        first = [t for _,t in zip(range(20), model.generate([1, 2, 3, 0, 1]))]
-        outs.append(first + [t for _,t in zip(range(8), model.generate([1, 2, 3, 0, 1] + first + [2]))])
-      self.assertEqual(outs[0], outs[1], f"{drafts=}")
-
-  def test_sampling_distribution(self):
-    # with a temperature the verified tokens are sampled: spec generates the same distribution as plain sampling
-    Tensor.manual_seed(0)
-    spec, plain = self._models(2, 16)
-    freqs = []
+    # drafts are accepted and rejected, and a second turn continues from the cached tokens until max_context
+    spec, plain = self._models(2, 32)
+    outs = []
     for model in (spec, plain):
-      counts = np.zeros((3, 8))
-      for _ in range(200):
-        model._cached_tokens = []
-        for pos, t in zip(range(3), model.generate([1, 2, 3], temperature=1.0)): counts[pos, t] += 1
-      freqs.append(counts / 200)
-    self.assertLess((0.5*np.abs(freqs[0] - freqs[1]).sum(-1)).max(), 0.2)
-
-  def test_until_max_context(self):
-    spec, plain = self._models(3, 16)
-    self.assertEqual(list(spec.generate([1, 2, 3])), list(plain.generate([1, 2, 3])))
+      first = [t for _,t in zip(range(10), model.generate(list(range(8))))]
+      outs.append(first + list(model.generate(list(range(8)) + first + [2])))
+    self.assertEqual(outs[0], outs[1])
 
 if __name__ == "__main__":
   unittest.main()

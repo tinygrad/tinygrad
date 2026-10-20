@@ -470,20 +470,16 @@ class GatedDeltaNetBlock(FFNBlock):
 
   def spec_seed(self, slots:int) -> list[Tensor]:
     if not hasattr(self, "state_slots"):
-      self.conv_slots = Tensor.zeros(slots, *self.conv_state.shape, dtype=self.conv_state.dtype, device=self.conv_state.device).clone()
-      self.state_slots = Tensor.zeros(slots, *self.recurrent_state.shape, dtype=self.recurrent_state.dtype,
-                                      device=self.recurrent_state.device).clone()
-    return [self.conv_slots.assign(self.conv_state.unsqueeze(0).expand(self.conv_slots.shape)),
-            self.state_slots.assign(self.recurrent_state.unsqueeze(0).expand(self.state_slots.shape))]
-  def spec_commit(self, slot:int) -> list[Tensor]:
-    return [self.conv_state.assign(self.conv_slots[slot]), self.recurrent_state.assign(self.state_slots[slot])]
+      self.conv_slots, self.state_slots = (s.unsqueeze(0).expand(slots, *s.shape).clone() for s in (self.conv_state, self.recurrent_state))
+      return [self.conv_slots, self.state_slots]
+    return [d.assign(s.unsqueeze(0).expand(d.shape)) for d, s in ((self.conv_slots, self.conv_state), (self.state_slots, self.recurrent_state))]
+  def spec_commit(self, i:int) -> list[Tensor]: return [self.conv_state.assign(self.conv_slots[i]), self.recurrent_state.assign(self.state_slots[i])]
 
 class MTPBlock(TransformerBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     self.eh_proj = Linear(2*config.dim, config.dim, bias=False)
-    self.enorm, self.hnorm = nn.RMSNorm(config.dim, config.norm_eps), nn.RMSNorm(config.dim, config.norm_eps)
-    self.shared_head_norm = nn.RMSNorm(config.dim, config.norm_eps)
+    self.enorm, self.hnorm, self.shared_head_norm = (nn.RMSNorm(config.dim, config.norm_eps) for _ in range(3))
   def predict(self, emb:Tensor, h:Tensor, start_pos:int|UOp) -> Tensor:
     return self.shared_head_norm(self(self.eh_proj(self.enorm(emb).cat(self.hnorm(h), dim=-1)), start_pos))
 
@@ -501,14 +497,13 @@ class Transformer:
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
-    if config.spec_drafts: self.mtp = MTPBlock(config)
+    if config.spec_drafts: self.mtp, self.spec_jit = MTPBlock(config), TinyJit(self.forward_spec)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
-    self.spec_jit = TinyJit(self.forward_spec)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
@@ -519,15 +514,13 @@ class Transformer:
       if not hasattr(self, "_spec_carry"): self._spec_carry = Tensor.zeros(1, 1, self.config.dim, device=x.device).contiguous().realize()
       T, hn = x.shape[1], self.output_norm(x.realize())
       m = self.mtp.predict(self.token_embd(tokens.to(x.device)).float(), self._spec_carry.cat(hn, dim=1).shrink((None, (0, T), None)), start_pos)
-      m[:, :1, :1].contiguous().realize()
-      self._spec_carry.assign(hn.shrink((None, (T-1, T), None))).realize()
+      Tensor.realize(m[:, :1, :1].contiguous(), self._spec_carry.assign(hn.shrink((None, (T-1, T), None))))
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)
     return self._sample(logits, temperature)
 
   def _sample(self, logits:Tensor, temperature:Tensor) -> Tensor:
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    temperature = temperature.to(logits.device)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -536,28 +529,23 @@ class Transformer:
   def forward_spec(self, mtp_pos:UOp, j:UOp, temperature:Tensor) -> Tensor:
     k, start_pos = self.config.spec_drafts, mtp_pos + j
     m = self.mtp.predict(self.token_embd(self._spec_g).float(), self._spec_hn, mtp_pos).shrink((None, (j, j+1), None))
-    drafts:list[Tensor] = []
-    for i in range(k):
-      drafts.append(self.output(m).argmax(-1).cast(dtypes.int32))
-      if i < k-1: m = self.mtp.predict(self.token_embd(drafts[-1]).float(), m, start_pos+i+1)
+    drafts = [self.output(m).argmax(-1).cast(dtypes.int32)]
+    for i in range(k-1):
+      drafts.append(self.output(m:=self.mtp.predict(self.token_embd(drafts[-1]).float(), m, start_pos+i+1)).argmax(-1).cast(dtypes.int32))
     x = self.token_embd(self._spec_g.shrink((None, (j, j+1))).cat(*drafts, dim=1)).float()
     for block in self.blk: x = block(x, start_pos, j if isinstance(block, GatedDeltaNetBlock) else None)
     hn = self.output_norm(x)
     out, hn = self._sample(self.output(hn), temperature).squeeze(-1).cast(dtypes.int32).cat(*drafts, dim=1), hn.contiguous()
-    Tensor.realize(out, hn)
-    Tensor.realize(self._spec_hn.assign(hn), self._spec_g.assign(out[:, :k+1]))
+    Tensor.realize(out, self._spec_hn.assign(hn), self._spec_g.assign(out[:, :k+1]))
     return out
 
   def _spec_generate(self, tokens:list[int], temperature:Tensor):
-    k = self.config.spec_drafts
+    k, temperature = self.config.spec_drafts, temperature.to(self._spec_carry.device).realize()
+    mtp_pos, j, given, gdn = len(tokens) - 1, 0, 1, [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     v_mtp, v_j = UOp.variable("mtp_pos", 0, self.max_context-1), UOp.variable("spec_j", 0, k)
-    if not hasattr(self, "_spec_hn"):
-      self._spec_hn = Tensor.zeros(1, k+1, self.config.dim, device=self._spec_carry.device).contiguous()
-      self._spec_g = Tensor.zeros(1, k+1, dtype=dtypes.int32, device=self._spec_carry.device).contiguous()
-    Tensor.realize(self._spec_hn.assign(self._spec_carry.pad((None, (0, k), None))),
-                   self._spec_g.assign(Tensor([[tokens[-1]] + [0]*k], dtype=dtypes.int32, device=self._spec_g.device)),
-                   *[t for b in self.blk if isinstance(b, GatedDeltaNetBlock) for t in b.spec_seed(k+1)])
-    mtp_pos, j, given = len(tokens) - 1, 0, 1
+    hn, g = self._spec_carry.pad((None, (0, k), None)), Tensor([[tokens[-1]] + [0]*k], dtype=dtypes.int32, device=self._spec_carry.device)
+    if not hasattr(self, "_spec_hn"): self._spec_hn, self._spec_g = hn.contiguous().realize(), g.contiguous().realize()
+    Tensor.realize(self._spec_hn.assign(hn), self._spec_g.assign(g), *[t for b in gdn for t in b.spec_seed(k+1)])
     try:
       while mtp_pos + j + k + 1 < self.max_context:
         out = [int(t) for t in self.spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), temperature).numpy()[0]]
@@ -567,8 +555,7 @@ class Transformer:
           self._cached_tokens = tokens[:-1]
           yield tok
     finally:
-      Tensor.realize(self._spec_carry.assign(self._spec_hn[:, given-1:given]),
-                     *[t for b in self.blk if isinstance(b, GatedDeltaNetBlock) for t in b.spec_commit(given-1)])
+      Tensor.realize(self._spec_carry.assign(self._spec_hn[:, given-1:given]), *[t for b in gdn for t in b.spec_commit(given-1)])
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -679,9 +666,8 @@ class Transformer:
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
-      sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer,
-      spec_drafts=spec_drafts)
+      sliding_window=kv.get(f'{arch}.attention.sliding_window', 0), spec_drafts=spec_drafts,
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer)
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused

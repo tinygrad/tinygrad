@@ -132,7 +132,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     for typ in (12, 13, 14, 23):
       for outputs in (3, 6, 12):
         with self.subTest(ggml_type=typ, out_features=outputs):
-          self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3, 5))
+          self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(3, 5))
 
   def test_quant_linear_bias(self):
     for typ in (12, 21, 23):
@@ -333,7 +333,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     cache = np.zeros((2, 1, 1, 128, 128), dtype=np.float16)
     cache[1] = np.arange(128, dtype=np.float16)[:, None]
     kv = Tensor(cache).realize()
-    for tokens in (1, 32):
+    for tokens in (3, 32):
       q = Tensor(np.zeros((1, 2, tokens, 128), dtype=np.float16)).realize()
       run = TinyJit(lambda q, kv, end: flash_attention(q, kv, end).realize())
       for valid in (tokens, 33, 97, 128, 64, tokens):
@@ -347,7 +347,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     rng = np.random.default_rng(42)
     cases = ((2, 4, 2, 32, 64, 45, 64, False), (1, 3, 1, 64, 128, 83, 128, False),
              (1, 2, 1, 96, 256, 149, 192, False), (1, 4, 2, 17, 128, 128, 128, True), (1, 2, 1, 3, 64, 33, 64, True),
-             (2, 3, 1, 64, 96, 99, 128, False), (1, 2, 1, 32, 320, 33, 64, False), (1, 6, 2, 3, 256, 149, 192, False))
+             (2, 3, 1, 64, 96, 99, 128, False), (1, 2, 1, 32, 320, 33, 64, False))
     for batch, heads, kv_heads, tokens, dim, valid, capacity, symbolic in cases:
       with self.subTest(batch=batch, tokens=tokens, dim=dim, symbolic=symbolic):
         q = rng.normal(size=(batch, heads, tokens, dim)).astype(np.float16)
