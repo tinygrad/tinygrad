@@ -15,7 +15,7 @@ from dataclasses import replace
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  LABEL = auto(); LOOP_CMP = auto()
+  LABEL = auto(); LOOP_CMP = auto(); IMM = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
