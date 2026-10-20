@@ -19,7 +19,8 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
       kept.append(si)
       needed |= si_bufs
     else: onetime.append(si)
-  return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
+  persist = {u:UOp.new_buffer(u.device, u.max_numel(), u.dtype) for si in onetime for s in si.src[1:] for u in s.toposort() if u.op is Ops.ALLOC}
+  return linear.replace(src=tuple(kept)).substitute(persist, walk=True), linear.replace(src=tuple(onetime)).substitute(persist, walk=True)
 
 def _copy_input(u:UOp) -> UOp:
   if u.on_disk(): raise JitError("cannot make an independent copy of a written DISK input")
@@ -34,9 +35,9 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:d
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
-  linear = memory_plan_rewrite(linear, held_bufs)
   scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
   linear = linear.substitute(scratch, walk=True)
+  linear = memory_plan_rewrite(linear)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear

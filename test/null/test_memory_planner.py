@@ -11,7 +11,7 @@ def b(i, base=None, offset=0, pin=False, size=16):
   if base is not None:
     global_map[i] = global_map[base]
     return global_map[i]
-  global_map[i] = UOp.new_buffer("NULL", size, dtypes.int8)
+  global_map[i] = UOp.new_buffer("NULL", size, dtypes.int8) if pin else UOp.alloc((size,), dtypes.int8, device="NULL")
   if pin: held_bufs.add(global_map[i])
   return global_map[i]
 
@@ -25,7 +25,7 @@ def _make_linear(buffer_lists, copies=None):
 
 def _get_planned_view(buf:UOp) -> tuple[UOp, int, int]|None:
   view = buf.src[0] if buf.op is Ops.BITCAST else buf
-  if view.op is not Ops.SHRINK or view.src[0].op is not Ops.BUFFER: return None
+  if view.op is not Ops.SHRINK or view.src[0].op is not Ops.ALLOC: return None
   return (arena:=view.src[0]), view.src[1].val * arena.dtype.itemsize, view.src[2].val * arena.dtype.itemsize
 
 def _get_arena(buf, linear, result):
@@ -36,7 +36,7 @@ def _get_arena(buf, linear, result):
 
 def check_assign(buffer_lists, copies=None):
   linear = _make_linear(buffer_lists, copies)
-  result = memory_plan_rewrite(linear, held_bufs)
+  result = memory_plan_rewrite(linear)
 
   # build mapping: original buf -> (arena, offset_bytes, nbytes) from the result
   replace_map: dict[int, tuple[UOp, int, int]] = {}
