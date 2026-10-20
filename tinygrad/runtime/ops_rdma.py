@@ -9,8 +9,7 @@ from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
 from tinygrad.runtime.support.hcq2 import unwrap_view, to_name, ins
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
-from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
-from tinygrad.runtime.support.system import filter_visible_devices
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System, filter_visible_devices
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
 
 RDMA_CHUNK = 1 << 30 # a wqe length is 32 bits
