@@ -1,11 +1,11 @@
-import math, struct
+import struct
 from tinygrad.renderer import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, OSX
+from tinygrad.helpers import prod, Target
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
@@ -21,8 +21,7 @@ def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, Addr
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
-    if math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
-    return truncate[dtype](x)
+    return "0x" + struct.pack(">d", truncate[dtype](x)).hex()
   return int(x)
 
 def lcast(input_type:DType, output_type:DType):
@@ -72,10 +71,12 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "ur
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CDIV: "sdiv", Ops.CMOD: "srem", Ops.SHR: "ashr"}
-flags = " nsz arcp contract afn"
+flags = " nsz contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
+
+llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 
 base_rewrite = PatternMatcher([
   # memory load/store
@@ -91,15 +92,15 @@ base_rewrite = PatternMatcher([
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
    f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
    f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
    f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}, align {idx.dtype.itemsize}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:
@@ -107,6 +108,8 @@ base_rewrite = PatternMatcher([
                f" = insertelement {ldt(x.dtype, x.max_numel())} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
+  (UPat(tuple(llvm_intrinsics), name="x"),
+   lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -161,7 +164,7 @@ pm_widen_uidx = PatternMatcher([
 class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
+  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, **{op: lambda: None for op in llvm_intrinsics}}
 
   def __init__(self, target:Target):
     super().__init__(target)
@@ -237,26 +240,20 @@ class CPULLVMRenderer(LLVMRenderer):
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
     self.compiler = CPULLVMCompiler(target.arch.split(","))
 
-  # FIXME: fp16 works on non-osx, but only if the cpu supports it
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if
-            (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and (d != dtypes.half or OSX) and d not in dtypes.fp8s}
+            (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
-# https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
-llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 class AMDLLVMRenderer(LLVMRenderer):
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
   abi = "amdgpu_kernel"
-  code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
-    (UPat(tuple(llvm_intrinsics), name="x"),
-    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
       f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {fp8_index(x.dtype)})"),

@@ -35,7 +35,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:d
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
-  linear = linear.substitute({u: u.rtag("scratch") for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}, walk=True)
+  scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
+  linear = linear.substitute(scratch, walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear
@@ -77,11 +78,7 @@ class CapturedJit(Generic[ReturnType]):
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
-  def free_intermediates(self):
-    bufs = [u.arg.buffer for u in self._jit_bufs if u.tag == "scratch"]
-    if not (freed:=[b for b in flatten(b.bufs if isinstance(b, MultiBuffer) else [b] for b in bufs) if b.is_allocated()]): return
-    for b in freed: b.deallocate()
-    self.__dict__.pop("linear", None) # should be relinked
+  def free_intermediates(self): self.__dict__.pop("linear", None)
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]

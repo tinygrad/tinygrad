@@ -5,6 +5,7 @@ from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
+from test.mockgpu.amd.emu import ASM_CALL
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
@@ -599,6 +600,7 @@ class TestCustomKernel(unittest.TestCase):
 
   @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
                        Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
+  @unittest.skipIf(ASM_CALL, "ASM_CALL doesn't support direct pc read and write")
   def test_binary(self):
     payload = bytes(range(256))
     def kernel(out:UOp):
@@ -742,6 +744,20 @@ class TestCallInKernel(unittest.TestCase):
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [6, 11, 16, 21])
+
+  def test_copy_offset_slices(self):
+    @uopfunc
+    def copy_block(dst:UOp, src:UOp) -> UOp:
+      i = UOp.range(4, 0, AxisType.UPCAST)
+      return dst[i].store(src[i]).end(i).sink()
+
+    def kernel(dst:UOp, src:UOp) -> UOp:
+      return copy_block(dst[1:5], src[1:5]).sink(arg=KernelInfo(opts_to_apply=()))
+
+    src = Tensor([0., 1., 2., 3., 4.]).realize()
+    dst = Tensor([-1.] * 6).realize()
+    out = dst.custom_kernel(src, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [-1., 1., 2., 3., 4., -1.])
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

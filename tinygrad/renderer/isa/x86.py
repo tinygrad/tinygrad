@@ -326,7 +326,7 @@ isel_matcher = PatternMatcher([
   (UPat.cvar("c").cast(dtypes.int64s, name="x"), lambda c,x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, c.val),)) if not x.tag else None),
   (UPat.cvar("c").cast(dtypes.ints+(dtypes.bool,), name="x"), lambda c,x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, c.val),)) if not x.tag else None),
   (UPat.cvar("c").cast(dtypes.floats, name="x"), lambda c,x:
-   UOp.cconst(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, c.val))[0], dt).bitcast(x.dtype) if not x.tag else None),
+   UOp.cconst(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, c.val))[0], dt).bitcast(x.dtype)),
   # conditional moves that use masks, the mask has the width of the values
   (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.float32), UPat()), name="m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.VBLENDVPS, src=(b, a, mask(m)))),
@@ -447,9 +447,6 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
-  # tag shape srcs so they aren't materialized into registers
-  (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
-    x.replace(src=tuple(s.rtag() for s in x.src)) if any(s.tag is not True for s in x.src) else None),
 ])
 
 # ***** pre register allocation *****
@@ -731,7 +728,7 @@ class X86Renderer(ISARenderer):
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)) + (x,), arg=(op, dtypes.void), tag=x.tag)
+    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)) + (x,), arg=(op, dtypes.void))
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
