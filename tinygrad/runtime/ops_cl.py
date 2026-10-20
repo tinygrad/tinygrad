@@ -48,7 +48,7 @@ def cl_run(buf:UOp, cmds:tuple) -> UOp: # one in-order queue, every call after t
 class CLQueue(HWQueue):
   dev:CLDevice
   def q64(self, *vals) -> int: return self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v.cast(dtypes.uint64) for v in vals])
-  def call(self, fn, *args): self.cmds.append((fn, *[self.q64(a) // 8 - 1 if isinstance(a, int) else a for a in args])) # ints go in as words
+  def call(self, fn, *args): self.cmds.append((fn, *[UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]))
 
   def exec(self, call:UOp, prg:UOp):
     args, images = get_call_kernel_args(call, prg, self.devs), []
