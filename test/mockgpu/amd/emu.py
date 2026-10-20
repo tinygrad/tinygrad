@@ -1975,9 +1975,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   if ASM_CALL:
     from test.mockgpu.amd.call import lift, get_call_runtime
-    prg = lift(lib, lib_sz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND, name=name)
-    vals = {"lib":lib, "args_ptr":args_ptr, "groups_x":gx, "groups_y":gy, "groups":gx*gy*gz,
-            **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
+    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND, name=name)
+    vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
       get_call_runtime(ASM_CALL_BACKEND, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
     return 0

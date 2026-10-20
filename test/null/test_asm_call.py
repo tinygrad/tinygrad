@@ -93,14 +93,14 @@ class TestAsmCFG(unittest.TestCase):
     code = b"".join((s_mov_b32(s[2], 0).to_bytes(), s_add_u32(s[2], s[2], 1).to_bytes(), s_cmp_lt_i32(s[2], 4).to_bytes(),
                      s_cbranch_scc1(simm16=-3).to_bytes(), s_endpgm().to_bytes()))
     buffers = [ctypes.create_string_buffer(code) for _ in range(2)]
-    first, second = [call.lift(ctypes.addressof(buf), len(code), 32, 1, 1, 0x19c, 0, "rdna3", 0, "PYTHON") for buf in buffers]
+    first, second = [call.lift(ctypes.addressof(buf), len(code), 1, 1, 1, 32, 1, 1, 0x19c, 0, "rdna3", 0, "PYTHON") for buf in buffers]
     self.assertEqual(first.src[0].key, second.src[0].key)
 
   def test_decode_past_early_exit_stops_before_allocation_padding(self):
     from tinygrad.runtime.autogen.amd.cdna.ins import s_cbranch_scc1, s_endpgm, s_nop
     code = b"".join(inst.to_bytes() for inst in (s_cbranch_scc1(simm16=1), s_endpgm(), s_nop(), s_endpgm()))
     buf = ctypes.create_string_buffer(code + b"\xff"*4096)
-    args = (ctypes.addressof(buf), len(code), 1, 1, 1, 0, 0, "cdna", 0, "CPU")
+    args = (ctypes.addressof(buf), len(code), 1, 1, 1, 1, 1, 1, 0, 0, "cdna", 0, "CPU")
     prg = call.lift(*args)
     buf[len(code)] = b"\x00"
     self.assertIs(call.lift(*args), prg)

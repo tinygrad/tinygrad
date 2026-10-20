@@ -320,10 +320,10 @@ def decode_cfg(insts:dict[int, Inst]):
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
-def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
+def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
          user_data_count:int, backend:str, name:str="") -> UOp:
   view = to_mv(lib, lib_sz)
-  dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
+  dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
   key = (lib_sz, arch, backend, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
   entries = dispatch_cache.setdefault(key, [])
@@ -353,13 +353,11 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str
       possible = (possible-{pc}) | (set(cfg["paths"][pc]) or {-1})
   routed = len(unconditional) != len(regions)
   axes = itertools.count(sum(inst.size() for inst in insts.values()))
-  lx, ly, lz, rsrc2, scratch_size, user_data_count = dispatch
+  gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count = dispatch
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
-  gx = UOp.variable("groups_x", 1, dtypes.uint32.max, dtypes.uint32)
-  gy = UOp.variable("groups_y", 1, dtypes.uint32.max, dtypes.uint32)
-  wg = UOp.range(UOp.variable("groups", 0, dtypes.uint64.max, dtypes.uint64), 0, dtype=dtypes.uint64)
+  wg = UOp.range(gx*gy*gz, 0, dtype=dtypes.uint64)
   wave = UOp.range(n_waves, 1, dtype=dtypes.int)
   # alloc register and LDS buffers
   sgpr = UOp.alloc((SGPR_COUNT*n_waves,), dtypes.uint32, 0, AddrSpace.REG)
@@ -371,7 +369,7 @@ def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   lib_addr = UOp.variable("lib", 0, dtypes.uint64.max, dtypes.uint64)
   # Keep grid dimensions unsigned: mixing the uint64 workgroup index with int32 promotes division/modulo to floats.
-  dims = [gx, gy, *(UOp.const(x, dtypes.int) for x in (lx, ly, total_threads))]
+  dims = [UOp.const(gx, dtypes.uint32), UOp.const(gy, dtypes.uint32), *(UOp.const(x, dtypes.int) for x in (lx, ly, total_threads))]
   ctx = _Ctx(4, wave_size)
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
