@@ -80,12 +80,8 @@ class CallLLVMRenderer(CPULLVMRenderer):
     super().__init__(target)
     self.compiler = CallJIT(CPULLVMCompiler(target.arch.split(',')))
 
-  def _render_fn(self, name, args, kernel, prefix=None):
-    if name == self.entry_name:
-      kernel = [f"  {n} = trunc i64 {n}_arg to {ldt(p.dtype)}" for n,p in args if p.addrspace == AddrSpace.ALU and p.dtype.itemsize < 8]+kernel
-      args = [(n+"_arg", p.replace(arg=replace(p.arg, dtype=dtypes.uint64))) if p.addrspace == AddrSpace.ALU and p.dtype.itemsize < 8
-              else (n,p) for n,p in args]
-    ret = super()._render_fn(name, args, kernel, prefix)
+  def _render_fn(self, name, args, kernel, prefix=None, args_struct=False):
+    ret = super()._render_fn(name, args, kernel, prefix, args_struct)
     return ret.replace(" #0", " #1") if name == self.entry_name or name.startswith("asm_block_") else ret
 
   def render(self, uops:list[UOp]) -> str:
@@ -100,7 +96,7 @@ class CallLLVMRenderer(CPULLVMRenderer):
       if name in self.compiler.functions: continue
       definition = self._render_kernel(list(body.src), name=name, fns=fns)[1]
       self.compiler.compile_cached(module(body.src, definition))
-    entry = self._render_kernel(uops, fns=fns)
+    entry = self._render_kernel(uops, fns=fns, args_struct=True)
     return module(uops, "\n".join([*entry[0], entry[1]]))
 
 class CallClangRenderer(ClangRenderer):
@@ -135,10 +131,6 @@ class CallClangRenderer(ClangRenderer):
       definition = f"__attribute__(({attrs})) void {name}({params}) {{\n" + '\n'.join(lines) + "\n}"
       self.compiler.compile_cached(module(body.src, definition))
     name, lines, bufs = self._render(uops)
-    # CPUProgram passes scalar arguments as uint64, including stack arguments on arm64.
-    lines = [f"  {self.param_type(p)} {n} = ({self.param_type(p)}){n}_arg;" for n,(p,_) in bufs if p.addrspace == AddrSpace.ALU] + lines
-    bufs = [(n+"_arg", (p.replace(arg=replace(p.arg, dtype=dtypes.uint64)), mutable)) if p.addrspace == AddrSpace.ALU else (n, (p, mutable))
-            for n,(p,mutable) in bufs]
     return module(uops, super().render_kernel(name, lines, bufs, []))
 
 @functools.cache

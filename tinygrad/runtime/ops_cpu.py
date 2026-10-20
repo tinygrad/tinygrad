@@ -1,8 +1,8 @@
 from __future__ import annotations
-import platform, ctypes, mmap, struct
+import platform, ctypes, struct, mmap
 from typing import Any
-from tinygrad.helpers import OSX, mv_address, unwrap, data64_le, cpu_profile
-from tinygrad.device import Compiled, TinyELF, Program, HostAllocator
+from tinygrad.helpers import OSX, unwrap, data64_le, cpu_profile, mv_address
+from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, Buffer, BufferSpec
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -41,32 +41,47 @@ class CPUExecutable:
 
     self.fxn:Any = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
-class CPUProgram(CPUExecutable, Program['CPUDevice']):
+class CPUProgram(Program['CPUDevice']):
+  rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
+
+  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
+
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
     self.lvp = obj.target.renderer == "LVP"
-    if dev.remote is not None: self.fxn = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
-    else: super().__init__(obj.lib, self.lvp)
+    if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
+    else:
+      self.buf = Buffer(dev.device, len(obj.lib), options=BufferSpec(nolru=True), preallocate=True)
+      loaded = self._load(obj.lib, self.buf._buf)
+      self.buf.host[:len(loaded)] = loaded
+
+      # RWX pages are unrepresentable on apple silicon (https://blog.svenpeter.dev/posts/m1_sprr_gxf/), so flip the written pages to R-X
+      libc.mprotect(ctypes.c_void_p(self.buf._buf), len(obj.lib), libc.PROT_READ | libc.PROT_EXEC)
+
+      # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
+      # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
+      # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
+      # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
+      if 'rt' in DLL._loaded_: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.buf._buf), ctypes.c_void_p(self.buf._buf + len(loaded)))
+      else:
+        # msync should be a universal POSIX way to do this
+        libc.msync(ctypes.c_void_p(self.buf._buf), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
+
+      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.buf._buf)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:
+    hdr = 12 if self.lvp else 0
+    kernargs = ctypes.create_string_buffer(hdr + len(args) * 8)
+    if self.lvp: struct.pack_into('<3I', kernargs, 0, *data64_le(ctypes.addressof(kernargs) + hdr), len(args) * 2)
+    for a, (off, dt) in zip(args, TinyELF.iter_sig(self.signature)): struct.pack_into(f'<{dt.fmt}', kernargs, hdr + off, a)
     if (remote:=self.dev.remote) is not None:
-      data = struct.pack(f'<{len(args)}Q', *(a & 0xffffffffffffffff for a in args))
-      ret = (remote._rpc if wait else remote._post)(remote.sock, RemoteCmd.EXEC_PROG, self.fxn, len(args), int(wait), payload=data)
+      ret = (remote._rpc if wait else remote._post)(remote.sock, RemoteCmd.EXEC_PROG, self.fxn, len(kernargs), int(wait), payload=bytes(kernargs))
       return ret[0] / 1e9 if ret is not None else None
-    with cpu_profile(self.name, self.dev.device, profile_key=self.profile_key) as prof:
-      if self.lvp:
-        lvp_args = bytearray(12 + len(args) * 8)
-        addr = mv_address(lvp_args)
-        struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), len(args)*2)
-        for a,(off,dt) in zip(args, TinyELF.iter_sig(self.signature)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, a)
-        self.fxn(addr)
-      else: self.fxn(*[ctypes.c_uint64(x) for x in args])
+    with cpu_profile(self.name, self.dev.device, profile_key=self.profile_key) as prof: self.fxn(kernargs)
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
 
 class CPUDevice(Compiled):
-  wait_timeout_ms = 30000
-
   @property
   def has_copy_queue(self) -> bool: return False
 

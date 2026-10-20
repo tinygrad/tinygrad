@@ -450,13 +450,15 @@ class TestVizIntegration(unittest.TestCase):
     self.assertTrue(graph[id((c+2).src[1])]["exclude"])
     self.assertFalse(graph[id(c+2)]["exclude"])
 
-  def test_recurse(self):
+  def test_nested(self):
     with save_viz() as viz:
       a = Tensor.empty(10)
-      for _ in range(2_000): a += a
+      for _ in range(10_000): a += a
       graph_rewrite(a.uop, PatternMatcher([]))
     lst = viz.list_items()
     assert len(lst) == 1
+    uop = next(viz.get_details(0, 0))
+    assert uop["_sink"] is a.uop
 
   def test_jit(self):
     with save_viz():

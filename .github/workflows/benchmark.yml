@@ -253,7 +253,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD', 'NV']
+        dev: ['AMD'] # ['AMD', 'NV']
     timeout-minutes: 20
     defaults:
       run:
