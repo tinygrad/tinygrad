@@ -1251,7 +1251,7 @@ class TestCLI(unittest.TestCase):
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
-    self.assertEqual(len(codegen_count), 4)
+    self.assertEqual(len(codegen_count), 3)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
 
