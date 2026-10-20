@@ -53,8 +53,6 @@ class CPUProgram(Program['CPUDevice']):
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
 
 class CPUDevice(Compiled):
-  wait_timeout_ms = 30000
-
   @property
   def has_copy_queue(self) -> bool: return False
 
