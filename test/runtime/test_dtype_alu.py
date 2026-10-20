@@ -291,6 +291,12 @@ class TestDTypeALU(unittest.TestCase):
       x = Tensor([dt.max//2, dt.max//2+1], dtype=dt)
       self.assertEqual((x*2).max().item(), dt.max-1)
 
+  def test_unsigned_wrap_bounds(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      h = 1 << (dt.bitsize-1)
+      u, x = Tensor([h], dtype=dt).maximum(h), Tensor([1], dtype=dt)
+      self.assertEqual([(t < 1).item() for t in (u+h, u*2, u<<1, -x, x^-1)], [True, True, True, False, False])
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")

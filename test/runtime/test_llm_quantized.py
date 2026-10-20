@@ -1,7 +1,7 @@
 import gc, itertools, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.helpers import not_support_multi_device
 
@@ -15,7 +15,8 @@ class QuantLinearMixin:
     elif ggml_type == 10:
       packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
       packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
-    elif ggml_type == 20: packed.reshape(-1, 18)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
+    elif ggml_type in SMALL_BLOCK_QUANTS:
+      packed.reshape(-1, SMALL_BLOCK_QUANTS[ggml_type]*2)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
     raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
@@ -105,6 +106,17 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[offset:])
         raw.assign(raw.full_like(1)).realize()
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
+
+  def test_small_block_quant_weights(self):
+    for ggml_type, halfwords in SMALL_BLOCK_QUANTS.items():
+      with self.subTest(ggml_type=ggml_type):
+        packed = np.arange(25*halfwords*2, dtype=np.uint8)
+        raw = Tensor(packed).realize()[0:]
+        if raw.uop.contiguous_view() is None: self.skipTest("requires buffer views")
+        linear = Linear(800, 1, bias=False)
+        linear.set_quantized(ggml_data_to_tensor(raw, 800, ggml_type).reshape(1, 800))
+        self.assertEqual(linear.ggml_type, ggml_type)
+        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
