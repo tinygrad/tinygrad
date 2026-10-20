@@ -426,6 +426,12 @@ class TestFastIdiv(unittest.TestCase):
     self.assertNotIn(Ops.SHR, ops)
     self.assertIn(Ops.CDIV, ops)
 
+class TestNegLowering(unittest.TestCase):
+  def test_int_neg(self):
+    for dt in dtypes.ints:
+      x = UOp.param(0, dt, 1).index(UOp.const(0))
+      self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
+
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
