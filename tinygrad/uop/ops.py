@@ -1419,14 +1419,13 @@ python_alu: dict[Ops, Callable]  = {
   Ops.CMOD: cmod, Ops.CDIV: cdiv, Ops.FLOORDIV: floordiv, Ops.FLOORMOD: floormod,
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
-def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
+def exec_alu(op:Ops, dtype:DType, operands):
   if any(isinstance(x, tuple) for x in operands):
     count = max(len(x) for x in operands if isinstance(x, tuple))
     return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
-  if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
-  return alu
+  return truncate_fxn(alu) if (truncate_fxn:=truncate.get(dtype)) is not None else alu
 
 # ***** pattern matcher *****
 
