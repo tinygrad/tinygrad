@@ -1,4 +1,4 @@
-import itertools, functools, struct
+import itertools, functools, struct, ctypes, mmap
 from dataclasses import replace
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, rewrite_group, uopfunc
@@ -10,23 +10,29 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
-from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.support.elf import elf_loader, jit_loader
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.ops_cpu import CPUExecutable
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, Target, cpu_profile, to_mv
+from tinygrad.helpers import Context, Target, cpu_profile, to_mv, mv_address, OSX
 from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
-class CallModule(CPUExecutable):
+class CallModule:
+  rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
+
   def __init__(self, lib:bytes, functions:dict[str, int]):
     self.functions = functions
     self.exports:dict[str, int] = {}
-    super().__init__(lib)
+    self.mem = mmap.mmap(-1, len(lib), access=mmap.ACCESS_WRITE)
+    addr = mv_address(self.mem)
+    self.mem.write(loaded:=self._load(lib, addr))
+    libc.mprotect(ctypes.c_void_p(addr), len(lib), libc.PROT_READ | libc.PROT_EXEC)
+    if 'rt' in DLL._loaded_: self.rt_lib["__clear_cache"](ctypes.c_void_p(addr), ctypes.c_void_p(addr + len(loaded)))
+    else: libc.msync(ctypes.c_void_p(addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
   def _load(self, lib, base=0):
-    image = bytearray(super()._load(lib, base))
+    image = bytearray(jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values())))
     _, sections, _ = elf_loader(lib, link_libs=list(DLL._loaded_.values()))
     for section in sections:
       if section.header.sh_type != libc.SHT_SYMTAB: continue
