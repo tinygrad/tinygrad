@@ -1,6 +1,7 @@
 import unittest
 import ctypes, subprocess, tempfile
 from tinygrad import dtypes
+from tinygrad.helpers import Context
 from tinygrad.codegen import to_program
 from tinygrad.uop.ops import UOp, KernelInfo
 from test.mockgpu.amd import call
@@ -12,7 +13,9 @@ class TestCallJIT(unittest.TestCase):
     out = UOp.param(0, dtypes.int, (1,))
     for backend in ("CPU", "CPU:CLANG"):
       with self.subTest(backend=backend):
-        programs = [to_program(out[0].store(v).sink(arg=KernelInfo()), call.backend_renderer(backend)) for v in (7, 19)]
+        renderer = call.backend_renderer(backend)
+        with Context(ALLOW_DEVICE_USAGE=0):
+          programs = [to_program(out[0].store(v).sink(arg=KernelInfo()), renderer) for v in (7, 19)]
         self.assertEqual(programs[0].to_elf().name, programs[1].to_elf().name)
         for prg, expected in zip(programs, (7, 19)):
           result = ctypes.c_int()
