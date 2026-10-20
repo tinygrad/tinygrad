@@ -102,7 +102,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       pat += [(UPat(Ops.CMOD, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
         lambda ctx, x, d: x - d * q if (q:=fast_idiv(ctx, x, d.val)) is not None else None)]
   if Ops.NEG in ops:
-    pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
+    pat += [(UPat.var('x')*UPat.cvar('c'), lambda ctx,x,c: x.alu(Ops.NEG) if c.val == x.dtype.const(-1) else None)]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
   if Ops.CMPLT in ops:
     # These are late rewrites because simplex expects equalities to be a certain format

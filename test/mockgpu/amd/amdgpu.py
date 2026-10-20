@@ -77,7 +77,7 @@ class PM4Executor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
     self.ib_executor: PM4Executor|None = None
-    self.kernel_name = ""
+    self.kernel_name, self.kernel_text_size  = "", 0
     super().__init__(base, size, rptr, wptr)
 
   def _next_dword(self):
@@ -111,7 +111,8 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
       elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       elif op == amd_gpu.PACKET3_NOP:
-        self.kernel_name = b"".join(self._next_dword().to_bytes(4,"little") for _ in range(n+1)).rstrip(b"\x00").decode()
+        data = b"".join(self._next_dword().to_bytes(4,"little") for _ in range(n+1))
+        self.kernel_name, self.kernel_text_size = data[:-4].rstrip(b"\x00").decode(), int.from_bytes(data[-4:], "little")
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
     return (self.rptr[0] - prev_rptr) + executed_in_ib
 
@@ -203,8 +204,8 @@ class PM4Executor(AMDQueue):
       except KeyError: user_data.append(0)
 
     prg_sz = 0
-    for st,sz in self.gpu.mapped_ranges:
-      if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
+    for st,sz in sorted(self.gpu.mapped_ranges):
+      if st <= prg_addr+prg_sz < st+sz: prg_sz = st+sz-prg_addr
 
     # Get scratch size from COMPUTE_TMPRING_SIZE register
     # WAVESIZE = ceildiv(lanes * size_per_thread, mem_alignment_size)
@@ -215,7 +216,7 @@ class PM4Executor(AMDQueue):
     wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25
     scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
 
-    assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
+    assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
     # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to the emulator
     remu.valid_mem_ranges = self.gpu.mapped_ranges
     remu.rsrc2 = rsrc2
@@ -223,7 +224,7 @@ class PM4Executor(AMDQueue):
     remu.arch = self.gpu.arch
     remu.user_data = user_data
     remu.name = self.kernel_name
-    err = remu.run_asm(prg_addr, prg_sz, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr)
+    err = remu.run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_indirect_buffer(self, n):

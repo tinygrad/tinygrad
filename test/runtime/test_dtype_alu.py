@@ -279,6 +279,17 @@ class TestDTypeALU(unittest.TestCase):
       x = Tensor.arange(10, dtype=dt) + Tensor([dt.max-4], dtype=dt)
       self.assertEqual((x < 3).tolist(), [i in (5, 6, 7) for i in range(10)])
 
+  def test_unsigned_narrow_wrap(self):
+    for dt in (dtypes.uint8, dtypes.uint16):
+      x = Tensor([dt.max, 3], dtype=dt)
+      self.assertEqual(((x+1)>>4).tolist(), [0, 0])
+      self.assertEqual(((x-4)>>4).tolist(), [dt.max>>4, dt.max>>4])
+      self.assertEqual(((x*2)>>4).tolist(), [dt.max>>4, 0])
+      self.assertEqual(((-x)>>4).tolist(), [0, dt.max>>4])
+      self.assertEqual(((x<<4)>>4).tolist(), [dt.max>>4, 3])
+      self.assertEqual(((x*x)>>4).tolist(), [0, 0])
+      self.assertEqual(((x+1)<1).tolist(), [True, False])
+
   def test_div_add_div_no_overflow(self):
     for dt in (dtypes.uint32, dtypes.uint64):
       x = Tensor([dt.max-1], dtype=dt)
@@ -296,6 +307,18 @@ class TestDTypeALU(unittest.TestCase):
       h = 1 << (dt.bitsize-1)
       u, x = Tensor([h], dtype=dt).maximum(h), Tensor([1], dtype=dt)
       self.assertEqual([(t < 1).item() for t in (u+h, u*2, u<<1, -x, x^-1)], [True, True, True, False, False])
+
+  def test_unsigned_const_canonical(self):
+    for dt in (dtypes.uint8, dtypes.uint32, dtypes.uint64):
+      c, z = Tensor(-1, dtype=dt), Tensor([1], dtype=dt)*0-1
+      self.assertEqual((c>>1).item(), dt.max>>1)
+      self.assertEqual((z>>1).item(), dt.max>>1)
+      self.assertEqual((z//2).item(), dt.max//2)
+      self.assertEqual((z<3).item(), False)
+      self.assertEqual(z.maximum(5).item(), dt.max)
+    self.assertEqual(Tensor(-1, dtype=dtypes.uint32).cast(dtypes.int64).item(), 2**32-1)
+    self.assertEqual((Tensor(255, dtype=dtypes.uint8)+1).cast(dtypes.uint16).item(), 0)
+    self.assertEqual((Tensor([5], dtype=dtypes.uint32)//Tensor(-1, dtype=dtypes.uint32)).item(), 0)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))

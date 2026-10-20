@@ -36,6 +36,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
 
   # ** scan sink for metadata
   sink, param_sizes, lds_size, scratch_size, gids = prg.src[0], {}, 0, 0, set()
+  arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
   wave32 = not is_cdna
   for u in sink.toposort():
@@ -45,7 +46,6 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
     elif u.op is Ops.RANGE and u.axis_type is AxisType.WARP and u.src[0].arg == 64: wave32 = True
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
-  arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
 
   # ** pad text to ISA alignment
   padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()

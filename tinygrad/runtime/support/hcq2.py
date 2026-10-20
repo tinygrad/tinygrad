@@ -31,7 +31,7 @@ def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for
 def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
-  runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS) else get_call_arg_uops(call)[0].device
+  runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
   return devs
@@ -516,7 +516,7 @@ pm_resolve_link = PatternMatcher([
   # the address of a buffer is a const
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   # math on consts is a const
-  (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"), lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
+  (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"), lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src]), a.dtype)),
   # fold rules
   (UPat(name="buf").store(UPat(Ops.BINARY, name="blob").or_bitcasted()), lambda buf, blob: _write_host(buf, [(0, blob.arg)])),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),

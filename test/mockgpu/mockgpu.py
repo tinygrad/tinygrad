@@ -28,14 +28,17 @@ def hook_doorbells(s:UOp) -> UOp|None:
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
 # this links AMD emulator's kernel back to the original kernel
-def emit_kernel_name(ctx:HWQueue, prg:UOp) -> None:
-  from tinygrad.runtime.ops_amd import AMDComputeQueue
+def emit_kernel_info(ctx:HWQueue, prg:UOp) -> None:
+  from tinygrad.runtime.ops_amd import AMDComputeQueue, _amd_program_image
   if isinstance(ctx, AMDComputeQueue):
+    from tinygrad.viz.serve import get_elf_section
     name = prg.src[0].arg.name.encode() + b"\x00"
-    ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"))
+    text = get_elf_section(prg.src[3].arg, ".text").header
+    text_size = text.sh_addr + text.sh_size - _amd_program_image(ctx.dev, prg.src[3].arg)[0].entry_point_offset
+    ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"), text_size)
 
 HWQueue.q_rewrite = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), allow_any_len=True), emit_kernel_name),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), allow_any_len=True), emit_kernel_info),
 ]) + HWQueue.q_rewrite
 
 original_memoryview = builtins.memoryview

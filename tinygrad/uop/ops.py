@@ -894,6 +894,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.device is None or self.dtype in dtypes.weaks
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
+    # anything that has dtype void has no memory backing, it lives in the ALU
+    if self.dtype is dtypes.void: return AddrSpace.ALU
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
@@ -1304,7 +1306,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def kernel_params(self) -> tuple[UOp, ...]:
-    # the kernel's params in its arg order, which is slot order. the LINEAR keeps two IMAGE params of one slot in order, x86 isel drops stack params
+    # the kernel's params in its arg order, which is slot order. the LINEAR keeps two IMAGE params of one slot in order, x86 isel replaces every PARAM
     params = [u for u in self.src[1].src if u.op is Ops.PARAM]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
@@ -1419,14 +1421,13 @@ python_alu: dict[Ops, Callable]  = {
   Ops.CMOD: cmod, Ops.CDIV: cdiv, Ops.FLOORDIV: floordiv, Ops.FLOORMOD: floormod,
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
-def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
+def exec_alu(op:Ops, dtype:DType, operands):
   if any(isinstance(x, tuple) for x in operands):
     count = max(len(x) for x in operands if isinstance(x, tuple))
     return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
-  if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
-  return alu
+  return truncate_fxn(alu) if (truncate_fxn:=truncate.get(dtype)) is not None else alu
 
 # ***** pattern matcher *****
 

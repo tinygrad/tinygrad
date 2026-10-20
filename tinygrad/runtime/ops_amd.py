@@ -2,9 +2,8 @@ from __future__ import annotations
 from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, itertools, collections, atexit
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args
-from tinygrad.runtime.support.hcq2 import pack_args, make_program, ccall
-from tinygrad.uop.ops import sint, UOp, ProgramInfo
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args, pack_args, make_program, ccall
+from tinygrad.uop.ops import sint, UOp, ProgramInfo, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
@@ -14,18 +13,13 @@ from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amdgpu_kd, amdgpu_drm, libc
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.memory import MMIOInterface
-from tinygrad.runtime.support.system import FileIOInterface
-from tinygrad.runtime.support.system import filter_visible_devices
+from tinygrad.runtime.support.memory import MMIOInterface, AddrSpace
+from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices, PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
-from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset, usb_ctrl_buffer
-from tinygrad.runtime.support.memory import AddrSpace
-if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
-
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.uop.ops import Ops, UPat, PatternMatcher, KernelInfo, uopfunc
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
