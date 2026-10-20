@@ -122,7 +122,9 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
+        if (host:=(strg:=self.get_storage()).host) is not None:
+          for dev in strg.maps: dev.synchronize()
+          host[:] = memoryview(initial_value).cast('B')
         else: self.copy_from(Buffer("PYTHON", self.nbytes, initial_value=initial_value))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
