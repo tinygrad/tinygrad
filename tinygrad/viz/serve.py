@@ -171,14 +171,13 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
 def _reconstruct(data:VizData, a:int) -> UOp:
   stack = [(a, False)]
   while stack:
-    num, ready = stack.pop()
+    num, visited = stack.pop()
     if num in data.all_uops: continue
     op, src, arg, *rest = data.trace.uop_fields[num]
-    if ready or not src:
-      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
-    else:
+    if not visited:
       stack.append((num, True))
-      stack.extend((s, False) for s in reversed(src) if s not in data.all_uops)
+      for s in reversed(src): stack.append((s, False))
+    else: data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
   return data.all_uops[a]
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
