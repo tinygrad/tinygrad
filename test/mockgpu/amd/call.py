@@ -1,38 +1,28 @@
-import itertools, functools, struct, ctypes, mmap
-from dataclasses import replace
+import itertools, functools, struct, ctypes, copy
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, rewrite_group, uopfunc
-from tinygrad.codegen import to_program, to_program_lower_config, lower_call
-from tinygrad.device import Device, Compiler
+from tinygrad.codegen import to_program, to_program_config, lower_call
+from tinygrad.device import Device, Compiler, TinyELF
 from tinygrad.engine.realize import get_runtime, runtime_cache
 from tinygrad.renderer.llvmir import CPULLVMRenderer, ldt
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
 from tinygrad.runtime.support.compiler_cpu import ClangCompiler
-from tinygrad.runtime.support.elf import elf_loader, jit_loader
+from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.c import DLL
+from tinygrad.runtime.ops_cpu import CPUDevice, CPUProgram
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, Target, cpu_profile, to_mv, mv_address, OSX
+from tinygrad.helpers import Context, Target, cpu_profile, to_mv
 from tinygrad.runtime.autogen import hsa, libc
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
-class CallModule:
-  rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
-
-  def __init__(self, lib:bytes, functions:dict[str, int]):
-    self.functions = functions
+class CallModule(CPUProgram):
+  def __init__(self, lib:bytes, functions:dict[str, tuple["CallModule", int]]):
+    self.lib = lib
     self.exports:dict[str, int] = {}
-    self.mem = mmap.mmap(-1, len(lib), access=mmap.ACCESS_WRITE)
-    addr = mv_address(self.mem)
-    self.mem.write(loaded:=self._load(lib, addr))
-    libc.mprotect(ctypes.c_void_p(addr), len(lib), libc.PROT_READ | libc.PROT_EXEC)
-    if 'rt' in DLL._loaded_: self.rt_lib["__clear_cache"](ctypes.c_void_p(addr), ctypes.c_void_p(addr + len(loaded)))
-    else: libc.msync(ctypes.c_void_p(addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
-
-  def _load(self, lib, base=0):
-    image = bytearray(jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values())))
+    self.imports:dict[int, tuple[CallModule, int]] = {}
     _, sections, _ = elf_loader(lib, link_libs=list(DLL._loaded_.values()))
     for section in sections:
       if section.header.sh_type != libc.SHT_SYMTAB: continue
@@ -41,28 +31,33 @@ class CallModule:
         if not 0 < symbol.st_shndx < len(sections): continue
         name = strings[symbol.st_name:strings.find(b'\0', symbol.st_name)].decode()
         offset = sections[symbol.st_shndx].header.sh_addr + symbol.st_value
-        if name.endswith('_ptr'): struct.pack_into('<Q', image, offset, self.functions[name[:-4]])
-        elif libc.ELF64_ST_BIND(symbol.st_info) == libc.STB_GLOBAL and symbol.st_info & 15 == libc.STT_FUNC: self.exports[name] = base + offset
-    self.functions.update(self.exports)
+        if name.endswith('_ptr'): self.imports[offset] = functions[name[:-4]]
+        elif libc.ELF64_ST_BIND(symbol.st_info) == libc.STB_GLOBAL and symbol.st_info & 15 == libc.STT_FUNC: self.exports[name] = offset
+    functions.update({name:(self, offset) for name, offset in self.exports.items()})
+
+  @functools.cached_property
+  def address(self) -> int:
+    dev = Device["CPU"]
+    assert isinstance(dev, CPUDevice)
+    super().__init__(dev, TinyELF(self.lib, "", Target("CPU"), ()))
+    return self.buf._buf
+
+  def _load(self, lib, base=0):
+    image = bytearray(super()._load(lib, base))
+    for offset, (module, fn_offset) in self.imports.items(): struct.pack_into('<Q', image, offset, module.address + fn_offset)
     return bytes(image)
 
 class CallJIT(Compiler):
   def __init__(self, compiler:CPULLVMCompiler|ClangCompiler):
     self.compiler, self.arch = compiler, compiler.arch
     super().__init__(f"asm_call_obj_{compiler.cachekey}" if compiler.cachekey is not None else None)
-    self.functions:dict[str, int] = {}
+    self.functions:dict[str, tuple[CallModule, int]] = {}
     self.modules:dict[bytes, CallModule] = {}
 
   def compile_cached(self, src:str) -> bytes:
     lib = super().compile_cached(src)
     if lib not in self.modules: self.modules[lib] = CallModule(lib, self.functions)
     return lib
-
-  def trampoline(self, lib:bytes, name:str) -> bytes:
-    addr = self.modules[lib].exports[name]
-    if self.arch == 'x86_64': return b'\x48\xb8'+struct.pack('<Q', addr)+b'\xff\xe0'
-    if self.arch == 'arm64': return struct.pack('<IIQ', 0x58000050, 0xd61f0200, addr)
-    raise RuntimeError(f'unsupported JIT trampoline architecture {self.arch}')
 
   def compile(self, src:str) -> bytes:
     with cpu_profile(f'{type(self.compiler).__name__} JIT compile'): return self.compiler.compile(src)
@@ -151,8 +146,12 @@ def get_call_runtime(backend:str, prg:UOp):
   if backend.split(':')[0] != "CPU": return get_runtime(backend, prg)
   if (runtime:=runtime_cache.get(key:=(prg.key, backend))) is None:
     obj = prg.to_elf()
-    lib = backend_renderer(backend).compiler.trampoline(obj.lib, obj.name)
-    runtime_cache[key] = runtime = Device["CPU"].runtime(replace(obj, lib=lib))
+    module = backend_renderer(backend).compiler.modules[obj.lib]
+    addr = module.address + module.exports[obj.name]
+    runtime = copy.copy(module)
+    runtime.name, runtime.signature, runtime.profile_key = obj.name, obj.signature, obj.profile_key
+    runtime.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(addr)
+    runtime_cache[key] = runtime
   return runtime
 
 InstructionCall = tuple[UOp, list[UOp]]
@@ -205,7 +204,7 @@ def lower_body(sink:UOp, renderer:Renderer, name:str) -> tuple[UOp, list[UOp]]:
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[InstructionCall|None, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
-                                          *(x.value for x in to_program_lower_config)), [])
+                                          *(x.value for x in to_program_config)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
@@ -326,7 +325,7 @@ def lift(lib:int, lib_sz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:in
   view = to_mv(lib, lib_sz)
   dispatch = (lx, ly, lz, rsrc2, scratch_size, user_data_count)
   renderer = backend_renderer(backend)
-  key = (lib_sz, arch, backend, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_lower_config))
+  key = (lib_sz, arch, backend, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
   entries = dispatch_cache.setdefault(key, [])
   for code, prg in entries:
     if bytes(view[:len(code)]) == code: return prg

@@ -203,7 +203,6 @@ class PM4Executor(AMDQueue):
       try: user_data.append(self.gpu.regs[regCOMPUTE_USER_DATA_0 + i])
       except KeyError: user_data.append(0)
 
-    # Kernels can span adjacent page mappings.
     prg_sz = 0
     for st,sz in sorted(self.gpu.mapped_ranges):
       if st <= prg_addr+prg_sz < st+sz: prg_sz = st+sz-prg_addr
