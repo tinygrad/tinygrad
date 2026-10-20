@@ -82,7 +82,7 @@ def load_rewrites(data:VizData) -> None:
         steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=0))
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
         lin_idx = None
-      if s.name == "View Program": ki = _reconstruct(data, s.sink, depth=1).src[0].arg
+      if s.name == "View Program": ki = data.trace.uop_fields[data.trace.uop_fields[s.sink][1][0]][2]
     for key in k.keys: data.ref_map[key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
@@ -168,21 +168,26 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 
-def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
-  if depth is None and a in data.all_uops: return data.all_uops[a]
-  op, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
-  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
-  if depth is None: data.all_uops[a] = ret
-  return ret
+def _reconstruct(data:VizData, a:int) -> UOp:
+  stack = [(a, False)]
+  while stack:
+    num, ready = stack.pop()
+    if num in data.all_uops: continue
+    op, src, arg, *rest = data.trace.uop_fields[num]
+    if ready or not src:
+      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+    else:
+      stack.append((num, True))
+      stack.extend((s, False) for s in reversed(src) if s not in data.all_uops)
+  return data.all_uops[a]
 
-def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
-  next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
+def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
+  next_sink, err = _reconstruct(data, ctx.sink), False
   yield {"graph":uop_to_json(data, next_sink), "uop":tokenize_uir(data, next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
-    replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
+    replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
@@ -192,11 +197,15 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
            "diff":[ansistrip(x) for x in diff if not x.startswith(("---","+++","@@"))]}
     if not ctx.bottom_up: next_sink = new_sink
 
-def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
+def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, alt:str|None=None, src:int|None=None) -> UOp|None:
   for i in range(lin_idx+1, len(rewrites:=viz_data.trace.rewrites[kernel_idx])):
-    if (r:=rewrites[i]).name == alt: return _reconstruct(viz_data, r.sink, depth=depth)
-  for s in get_full_rewrite(viz_data, rewrites[lin_idx], depth=depth):
-    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)): return s["_sink"]
+    if (r:=rewrites[i]).name == alt:
+      op, sources, *_ = viz_data.trace.uop_fields[r.sink]
+      return _reconstruct(viz_data, sources[src] if src is not None and op is not Ops.REWRITE_ERROR else r.sink)
+  for s in get_full_rewrite(viz_data, rewrites[lin_idx]):
+    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)):
+      sink = s["_sink"]
+      return sink.src[src] if src is not None and sink.op is not Ops.REWRITE_ERROR else sink
   return None
 
 # encoder helpers
@@ -633,14 +642,14 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort(enter_calls=True))[:-1])
     return ret
   if fmt == "code":
-    if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
+    if (sink:=get_sink_at(("do_render",), viz_data, i, data, alt="View Program", src=2)) is None: return {"src":"No source found"}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.arg, "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data
-    if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
+    if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, alt="View Program", src=3)) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
-    lib:bytes = sink.src[3].arg
+    lib:bytes = sink.arg
     if (target:=renderer.target.arch).startswith("gfx"):
       with soft_err(lambda err: ret.update(err)):
         ret.update(tokenize_asm(pc_table:=amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
