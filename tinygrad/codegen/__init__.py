@@ -242,7 +242,7 @@ pm_cast_float_alu = PatternMatcher([
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
 ])
 
-def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
+def _is_local_store(x:UOp): return x.op is Ops.STORE and x.src[0].addrspace is AddrSpace.LOCAL
 
 def add_raw_barrier(after:UOp):
   # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
