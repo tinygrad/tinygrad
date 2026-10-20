@@ -266,6 +266,16 @@ class TestCustomKernel(unittest.TestCase):
     jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [15+k, 16+k, 17+k, 18+k])
 
+  def test_scalar_arg_jit_fixed_bind_two_values(self):
+    # r is bound to 4 and then to 2 in two separately realized kernels inside one jit, each keeps its own range
+    def f(B):
+      for r in (4, 2):
+        B = Tensor.custom_kernel(Tensor(Variable("r", 1, 4, dtypes.int).bind(r)), Tensor.zeros(4, dtype=dtypes.int).contiguous(), B,
+                                 fxn=custom_range_kernel)[1].realize()
+      return B
+    jf, B = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    for _ in range(4): self.assertEqual(jf(B).tolist(), [7, 8, 0, 0])
+
   def test_scalar_arg_twice(self):
     n = Tensor(Variable("n", 0, 100, dtypes.int).bind(3))
     out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), n, fxn=custom_add_nm_kernel)[1]
