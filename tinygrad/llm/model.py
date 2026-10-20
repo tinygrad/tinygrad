@@ -9,7 +9,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax, moe_combine_scatter, kda_conv
+  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
@@ -264,6 +264,21 @@ def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tu
   aliases = [Buffer(d, nbytes, opaque=BufferStorage(a:=host.get_buf(d)), options=BufferSpec(external_ptr=a)) for d in devs[1:]]
   (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + aliases
   return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(mb, dtype, devs))
+
+def _read_ahead(entries:dict):
+  """
+  the files of the entries read into memory in the background: a thread a file, in order (the disk's fastest: 6.8 GB/s on the 990 pro,
+  scattered reads 4.9), the loader finds them there
+  """
+  import os, threading
+  paths = dedup(b.device[5:] for d, _, _ in entries.values() if isinstance(b:=d.uop.base.buffer, Buffer) and b.device.startswith("DISK:"))
+  def run(path:str):
+    fd, mv = os.open(path, os.O_RDONLY), memoryview(bytearray(64 << 20))
+    try:
+      size, off = os.fstat(fd).st_size, 0
+      while off < size and (got:=os.preadv(fd, [mv], off)) > 0: off += got
+    finally: os.close(fd)
+  for path in paths: threading.Thread(target=run, args=(path,), daemon=True, name="read_ahead").start()
 
 def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
   """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
@@ -1144,6 +1159,7 @@ class Transformer:
     """the states and caches of the blocks, realized (the jits capture on their first call: not the one time setup)"""
     if getattr(self, "_states_ready", False): return
     devs = self.token_embd.weight.device
+    if devs is not None and amd_custom_kernels_supported(devs): tables_ready(devs)
     x = Tensor.empty(1, 1, self.config.dim, device=devs)
     holders:list = []
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
@@ -1182,6 +1198,8 @@ class Transformer:
     """defer_load: the weights are read later (warmup compiles meanwhile), before the first call"""
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+    # deferred: the files are read ahead from now (the disk works while the model is made, the loader finds them in memory)
+    if defer_load: _read_ahead(entries)
     arch = kv['general.architecture']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
