@@ -29,40 +29,45 @@ class Estimates:
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
     excluded: set[UOp] = set()
-    uops = list(sink.toposort(enter_calls=True))
-    if ignore_indexing:
+    uops = list(sink.toposort(enter_calls=False))
+    specials = tuple(u for u in uops if u.op is Ops.SPECIAL)
+
+    def exclude_idx_alu(uops:list[UOp]):
+      nonlocal excluded
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
 
-    call_scopes: dict[UOp, list[UOp]] = {}
-    for u in filter(lambda u: u.op is Ops.CALL, reversed(uops)):
-      for s in u.body.backward_slice:
-        call_scopes.setdefault(s, []).extend(list(u.ranges))
-        if u in call_scopes: call_scopes[s].extend(call_scopes[u])
-
-    specials = tuple(u for u in uops if u.op is Ops.SPECIAL)
-    rngs: dict[UOp, tuple[UOp,...]] = {u:tuple(u.ranges) + tuple(dedup(call_scopes.get(u, []))) +
-      (UOp.const(len(call_scopes[u]) if u in call_scopes else 1, dtypes.u32),) + specials for u in uops}
+    if ignore_indexing: exclude_idx_alu(uops)
 
     @functools.cache
     def mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
-    for u in uops:
+    def update(u:UOp, rngs:tuple[UOp,...]):
+      nonlocal flops, lds, mem, excluded
+      from tinygrad.schedule.prepare import resolve_function
+      if u in excluded: return
       if u.op in {Ops.LOAD, Ops.STORE}:
         if (buf:=u.buf_uop).op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(rngs[u])
+          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(rngs)
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
-      if u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.dtype.itemsize * mults(rngs[u])
+      if u.op is Ops.CALL and u.is_inline_call:
+        bops = list(resolve_function(u).toposort())
+        if ignore_indexing: exclude_idx_alu(bops)
+        for s in bops: update(s, tuple(dedup(rngs+tuple(s.ranges)+specials)))
+      elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
+        lds += u.max_numel() * u.dtype.itemsize * mults(rngs)
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(rngs[u])
-      elif u.op in GroupOp.ALU and u not in excluded:
-        flops += (mults(rngs[u]) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
-      elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(rngs[u])
+        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(rngs)
+      elif u.op in GroupOp.ALU:
+        flops += (mults(rngs) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+      elif u.op is Ops.WMMA:
+        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(rngs)
+      excluded.add(u) # excludes substituted args from the body estimates
+
+    for u in uops: update(u, tuple(u.ranges)+specials)
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:

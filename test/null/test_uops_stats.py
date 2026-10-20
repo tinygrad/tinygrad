@@ -103,31 +103,40 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
 class TestUOpsStats(unittest.TestCase):
   def test_inline_call(self):
     buf = UOp.param(0, dtypes.int32, 4)
-    p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
-    val = (p0[p1].load() * p1) + 10
-    i = UOp.range(4, 0)
-    body = p0[p1].store(val).sink()
-    buf1 = UOp.param(1, dtypes.int32, 4)
+    p0 = buf.param_like(0)
+    body = p0[0].store(UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU) + p0[0].load())
+    out = body.sink().call(buf, UOp.const(5, dtypes.int32), name="test_call").sink(arg=KernelInfo(optimized=True))
+    self.assertEqual(flops_mem(out), (1, 8))
+
+  def test_multiple_inline_call_sites(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+    val, i = (p0[p1].load() * p1) + 10, UOp.range(4, 0, dtype=dtypes.i32)
+    body, buf1 = p0[p1].store(val).sink(), UOp.param(1, dtypes.int32, 4)
     call0 = body.call(buf.after(i), i, name="test_call")
     call1 = body.call(buf1.after(i), i, name="test_call")
-    self.assertIsNot(call0, call1)
-    self.assertIs(call0.body, call1.body)
-    prg = to_program(UOp.sink(call0, call1).end(i).sink(arg=KernelInfo(optimized=True)), Device[Device.DEFAULT].renderer)
-    self.assertEqual(prg.src[0].arg.estimates.lds, 64)
-    self.assertEqual(prg.src[0].arg.estimates.ops, 16)
+    out = UOp.sink(call0, call1).end(i).sink(arg=KernelInfo(optimized=True))
+    est = Estimates.from_uops(out, ignore_indexing=True)
+    self.assertEqual((est.ops,est.lds,est.mem), (16,64,64))
+
+  def test_sequential_inline_calls(self):
+    buf = UOp.param(0, dtypes.int32, 1)
+    p0 = buf.param_like(0)
+    body = p0[0].store(p0[0].load() + 1).sink()
+    first = body.call(buf, name="increment")
+    second = body.call(buf.after(first), name="increment")
+    est = Estimates.from_uops(second.sink())
+    self.assertEqual((est.ops, est.lds, est.mem), (2, 16, 8))
 
   def test_nested_inline_call(self):
     buf = UOp.param(0, dtypes.int32, 4)
     p0 = buf.param_like(0)
-    p1 = UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
-
-    inner = p0[p1].store(p0[p1].load() * p1 + 10).sink()
+    p1 = UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+    inner = p0[p1].store(p0[p1].load() * p1 + UOp.const(10, dtypes.int32)).sink()
     outer = inner.call(p0, p1, name="inner_call").sink()
-
-    i = UOp.range(4,0)
+    i = UOp.range(4, 0, dtype=dtypes.i32)
     out = outer.call(buf, i, name="outer_cal").end(i).sink(arg=KernelInfo(optimized=True))
-    prg = to_program(out, Device[Device.DEFAULT].renderer)
-    self.assertEqual(prg.src[0].arg.estimates.ops, 8)
+    self.assertEqual(flops_mem(out), (8, 32))
 
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)
