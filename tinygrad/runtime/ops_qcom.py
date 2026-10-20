@@ -4,16 +4,14 @@ from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
 from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
 from tinygrad.runtime.support.memory import MMIOInterface
-from tinygrad.runtime.support.system import FileIOInterface
+from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.autogen import kgsl, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape
-from tinygrad.helpers import next_power2, flatten, to_name, PROFILE, IMAGE
+from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape, next_power2, flatten, to_name, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
