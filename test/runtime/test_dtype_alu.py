@@ -279,6 +279,17 @@ class TestDTypeALU(unittest.TestCase):
       x = Tensor.arange(10, dtype=dt) + Tensor([dt.max-4], dtype=dt)
       self.assertEqual((x < 3).tolist(), [i in (5, 6, 7) for i in range(10)])
 
+  def test_unsigned_narrow_wrap(self):
+    for dt in (dtypes.uint8, dtypes.uint16):
+      x = Tensor([dt.max, 3], dtype=dt)
+      self.assertEqual(((x+1)>>4).tolist(), [0, 0])
+      self.assertEqual(((x-4)>>4).tolist(), [dt.max>>4, dt.max>>4])
+      self.assertEqual(((x*2)>>4).tolist(), [dt.max>>4, 0])
+      self.assertEqual(((-x)>>4).tolist(), [0, dt.max>>4])
+      self.assertEqual(((x<<4)>>4).tolist(), [dt.max>>4, 3])
+      self.assertEqual(((x*x)>>4).tolist(), [0, 0])
+      self.assertEqual(((x+1)<1).tolist(), [True, False])
+
   def test_div_add_div_no_overflow(self):
     for dt in (dtypes.uint32, dtypes.uint64):
       x = Tensor([dt.max-1], dtype=dt)
