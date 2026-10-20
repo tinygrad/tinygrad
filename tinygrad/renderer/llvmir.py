@@ -170,12 +170,17 @@ class LLVMRenderer(Renderer):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
     # Buffer views may start at an offset from the aligned allocation.
-    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU)}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
-      name for name,u in args])
+    tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
+    sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
+    if args_struct:
+      args_t = "{ " + ", ".join(tys) + " }"
+      kernel = [f"  %args_t = load {args_t}, ptr %args"] + [f"  {n} = extractvalue {args_t} %args_t, {i}" for i,(n,_) in enumerate(args)] + kernel
+      sargs = "ptr %args"
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
-  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", fns:dict[UOp, str]|None=None) -> tuple[tuple[str, ...], str]:
+  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", fns:dict[UOp, str]|None=None,
+                     args_struct=False) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = dict(fns or {}) # the functions the kernel calls, by name
     args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
@@ -217,7 +222,7 @@ class LLVMRenderer(Renderer):
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix, args_struct)
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
@@ -228,7 +233,7 @@ class CPULLVMRenderer(LLVMRenderer):
     topo = UOp.sink(*uops).toposort(enter_calls=True)
     fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
     defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
-    return "\n".join((k:=self._render_kernel(uops, fns=fns))[0] + (k[1], *defs, self._render_footer(topo)))
+    return "\n".join((k:=self._render_kernel(uops, fns=fns, args_struct=True))[0] + (k[1], *defs, self._render_footer(topo)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}

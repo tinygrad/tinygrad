@@ -133,6 +133,7 @@ class CStyleLanguage(Renderer):
   var_suffix: str = ""
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l"], Callable] = {}
+  args_struct_prefix: str|None = None
   extra_args: list[str] = []
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
@@ -163,6 +164,10 @@ class CStyleLanguage(Renderer):
     buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
                        self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
+    if self.args_struct_prefix is not None:
+      prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} {n}; " for n,(u,_) in bufs) + "};"]
+      kernel = [f"  {t} {n} = args->{n};" for n,t in buftypes] + kernel
+      buftypes = [("args", f"{self.args_struct_prefix} struct {function_name}_args*")]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -287,6 +292,7 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   global_max = (1, 0, 0)
+  args_struct_prefix = "const"
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
 
@@ -372,8 +378,9 @@ class MetalRenderer(CStyleLanguage):
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
+  args_struct_prefix = "constant"
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
-  extra_args = ['constant args_t& args [[buffer(0)]]', 'uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
+  extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {**CStyleLanguage.type_map, dtypes.u32: "uint", dtypes.bf16: "bfloat"}
 
   # precise::sin
@@ -401,10 +408,7 @@ f"""{dstr_out} __{name}({dstr_in} a, {dstr_in} b, {dstr_out} c){{
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
-    # one argument buffer: a struct of the buffer pointers and the scalars, so a binding is a gpu address (an icb offset keeps 32 bits, an address 64)
-    args = [(name, self._render_dtype(u.dtype, addrspace=u.addrspace)) for name, (u, _) in bufs]
-    prefix.append("struct args_t { " + " ".join(f"{t} {n};" for n, t in args) + " };")
-    return super().render_kernel(function_name, ["  " + " ".join(f"{t} {n} = args.{n};" for n, t in args)] + kernel, [], uops, prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or ((arch:=self.target.arch).startswith("Apple") and int(arch[5:]) >= 6))
