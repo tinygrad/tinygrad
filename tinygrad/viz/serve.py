@@ -553,27 +553,15 @@ def get_elf_section(lib:bytes, name:str):
 
 def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
 
-def amd_code_end(arch:str) -> bytes:
-  from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
-  return s_code_end().to_bytes()*5 if arch.startswith("rdna") else b""
-
-def amd_decode(buf:bytes|memoryview, arch:str, off:int=0, stop_at_end:bool=False) -> dict[int, Inst]:
-  code_end = amd_code_end(arch)
+def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
   addr_table:dict[int, Inst] = {}
-  offset, branch_end, view = 0, 0, memoryview(buf)
-  while offset < len(view):
+  offset, view = 0, memoryview(buf)
+  while offset < len(buf):
     remaining = view[offset:]
-    if code_end and remaining[:len(code_end)] == code_end: break
-    try: fmt = detect_format(remaining, arch)
-    except ValueError:
-      if not any(getattr(inst, "op_name", "") == "S_ENDPGM" for inst in addr_table.values()): raise
-      break
-    addr_table[off+offset] = inst = fmt.from_bytes(remaining)
-    offset += inst.size()
-    if stop_at_end:
-      op = getattr(inst, "op_name", "").lower()
-      if (branch:=parse_branch(inst, op)) is not None: branch_end = max(branch_end, offset+branch)
-      if op == "s_endpgm" and offset > branch_end: break
+    fmt = detect_format(remaining, arch)
+    decoded = fmt.from_bytes(remaining)
+    addr_table[off+offset] = decoded
+    offset += decoded.size()
   return addr_table
 
 def parse_branch(inst, op:str) -> int|None:

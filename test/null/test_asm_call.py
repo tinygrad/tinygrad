@@ -96,7 +96,11 @@ class TestAsmCFG(unittest.TestCase):
   def test_decode_past_early_exit_stops_before_allocation_padding(self):
     from tinygrad.runtime.autogen.amd.cdna.ins import s_cbranch_scc1, s_endpgm, s_nop
     code = b"".join(inst.to_bytes() for inst in (s_cbranch_scc1(simm16=1), s_endpgm(), s_nop(), s_endpgm()))
-    self.assertEqual(list(call.amd_decode(code + bytes(4096), "cdna", stop_at_end=True)), [0, 4, 8, 12])
+    buf = ctypes.create_string_buffer(code + b"\xff"*4096)
+    args = (ctypes.addressof(buf), len(code), 1, 1, 1, 0, 0, "cdna", 0, "CPU")
+    prg = call.lift(*args)
+    buf[len(code)] = b"\x00"
+    self.assertIs(call.lift(*args), prg)
 
 
 if __name__ == "__main__": unittest.main()
