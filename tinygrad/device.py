@@ -120,7 +120,9 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
+        if (host:=(strg:=self.get_storage()).host) is not None:
+          for dev in strg.maps: dev.synchronize()
+          host[:] = memoryview(initial_value).cast('B')
         else: self.copy_from(Buffer("PYTHON", self.nbytes, initial_value=initial_value))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
@@ -254,9 +256,7 @@ class Allocator(Generic[DeviceType]):
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
-    if len(c:=self.cache[(size, options)]):
-      for dev in (strg:=c.pop()).maps: dev.synchronize()
-      return strg
+    if len(c:=self.cache[(size, options)]): return c.pop()
     spec = options if options is not None else self.default_buffer_spec
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError): self.free_cache()
