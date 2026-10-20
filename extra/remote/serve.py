@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import socket, struct, sys, signal
+import socket, struct, sys, signal, ctypes, time
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
@@ -79,7 +79,10 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     programs.append(Device["CPU"].runtime(TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), ())))
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
-    et = programs[arg0](*struct.unpack(f'<{arg1}Q', conn.recv(arg1 * 8, socket.MSG_WAITALL)), wait=bool(arg2))
+    kernargs = ctypes.create_string_buffer(conn.recv(arg1, socket.MSG_WAITALL))
+    st = time.perf_counter()
+    programs[arg0].fxn(kernargs)
+    et = time.perf_counter() - st
     if (mock:=sys.modules.get("test.mockgpu.mockgpu")) is not None: # native programs bypass the mock's memoryview hooks
       for d in mock.drivers: d._emulate_execute()
     if arg2: conn.sendall(resp(int(et * 1e9)))

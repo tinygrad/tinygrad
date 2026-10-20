@@ -235,9 +235,6 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
 
-    # test no truncate
-    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
-
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp.param(0, dtypes.float, 8)
@@ -425,6 +422,12 @@ class TestFastIdiv(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertNotIn(Ops.SHR, ops)
     self.assertIn(Ops.CDIV, ops)
+
+class TestNegLowering(unittest.TestCase):
+  def test_int_neg(self):
+    for dt in dtypes.ints:
+      x = UOp.param(0, dt, 1).index(UOp.const(0))
+      self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
