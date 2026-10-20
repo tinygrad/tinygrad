@@ -308,6 +308,18 @@ class TestDTypeALU(unittest.TestCase):
       u, x = Tensor([h], dtype=dt).maximum(h), Tensor([1], dtype=dt)
       self.assertEqual([(t < 1).item() for t in (u+h, u*2, u<<1, -x, x^-1)], [True, True, True, False, False])
 
+  def test_unsigned_const_canonical(self):
+    for dt in (dtypes.uint8, dtypes.uint32, dtypes.uint64):
+      c, z = Tensor(-1, dtype=dt), Tensor([1], dtype=dt)*0-1
+      self.assertEqual((c>>1).item(), dt.max>>1)
+      self.assertEqual((z>>1).item(), dt.max>>1)
+      self.assertEqual((z//2).item(), dt.max//2)
+      self.assertEqual((z<3).item(), False)
+      self.assertEqual(z.maximum(5).item(), dt.max)
+    self.assertEqual(Tensor(-1, dtype=dtypes.uint32).cast(dtypes.int64).item(), 2**32-1)
+    self.assertEqual((Tensor(255, dtype=dtypes.uint8)+1).cast(dtypes.uint16).item(), 0)
+    self.assertEqual((Tensor([5], dtype=dtypes.uint32)//Tensor(-1, dtype=dtypes.uint32)).item(), 0)
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
