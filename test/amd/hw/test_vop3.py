@@ -4,8 +4,10 @@ Includes: v_fma_f32, v_div_scale_f32, v_div_fmas_f32, v_div_fixup_f32,
           v_alignbit_b32, v_bfe_i32, v_mad_u64_u32, v_readlane_b32, v_writelane_b32
 """
 import unittest
-from tinygrad.helpers import OSX
+from tinygrad.helpers import Context, OSX
 from test.amd.hw.helpers import *
+
+def setUpModule(): unittest.enterModuleContext(Context(ASM_CALL=1))
 
 class TestFMA(unittest.TestCase):
   """Tests for FMA instructions."""

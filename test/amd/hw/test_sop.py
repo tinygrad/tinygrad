@@ -4,7 +4,10 @@ Includes: s_add_u32, s_mov_b32, s_and_b32, s_or_b32, s_quadmask_b32, s_wqm_b32,
           s_cbranch_vccnz, s_cbranch_vccz
 """
 import unittest
+from tinygrad.helpers import Context
 from test.amd.hw.helpers import *
+
+def setUpModule(): unittest.enterModuleContext(Context(ASM_CALL=1))
 
 class TestBasicScalar(unittest.TestCase):
   """Tests for basic scalar operations."""
