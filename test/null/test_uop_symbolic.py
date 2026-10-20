@@ -476,6 +476,10 @@ class TestSymbolic(unittest.TestCase):
     z = UOp.const(0.0)
     self.assertTrue(math.isnan(graph_rewrite(z/z, symbolic_simple, bottom_up=True).arg))
 
+  def test_two_stage_const_folding(self):
+    x = UOp.variable("x", 0, 10)
+    self.assertIs(graph_rewrite((x+1)+2, symbolic_simple), x+3)
+
   def test_masked_shr_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
