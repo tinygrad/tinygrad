@@ -108,13 +108,26 @@ class TestUOpsStats(unittest.TestCase):
     i = UOp.range(4, 0)
     body = p0[p1].store(val).sink()
     buf1 = UOp.param(1, dtypes.int32, 4)
-    call0 = body.call(buf.after(i), i, name="inline_update")
-    call1 = body.call(buf1.after(i), i, name="inline_update")
+    call0 = body.call(buf.after(i), i, name="test_call")
+    call1 = body.call(buf1.after(i), i, name="test_call")
     self.assertIsNot(call0, call1)
     self.assertIs(call0.body, call1.body)
     prg = to_program(UOp.sink(call0, call1).end(i).sink(arg=KernelInfo(optimized=True)), Device[Device.DEFAULT].renderer)
     self.assertEqual(prg.src[0].arg.estimates.lds, 64)
     self.assertEqual(prg.src[0].arg.estimates.ops, 16)
+
+  def test_nested_inline_call(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0 = buf.param_like(0)
+    p1 = UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+
+    inner = p0[p1].store(p0[p1].load() * p1 + 10).sink()
+    outer = inner.call(p0, p1, name="inner_call").sink()
+
+    i = UOp.range(4,0)
+    out = outer.call(buf, i, name="outer_cal").end(i).sink(arg=KernelInfo(optimized=True))
+    prg = to_program(out, Device[Device.DEFAULT].renderer)
+    self.assertEqual(prg.src[0].arg.estimates.ops, 8)
 
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)

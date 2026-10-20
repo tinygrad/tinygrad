@@ -390,7 +390,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     else: type_verify(sink, spec_program)
 
   # do program estimates
-  if isinstance(sink.arg, KernelInfo):
+  if isinstance(sink.arg, KernelInfo) and sink.arg.estimates is None:
     sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(sink, ignore_indexing=True)))
 
   # return the rewritten sink
