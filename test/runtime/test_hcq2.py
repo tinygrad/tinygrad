@@ -1,4 +1,5 @@
 import unittest, gc, struct, ctypes, threading, numpy as np
+from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace
@@ -54,6 +55,18 @@ class TestHCQ2Schedule(unittest.TestCase):
     copyout, copyin = hu.store_call(vu), vu.store_call(nu)
     run_linear(UOp(Ops.LINEAR, src=(copyout, copyin, copyout)), wait=True)
     self.assertEqual(bytes(host.host[:]), bytes(new.host[:]))
+
+  @patch.object(type(Device["NULL"]), "host", "CPU")
+  def test_staging(self):
+    table = [("NULL", "NULL:1"), ("NULL", "CPU"), ("CPU", "NULL"), ("CL", "CPU"), ("CL", "METAL"), ("CL", "CPU", "NULL"),]
+    for path in table:
+      with self.subTest(path):
+        try: Device[path[0]], Device[path[-1]] # TODO: do not open devices?
+        except Exception: self.skipTest(f"{path} needs both devices")
+        copy = UOp.param(0, dtypes.uint8, 16, device=path[-1]).store_call(UOp.param(1, dtypes.uint8, 16, device=path[0]))
+        staged = hcq2.stage_copy(copy, *copy.src[1:3])
+        copies = (copy,) if staged is None else staged.src
+        self.assertEqual((copies[0].src[2].device, *(c.src[1].device for c in copies)), path)
 
   @unittest.skipIf(Device.DEFAULT == "METAL", "unified memory: METAL copies on the host and maps nothing")
   def test_map_cpu_buffer_preserves_contents(self):
