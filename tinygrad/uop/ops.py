@@ -894,6 +894,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.device is None or self.dtype in dtypes.weaks
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
+    # anything that has dtype void has no memory backing, it lives in the ALU
+    if self.dtype is dtypes.void: return AddrSpace.ALU
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
