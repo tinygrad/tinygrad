@@ -106,10 +106,15 @@ class TestUOpsStats(unittest.TestCase):
     p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, 1, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
     val = (p0[p1].load() * p1) + 10
     i = UOp.range(4, 0)
-    call = p0[p1].store(val).sink().call(buf.after(i), i, name="test")
-    prg = to_program(call.end(i).sink(arg=KernelInfo(optimized=True)), Device[Device.DEFAULT].renderer)
-    self.assertEqual(prg.src[0].arg.estimates.lds, 32)
-    self.assertEqual(prg.src[0].arg.estimates.ops, 8)
+    body = p0[p1].store(val).sink()
+    buf1 = UOp.param(1, dtypes.int32, 4)
+    call0 = body.call(buf.after(i), i, name="inline_update")
+    call1 = body.call(buf1.after(i), i, name="inline_update")
+    self.assertIsNot(call0, call1)
+    self.assertIs(call0.body, call1.body)
+    prg = to_program(UOp.sink(call0, call1).end(i).sink(arg=KernelInfo(optimized=True)), Device[Device.DEFAULT].renderer)
+    self.assertEqual(prg.src[0].arg.estimates.lds, 64)
+    self.assertEqual(prg.src[0].arg.estimates.ops, 16)
 
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)

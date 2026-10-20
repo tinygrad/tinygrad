@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable, cast
 from dataclasses import dataclass, replace
-from tinygrad.helpers import prod, Target, EMULATED_DTYPES
+from tinygrad.helpers import prod, Target, EMULATED_DTYPES, dedup
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.renderer.tc import TensorCore
@@ -35,16 +35,19 @@ class Estimates:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
 
-    call_scopes: dict[UOp, UOp] = {}
+    call_scopes: dict[UOp, list[UOp]] = {}
     for u in filter(lambda u: u.op is Ops.CALL, uops):
-      for s in u.body.backward_slice: call_scopes[s]=u
+      for s in u.body.backward_slice: call_scopes.setdefault(s, []).append(u)
 
     special_mult = prod(cast(sint, u.src[0].ssimplify()) for u in uops if u.op is Ops.SPECIAL)
     @functools.cache
     def scope_mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void] + [special_mult])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
-    def mults(u:UOp) -> sint: return scope_mults(tuple(u.ranges)+(tuple(call_scopes[u].ranges) if u in call_scopes else ()))
+    def mults(u:UOp) -> sint:
+      rngs = tuple(u.ranges)
+      if u in call_scopes: rngs += tuple(dedup(r for c in call_scopes[u] for r in c.ranges.keys())) + (UOp.const(len(call_scopes[u]), dtypes.uint32),)
+      return scope_mults(rngs)
 
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
