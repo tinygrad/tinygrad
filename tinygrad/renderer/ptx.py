@@ -5,7 +5,7 @@ from tinygrad.renderer import tc
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.renderer import Renderer, with_storage
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer, pm_narrow_uint
 from tinygrad.helpers import flatten, prod, unwrap, Target
 
 def render_val(x, dtype):
@@ -138,7 +138,7 @@ class PTXRenderer(Renderer):
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   code_for_op = asm_for_op
-  extra_matcher = ptx_matcher
+  extra_matcher = pm_narrow_uint + ptx_matcher
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler

@@ -76,6 +76,10 @@ base_rewrite = PatternMatcher([
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
 ])
 
+# C promotes uchar and ushort to int, WGSL holds them in u32 and PTX holds uchar in u16, so the ops that wrap compute in uint and narrow after
+pm_narrow_uint = PatternMatcher([(UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.NEG, Ops.SHL, Ops.MULACC), (dtypes.uint8, dtypes.uint16), name="x"),
+                                  lambda x: x.replace(src=tuple(s.cast(dtypes.uint32) for s in x.src)).cast(x.dtype))])
+
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
     # a weak CONST states no width and cannot be restated: commit it at the emulated dtype a sibling src states
@@ -297,7 +301,7 @@ class ClangRenderer(CStyleLanguage):
 
   # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) \
-    + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
+    + pm_narrow_uint + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
@@ -332,7 +336,7 @@ class OpenCLRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})"}
   type_map = {**CStyleLanguage.type_map, dtypes.i8: "char", dtypes.u8: "uchar", dtypes.u32: "uint", dtypes.u16: "ushort",
               dtypes.u64: "ulong", dtypes.bf16: "ushort"}
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
+  extra_matcher = pm_narrow_uint + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   string_rewrite = pm_bf16_ushort_const + PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
@@ -376,7 +380,7 @@ class MetalRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage.code_for_op, Ops.SIN: lambda x,dtype: f"precise::sin({x})"}
 
   # upcast to float32 all the ops that don't support bfloat16
-  extra_matcher = PatternMatcher([
+  extra_matcher = pm_narrow_uint + PatternMatcher([
     # NOTE: this is copied from PTX
     (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.TRUNC), dtype=dtypes.bfloat16, name="x"),
       lambda x: (UOp(x.op, src=tuple(vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(dtypes.bfloat16))),
@@ -438,7 +442,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.RECIPROCAL: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
   type_map = {**CStyleLanguage.type_map, dtypes.u32: "uint", dtypes.bf16: "nv_bfloat16",
               dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
-  extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
+  extra_matcher = pm_narrow_uint + create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
   ])
   string_rewrite = PatternMatcher([
@@ -538,7 +542,7 @@ class HIPRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {**CStyleLanguage.type_map, **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s))
+  extra_matcher = pm_narrow_uint + create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
