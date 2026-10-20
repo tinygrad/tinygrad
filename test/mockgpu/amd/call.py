@@ -69,8 +69,7 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
   backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
   # decode
   view = to_mv(lib, lib_sz)
-  # last 64b is the kernel descriptor
-  insts = amd_decode(view[:-64], arch)
+  insts = amd_decode(view, arch)
   cfg = get_cfg(insts)
   # construct CALL graph
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
