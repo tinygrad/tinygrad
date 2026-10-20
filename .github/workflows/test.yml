@@ -520,7 +520,7 @@ jobs:
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
-        run: ASM_CALL=1 python -m pytest -n=auto test/amd/ --durations 20
+        run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=MOCKKFD+AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
       - name: Run SQTT profiling tests
