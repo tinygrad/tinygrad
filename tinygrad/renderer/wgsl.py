@@ -1,6 +1,6 @@
 from tinygrad.dtype import DType, dtypes, truncate, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
+from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, pm_narrow_uint
 from tinygrad.helpers import strip_parens, ceildiv
 
 # a field of `width` bits sitting in the low bits of val: shift it up to the sign bit, then let the arithmetic shift fill
@@ -55,7 +55,7 @@ class WGSLRenderer(CStyleLanguage):
   global_max = (65535, 65535, 65535)
   local_max = (256, 256, 64)
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[int(x)]})", "l": lambda x: f"i32(lindex.{'xyz'[int(x)]})"}
-  extra_matcher = wgsl_matcher
+  extra_matcher = pm_narrow_uint + wgsl_matcher
   supports_float4 = False
   barrier = "workgroupBarrier();"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}

@@ -79,6 +79,11 @@ class TestAttention(unittest.TestCase):
     expected = [[[[4 + (3/5 + 3*2/5)], [4 + (1/3 + 3*2/3)]]]]
     actual = hc(Tensor([[[[1.], [3.]]]]), lambda x: x.square())
     np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
+    for mask in (None, Tensor([0., -np.inf])):
+      with self.subTest(mask=mask is not None):
+        actual, returned_mask = hc(Tensor([[[[1.], [3.]]]]), lambda x: (x.square(), mask))
+        self.assertIs(returned_mask, mask)
+        np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
 
   def test_indexer(self):
     indexer = Indexer(self._make_config(dim=2, q_lora_rank=2, indexer=IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)))
@@ -90,6 +95,24 @@ class TestAttention(unittest.TestCase):
     expected = np.where([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]], 0., -np.inf)
     np.testing.assert_array_equal(indexer(x, q, 0).numpy(), expected[None, None])
 
+  def test_indexer_no_kpool(self):
+    # glm-dsa: every key is scored on its own (no k-pools) and the first rope_dim dims are rotated, interleaved
+    idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=1, norm_eps=1e-6, rope_dim=2)
+    indexer = Indexer(self._make_config(dim=2, q_lora_rank=2, indexer=idx))
+    indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
+    indexer.proj.weight = Tensor.ones(1, 2)
+    x, q = Tensor([[[2., 0.], [2., 0.], [0., 2.], [0., 2.]]]), Tensor([[[1., -1.], [1., -1.], [1., -1.], [-1., 1.]]])
+    indexer._init_state(x)
+    # reference: interleaved rope on q/k, relu scores, top-2 of the causal positions
+    pos = np.arange(4)
+    cos, sin = np.cos(pos), np.sin(pos)  # rope_dim=2 -> one frequency, theta=10000**0
+    def irope(v):
+      return np.concatenate([v[:, 0::2]*cos[:, None] - v[:, 1::2]*sin[:, None], v[:, 0::2]*sin[:, None] + v[:, 1::2]*cos[:, None]], axis=-1)
+    scores = np.maximum(irope(q.numpy()[0]) @ irope(x.numpy()[0]).T, 0) / 2**0.5
+    expected = np.full((4, 4), -np.inf)
+    for t in range(4): expected[t, np.argsort(scores[t, :t+1])[-2:]] = 0.0
+    np.testing.assert_allclose(indexer(x, q, 0, precompute_freqs_cis(2, 4, 10000.0)).numpy(), expected[None, None])
+
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
     block = MLATransformerBlock(self._make_config(dim=2, kv_lora_rank=2, q_lora_rank=2, max_context=5, indexer=idx))
@@ -100,7 +123,7 @@ class TestAttention(unittest.TestCase):
     block._init_state(x)
     # every query prefers the first pool, and incomplete pools contribute only their visible tail
     expected = np.where([[1, 0, 0, 0, 0], [1, 1, 0, 0, 0], [1, 1, 1, 0, 0], [1, 1, 0, 0, 0], [1, 1, 0, 0, 1]], 0., -np.inf)
-    np.testing.assert_array_equal(block._attn_mask(x, 0).numpy(), expected[None, None])
+    np.testing.assert_array_equal(block._indexer_mask(x, 0, None).numpy(), expected[None, None])
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
@@ -327,7 +350,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     Tensor.realize(*block.spec_seed(2))
     # the first step starts from the seeded state, the second after its draft was accepted
     for start in (0, 2):
-      out = block._attention(Tensor(x_norm[:, start:start+2]), pos.bind(start), src.bind(1)).numpy()
+      out = block._attention(Tensor(x_norm[:, start:start+2]), pos.bind(start), src=src.bind(1)).numpy()
       np.testing.assert_allclose(out, np.concatenate(outs[start:start+2], axis=1), rtol=1e-3, atol=1e-3)
       for slots, expected in ((block.conv_slots.numpy(), convs), (block.state_slots.numpy(), recurrents)):
         for t in range(2): np.testing.assert_allclose(slots[t], expected[start+t], rtol=1e-3, atol=1e-3)
