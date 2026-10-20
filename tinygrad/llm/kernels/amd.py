@@ -297,7 +297,7 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
     if ggml_type in SMALL_BLOCK_QUANTS: base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[ggml_type]
     if sel is not None:
-      base += sel[token].load().cast(dtypes.weakint) * expert_words
+      base += sel[token].load().cast(dtypes.weakint).maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
       if x_slots != slots: token = token // slots
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
