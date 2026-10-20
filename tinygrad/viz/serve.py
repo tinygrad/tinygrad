@@ -173,11 +173,12 @@ def _reconstruct(data:VizData, a:int) -> UOp:
   while stack:
     num, visited = stack.pop()
     if num in data.all_uops: continue
-    op, src, arg, *rest = data.trace.uop_fields[num]
-    if not visited:
+    if visited:
+      op, src, arg, *rest = data.trace.uop_fields[num]
+      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+    else:
       stack.append((num, True))
-      for s in reversed(src): stack.append((s, False))
-    else: data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+      stack.extend((s, False) for s in data.trace.uop_fields[num][1])
   return data.all_uops[a]
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
