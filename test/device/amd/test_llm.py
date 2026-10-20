@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4)
+                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4, _cdna)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -343,7 +343,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           np.testing.assert_allclose(run(q, kv, end).numpy(), expected, rtol=1e-3, atol=1e-3)
 
   def test_prefill_attention_random(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device) or _cdna(d): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(42)
     cases = ((2, 4, 2, 32, 64, 45, 64, False), (1, 3, 1, 64, 128, 83, 128, False),
              (1, 2, 1, 96, 256, 149, 192, False), (1, 4, 2, 17, 128, 128, 128, True), (1, 2, 1, 3, 64, 33, 64, True),
