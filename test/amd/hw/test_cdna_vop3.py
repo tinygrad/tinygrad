@@ -108,3 +108,6 @@ class TestCDNATrue16(unittest.TestCase):
       cdna.v_mov_b32_e32(cdna.v[2], cdna.VCC_LO),
     ])
     self.assertEqual(out & 1, 1)
+
+if __name__ == "__main__":
+  unittest.main()
