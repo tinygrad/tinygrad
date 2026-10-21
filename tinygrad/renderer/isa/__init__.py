@@ -27,9 +27,13 @@ class IselContext:
     cons = cons if isinstance(cons, tuple) else (cons,)
     return Register(f"v{next(self.reg_n)}", 0, cons, size or cons[0].size)
 
+# the registers a uop defines: an INS's follow its opcode and dtype in its arg
+def regs(u:UOp) -> tuple[Register, ...]: return u.arg[2:] if u.op is Ops.INS else u.tag if isinstance(u.tag, tuple) else ()
+def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp: return u.replace(arg=u.arg[:2]+r) if u.op is Ops.INS else u.replace(tag=r)
+
 def rdef(u:UOp):
   if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return rdef(u.src[0])
-  return u.tag[0] if isinstance(u.tag, tuple) else u.tag
+  return r[0] if (r:=regs(u)) else None
 
 class LinearContext:
   def __init__(self, ren:ISARenderer):

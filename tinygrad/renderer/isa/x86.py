@@ -6,7 +6,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef, regs, with_regs
 from tinygrad.helpers import unwrap, Target
 from dataclasses import replace
 
@@ -241,7 +241,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   dividend = alloc_reg(ctx, dividend_dtype, RAX)[0].set(x.src[0].cast(dividend_dtype))
   defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][:1+(x.dtype not in dtypes.int8s)]
   divisor = alloc_reg(ctx, x.dtype, tuple(r for r in WGPR if r not in (RAX, RDX)))[0].set(x.src[1])
-  idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=tuple(defs))
+  idiv = x.ins(op, *defs, src=(dividend, divisor) + tuple(ext))
   # this move "cleanses" the register constraints (rax/rdx) of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
@@ -295,15 +295,15 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
-  if isinstance(x.tag, tuple) and x.tag[0]._cons: return None
+  if regs(x) and regs(x)[0]._cons: return None
   defs = []
   if x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG: defs = [ctx.vreg(WGPR, 8)]
-  elif isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag, x.dtype.itemsize)]
+  elif regs(x): defs = [ctx.vreg(regs(x), x.dtype.itemsize)]
   elif x.dtype in dtypes.floats or x.op is Ops.INS and x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR, x.dtype.itemsize)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
-  return x.replace(tag=tuple(defs))
+  return with_regs(x, tuple(defs))
 
 def copy_op(dt:DType) -> X86Ops:
   return {dtypes.float16:X86Ops.VMOVSS, dtypes.float32:X86Ops.VMOVSS, dtypes.float64:X86Ops.VMOVSD, dtypes.bool:X86Ops.MOVZX}.get(dt, X86Ops.MOV)
@@ -420,7 +420,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
-    buf.ins(copy_op(val.dtype), src=(val.after(buf),), tag=(rdef(buf),))
+    buf.ins(copy_op(val.dtype), rdef(buf), src=(val.after(buf),))
     if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) and isinstance(rdef(buf), Register) and rdef(buf)._cons else None),
   (UPat.var("a").load().named("x"), lambda ctx,a,x:
     x.ins(copy_op(x.dtype), src=(buf,)) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
@@ -456,7 +456,7 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
-  nx = UOp(Ops.INS, fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), (X86Ops.LEA, x.dtype), x.tag)
+  nx = UOp(Ops.INS, fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), (X86Ops.LEA, x.dtype, *regs(x)))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer, nx]
 
@@ -476,7 +476,7 @@ def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   else:
     # an AFTER-wrapped bound carries the loop's ordering deps, they keep the acc unique per loop (hash-consing)
     bound, deps = ((b:=x.src[0]).src[0], b.src[1:]) if (b:=x.src[0]).op is Ops.AFTER else (x.src[0], ())
-    acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + tuple(deps))
+    acc = x.ins(X86Ops.MOVi, *regs(x), src=(imm(x.dtype, 0),) + tuple(deps))
     cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtypes.void), src=(acc, bound))
     jump_out = UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(label(x), cmp))
     ctx.loop_label[acc] = x
@@ -484,7 +484,7 @@ def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 
 def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), src=(rng:=ctx.loop_label[x.src[1]],))
-  inc = x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),))
+  inc = x.src[1].ins(X86Ops.ADDi, *regs(x.src[1]), src=(imm(x.src[1].dtype, 1),))
   return (inc, [inc, jmp, label(label(rng))])
 
 # final rewrite to match the isa spec
@@ -680,8 +680,8 @@ class X86LinearContext(LinearContext):
         after.append(self.ren.fill(slot,a,r))
 
     if self.stack_size > 0:
-      before.insert(0, stack_pointer.ins(X86Ops.SUBi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
-      after.append(stack_pointer.ins(X86Ops.ADDi, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+      before.insert(0, stack_pointer.ins(X86Ops.SUBi, RSP, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+      after.append(stack_pointer.ins(X86Ops.ADDi, RSP, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
@@ -707,7 +707,7 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.INS and x.arg[0] in X86GroupOp.TwoAddress
-  def copy(self, x:UOp, reg:Register) -> UOp: return x.ins(X86Ops.MOV, src=(x,), tag=reg)
+  def copy(self, x:UOp, reg:Register) -> UOp: return x.ins(X86Ops.MOV, reg, src=(x,))
 
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
@@ -716,7 +716,7 @@ class X86Renderer(ISARenderer):
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype), tag=(reg,))
+    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype, reg))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
