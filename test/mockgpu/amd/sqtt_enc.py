@@ -20,6 +20,8 @@ def make_encoder():
   from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
   from tinygrad.runtime.autogen.amd.cdna import ins as irc
   import re
+  from tinygrad.helpers import ContextVar
+  SQTT_SIMD_PARITY = ContextVar("SQTT_SIMD_PARITY", 0)  # which SIMD of the pair gets wave 0: the dispatcher's round robin carries over
 
   def _kinds(*names: str) -> tuple[type[Inst], ...]:
     return tuple(getattr(m, n) for m in (ir3, ir4, irc) for n in names if hasattr(m, n))
@@ -73,6 +75,7 @@ def make_encoder():
   FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 160, 880, 9
   VALU_EXEC_LAT_NOREAD = 6  # no register operand read: v_mov_b32 v4, -1
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, VALU_QUEUE, MEM_AFTER_EXEC = 8, 9, 5, 13, 9
+  SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
   VMEM_LOAD_LAT, STORE_ACK = 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
@@ -137,8 +140,8 @@ def make_encoder():
       phases[-1].append((inst, bt))
       if inst is not None and _classify(inst, bt)[0] == "BARRIER": phases.append([])
     waves = sorted(recs)
-    simd, slot = {w: 2 * (w % 2) for w in waves}, {w: w // 2 for w in waves}
-    st = {w: dict(i=0, ready=w + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, mem_issue=None, reg_ready={},
+    simd, slot = {w: 2 * ((w + SQTT_SIMD_PARITY.value) % 2) for w in waves}, {w: w // 2 for w in waves}
+    st = {w: dict(i=0, ready=w + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], pend=[],
                   last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
@@ -175,6 +178,8 @@ def make_encoder():
         need = max(need, s["valu_execs"][-VALU_QUEUE] + 4)
       if (cls in ("LDS", "VMEM") or (cls == "BR" and _name(inst).startswith("S_CBRANCH_EXEC"))) and s["valu_exec"] is not None:
         need = max(need, s["valu_exec"] + MEM_AFTER_EXEC)
+      if cls == "BR" and "CBRANCH" in _name(inst) and "EXEC" not in _name(inst) and s["salu_exec"] is not None:
+        need = max(need, s["salu_exec"] + BRANCH_AFTER_SALU)  # waits for its SCC/VCC producer
       if cls == "SMEM" and s["salu_issue"] is not None: need = max(need, s["salu_issue"] + SMEM_AFTER_SALU)
       for countdown, dep in s["pend"]:  # s_delay_alu: VALU_DEP_n / TRANS32_DEP_n wait for the n-th newest VALU, SALU_CYCLE_n
         if countdown: continue
@@ -235,7 +240,11 @@ def make_encoder():
         if cls == "SMEM":
           s["lgkm"].append(cycle + SMEM_LAT)
           s["mem_issue"] = cycle
-        if cls == "SALU": s["salu_issue"] = cycle
+        if cls == "SALU":
+          s["salu_issue"] = s["salu_exec"] = max([cycle + SALU_EXEC_LAT] + [s["reg_ready"].get(r, 0) for r in reads if r[0] == "s"])
+          s["salu_issue"] = cycle
+          for r in writes: s["reg_ready"][r] = s["salu_exec"] + SALU_DEP_LAT
+        if cls == "BR": s["ready"] = cycle + (BRANCH_TAKEN if op == InstOp.JUMP else BRANCH_NOT_TAKEN)
         if cls == "BARRIER": s["arrival"] = cycle
         if primary: put(cycle, INST, wave=sl, op=op)
       return True
