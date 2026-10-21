@@ -61,6 +61,11 @@ class Estimates:
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
+  separate_calls = False
+  @staticmethod
+  def call_name(body:UOp) -> str: return f"{body.arg}_{body.key.hex()}"
+  def render_function(self, body:UOp) -> str: raise NotImplementedError
+
   target: Target
   suffix: str = ""
   # TODO: make this generic with a list of supported types

@@ -1,5 +1,5 @@
 import unittest
-import ctypes, subprocess, tempfile
+import ctypes, subprocess, tempfile, pickle, sys
 from tinygrad import dtypes
 from tinygrad.helpers import Context
 from tinygrad.codegen import to_program
@@ -23,15 +23,17 @@ class TestCallJIT(unittest.TestCase):
           self.assertEqual(result.value, expected)
 
   def test_static_functions_are_not_exported(self):
-    compiler = call.CallJIT(call.CPULLVMCompiler(call.backend_renderer("CPU").target.arch.split(",")))
-    compiler.compile_cached("define internal void @asm_fn_local(ptr %out) noinline { store i32 42, ptr %out\n ret void }\n"
-                            "define void @asm_fn_entry(ptr %out) noinline { call void @asm_fn_local(ptr %out)\n ret void }")
-    self.assertIn("asm_fn_entry", compiler.functions)
-    self.assertNotIn("asm_fn_local", compiler.functions)
+    from tinygrad.device import Device, TinyELF
+    compiler = call.backend_renderer("CPU").compiler
+    lib = compiler.compile_cached("define internal void @asm_fn_local(ptr %out) noinline { store i32 42, ptr %out\n ret void }\n"
+                                  "define void @asm_fn_entry(ptr %out) noinline { call void @asm_fn_local(ptr %out)\n ret void }")
+    runtime = Device["CPU"].runtime(TinyELF(lib, "asm_fn_entry", call.backend_renderer("CPU").target, ()))
+    self.assertIn("asm_fn_entry", runtime.exports)
+    self.assertNotIn("asm_fn_local", runtime.exports)
 
   def test_program_preserves_elf(self):
     out = UOp.param(0, dtypes.int, (1,))
-    prg = to_program(out[0].store(7).sink(arg=KernelInfo(name="jit_store")), call.backend_renderer("CPU"))
+    prg = to_program(out[0].store(7).sink().call(out, name="store").sink(arg=KernelInfo(name="jit_store")), call.backend_renderer("CPU"))
     with tempfile.NamedTemporaryFile() as f:
       f.write(prg.src[3].arg)
       f.flush()
@@ -41,6 +43,15 @@ class TestCallJIT(unittest.TestCase):
     self.assertEqual(runtime.profile_key, prg.key)
     runtime(ctypes.addressof(result))
     self.assertEqual(result.value, 7)
+    # The compiled artifact loads in another process without reconstructing its renderer or compiler caches.
+    subprocess.run([sys.executable, "-c", """
+import ctypes, pickle, sys
+from tinygrad.device import Device
+obj = pickle.loads(sys.stdin.buffer.read())
+out = ctypes.c_int()
+Device['CPU'].runtime(obj)(ctypes.addressof(out))
+assert out.value == 7
+"""], input=pickle.dumps(prg.to_elf()), check=True)
 
 
 class TestAsmCFG(unittest.TestCase):

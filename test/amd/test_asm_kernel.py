@@ -275,9 +275,7 @@ class TestAsmKernel(unittest.TestCase):
 
   def test_jit_call_reuse(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
-    from test.mockgpu.amd import call
-    if getenv("ASM_CALL_BACKEND", "CPU") != "CPU": self.skipTest("Clang JIT only")
-    compiler = call.backend_renderer("CPU").compiler
+    libraries = Device["CPU"].libraries
     def kernel(out:UOp, second=False):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
@@ -298,13 +296,11 @@ class TestAsmKernel(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
     a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
     self.assertEqual(a.tolist(), [15]*32)
-    functions = {name:addr for name,addr in compiler.functions.items() if name.startswith("asm_fn_")}
+    functions = dict(libraries)
     b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=lambda out: kernel(out, second=True))[0]
     self.assertEqual(b.tolist(), [23]*32)
-    self.assertTrue(functions.keys() < compiler.functions.keys())
-    for name, address in functions.items():
-      self.assertEqual(compiler.functions[name], address)
-      self.assertNotIn(name, next(reversed(compiler.modules.values())).exports)
+    self.assertTrue(functions.keys() < libraries.keys())
+    for lib, runtime in functions.items(): self.assertIs(libraries[lib], runtime)
 
   def test_variable(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")

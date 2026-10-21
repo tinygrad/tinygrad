@@ -287,6 +287,27 @@ class CStyleLanguage(Renderer):
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
 class ClangRenderer(CStyleLanguage):
+  separate_calls = True
+
+  def _call_declarations(self, uops:list[UOp]) -> list[str]:
+    self.fn_names = {u.body:self.call_name(u.body) for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
+    return [f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION)] + [
+      f"void {name}({', '.join(self.param_type(p) for p in sorted((p for p in b.src if p.op is Ops.PARAM), key=lambda p:p.arg.slot))});"
+      for b,name in self.fn_names.items()]
+
+  def render(self, uops:list[UOp]) -> str:
+    if not self.separate_calls: return super().render(uops)
+    prefix = self._call_declarations(uops)
+    return self.render_kernel(*self._render(uops), uops, prefix)
+
+  def render_function(self, body:UOp) -> str:
+    uops = list(body.src)
+    prefix = self._call_declarations(uops)
+    _, lines, bufs = self._render(uops)
+    params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
+    return '\n'.join(self._render_defines(uops) + prefix + [
+      f"{self.kernel_typedef} {self.call_name(body)}({params}) {{\n" + '\n'.join(lines) + "\n}"])
+
   float4 = "(float4)"
   float4_style = ('{', '}')
   gep_arr_threshold = 0
@@ -330,6 +351,8 @@ class ClangRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
+    self.compiler.args += ['-fno-strict-aliasing']
+    if self.compiler.cachekey is not None: self.compiler.cachekey += "_no_strict_aliasing"
 
 class OpenCLRenderer(CStyleLanguage):
   # language options

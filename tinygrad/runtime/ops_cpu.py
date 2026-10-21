@@ -15,12 +15,22 @@ from tinygrad.runtime.autogen import libc
 class CPUProgram(Program['CPUDevice']):
   rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
 
-  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
+  def _load(self, lib, base=0):
+    return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()),
+      symbols={name:addr for library in self.libraries for name,addr in library.exports.items()}, exports=self.exports)
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
+    self.obj = obj
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
     self.lvp = obj.target.renderer == "LVP"
-    if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
+    self.exports:dict[str, int] = {}
+    self.libraries = []
+    for library in obj.libraries:
+      if library.lib not in dev.libraries: dev.libraries[library.lib] = CPUProgram(dev, library)
+      self.libraries.append(dev.libraries[library.lib])
+    if dev.remote is not None:
+      deps = struct.pack(f"<{len(self.libraries)}Q", *(lib.fxn for lib in self.libraries))
+      self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(self.libraries), payload=deps + obj.lib)[0]
     else:
       self.buf = Buffer(dev.device, len(obj.lib), options=BufferSpec(nolru=True), preallocate=True)
       loaded = self._load(obj.lib, self.buf._buf)
@@ -57,6 +67,7 @@ class CPUDevice(Compiled):
   def has_copy_queue(self) -> bool: return False
 
   def __init__(self, device:str=""):
+    self.libraries:dict[bytes, CPUProgram] = {}
     self.remote = None
     if len(parts:=device.split(':')) == 3:
       self.remote = RemotePCIDevice("CPU", f"remote:{device[4:]}:0", RemotePCIDevice.connect(parts[1], int(parts[2])))

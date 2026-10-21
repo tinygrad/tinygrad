@@ -1,158 +1,28 @@
-import itertools, functools, struct, ctypes, copy
+import itertools, functools, struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, rewrite_group, uopfunc
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_config, lower_call
-from tinygrad.device import Device, Compiler, TinyELF
-from tinygrad.engine.realize import get_runtime, runtime_cache
-from tinygrad.renderer.llvmir import CPULLVMRenderer, ldt
+from tinygrad.device import Device
+from tinygrad.engine.realize import get_runtime
+from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer import Renderer
-from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
-from tinygrad.runtime.support.compiler_cpu import ClangCompiler
-from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.ops_cpu import CPUDevice, CPUProgram
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, Target, cpu_profile, to_mv
-from tinygrad.runtime.autogen import hsa, libc
+from tinygrad.helpers import Context, Target, to_mv
+from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
-class CallModule(CPUProgram):
-  def __init__(self, lib:bytes, functions:dict[str, tuple["CallModule", int]]):
-    self.lib = lib
-    self.exports:dict[str, int] = {}
-    self.imports:dict[int, tuple[CallModule, int]] = {}
-    _, sections, _ = elf_loader(lib, link_libs=list(DLL._loaded_.values()))
-    for section in sections:
-      if section.header.sh_type != libc.SHT_SYMTAB: continue
-      strings = sections[section.header.sh_link].content
-      for symbol in (libc.Elf64_Sym * (section.header.sh_size // section.header.sh_entsize)).from_buffer_copy(section.content):
-        if not 0 < symbol.st_shndx < len(sections): continue
-        name = strings[symbol.st_name:strings.find(b'\0', symbol.st_name)].decode()
-        offset = sections[symbol.st_shndx].header.sh_addr + symbol.st_value
-        if name.endswith('_ptr'): self.imports[offset] = functions[name[:-4]]
-        elif libc.ELF64_ST_BIND(symbol.st_info) == libc.STB_GLOBAL and symbol.st_info & 15 == libc.STT_FUNC: self.exports[name] = offset
-    functions.update({name:(self, offset) for name, offset in self.exports.items()})
-
-  @functools.cached_property
-  def address(self) -> int:
-    dev = Device["CPU"]
-    assert isinstance(dev, CPUDevice)
-    super().__init__(dev, TinyELF(self.lib, "", Target("CPU"), ()))
-    return self.buf._buf
-
-  def _load(self, lib, base=0):
-    image = bytearray(super()._load(lib, base))
-    for offset, (module, fn_offset) in self.imports.items(): struct.pack_into('<Q', image, offset, module.address + fn_offset)
-    return bytes(image)
-
-class CallJIT(Compiler):
-  def __init__(self, compiler:CPULLVMCompiler|ClangCompiler):
-    self.compiler, self.arch = compiler, compiler.arch
-    super().__init__(f"asm_call_obj_{compiler.cachekey}" if compiler.cachekey is not None else None)
-    self.functions:dict[str, tuple[CallModule, int]] = {}
-    self.modules:dict[bytes, CallModule] = {}
-
-  def compile_cached(self, src:str) -> bytes:
-    lib = super().compile_cached(src)
-    if lib not in self.modules: self.modules[lib] = CallModule(lib, self.functions)
-    return lib
-
-  def compile(self, src:str) -> bytes:
-    with cpu_profile(f'{type(self.compiler).__name__} JIT compile'): return self.compiler.compile(src)
-
-  def disassemble(self, lib:bytes): self.compiler.disassemble(lib)
-
-def call_bodies(uops:list[UOp], compiler:CallJIT) -> dict[UOp, str]:
-  def fn_name(b:UOp): return ("asm_block_" if b.arg == "asm_block" else "asm_fn_")+b.key.hex()
-  topo = UOp.sink(*uops).toposort(lambda u:u.op is not Ops.LINEAR or fn_name(u) not in compiler.functions, enter_calls=True)
-  return {u.body:fn_name(u.body) for u in topo if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
-
-class CallLLVMRenderer(CPULLVMRenderer):
-  compiler: CallJIT
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-     f"  {ctx[x]} = load ptr, ptr @{ctx[body]}_ptr\n  call void {ctx[x]}(" +
-     ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
-  ]) + CPULLVMRenderer.string_rewrite
-
-  def __init__(self, target:Target):
-    super().__init__(target)
-    self.compiler = CallJIT(CPULLVMCompiler(target.arch.split(',')))
-
-  def _render_fn(self, name, args, kernel, prefix=None, args_struct=False):
-    ret = super()._render_fn(name, args, kernel, prefix, args_struct)
-    return ret.replace(" #0", " #1") if name == self.entry_name or name.startswith("asm_block_") else ret
-
-  def render(self, uops:list[UOp]) -> str:
-    self.entry_name = next(u.arg.function_name for u in uops if u.op is Ops.SINK)
-    fns = call_bodies(uops, self.compiler)
-    def module(us, definition):
-      declarations = [f"@{fns[b]}_ptr = hidden global ptr null, section \".data\"" for b in
-                      dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.op is Ops.LINEAR)]
-      footer = self._render_footer(us).replace("alwaysinline", "noinline")
-      return "\n".join([*declarations, definition, footer, "attributes #1 = { noinline optnone nounwind }"])
-    for body, name in fns.items():
-      if name in self.compiler.functions: continue
-      definition = self._render_kernel(list(body.src), name=name, fns=fns)[1]
-      self.compiler.compile_cached(module(body.src, definition))
-    entry = self._render_kernel(uops, fns=fns, args_struct=True)
-    return module(uops, "\n".join([*entry[0], entry[1]]))
-
-class CallClangRenderer(ClangRenderer):
-  compiler: CallJIT
-  kernel_typedef = "__attribute__((noinline, optnone)) void"
-
-  def __init__(self, target:Target):
-    super().__init__(target)
-    compiler = ClangCompiler(target.arch.split(','))
-    compiler.args += ['-fno-zero-initialized-in-bss', '-fvisibility=hidden', '-fno-strict-aliasing']
-    self.compiler = CallJIT(compiler)
-
-  def render_vector_prefix(self, dt, count):
-    # Register-file slices only guarantee scalar alignment.
-    return f"typedef {self.render_dtype(dt)} {self._render_dtype(dt, count, AddrSpace.REG)} " \
-      f"__attribute__((aligned({dt.itemsize}),ext_vector_type({count})));"
-
-  def render(self, uops:list[UOp]) -> str:
-    self.fn_names = call_bodies(uops, self.compiler)
-    def module(us, definition):
-      declarations = []
-      for body in dict.fromkeys(u.body for u in us if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
-        name = self.fn_names[body]
-        params = ', '.join(self.param_type(p) for p in sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda u:u.arg.slot))
-        declarations.append(f"void (*{name}_ptr)({params}) = 0;\n#define {name} {name}_ptr")
-      return '\n'.join(self._render_defines(us) + declarations + [definition])
-    for body, name in self.fn_names.items():
-      if name in self.compiler.functions: continue
-      _, lines, bufs = self._render(list(body.src))
-      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
-      attrs = 'noinline, optnone' if body.arg == 'asm_block' else 'noinline'
-      definition = f"__attribute__(({attrs})) void {name}({params}) {{\n" + '\n'.join(lines) + "\n}"
-      self.compiler.compile_cached(module(body.src, definition))
-    name, lines, bufs = self._render(uops)
-    return module(uops, super().render_kernel(name, lines, bufs, []))
-
 @functools.cache
 def cpu_renderer(arch:str, renderer:str="LLVM"):
-  return {"LLVM":CallLLVMRenderer, "CLANG":CallClangRenderer}[renderer](Target("CPU", renderer, arch))
+  return {"LLVM":CPULLVMRenderer, "CLANG":ClangRenderer}[renderer](Target("CPU", renderer, arch))
 
 def backend_renderer(backend:str):
   return cpu_renderer(Device["CPU"].renderer.target.arch, backend.partition(':')[2] or "LLVM") \
     if backend.split(':')[0] == "CPU" else Device[backend].renderer
 
 def get_call_runtime(backend:str, prg:UOp):
-  if backend.split(':')[0] != "CPU": return get_runtime(backend, prg)
-  if (runtime:=runtime_cache.get(key:=(prg.key, backend))) is None:
-    obj = prg.to_elf()
-    module = backend_renderer(backend).compiler.modules[obj.lib]
-    addr = module.address + module.exports[obj.name]
-    runtime = copy.copy(module)
-    runtime.name, runtime.signature, runtime.profile_key = obj.name, obj.signature, obj.profile_key
-    runtime.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(addr)
-    runtime_cache[key] = runtime
-  return runtime
+  return get_runtime("CPU" if backend.split(':')[0] == "CPU" else backend, prg)
 
 InstructionCall = tuple[UOp, list[UOp]]
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[InstructionCall|None, UOp|None]]]] = {}

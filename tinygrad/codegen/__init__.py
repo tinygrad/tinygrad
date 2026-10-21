@@ -462,7 +462,24 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
   if DEBUG >= 7: ctx.compiler.disassemble(lib)
-  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
+  deps = compile_calls(ctx, prg.src[1]) if ctx.separate_calls else ()
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib, src=deps),))
+
+def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
+  deps = []
+  for body in dict.fromkeys(u.body for u in linear.src if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
+    key = ("function", *to_program_key(body, ctx))
+    if (obj:=to_program_cache.get(key)) is None:
+      to_program_cache[key] = obj = do_compile_function(ctx, body)
+    deps.append(obj)
+  return tuple(deps)
+
+@rewrite_group(name=lambda ctx,body,ret: TracingKey(ctx.call_name(body), (ret.key, ctx.call_name(body)), ret=ctx))
+def do_compile_function(ctx:Renderer, body:UOp) -> UOp:
+  prg = UOp(Ops.PROGRAM, src=(UOp.sink(arg=KernelInfo(ctx.call_name(body))), body, UOp(Ops.SOURCE, arg=ctx.render_function(body))))
+  prg = graph_rewrite(prg, pm_to_program, ctx=ctx, name="linearize/render")
+  if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
+  return prg.src[3]
 
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), name="prg"), do_linearize),

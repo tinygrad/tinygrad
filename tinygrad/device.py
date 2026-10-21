@@ -349,6 +349,7 @@ class TinyELF:
   # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
   signature: tuple[tuple[str|None, AddrSpace, DType, tuple], ...]
   profile_key: bytes|None = None
+  libraries: tuple[TinyELF, ...] = ()
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:

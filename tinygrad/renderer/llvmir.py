@@ -225,21 +225,31 @@ class LLVMRenderer(Renderer):
     return tuple(local_args), self._render_fn(name, args, kernel, prefix, args_struct)
 
 class CPULLVMRenderer(LLVMRenderer):
+  separate_calls = True
   has_local = False
   global_max = (1, 0, 0)
   abi = None
   string_rewrite = base_rewrite
-  def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
-    fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
-    defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
-    return "\n".join((k:=self._render_kernel(uops, fns=fns, args_struct=True))[0] + (k[1], *defs, self._render_footer(topo)))
+  def render(self, uops: list[UOp]) -> str:
+    return self._render_module(uops, args_struct=True)
+
+  def _call_declarations(self, fns:dict[UOp, str]) -> str:
+    return "\n".join(f"declare void @{name}({', '.join(ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in b.src if p.op is Ops.PARAM)})"
+                     for b,name in fns.items())
+
+  def render_function(self, body:UOp) -> str:
+    return self._render_module(list(body.src), name=self.call_name(body))
+
+  def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
+    fns = {u.body:self.call_name(u.body) for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
+    k = self._render_kernel(uops, name=name, fns=fns, args_struct=args_struct)
+    return "\n".join((*k[0], k[1], self._call_declarations(fns), self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
-    return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
+    return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
