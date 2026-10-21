@@ -58,7 +58,10 @@ def make_encoder():
 
   def _mem_op(t: type[Inst], op_name: str) -> InstOp:
     is_store = "STORE" in op_name
-    if issubclass(t, _DS): return InstOp.LDS_WR_2 if is_store else InstOp.LDS_RD
+    if issubclass(t, _DS):  # stores: one cycle plus one per dword (b32 -> LDS_WR_2, b64 -> LDS_WR_3)
+      if not is_store: return InstOp.LDS_RD
+      m = re.search(r'_B(\d+)$', op_name)
+      return InstOp[f"LDS_WR_{min(5, 1 + max(1, int(m.group(1)) // 32 if m else 1))}"]
     if issubclass(t, _GLOBAL): return InstOp.SGMEM_WR_2 if is_store else InstOp.SGMEM_RD_1
     if issubclass(t, _FLAT) or issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
