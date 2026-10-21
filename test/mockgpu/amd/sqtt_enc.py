@@ -63,9 +63,10 @@ def make_encoder():
     if issubclass(t, _FLAT) or issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
 
-  # Timing model. The emulator runs each wave until s_barrier/s_endpgm, so packets arrive out of time order: each wave
-  # keeps its own clock, packets are recorded with a timestamp and sorted in finalize(). Constants are fitted to the
-  # gfx1100 lds_sync capture (extra/sqtt/examples/gfx1100/profile_sync_run_*.pkl); global-memory waits are not modeled.
+  # Timing is decided after execution, not during it. The emulator runs each wave until s_barrier/s_endpgm, so emit()
+  # and finish() only record what each wave issued, in emulator order; schedule() replays those events and assigns
+  # every packet its cycle; finalize() sorts by cycle and encodes. Current rules are fitted to the gfx1100 lds_sync
+  # capture (extra/sqtt/examples/gfx1100/profile_sync_run_*.pkl); global-memory waits are not modeled.
   MEM_AFTER_VALU, WAIT_AFTER_MEM, BARRIER_RELEASE = 16, 31, 21
   _MEM = {InstOp.LDS_WR_2, InstOp.LDS_RD, InstOp.SGMEM_WR_2, InstOp.SGMEM_RD_1, InstOp.FLAT_WR_3, InstOp.FLAT_RD_2}
 
@@ -73,56 +74,61 @@ def make_encoder():
     """Issue cycles encoded in the op name (LDS_WR_2 -> 2); 1 when the name carries none."""
     return int(m.group(1)) if (m := re.search(r'_(\d+)$', op.name)) else 1
 
-  records: list[tuple[int, int, type[PacketType], dict]] = []  # (time, seq, packet class, fields)
-  clock: dict[int, int] = {}
-  prev: dict[int, InstOp|str] = {}
-  at_barrier: dict[int, int] = {}
-
-  def _record(wave_id: int, cost: int, pkt_cls: type[PacketType], kind: InstOp|str, **kw):
-    if wave_id in at_barrier:  # resuming after s_barrier: every wave has arrived by the time the emulator runs us again
-      clock[wave_id] = max(at_barrier.values()) + BARRIER_RELEASE - cost
-      del at_barrier[wave_id]
-    clock[wave_id] += cost
-    records.append((clock[wave_id], len(records), pkt_cls, kw))
-    prev[wave_id] = kind
+  events: list[tuple[int, InstOp|str, type[PacketType], dict]] = []  # (wave_id, kind, packet class, fields)
 
   def emit(wave_id: int, inst: Inst, branch_taken: bool|None):
-    """Record an SQTT packet for one executed instruction."""
+    """Record one executed instruction; timing is assigned later by schedule()."""
     w = wave_id & 0x1F
-    if wave_id not in clock:
-      clock[wave_id] = wave_id
-      records.append((wave_id, len(records), WAVESTART, dict(simd=0, wgp=0, wave=w, id7=wave_id)))
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
-    last = prev.get(wave_id)
     if issubclass(inst_type, _SOPP):
       if inst_op in _SOPP_SKIP: return
-      if inst_op in _SOPP_IMMEDIATE:
-        _record(wave_id, WAIT_AFTER_MEM + _cycles(last) if last in _MEM else 1, IMMEDIATE, "IMMEDIATE", wave=w)
-      elif inst_op in _SOPP_BARRIER:
-        _record(wave_id, 1, INST, InstOp.BARRIER, wave=w, op=InstOp.BARRIER)
-        at_barrier[wave_id] = clock[wave_id]
+      if inst_op in _SOPP_IMMEDIATE: events.append((wave_id, "IMMEDIATE", IMMEDIATE, dict(wave=w)))
+      elif inst_op in _SOPP_BARRIER: events.append((wave_id, InstOp.BARRIER, INST, dict(wave=w, op=InstOp.BARRIER)))
       elif inst_op in _SOPP_BRANCH:
         op = InstOp.JUMP if branch_taken else InstOp.JUMP_NO
-        _record(wave_id, 1, INST, op, wave=w, op=op)
-      else: _record(wave_id, 1, INST, InstOp.SALU, wave=w, op=InstOp.SALU)
+        events.append((wave_id, op, INST, dict(wave=w, op=op)))
+      else: events.append((wave_id, InstOp.SALU, INST, dict(wave=w, op=InstOp.SALU)))
     elif issubclass(inst_type, _VALU):
-      if (op := _valu_op(op_name)) is None: _record(wave_id, 1, VALUINST, "VALU", wave=w)
-      else: _record(wave_id, 1, INST, op, wave=w, op=op)
-    elif issubclass(inst_type, _SMEM): _record(wave_id, 1, INST, InstOp.SMEM_RD, wave=w, op=InstOp.SMEM_RD)
+      if (op := _valu_op(op_name)) is None: events.append((wave_id, "VALU", VALUINST, dict(wave=w)))
+      else: events.append((wave_id, op, INST, dict(wave=w, op=op)))
+    elif issubclass(inst_type, _SMEM): events.append((wave_id, InstOp.SMEM_RD, INST, dict(wave=w, op=InstOp.SMEM_RD)))
     else:
       op = _mem_op(inst_type, op_name)
-      _record(wave_id, MEM_AFTER_VALU + _cycles(op) if last == "VALU" and op in _MEM else 1, INST, op, wave=w, op=op)
+      events.append((wave_id, op, INST, dict(wave=w, op=op)))
 
   def finish(wave_id: int):
     """Record WAVEEND for a completed wave."""
-    if wave_id in clock: _record(wave_id, 1, WAVEEND, "WAVEEND", simd=0, wgp=0, wave=wave_id & 0x1F)
+    if any(e[0] == wave_id for e in events): events.append((wave_id, "WAVEEND", WAVEEND, dict(simd=0, wgp=0, wave=wave_id & 0x1F)))
+
+  def schedule() -> list[tuple[int, int, type[PacketType], dict]]:
+    """Assign a cycle to every recorded event. Returns (cycle, seq, packet class, fields)."""
+    records: list[tuple[int, int, type[PacketType], dict]] = []
+    clock: dict[int, int] = {}
+    prev: dict[int, InstOp|str] = {}
+    at_barrier: dict[int, int] = {}
+    for wave_id, kind, pkt_cls, kw in events:
+      if wave_id not in clock:
+        clock[wave_id] = wave_id
+        records.append((wave_id, len(records), WAVESTART, dict(simd=0, wgp=0, wave=wave_id & 0x1F, id7=wave_id)))
+      last = prev.get(wave_id)
+      if kind == "IMMEDIATE": cost = WAIT_AFTER_MEM + _cycles(last) if last in _MEM else 1
+      elif kind in _MEM: cost = MEM_AFTER_VALU + _cycles(kind) if last == "VALU" else 1
+      else: cost = 1
+      if wave_id in at_barrier:  # resuming after s_barrier: every wave has arrived by the time the emulator runs us again
+        clock[wave_id] = max(at_barrier.values()) + BARRIER_RELEASE - cost
+        del at_barrier[wave_id]
+      clock[wave_id] += cost
+      records.append((clock[wave_id], len(records), pkt_cls, kw))
+      prev[wave_id] = kind
+      if kind == InstOp.BARRIER: at_barrier[wave_id] = clock[wave_id]
+    return records
 
   def finalize() -> bytes:
-    """Sort the recorded packets by time, encode the gaps, pad and return the SQTT blob."""
+    """Schedule the recorded events, sort by cycle, encode the gaps, pad and return the SQTT blob."""
     nibbles: list[int] = []
     _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
     now = 0
-    for t, _, pkt_cls, kw in sorted(records, key=lambda r: (r[0], r[1])):
+    for t, _, pkt_cls, kw in sorted(schedule(), key=lambda r: (r[0], r[1])):
       gap, room = t - now, pkt_cls.__dict__['delta'].mask
       if gap > room:  # a long gap goes in a timestamp packet ahead of the instruction packet
         _emit_nibbles(nibbles, TS_DELTA_OR_MARK, delta=gap - room)
