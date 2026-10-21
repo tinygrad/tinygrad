@@ -188,7 +188,7 @@ def decode_cfg(insts:dict[int, Inst]):
 
 # ISA operand types and operations are independent of tensor construction and GPU lowering settings.
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
-         DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
+         DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1, LLVM_OPTNONE=1)
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
          user_data_count:int, backend:str, name:str="") -> UOp:

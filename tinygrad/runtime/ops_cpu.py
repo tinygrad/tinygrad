@@ -15,10 +15,10 @@ from tinygrad.runtime.autogen import libc
 class CPUProgram(Program['CPUDevice']):
   rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
   entry:int
-  bindings:ctypes.Array[ctypes.c_void_p]
 
   def _load(self, lib, base=0):
-    return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()), exports=self.exports)
+    return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()), exports=self.exports,
+                                                                 symbols={f"__tinygrad_call_{i}":lib.entry for i,lib in enumerate(self.libraries)})
 
   def __init__(self, dev:CPUDevice, obj:TinyELF, libraries:tuple[CPUProgram, ...]|None=None):
     self.obj = obj
@@ -31,7 +31,6 @@ class CPUProgram(Program['CPUDevice']):
       deps = struct.pack(f"<{len(self.libraries)}Q", *(lib.fxn for lib in self.libraries))
       self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(self.libraries), payload=deps + obj.lib)[0]
     else:
-      self.bindings = (ctypes.c_void_p * (2*len(self.libraries)))(*(v for lib in self.libraries for v in (lib.entry, ctypes.addressof(lib.bindings))))
       self.buf = Buffer(dev.device, len(obj.lib), options=BufferSpec(nolru=True), preallocate=True)
       loaded = self._load(obj.lib, self.buf._buf)
       self.buf.host[:len(loaded)] = loaded
@@ -50,8 +49,6 @@ class CPUProgram(Program['CPUDevice']):
 
       self.entry, = self.exports.values() if self.exports else (self.buf._buf,)
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.entry)
-      if self.libraries:
-        self.fxn = lambda args, fn=ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)(self.entry), bindings=self.bindings: fn(args, bindings)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:

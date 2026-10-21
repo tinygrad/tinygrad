@@ -33,7 +33,7 @@ def elf_symbols(ecls:str, sections:list[ElfSection]) -> list[tuple[str, libc.Elf
   return [(_strtab(strings, sym.st_name), sym) for sym in _to_carray(symsec, getattr(libc, f"{ecls}_Sym"))]
 
 def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
-               exports:dict[int, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+               exports:dict[int, int]|None=None, symbols:dict[str, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
   ecls, sections = elf_sections(blob)
 
   rel = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
@@ -63,14 +63,15 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
              getattr(r, "r_addend", 0)) for r in c_rels]
     for roff, idx, rtype, raddend in rels:
       name, sym = symtab[idx]
-      value = link_sym(name, link_libs or []) if sym.st_shndx == 0 else sections[sym.st_shndx].header.sh_addr + sym.st_value
+      value = (((symbols or {}).get(name) or link_sym(name, link_libs or [])) if sym.st_shndx == 0
+               else sections[sym.st_shndx].header.sh_addr + sym.st_value)
       relocs.append((target_image_off + roff, value, rtype, raddend))
 
   return memoryview(image), sections, relocs
 
 def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
-               exports:dict[int, int]|None=None) -> bytes:
-  image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports)
+               exports:dict[int, int]|None=None, symbols:dict[str, int]|None=None) -> bytes:
+  image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports, symbols=symbols)
   if exports is not None: exports.update({idx:base+offset for idx,offset in exports.items()})
   image = bytearray(image_)
 

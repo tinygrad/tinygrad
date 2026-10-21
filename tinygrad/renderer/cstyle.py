@@ -288,35 +288,27 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   separate_calls = True
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"),
-     lambda ctx,x,body: ctx.render_call(x, body) if ctx.separate_calls else None),
-  ]) + base_rewrite
-
-  def render_call(self, x:UOp, body:UOp) -> str:
-    params = sorted((u for u in body.src if u.op is Ops.PARAM), key=lambda p:p.arg.slot)
-    types = ', '.join([*(self.param_type(p) for p in params), 'void **'])
-    args = ', '.join([*(f'({self.param_type(p)}){self[x.src[p.arg.slot+1]]}' for p in params),
-                      f'(void **)__calls[{2*self.call_indices[body]+1}]'])
-    return f"{{\n  void (*{body.arg})({types}) = (void (*)({types}))__calls[{2*self.call_indices[body]}];\n  {body.arg}({args});\n}}"
 
   def _call_declarations(self, uops:list[UOp]) -> list[str]:
-    self.call_indices = {b:i for i,b in enumerate(dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR))}
-    return [f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION)]
+    self.fn_names = {b:f"__tinygrad_call_{i}" for i,b in
+                     enumerate(dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR))}
+    return [*(f"extern void {name}(" + ', '.join(self.param_type(p) for p in sorted((u for u in b.src if u.op is Ops.PARAM),
+                                                                               key=lambda p:p.arg.slot)) + ");"
+              for b,name in self.fn_names.items()),
+            *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
 
   def render(self, uops:list[UOp]) -> str:
     if not self.separate_calls: return super().render(uops)
     prefix = self._call_declarations(uops)
-    self.extra_args = ['void **__calls'] if self.call_indices else []
     return self.render_kernel(*self._render(uops), uops, prefix)
 
   def render_function(self, body:UOp) -> str:
     uops = list(body.src)
     prefix = self._call_declarations(uops)
     _, lines, bufs = self._render(uops)
-    params = ', '.join([*(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot)), 'void **__calls'])
+    params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
     return '\n'.join(self._render_defines(uops) + prefix + [
-      f"{self.kernel_typedef} {body.arg}({params}) {{\n" + '\n'.join(lines) + "\n}"])
+      f"{self.kernel_typedef} __tinygrad_entry({params}) {{\n" + '\n'.join(lines) + "\n}"])
 
   float4 = "(float4)"
   float4_style = ('{', '}')
