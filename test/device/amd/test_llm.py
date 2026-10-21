@@ -411,7 +411,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     np.testing.assert_allclose(flash_attention(q, cache, valid_kv_len).numpy(), 5500, rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_unaligned_start(self):
-    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device) or _cdna(d): self.skipTest("RDNA3 required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     start_pos = 1718
     q = Tensor.zeros(1, 8, 32, 128)
