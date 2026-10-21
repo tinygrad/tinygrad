@@ -21,7 +21,6 @@ def idx_alu(uops:list[UOp]):
       excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
   return excluded
 
-
 @dataclass(frozen=True)
 class Estimates:
   # number of FLOPS used in the Kernel
