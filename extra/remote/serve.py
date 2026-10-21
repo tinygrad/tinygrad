@@ -41,8 +41,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     pci_dev = opened_devices[dev_id]
 
   if cmd == RemoteCmd.MAP_BAR:
-    if (dev_id, bar) not in mapped_bars:
-      mapped_bars[(dev_id, bar)] = pci_dev.map_bar(bar)
+    if (dev_id, bar) not in mapped_bars: mapped_bars[(dev_id, bar)] = pci_dev.map_bar(bar)
     conn.sendall(resp(*pci_dev.bar_info(bar)) + struct.pack('<Q', mapped_bars[(dev_id, bar)].addr))
   elif cmd == RemoteCmd.CFG_READ:
     conn.sendall(resp(pci_dev.read_config(arg0, arg1)))

@@ -53,7 +53,7 @@ def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_a
 
 class _System:
   vfio:FileIOInterface|None = None
-  iova = TLSFAllocator(12 << 40, base=4 << 40, block_size=0x1000) # off the bars' bus addresses, below 44 bits
+  iova = TLSFAllocator(12 << 40, base=4 << 40, block_size=0x1000)
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
     if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
       os.system(cmd:=f"sudo sh -c 'echo {value} > {path}'")
@@ -82,7 +82,8 @@ class _System:
 
   def vfio_map(self, vaddr:int, size:int, align:int=1) -> int:
     iova = self.iova.alloc(size, align)
-    vfio.VFIO_IOMMU_MAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_map(argsz=32, flags=3, vaddr=vaddr, iova=iova, size=size)) # read|write
+    flags = vfio.VFIO_DMA_MAP_FLAG_READ | vfio.VFIO_DMA_MAP_FLAG_WRITE
+    vfio.VFIO_IOMMU_MAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_map(argsz=32, flags=flags, vaddr=vaddr, iova=iova, size=size))
     return iova
 
   def vfio_unmap(self, iova:int, size:int):
@@ -252,7 +253,7 @@ class PCIDevice:
   def bar_fd(self, bar_idx:int) -> FileIOInterface:
     return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
   @functools.cache
-  def bar_info(self, bar_idx:int) -> tuple[int, int]: # the address devices reach the bar at (behind the iommu: an iova), the size
+  def bar_info(self, bar_idx:int) -> tuple[int, int]:
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
     addr, sz = int(s, 16), int(e, 16) - int(s, 16) + 1
     if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.map_bar(bar_idx, size=sz).addr, sz, sz)
