@@ -1,4 +1,4 @@
-from dataclasses import replace, dataclass
+from dataclasses import replace
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, dedup
@@ -268,40 +268,33 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
-@dataclass(frozen=True)
-class RangeCtx:
-  acc: UOp
-  loop: UOp
-  gate: UOp|None
+pm_remove_range = PatternMatcher([(UPat((Ops.RANGE, Ops.END), name="x"), lambda ctx,x: ctx.get(x))])
 
 def remove_range(sink:UOp):
   uops = list(sink.toposort())
   loop_ids = itertools.count(max((aid for u in uops if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
   acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if u.op in GroupOp.Defines), default=0))
-  enclosing: dict[UOp, tuple[UOp,...]] = {u.src[1]:tuple(u.ranges.keys()) for u in uops if u.op is Ops.END and len(u.ranges)}
-  ends = {u.src[1] for u in uops if u.op is Ops.END}
-  range_inputs = {r:dedup(s for u in uops if r in u.ranges for s in u.src_without_body if r not in s.ranges and s is not r) for r in ends}
-  def init(u:UOp):
+  enclosing = {u.src[1]:tuple(u.ranges) for u in uops if u.op is Ops.END and u.ranges}
+  ends: dict[UOp, list[UOp]] = {}
+  for u in uops:
+    if u.op is Ops.END: ends.setdefault(u.src[1], []).append(u)
+  replacements: dict[UOp, UOp] = {}
+  for u in uops:
+    if u.op is not Ops.RANGE or u.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) or u.dtype is dtypes.void or u not in ends: continue
     acc = UOp.alloc((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
-    init = acc.after((acc.after(*enclosing[u]) if u in enclosing else acc)[0].store(0))
-    l, gate = UOp.loop(next(loop_ids)), UOp(Ops.IF, src=((u.src[0] > 0).after(init, *range_inputs[u]),UOp(Ops.NOOP))) if u.src[0].vmin <= 0 else None
-    l = l.replace(src=(l.src[0].after(gate if gate is not None else init),))
-    return RangeCtx(init, l, gate)
-  ctx = {u:init(u) for u in uops if u.op is Ops.RANGE
-    and u.axis_type not in (AxisType.GLOBAL, AxisType.LOCAL) and u.dtype is not dtypes.void and u in ends}
-  return graph_rewrite(sink, pm_end_to_backedge+pm_cast_const, ctx=ctx, bottom_up=True, name="remove range")
-
-def close_range(ctx:RangeCtx, x:UOp, rng:UOp, bnd:UOp, body:UOp):
-  inc = ctx.acc.after(ctx.acc[0].store(ctx.acc.after(body)[0].load() + 1))
-  end = body.backedge(ctx.loop, inc[0].load() < bnd)
-  return end if ctx.gate is None else UOp(Ops.ENDIF, src=(ctx.gate, end))
-
-pm_end_to_backedge = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx[x].acc.after(*((ctx[x].loop, ctx[x].gate)
-    if ctx[x].gate is not None else (ctx[x].loop,)))[0].load() if x in ctx else None),
-  (UPat(Ops.END, src=(UPat.var("body"), UPat(Ops.RANGE, src=(UPat.var("bnd"),), name="rng")), name="x"),
-    lambda body,bnd,rng,x,ctx: close_range(ctx[rng], x, rng, bnd, body) if rng in ctx else None)
-])
+    acc = acc.after(acc.after(*enclosing.get(u, ()))[0].store(0))
+    inputs = dedup(s for x in uops if u in x.ranges for s in x.src_without_body if u not in s.ranges and s is not u)
+    gate = UOp(Ops.IF, src=((u.src[0] > 0).after(acc, *inputs), UOp(Ops.NOOP))) if u.src[0].vmin <= 0 else None
+    loop = UOp.loop(next(loop_ids))
+    loop = loop.replace(src=(loop.src[0].after(gate if gate is not None else acc),))
+    replacements[u] = acc.after(*((loop, gate) if gate is not None else (loop,)))[0].load()
+    for e in ends[u]:
+      if len(e.src) != 2 or len(u.src) != 1: continue
+      body = e.src[0]
+      inc = acc.after(acc[0].store(acc.after(body)[0].load() + 1))
+      end = body.backedge(loop, inc[0].load() < u.src[0])
+      replacements[e] = end if gate is None else UOp(Ops.ENDIF, src=(gate, end))
+  return graph_rewrite(sink, pm_remove_range+pm_cast_const, ctx=replacements, bottom_up=True, name="remove range")
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
