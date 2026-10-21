@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, g
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, getenv, dedup, to_mv
+from tinygrad.helpers import Context, DEV, dedup, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
@@ -58,8 +58,7 @@ pm_asm_call = PatternMatcher([
 
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
-         user_data_count:int=0, backend:str|None=None, name="") -> UOp:
-  backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
+         user_data_count:int=0, name="") -> UOp:
   # decode
   view = to_mv(lib, lib_sz)
   insts = amd_decode(view, arch)
@@ -120,5 +119,5 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
     end = UOp.group(*afters.values()).end(wave)
   sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu {name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
-  with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    return to_program(sink, Device[backend].renderer)
+  with Context(DEV=DEV.target('CPU', renderer='LLVM'), CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+    return to_program(sink, Device['CPU'].renderer)
