@@ -27,7 +27,6 @@ class TestIndexing(unittest.TestCase):
     print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
     self.assertLess(bwd_ops, expected_ops, f"rope bwd ops {bwd_ops:,} should be < {ops_scale} per (got {bwd_ops/(bs*seqlen*dim*dim):.1f})")
 
-  @unittest.skipIf(DEV.renderer == "LLVM", "TODO: LLVM lowering exceeds the HIP kernel op-count bound")
   def test_llama_8b_rope_backward_f16(self):
     self.base_test_llama_8b_rope_backward(dtypes.float16, ops_scale=2)
   # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
