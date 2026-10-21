@@ -313,7 +313,6 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),))),
   # BACKEDGE becomes a conditional jump to its RANGE, it uses flags
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y: x.ins({Ops.CMPEQ: X86Ops.JE,
@@ -443,7 +442,7 @@ isel_matcher = PatternMatcher([
    x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****
@@ -464,40 +463,35 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer, nx]
 
-pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
-])
-
-# ***** post register allocation *****
 # TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
 def label(x:UOp) -> UOp: return UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), src=(x,))
 
-def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  # loop, cmp on backedge all we need is a jmp target
-  if x.dtype is dtypes.void: return (x, [label(x)])
-  else:
-    # an AFTER-wrapped bound carries the loop's ordering deps, they keep the acc unique per loop (hash-consing)
-    bound, deps = ((b:=x.src[0]).src[0], b.src[1:]) if (b:=x.src[0]).op is Ops.AFTER else (x.src[0], ())
-    acc = x.ins(X86Ops.MOVi, *regs(x), src=(imm(x.dtype, 0),) + tuple(deps))
-    cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtypes.void), src=(acc, bound))
-    jump_out = UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(label(x), cmp))
-    ctx.loop_label[acc] = x
-    return (acc, [acc, label(x), cmp, jump_out])
+# a loop's LABEL follows its RANGE. a bounded RANGE's index is a register named by the RANGE, 0 before the loop, compared to the bound
+# after the LABEL and incremented before the END, the body reads it as AFTER(index, RANGE)
+def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
+  if x.dtype is dtypes.void: return x, [x, label(x)]
+  bound, deps = (x.src[0].src[0], x.src[0].src[1:]) if x.src[0].op is Ops.AFTER else (x.src[0], ())
+  idx = UOp(Ops.INS, arg=(X86Ops.MOVi, x.dtype, regbuf_reg(x)), src=(imm(x.dtype, 0),) + deps)
+  cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtypes.void), src=(idx, bound))
+  return idx.after(x), [idx, x, start:=label(x), cmp, UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(start, cmp))]
 
-def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  jmp = UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), src=(rng:=ctx.loop_label[x.src[1]],))
-  inc = x.src[1].ins(X86Ops.ADDi, *regs(x.src[1]), src=(imm(x.src[1].dtype, 1),))
-  return (inc, [inc, jmp, label(label(rng))])
+def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
+  return (end:=x.replace(src=(x.src[0], c.src[1]))), [c.ins(X86Ops.ADDi, *regs(c.src[0]), src=(c, imm(c.dtype, 1))), end]
 
+pre_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
+  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
+  (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.AFTER, name="c")), name="x"), lower_end),
+])
+
+# ***** post register allocation *****
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(X86Ops.RET)])),
-  # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  # rewrite END to ACC + 1 -> JUMP -> LABEL
-  (UPat(Ops.END, name="x"), lower_end),
+  # an END jumps back to its loop's LABEL and labels the loop's exit
+  (UPat(Ops.END, name="x"), lambda x: (x, [UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), src=(x.src[1],)), label(label(x.src[1]))])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
