@@ -18,7 +18,7 @@ EXAMPLES_DIR = Path(__file__).parent.parent.parent / "extra/sqtt/examples/gfx110
 MATCHING = {
   "sync": (128, {
     (0,0), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (1,2), (1,3), (1,4), (1,6), (1,7), (1,8),
-    (1,9), (1,10), (1,11), (1,12), (1,13)
+    (1,9), (1,10), (1,11), (1,12), (1,13), (1,14)
   }),
   "plus": (1, {
     (0,1), (0,2), (0,3), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10)
@@ -35,7 +35,7 @@ def wave_deltas(blob:bytes) -> list[list[tuple[str, int]]]:
   last:dict[int, int] = {}
   out:dict[int, list[tuple[str, int]]] = defaultdict(list)
   for p in decode(blob):
-    if isinstance(p, WAVESTART): last[p.wave] = p._time
+    if isinstance(p, WAVESTART) and p.simd == 0: last[p.wave] = p._time  # waves of the traced SIMD only
     elif isinstance(p, IMMEDIATE_MASK):
       for w in [w for w in last if p.mask & (1 << w)]:
         out[w].append(("IMMEDIATE", p._time - last[w]))
@@ -45,7 +45,7 @@ def wave_deltas(blob:bytes) -> list[list[tuple[str, int]]]:
       if kind.startswith("OTHER_"): continue
       out[p.wave].append((kind, p._time - last[p.wave]))
       last[p.wave] = p._time
-    elif isinstance(p, WAVEEND) and p.wave in last: out[p.wave].append(("WAVEEND", p._time - last.pop(p.wave)))
+    elif isinstance(p, WAVEEND) and p.simd == 0 and p.wave in last: out[p.wave].append(("WAVEEND", p._time - last.pop(p.wave)))
   return [s for _, s in sorted(out.items()) if s]
 
 class TestSQTTTiming(unittest.TestCase):
