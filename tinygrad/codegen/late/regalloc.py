@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.isa import ISARenderer, Register, rdef, LinearContext
+from tinygrad.renderer.isa import ISARenderer, Register, rdef, regs, with_regs, LinearContext
 from typing import Any
 from dataclasses import replace
 
@@ -21,7 +21,7 @@ class LinearScanRegallocContext:
     loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last uop that reads that RANGE
     for idx,u in reversed(list(enumerate(uops))):
       if u.op in PSEUDO_OPS: continue
-      defs = u.tag if isinstance(u.tag, tuple) else ()
+      defs = regs(u)
       for v in defs + tuple(rdef(s) for s in dedup(u.src)):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
@@ -62,8 +62,8 @@ class LinearScanRegallocContext:
         self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate defs
-      if isinstance(u.tag, tuple):
-        for j,v in enumerate(u.tag):
+      if regs(u):
+        for j,v in enumerate(regs(u)):
           if v not in live:
             cons = v.cons
             # two address instructions (src is reused by def) can only coalesce reused src.
@@ -104,7 +104,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   if x.op in PSEUDO_OPS: return None
   nsrc = []
   def retag(x:UOp, r:Register) -> UOp:
-    return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else x.replace(tag=(r,))
+    return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else with_regs(x, (r,))
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
     if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
@@ -115,11 +115,10 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
         nsrc.append(s.replace(src=(fill,)+s.src[1:]) if s.op is Ops.AFTER else fill)
       else: nsrc.append(retag(s, reg))
     else: nsrc.append(s)
-  ndefs = tuple(replace(ctx.reals[i][v], size=v.size) for v in x.tag) if isinstance(x.tag, tuple) else x.tag
-  nx = x.replace(src=tuple(nsrc), tag=ndefs)
+  nx = with_regs(x.replace(src=tuple(nsrc)), tuple(replace(ctx.reals[i][v], size=v.size) for v in regs(x))) if regs(x) else x.replace(src=tuple(nsrc))
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), replace(r, size=v.size)) for v,r in ctx.insert_before.get(i, [])]
-  after = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
+  after = [ctx.ren.spill(ctx.spills[v], nx) for v in regs(x) if v in ctx.spills]
 
   return nx, before + [nx] + after
 
