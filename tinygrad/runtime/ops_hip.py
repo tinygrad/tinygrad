@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import DEV, getenv
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.device import Compiled
@@ -18,6 +18,7 @@ HIPIFY = dict(CUdevice=hip.hipDevice_t, CUcontext=hip.hipCtx_t, CUstream=hip.hip
   cuMemHostRegister_v2=hip.hipHostRegister, cuMemHostUnregister=hip.hipHostUnregister, cuModuleLoadData=hip.hipModuleLoadData,
   cuModuleGetFunction=hip.hipModuleGetFunction, cuLaunchKernel=hip.hipModuleLaunchKernel, cuMemcpyAsync=hip.hipMemcpyAsync,
   cuStreamWaitValue64_v2=hip.hipStreamWaitValue64, cuStreamWriteValue64_v2=hip.hipStreamWriteValue64, cuLaunchHostFunc=hip.hipLaunchHostFunc)
+if DEV.target("HIP").interface == "MOCK": import test.mockgpu.hip.hip  # noqa: F401  # pylint: disable=unused-import
 
 def hipify(c:UOp, f:UOp) -> UOp|None:
   if (fn:=HIPIFY.get(f.arg.name)) is None: return None
