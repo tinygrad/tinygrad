@@ -1,6 +1,7 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple, round_up
 from tinygrad.device import Compiled
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.support.hcq2 import HWQueue
@@ -26,6 +27,16 @@ def hook_doorbells(s:UOp) -> UOp|None:
                 for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.arg.name) and to_tuple(b.device)[0].split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
+
+@ctypes.CFUNCTYPE(None, ctypes.c_uint64)
+def mockgpu_progress(_:int): # compiled spin loops wait on the gpus, which run only when called
+  for d in drivers: d.progress()
+setattr(libc.dll, "mockgpu_progress", mockgpu_progress)
+
+def kick_gpus(body:UOp, loop:UOp, cond:UOp) -> UOp|None: # each iteration of a spin loop runs the gpus
+  kick = UOp.custom_function("mockgpu_progress").call(UOp.const(0, dtypes.uint64).after(body))
+  return None if kick in cond.src else body.backedge(loop, cond.after(kick))
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.BACKEDGE, src=(UPat(name="body"), UPat(name="loop"), UPat(name="cond"))), kick_gpus)])
 
 # this links AMD emulator's kernel back to the original kernel
 def emit_kernel_info(ctx:HWQueue, prg:UOp) -> None:
