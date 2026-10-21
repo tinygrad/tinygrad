@@ -4,7 +4,7 @@ from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import prod, getenv, unwrap
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.renderer.cstyle import HIPRenderer
 
@@ -124,19 +124,16 @@ class ExpertWeights:
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
     if bias: self.bias = Tensor.zeros(num_experts, out_features)
   def set_quantized(self):
-    if self.ggml_type is not None or hasattr(self, 'bias') or not amd_custom_kernels_supported(self.weight.device): return
-    if self.weight.uop.axis not in (None, 1): return
-    if (found:=find_packed(self.weight, self.in_features)) is None: return
-    self.ggml_type, self.packed = found[0], found[1]
+    if self.weight.uop.axis not in (None, 1) or (found:=find_packed(self.weight, self.in_features)) is None: return
+    self.ggml_type, self.packed = found
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
       self.set_quantized()
       if self.ggml_type is None: self.use_custom_quant = supported = False  # not a supported quant format
-    if self.ggml_type is not None and supported and isinstance(x.shape[1], int) and x.shape[1] == 1:
-      return moe_linear(self.packed, self.ggml_type, self.num_experts, x, sel, self.weight.uop.axis)
-    ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    if self.ggml_type is not None and supported and isinstance(x.shape[1], int) and x.shape[1] == 1: ret = moe_linear(self, sel, x)
+    else: ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
@@ -291,14 +288,14 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
 
 @functools.cache
 def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
-                         out_features:int, in_features:int, ggml_type:int, sel:UOp|None=None, expert_words:int=0, slots:int=0, x_slots:int=0) -> UOp:
+                         out_features:int, in_features:int, ggml_type:int, sel:UOp|None=None, expert_words:int=0, x_share:int=1) -> UOp:
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
     if ggml_type in SMALL_BLOCK_QUANTS: base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[ggml_type]
     if sel is not None:
       base += sel[token].load().cast(dtypes.weakint).maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
-      if x_slots != slots: token = token // slots
+      token = token // x_share
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
     xwords = _amd_load(xq[token, group, 0], 8)
@@ -337,25 +334,24 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
     return total * xd[token, group]
-  return _decode_linear(out, out_features, in_features//32, group_dot, "linear_"+QUANT_NAMES[ggml_type])
+  return _decode_linear(out, out_features, in_features//32, group_dot, ("linear_" if sel is None else "moe_")+QUANT_NAMES[ggml_type])
 
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
-                       out_features:int, in_features:int, ggml_type:int, slots:int, x_slots:int) -> UOp:
+                       out_features:int, in_features:int, ggml_type:int, x_share:int) -> UOp:
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
   return _quant_decode_kernel(out, raw, xq, xd, xs, *grids, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
-                              sel=sel, expert_words=expert_words, slots=slots, x_slots=x_slots)
+                              sel=sel, expert_words=expert_words, x_share=x_share)
 
-def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, shard_axis:int|None=None) -> Tensor:
-  assert shard_axis != 2, "decode down with split inputs keeps the generic path"
+def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   B, T, slots = cast(tuple[int, int, int], sel.shape[-3:])
   in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2])
-  local_out = weight.uop.max_shard_shape[0] * weight.dtype.itemsize * 256 // QUANT_SIZES[ggml_type] // in_features // experts
-  global_out = local_out * (len(weight.device) if isinstance(weight.device, tuple) else 1) if shard_axis == 1 else local_out
+  assert x_slots in (1, slots), f"x has {x_slots} rows per token, expected 1 or {slots}"
+  local_out, global_out, ggml_type = int(layer.weight.uop.max_shard_shape[1]), int(layer.weight.shape[1]), unwrap(layer.ggml_type)
   xq, xd, xs = q8_quantize(x.contiguous(), B*T*x_slots, in_features)
-  out = Tensor.empty(B*T*slots, global_out, (in_features+1023)//1024, dtype=dtypes.float32, device=x.device, axis=1 if shard_axis == 1 else None)
-  fxn = functools.partial(_moe_decode_kernel, out_features=local_out, in_features=in_features, ggml_type=ggml_type, slots=slots, x_slots=x_slots)
+  out = Tensor.empty(B*T*slots, global_out, (in_features+1023)//1024, dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
+  fxn = functools.partial(_moe_decode_kernel, out_features=local_out, in_features=in_features, ggml_type=ggml_type, x_share=slots//x_slots)
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
-  result = Tensor.custom_kernel(out, weight, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
+  result = Tensor.custom_kernel(out, layer.packed, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
   return result.reshape(B, T, slots, global_out)
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
