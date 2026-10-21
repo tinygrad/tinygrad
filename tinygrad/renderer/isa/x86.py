@@ -1,11 +1,11 @@
 from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-import struct, functools, itertools
+import struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ParamArg
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef, regs, with_regs
 from tinygrad.helpers import unwrap, Target
 from dataclasses import replace
@@ -15,7 +15,7 @@ from dataclasses import replace
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  LABEL = auto(); LOOP_CMP = auto(); IMM = auto()
+  LABEL = auto(); IMM = auto(); REG = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -192,8 +192,10 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
-stack_pointer = UOp.placeholder((1,), dtypes.uint64, slot=-1, addrspace=AddrSpace.REG).replace(tag=(RSP,))
-args_pointer = UOp.placeholder((1,), dtypes.uint64, slot=-1, addrspace=AddrSpace.REG).replace(tag=(RDI,))
+# a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
+def reg(dt:DType, r:Register) -> UOp: return UOp(Ops.INS, arg=(X86Ops.REG, dt, r))
+stack_pointer = reg(dtypes.uint64, RSP)
+args_pointer = reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
 def alloc_reg(ctx:IselContext, dt:DType, pin:Register|tuple[Register, ...]|None=None):
@@ -258,7 +260,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint32, x.dtype.itemsize))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, the stack pointer by byte
-  scale = 1 if base.addrspace is AddrSpace.REG else base.dtype.itemsize
+  scale = 1 if base in (stack_pointer, args_pointer) else base.dtype.itemsize
   sz = imm(dtypes.uint32, base.dtype.itemsize)
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
     return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale), sz)
@@ -671,10 +673,9 @@ class X86LinearContext(LinearContext):
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
     before, after, used = [], [], {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
-    buf_ids = itertools.count(max((u.arg.slot+1 for u in uops if u.op in GroupOp.Defines), default=0))
     for r in CALLEE_SAVED:
       if r.name in used:
-        a = UOp(Ops.BUFFER, arg=ParamArg(next(buf_ids), dtypes.uint64, addrspace=AddrSpace.REG)).replace(tag=(r,))
+        a = reg(dtypes.uint64, r)
         slot = self.assign_spill_slot(r,a)
         before.append(self.ren.spill(slot,a))
         after.append(self.ren.fill(slot,a,r))
@@ -735,7 +736,7 @@ class X86Renderer(ISARenderer):
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if u.op is not Ops.INS or is_imm(u): continue
+      if u.op is not Ops.INS or u.arg[0] in {X86Ops.IMM, X86Ops.REG}: continue
       if u.arg[0] is X86Ops.LABEL: asm.append(f".L{uops.index(u)}:")
       elif u.arg[0] is X86Ops.RET: asm.append(_format_op(u))
       elif u.arg[0] in X86GroupOp.Jump: asm.append(_format_op(u) + f" .L{uops.index(label(u.src[0]))}")
@@ -747,7 +748,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op is not Ops.INS or is_imm(u): continue
+      if u.op is not Ops.INS or u.arg[0] in {X86Ops.IMM, X86Ops.REG}: continue
       if u.arg[0] is X86Ops.LABEL:
         targets[u.src[0]] = len(binary)
         continue

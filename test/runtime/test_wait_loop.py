@@ -112,8 +112,6 @@ class TestWaitLoop(unittest.TestCase):
     c.realize()
     self.assertEqual(c.item(), 25)
 
-  # TODO: x86's callee saved registers build a BUFFER(REG) after regalloc, which fails spec_full
-  @(unittest.expectedFailure if isinstance(Device[Device.DEFAULT].renderer, X86Renderer) else lambda f: f)
   def test_wait_loop_spec(self):
     c = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=functools.partial(wait_loop_kernel, N=7))[0]
     with Context(SPEC=2): c.realize()

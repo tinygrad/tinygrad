@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import replace
 from tinygrad.helpers import Target
-from tinygrad.uop.ops import UOp, Ops, AddrSpace
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType
 from tinygrad.renderer.isa import Register
 from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm
@@ -9,8 +9,8 @@ from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, R
 # the operand width is carried by the register, not by the dtype
 def reg(r:Register, size:int) -> Register: return replace(r, size=size)
 def ins(op, dt, src, r:Register|None=None): return UOp(Ops.INS, arg=(op, dt) + ((r,) if r is not None else ()), src=src)
-def reg_placeholder(r:Register): return UOp(Ops.NOOP, tag=(r,))
-def alloc(dt:DType, r:Register): return UOp.alloc((1,), dtypes.uint64, slot=-1, addrspace=AddrSpace.REG).replace(tag=(r,))
+def reg_placeholder(r:Register): return UOp(Ops.INS, arg=(X86Ops.REG, dtypes.uint64, r))
+def alloc(dt:DType, r:Register): return reg_placeholder(r)
 
 class TestEncodingsX86(unittest.TestCase):
   # NOTE: x86 supports a single displacement as memory address and index without base memory address
