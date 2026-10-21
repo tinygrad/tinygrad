@@ -75,6 +75,7 @@ def make_encoder():
   FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 160, 880, 9
   VALU_EXEC_LAT_NOREAD = 6  # no register operand read: v_mov_b32 v4, -1
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, VALU_QUEUE, MEM_AFTER_EXEC = 8, 9, 5, 13, 9
+  LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
   VMEM_LOAD_LAT, STORE_ACK = 785, 325
@@ -145,6 +146,10 @@ def make_encoder():
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], pend=[],
                   last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
+    lds_issued, lds_starts = {0: 0, 2: 0}, {0: [], 2: []}  # per SIMD: requests issued, service start times in order
+    def lds_credits(sm: int, cycle: int) -> int:  # slots free in pairs at the second service's start (the first one alone)
+      st_ = lds_starts[sm]
+      return sum(1 for n in range(len(st_)) if (i := ((n + 1) | 1) - 1) < len(st_) and st_[i] <= cycle)
     lds_q: list[tuple[int, int, bool, int]] = []  # (accept, wave, store, occupancy), served by serve_lds
 
     lds_tie = dict(store=None, n=0)  # same-slot ties between SIMDs alternate, simd 2 first, within a run of stores or loads
@@ -162,6 +167,7 @@ def make_encoder():
           cand = [r for r in cand if simd[r[1]] == want]
         r = cand[0]
         lds_q.remove(r)
+        lds_starts[simd[r[1]]].append(t)
         unit["lds"] = t + r[3]
         st[r[1]]["lgkm"].append(t + LDS_RET + (2 if r[2] else 0))
         st[r[1]]["lds_wait"] -= 1
@@ -176,6 +182,7 @@ def make_encoder():
       need = cycle
       if cls == "VALU" and len(s["valu_execs"]) >= VALU_QUEUE:  # the per-wave VALU queue holds 13; a slot frees at exec + 4
         need = max(need, s["valu_execs"][-VALU_QUEUE] + 4)
+      if cls == "LDS" and lds_issued[simd[w]] - lds_credits(simd[w], cycle) >= LDS_QUEUE: need = max(need, cycle + 1)
       if (cls in ("LDS", "VMEM") or (cls == "BR" and _name(inst).startswith("S_CBRANCH_EXEC"))) and s["valu_exec"] is not None:
         need = max(need, s["valu_exec"] + MEM_AFTER_EXEC)
       if cls == "BR" and "CBRANCH" in _name(inst) and "EXEC" not in _name(inst) and s["salu_exec"] is not None:
@@ -228,6 +235,7 @@ def make_encoder():
         store = "STORE" in _name(inst)
         occ = _cycles(op) if store else 1
         lds_q.append((cycle + LDS_ACCEPT, w, store, occ))
+        lds_issued[simd[w]] += 1
         s["lds_wait"] += 1
         s["mem_issue"] = cycle
         put(cycle, INST, wave=sl, op=op if primary else InstOp(0x50 + occ - 1))
