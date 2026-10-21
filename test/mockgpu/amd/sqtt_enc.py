@@ -23,7 +23,7 @@ def make_encoder():
 
   def _kinds(*names: str) -> tuple[type[Inst], ...]:
     return tuple(getattr(m, n) for m in (ir3, ir4, irc) for n in names if hasattr(m, n))
-  _SOPP, _SMEM, _DS = _kinds('SOPP'), _kinds('SMEM'), _kinds('DS')
+  _SOPP, _SOPK, _SMEM, _DS = _kinds('SOPP'), _kinds('SOPK'), _kinds('SMEM'), _kinds('DS')
   _GLOBAL, _FLAT, _SCRATCH = _kinds('GLOBAL', 'VGLOBAL'), _kinds('FLAT', 'VFLAT'), _kinds('SCRATCH', 'VSCRATCH')
   _VALU = _kinds('VOP1', 'VOP2', 'VOP3', 'VOP3P', 'VOP3PX2', 'VOPC', 'VOPD', 'VOP3SD', 'VOP3_SDST', 'VOP1_SDST')
 
@@ -86,6 +86,14 @@ def make_encoder():
         out |= {f"{m.group(1)}{r}" for r in range(lo, int(m.group(3) or lo) + 1)}
     return out
 
+  def _waits(inst: Inst) -> tuple[int, int]:
+    """(lgkmcnt, vmcnt) targets of s_waitcnt or the SOPK s_waitcnt_<counter> form (null sdst: the immediate is the count)."""
+    name, v = _name(inst), inst.simm16
+    if name == "S_WAITCNT_LGKMCNT": return v & 0x3f, 0x3f
+    if name == "S_WAITCNT_VMCNT": return 0x3f, v & 0x3f
+    if name.startswith("S_WAITCNT_"): return 0x3f, 0x3f
+    return (v >> 4) & 0x3f, (v >> 10) & 0x3f
+
   def _name(inst: Inst) -> str:
     """Op name; a VOPD pair is named by both halves."""
     return inst.op.name if hasattr(inst, 'op') else f"{inst.opx.name}::{inst.opy.name}" if hasattr(inst, 'opx') else ""
@@ -93,6 +101,7 @@ def make_encoder():
   def _classify(inst: Inst, branch_taken: bool|None) -> tuple[str, InstOp|None]:
     """Issue class and INST op of one instruction; class NONE is not traced."""
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, _name(inst)
+    if issubclass(inst_type, _SOPK) and op_name.startswith("S_WAITCNT_"): return "IMM", None
     if issubclass(inst_type, _SOPP):
       if inst_op in _SOPP_SKIP: return "NONE", None
       if inst_op in _SOPP_IMMEDIATE: return "IMM", None
@@ -169,11 +178,11 @@ def make_encoder():
       if cls == "IMM":
         if s["mem_issue"] is not None: need = max(need, s["mem_issue"] + IMM_AFTER_MEM)
         if "WAITCNT" in _name(inst):
-          wait = inst.simm16
-          if s["lds_wait"] and len(s["lgkm"]) < len(s["lgkm"]) + s["lds_wait"] - ((wait >> 4) & 0x3f):
+          lgkm_n, vm_n = _waits(inst)
+          if s["lds_wait"] and len(s["lgkm"]) < len(s["lgkm"]) + s["lds_wait"] - lgkm_n:
             s["ready"], s["blocked"] = cycle + 1, True
             return False  # a counted LDS request is not served yet
-          for q, n in ((s["lgkm"], ((wait >> 4) & 0x3f) - s["lds_wait"]), (s["vm"], (wait >> 10) & 0x3f)):  # unserved LDS are newest
+          for q, n in ((s["lgkm"], lgkm_n - s["lds_wait"]), (s["vm"], vm_n)):  # unserved LDS are newest
             q.sort()
             if len(q) > n:
               sat = q[len(q) - n - 1]
@@ -187,8 +196,7 @@ def make_encoder():
       s["last_cls"] = cls
       if cls == "IMM":
         if "WAITCNT" in _name(inst):
-          wait = inst.simm16
-          for q, n in ((s["lgkm"], (wait >> 4) & 0x3f), (s["vm"], (wait >> 10) & 0x3f)): del q[:max(0, len(q) - n)]
+          for q, n in zip((s["lgkm"], s["vm"]), _waits(inst)): del q[:max(0, len(q) - n)]
           if not s["blocked"]: s["ready"] = cycle + WAITCNT_FREE_PENALTY
         s["blocked"] = False
         if primary: put(cycle, IMMEDIATE, wave=sl)
