@@ -56,6 +56,18 @@ class TestMov(unittest.TestCase):
     self.assertEqual(result_hi, 0xBEEF, f"Expected hi=0xBEEF (preserved), got 0x{result_hi:04x}")
 
 
+class TestNop(unittest.TestCase):
+  def test_v_nop(self):
+    """V_NOP has no pcode, it must only advance the pc."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_nop_e32(),
+      v_pipeflush_e32(),
+      v_add_f32_e32(v[0], 1.0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], f2i(2.0))
+
 class TestTrigonometry(unittest.TestCase):
   """Tests for trigonometric instructions."""
 
