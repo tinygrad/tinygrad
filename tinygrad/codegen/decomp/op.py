@@ -108,6 +108,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
     # These are late rewrites because simplex expects equalities to be a certain format
     pat += [
       ((UPat.var("x", dtypes.sints) < UPat.cvar("c")).logical_not(), lambda x,c: c-1<x),
+      ((UPat.cvar("c") < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
       ((UPat.cvar("c1")<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2")),
         lambda x,c1,c2: x.eq(c1+1) if c1.val+1==c2.val-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
