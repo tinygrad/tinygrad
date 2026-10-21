@@ -3,7 +3,7 @@
 from __future__ import annotations
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd.sqtt import (_build_decode_tables, PACKET_TYPES_RDNA3, PacketType, InstOp,
-                                        LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, TS_DELTA_OR_MARK)
+                                        LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, IMMEDIATE_MASK, VALUINST, TS_DELTA_OR_MARK)
 
 _NIB_COUNTS = {cls: nc for _, (cls, nc, *_) in _build_decode_tables(PACKET_TYPES_RDNA3)[0].items()}
 
@@ -276,7 +276,14 @@ def make_encoder():
     nibbles: list[int] = []
     _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
     now = 0
-    for t, _, pkt_cls, kw in sorted(schedule(), key=lambda r: (r[0], r[1])):
+    recs, imm = [], {}
+    for r in sorted(schedule(), key=lambda r: (r[0], r[1])):  # waits of several waves done in one cycle share an IMMEDIATE_MASK
+      if r[2] is not IMMEDIATE: recs.append(r)
+      elif r[0] in imm: imm[r[0]][3]["mask"] |= 1 << r[3]["wave"]
+      else: recs.append(imm.setdefault(r[0], (r[0], r[1], IMMEDIATE_MASK, {"mask": 1 << r[3]["wave"]})))
+    recs = [(t, q, IMMEDIATE, {"wave": kw["mask"].bit_length() - 1}) if c is IMMEDIATE_MASK and kw["mask"] & (kw["mask"] - 1) == 0
+            else (t, q, c, kw) for t, q, c, kw in recs]
+    for t, _, pkt_cls, kw in recs:
       gap, room = t - now, pkt_cls.__dict__['delta'].mask
       if gap > room:  # a long gap goes in a timestamp packet ahead of the instruction packet
         _emit_nibbles(nibbles, TS_DELTA_OR_MARK, delta=gap - room)
