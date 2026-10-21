@@ -187,7 +187,6 @@ class NIRRenderer(Renderer):
       self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].src[0].val
     self.r: dict[UOp, Any] = {}
     self.param_idx = 0
-    ranges: list[mesa.nir_def|None] = []
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.CONST} or (u.op is Ops.STACK and len(u.src) == 0): pass
@@ -204,11 +203,9 @@ class NIRRenderer(Renderer):
         self.b.shader.contents.info.shared_size += u.max_numel()*u.dtype.itemsize
       elif u.op == Ops.RANGE:
         # a RANGE with no bound is a loop header: just open the loop, BACKEDGE supplies its condition
-        ranges.append(None)
         mesa.nir_push_loop(self.b)
       elif u.op == Ops.BACKEDGE:
         nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
-        ranges.pop()
         mesa.nir_pop_loop(self.b, None)
       else:
         d: mesa.nir_def|None = self.def_rewrite.rewrite(u, ctx=self)
