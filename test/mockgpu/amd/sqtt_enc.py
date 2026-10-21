@@ -133,7 +133,7 @@ def make_encoder():
 
     def serve_lds(upto: int):
       """Start every queued LDS request whose service slot is decidable by cycle upto (accept = issue + LDS_ACCEPT)."""
-      while lds_q and (t := max(unit["lds"], min(r[0] for r in lds_q))) <= upto + LDS_ACCEPT:
+      while lds_q and (t := max(unit["lds"], min(r[0] for r in lds_q))) < upto + LDS_ACCEPT:
         cand = [r for r in lds_q if r[0] <= t]
         top = min(slot[r[1]] for r in cand)
         cand = [r for r in cand if slot[r[1]] == top]
@@ -169,7 +169,7 @@ def make_encoder():
           wait = inst.simm16
           if s["lds_wait"] and len(s["lgkm"]) < len(s["lgkm"]) + s["lds_wait"] - ((wait >> 4) & 0x3f):
             s["ready"], s["blocked"] = cycle + 1, True; return False  # a counted LDS request is not served yet
-          for q, n in ((s["lgkm"], (wait >> 4) & 0x3f), (s["vm"], (wait >> 10) & 0x3f)):
+          for q, n in ((s["lgkm"], ((wait >> 4) & 0x3f) - s["lds_wait"]), (s["vm"], (wait >> 10) & 0x3f)):  # unserved LDS are newest
             q.sort()
             if len(q) > n:
               sat = q[len(q) - n - 1]
