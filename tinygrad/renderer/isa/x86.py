@@ -291,7 +291,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.op is Ops.INS and x.arg[0] in {X86Ops.LOOP_CMP, X86Ops.IMM}: return None
+  if x.op is Ops.INS and x.arg[0] is X86Ops.IMM: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -312,9 +312,9 @@ isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),))),
-  # BACKEDGE becomes a conditional jump referencing the RANGE start label
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
-    lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
+  # BACKEDGE becomes a conditional jump to its RANGE, it uses flags
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y: x.ins({Ops.CMPEQ: X86Ops.JE,
+   Ops.CMPNE: X86Ops.JNE, Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op], src=(x.src[1], x.src[0], cmp(y)))),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM, name="x"), abi),
@@ -343,11 +343,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVB, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPEQ, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVE, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPNE, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVNE, src=(b, a, cmp(m)))),
-  # jumps, use flags
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JB, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JL, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JE, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JNE, src=(cmp(y),))),
   # comparisons whose user doesn't use the flag, move flag result to register
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: x.ins(X86Ops.SETB, src=(cmp(x),))),
   (UPat(Ops.CMPLT, name="x"), lambda x: x.ins(X86Ops.SETL, src=(cmp(x),))),
@@ -492,16 +487,9 @@ def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   inc = x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),))
   return (inc, [inc, jmp, label(label(rng))])
 
-def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  cond = x.replace(op=x.tag, src=x.src[:2])
-  jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
-  return (jmp.src[0], [jmp.src[0], jmp.replace(src=(x.src[3],)+jmp.src)])
-
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(X86Ops.RET)])),
-  # expand the cmp here so we can preserve rng src edge to get label from ctx
-  (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lower_range),
   # rewrite END to ACC + 1 -> JUMP -> LABEL
@@ -759,7 +747,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op is not Ops.INS or u.arg[0] in {X86Ops.LOOP_CMP, X86Ops.IMM}: continue
+      if u.op is not Ops.INS or is_imm(u): continue
       if u.arg[0] is X86Ops.LABEL:
         targets[u.src[0]] = len(binary)
         continue
