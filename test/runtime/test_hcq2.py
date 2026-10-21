@@ -99,7 +99,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     ranges = [((b:=dev.rt_buffer(spec))._buf, b._buf + b.nbytes) for spec in specs]
     x, f = chain_input(device=dev.device), TinyJit(lambda a: chain(a, 2).realize())
     for _ in range(2): f(x)
-    for u in f.captured.linear.toposort(enter_calls=True):
+    for u in f.captured._linears[()][0].toposort(enter_calls=True):
       if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and (buf:=u.buffer).device == dev.device:
         self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
