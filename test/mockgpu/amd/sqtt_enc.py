@@ -72,9 +72,11 @@ def make_encoder():
   # and finish() only record what each wave issued; schedule() replays all waves of a workgroup cycle by cycle, one
   # barrier phase at a time, with per-SIMD issue ports, a shared in-order VALU pipe and one LDS unit for both SIMDs of
   # the pair. Constants come from the gfx1100 references in extra/sqtt/examples/gfx1100; DRAM latencies are rough.
-  FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 160, 880, 9
+  FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 16, 880, 9
   VALU_EXEC_LAT_NOREAD = 6  # no register operand read: v_mov_b32 v4, -1
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, VALU_QUEUE, MEM_AFTER_EXEC = 8, 9, 5, 13, 9
+  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}  # load data return: (extra latency, cycles on the return path)
+  VALU_TO_SCALAR, IMM_AFTER_ALU, VALU_AFTER_SALU, SLEEP_CYCLES = 9, 3, 5, 24  # s_sleep 1 measured once
   LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
@@ -144,14 +146,15 @@ def make_encoder():
     rank = {w: k for k, w in enumerate(waves)}  # wave id = workgroup * 64 + wave; placement goes by rank across workgroups
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
     st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
-                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], pend=[],
+                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], vsgpr_exec={}, pend=[], last_issue=0,
                   last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
     lds_issued, lds_starts = {0: 0, 2: 0}, {0: [], 2: []}  # per SIMD: requests issued, service start times in order
     def lds_credits(sm: int, cycle: int) -> int:  # slots free in pairs at the second service's start (the first one alone)
       st_ = lds_starts[sm]
       return sum(1 for n in range(len(st_)) if (i := ((n + 1) | 1) - 1) < len(st_) and st_[i] <= cycle)
-    lds_q: list[tuple[int, int, bool, int]] = []  # (accept, wave, store, occupancy), served by serve_lds
+    lds_q: list[tuple[int, int, bool, int, str|None]] = []  # (accept, wave, store, occupancy, load width), served by serve_lds
+    ret_free = {0: 0, 2: 0}
 
     lds_tie = dict(store=None, n=0)  # same-slot ties between SIMDs alternate, simd 2 first, within a run of stores or loads
 
@@ -170,7 +173,11 @@ def make_encoder():
         lds_q.remove(r)
         lds_starts[simd[r[1]]].append(t)
         unit["lds"] = t + r[3]
-        st[r[1]]["lgkm"].append(t + LDS_RET + (2 if r[2] else 0))
+        if r[2]: st[r[1]]["lgkm"].append(t + LDS_RET + 2)
+        else:  # loads return their data one after another per SIMD
+          extra, beat = LDS_RET_WIDE[r[4]]
+          ret_free[simd[r[1]]] = done = max(t + LDS_RET + extra, ret_free[simd[r[1]]] + beat)
+          st[r[1]]["lgkm"].append(done)
         st[r[1]]["lds_wait"] -= 1
     for w in waves: put(w, WAVESTART, simd=simd[w], wgp=0, wave=slot[w], id7=rank[w])
 
@@ -188,12 +195,17 @@ def make_encoder():
         need = max(need, s["valu_exec"] + MEM_AFTER_EXEC)
       if cls == "BR" and "CBRANCH" in _name(inst) and "EXEC" not in _name(inst) and s["salu_exec"] is not None:
         need = max(need, s["salu_exec"] + BRANCH_AFTER_SALU)  # waits for its SCC/VCC producer
+      if cls in ("SALU", "SMEM", "BR"):  # an SGPR or VCC written by a VALU stalls the scalar reader until exec + 9
+        need = max([need] + [s["vsgpr_exec"][r] + VALU_TO_SCALAR for r in reads | ({"s106"} if "VCC" in _name(inst) else set())
+                             if r in s["vsgpr_exec"]])
       if cls == "SMEM" and s["salu_issue"] is not None: need = max(need, s["salu_issue"] + SMEM_AFTER_SALU)
       for countdown, dep in s["pend"]:  # s_delay_alu: VALU_DEP_n / TRANS32_DEP_n wait for the n-th newest VALU, SALU_CYCLE_n
         if countdown: continue
         if 1 <= dep <= 7 and len(s["valu_issues"]) >= (n := dep if dep <= 4 else dep - 4):
           need = max(need, s["valu_issues"][-n] + VALU_DEP_LAT)
         elif 9 <= dep <= 11 and s["salu_issue"] is not None: need = max(need, s["salu_issue"] + 1 + dep - 8)
+      if cls == "IMM" and s["last_cls"] in ("SALU", "VALU"): need = max(need, s["last_issue"] + IMM_AFTER_ALU)
+      if cls == "VALU" and s["salu_exec"] is not None: need = max(need, s["salu_exec"] + VALU_AFTER_SALU)
       if cls == "IMM":
         if s["mem_issue"] is not None: need = max(need, s["mem_issue"] + IMM_AFTER_MEM)
         if "WAITCNT" in _name(inst):
@@ -212,13 +224,16 @@ def make_encoder():
       s["i"] += 1
       s["ready"] = cycle + 1
       s["pend"] = [[c - 1, d] for c, d in s["pend"] if c > 0]
-      s["last_cls"] = cls
+      s["last_cls"], s["last_issue"] = cls, cycle
       if cls == "IMM":
         if "WAITCNT" in _name(inst):
           for q, n in zip((s["lgkm"], s["vm"]), _waits(inst)): del q[:max(0, len(q) - n)]
           if not s["blocked"]: s["ready"] = cycle + WAITCNT_FREE_PENALTY
         s["blocked"] = False
-        if primary: put(cycle, IMMEDIATE, wave=sl)
+        # s_nop N / s_sleep N hold the wave; the token is stamped when they end
+        hold = inst.simm16 & 0xf if _name(inst) == "S_NOP" else SLEEP_CYCLES * (inst.simm16 & 0x7f) if _name(inst) == "S_SLEEP" else 0
+        if hold: s["ready"] = max(s["ready"], cycle + hold + 1)
+        if primary: put(cycle + hold, IMMEDIATE, wave=sl)
       elif cls == "VALU":
         lat = VALU_EXEC_LAT_NOREAD if not reads else VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT
         base = cycle + lat
@@ -228,6 +243,8 @@ def make_encoder():
                                                                   for o in reads) for d in writes & reads if d[0] == "v"): ex += 1
         valu_free[simd[w]], s["valu_exec"] = ex + 1, ex
         s["valu_execs"].append(ex)
+        for r in writes | ({"s106"} if re.search(r"V_CMP|V_ADD_CO|V_SUB_CO", _name(inst)) else set()):
+          if r[0] == "s": s["vsgpr_exec"][r] = ex
         s["valu_issues"].append(cycle)
         if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], "VALU")] = cycle + _cycles(op)
         for r in writes: s["reg_ready"][r], s["reg_issue"][r] = ex + VALU_DEP_LAT, cycle
@@ -235,7 +252,8 @@ def make_encoder():
       elif cls == "LDS":
         store = "STORE" in _name(inst)
         occ = _cycles(op) if store else 1
-        lds_q.append((cycle + LDS_ACCEPT, w, store, occ))
+        width = (m.group(1) if (m := re.search(r'_B(32|64|96|128)$', _name(inst))) else "32") if not store else None
+        lds_q.append((cycle + LDS_ACCEPT, w, store, occ, width))
         lds_issued[simd[w]] += 1
         s["lds_wait"] += 1
         s["mem_issue"] = cycle
