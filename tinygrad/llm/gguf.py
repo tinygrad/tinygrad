@@ -262,7 +262,7 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
       parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
       packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
   # TODO: shard copies the full tensor to every device
-  for t in packed.values(): t.realize()
+  if packed: Tensor.realize(*packed.values())
   for d in devices: Device[d].allocator.free_cache()
   def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
     decoded = ggml_data_to_tensor(packed[name].flatten(), prod(shape), typ)
