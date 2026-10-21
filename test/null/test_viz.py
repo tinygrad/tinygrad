@@ -390,16 +390,6 @@ class TestVizIntegration(unittest.TestCase):
     with Context(BEAM=2):
       self.test_link_sched_codegen()
 
-  @Context(TRACEMETA=2)
-  def test_metadata_tracing(self):
-    with save_viz() as viz:
-      a = Tensor.empty(1)
-      b = Tensor.empty(1)
-      metadata = (alu:=a+b).uop.metadata
-      alu.schedule_linear()
-    graph = next(viz.get_details(0, 0))["graph"]
-    self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
-
   # tracing also works without a rewrite_group context
   # all graph_rewrites get put into the default group
   def test_default_tracing(self):
@@ -570,6 +560,27 @@ from tinygrad.viz.cli import decode_profile
 def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
 class TestVizProfiler(unittest.TestCase):
+  def test_tensor_calls(self):
+    a = Tensor.empty(2, device="NULL")
+    with save_viz():
+      a.relu()
+      count = len(cpu_events)
+      with Context(PROFILE=0): a.sigmoid()
+      self.assertEqual(len(cpu_events), count)
+    events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent) and e.device == "USER"]
+    self.assertEqual(events[-1].name.display_name, "relu")
+    self.assertGreater(len(events), 1)
+    self.assertTrue(all(events[-1].st <= e.st <= e.en <= events[-1].en for e in events))
+
+  def test_tensor_call_exception(self):
+    a = Tensor.empty(2, device="NULL")
+    with save_viz():
+      with self.assertRaises(ValueError): a.reshape(3)
+      a.relu()
+    events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent) and e.device == "USER"]
+    self.assertIn("reshape", [e.name.display_name for e in events])
+    self.assertEqual(events[-1].name.display_name, "relu")
+
   def test_transfer_uses_copy_device(self):
     with save_viz():
       a = Tensor.ones(1, device="NULL").contiguous().realize()
