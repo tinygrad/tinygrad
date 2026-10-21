@@ -43,7 +43,6 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
   if cmd == RemoteCmd.MAP_BAR:
     if (dev_id, bar) not in mapped_bars:
       mapped_bars[(dev_id, bar)] = pci_dev.map_bar(bar)
-      if hasattr(pci_dev, "vfio_dev"): System.vfio_map(mapped_bars[(dev_id, bar)].addr, *pci_dev.bar_info(bar)) # p2p: bus address
     conn.sendall(resp(*pci_dev.bar_info(bar)) + struct.pack('<Q', mapped_bars[(dev_id, bar)].addr))
   elif cmd == RemoteCmd.CFG_READ:
     conn.sendall(resp(pci_dev.read_config(arg0, arg1)))

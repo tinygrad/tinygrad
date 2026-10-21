@@ -53,7 +53,7 @@ def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_a
 
 class _System:
   vfio:FileIOInterface|None = None
-  iova = TLSFAllocator(12 << 40, base=4 << 40, block_size=0x1000) # above the bars, below 44 bits
+  iova = TLSFAllocator(12 << 40, base=4 << 40, block_size=0x1000) # off the bars' bus addresses, below 44 bits
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
     if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
       os.system(cmd:=f"sudo sh -c 'echo {value} > {path}'")
@@ -80,7 +80,8 @@ class _System:
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
-  def vfio_map(self, vaddr:int, iova:int, size:int) -> int:
+  def vfio_map(self, vaddr:int, size:int, align:int=1) -> int:
+    iova = self.iova.alloc(size, align)
     vfio.VFIO_IOMMU_MAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_map(argsz=32, flags=3, vaddr=vaddr, iova=iova, size=size)) # read|write
     return iova
 
@@ -89,7 +90,7 @@ class _System:
     self.iova.free(iova)
 
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
-    if self.vfio is not None: return list(range(iova:=self.vfio_map(vaddr, self.iova.alloc(size), size), iova + size, mmap.PAGESIZE))
+    if self.vfio is not None: return list(range(iova:=self.vfio_map(vaddr, size), iova + size, mmap.PAGESIZE))
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
@@ -251,9 +252,11 @@ class PCIDevice:
   def bar_fd(self, bar_idx:int) -> FileIOInterface:
     return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
   @functools.cache
-  def bar_info(self, bar_idx:int) -> tuple[int, int]:
+  def bar_info(self, bar_idx:int) -> tuple[int, int]: # the address devices reach the bar at (behind the iommu: an iova), the size
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
-    return (int(s, 16), int(e, 16) - int(s, 16) + 1)
+    addr, sz = int(s, 16), int(e, 16) - int(s, 16) + 1
+    if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.bar_fd(bar_idx).mmap(0, sz, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, 0), sz, sz)
+    return addr, sz
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
@@ -300,7 +303,6 @@ class PCIIfaceBase:
     self.pci_dev = System.pci_probe_device(dn:=dev.__class__.__name__[:-6], dev_id, vendor, devices, base_class=base_class)
     if self.remote is None: System.reserve_va(va_start, va_size)
     with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
-    if hasattr(self.pci_dev, "vfio_dev"): System.vfio_map(self.pci_dev.map_bar(vram_bar).addr, *self.pci_dev.bar_info(vram_bar)) # p2p: bus address
     self.dev_impl = dev_impl_t(self.pci_dev)
     self.dev, self.vram_bar, self.count = dev, vram_bar, len(filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
 
