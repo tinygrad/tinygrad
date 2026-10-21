@@ -8,9 +8,8 @@ from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address
 from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
-from tinygrad.renderer import tc
+from tinygrad.renderer import tc, Renderer
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
-from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.elf import link_sym
 from tinygrad.runtime.support.c import DLL
 
