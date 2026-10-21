@@ -28,46 +28,48 @@ class Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
-    excluded: set[UOp] = set()
     uops = list(sink.toposort(enter_calls=False))
     specials = tuple(u for u in uops if u.op is Ops.SPECIAL)
 
-    def exclude_idx_alu(uops:list[UOp]):
-      nonlocal excluded
+    def idx_alu(uops:list[UOp]):
+      excluded: set[UOp] = set()
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
-
-    if ignore_indexing: exclude_idx_alu(uops)
+      return excluded
 
     @functools.cache
     def mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
-    def update(u:UOp, rngs:tuple[UOp,...]):
-      nonlocal flops, lds, mem, excluded
-      from tinygrad.schedule.prepare import resolve_function
-      if u in excluded: return
-      if u.op in {Ops.LOAD, Ops.STORE}:
-        if (buf:=u.buf_uop).op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults(rngs)
-          mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
-      if u.op is Ops.CALL and u.is_inline_call:
-        bops = list(resolve_function(u).toposort())
-        if ignore_indexing: exclude_idx_alu(bops)
-        for s in bops: update(s, tuple(dedup(rngs+tuple(s.ranges)+specials)))
-      elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.dtype.itemsize * mults(rngs)
-      elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.src[1].dtype.itemsize * mults(rngs)
-      elif u.op in GroupOp.ALU:
-        flops += (mults(rngs) * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
-      elif u.op is Ops.WMMA:
-        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults(rngs)
-      excluded.add(u) # excludes substituted args from the body estimates
+    # computes estimates within a given caller scope, inline calls get resolved recursively
+    def process_body(u:UOp, caller_mult:sint, bindings:dict[UOp,UOp]={}):
+      nonlocal flops, lds, mem
+      uops = u.toposort(enter_calls=False)
+      excluded = idx_alu(uops) if ignore_indexing else set()
+      for u in uops:
+        mult = mults(tuple(bindings.get(r.src[0],r.src[0]) for r in u.ranges)) * caller_mult
+        if u.op in {Ops.LOAD, Ops.STORE}:
+          buf = bindings.get(u.buf_uop, u.buf_uop).without_after
+          if buf.op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
+            accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mult
+            mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
+        if u.op is Ops.CALL:
+          bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
+            for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
+          process_body(u.body, mult, bindings)
+        elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
+          lds += u.max_numel() * u.dtype.itemsize * mult
+        elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
+          lds += u.max_numel() * u.src[1].dtype.itemsize * mult
+        elif u.op in GroupOp.ALU and u not in excluded:
+          flops += (mult * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+        elif u.op is Ops.WMMA and u not in excluded:
+          flops += 2 * prod(u.arg[0]) // u.arg[2] * mult
 
-    for u in uops: update(u, tuple(u.ranges)+specials)
+    special_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
+    process_body(sink, special_mult)
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
