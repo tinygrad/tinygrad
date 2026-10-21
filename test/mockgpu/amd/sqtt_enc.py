@@ -77,6 +77,7 @@ def make_encoder():
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, VALU_QUEUE, MEM_AFTER_EXEC = 8, 9, 5, 13, 9
   LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}  # load data return: (extra latency, cycles on the return path)
   VALU_TO_SCALAR, IMM_AFTER_ALU, VALU_AFTER_SALU, SLEEP_CYCLES = 9, 3, 5, 24  # s_sleep 1 measured once
+  ICACHE_LINE_LAT = 530
   LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
@@ -123,25 +124,29 @@ def make_encoder():
     op = _mem_op(inst_type, op_name, bool(_regs(inst, ("saddr",))))
     return ("LDS" if issubclass(inst_type, _DS) else "VMEM" if op != InstOp.SALU else "SALU"), op
 
-  events: list[tuple[int, Inst|None, bool|None]] = []  # (wave_id, inst, branch_taken); inst None = end of wave
+  events: list[tuple[int, Inst|None, bool|None, int]] = []  # (wave_id, inst, branch_taken, pc); inst None = end of wave
 
-  def emit(wave_id: int, inst: Inst, branch_taken: bool|None):
+  def emit(wave_id: int, inst: Inst, branch_taken: bool|None, pc: int):
     """Record one executed instruction; timing is assigned later by schedule()."""
-    events.append((wave_id, inst, branch_taken))
+    events.append((wave_id, inst, branch_taken, pc))
 
   def finish(wave_id: int):
     """Record the end of a wave."""
-    if any(e[0] == wave_id for e in events): events.append((wave_id, None, None))
+    if any(e[0] == wave_id for e in events): events.append((wave_id, None, None, 0))
 
   def schedule() -> list[tuple[int, int, type[PacketType], dict]]:
     """Assign a cycle to every recorded instruction. Returns (cycle, seq, packet class, fields)."""
     out: list[tuple[int, int, type[PacketType], dict]] = []
     def put(t: int, pkt_cls: type[PacketType], **kw): out.append((t, len(out), pkt_cls, kw))
     recs: dict[int, list[list[tuple[Inst|None, bool|None]]]] = {}  # wave -> barrier phases -> records
-    for wave_id, inst, bt in events:
+    pcs: dict[int, list[list[int]]] = {}  # same shape as recs: byte offset of each record in the code
+    for wave_id, inst, bt, pc in events:
+      pcs.setdefault(wave_id, [[]])[-1].append(pc)
       phases = recs.setdefault(wave_id, [[]])
       phases[-1].append((inst, bt))
-      if inst is not None and _classify(inst, bt)[0] == "BARRIER": phases.append([])
+      if inst is not None and _classify(inst, bt)[0] == "BARRIER":
+        phases.append([])
+        pcs[wave_id].append([])
     waves = sorted(recs)
     rank = {w: k for k, w in enumerate(waves)}  # wave id = workgroup * 64 + wave; placement goes by rank across workgroups
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
@@ -149,6 +154,16 @@ def make_encoder():
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], vsgpr_exec={}, pend=[], last_issue=0,
                   last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
+    # instruction cache: 64 B lines fetched in aligned blocks of ahead + 1 lines (s_set_inst_prefetch_distance, default 3);
+    # a miss fetches the line's block, entering the second half of a block prefetches the next one
+    icache = dict(ahead=3, ready={line: FETCH_LAT for line in range(4)})
+    def line_ready(line: int, cycle: int) -> int:
+      n = icache["ahead"] + 1
+      def fetch(block: int):
+        for x in range(block * n, block * n + n): icache["ready"].setdefault(x, cycle + ICACHE_LINE_LAT)
+      if line not in icache["ready"]: fetch(line // n)
+      if line % n >= n // 2: fetch(line // n + 1)
+      return icache["ready"][line]
     lds_issued, lds_starts = {0: 0, 2: 0}, {0: [], 2: []}  # per SIMD: requests issued, service start times in order
     def lds_credits(sm: int, cycle: int) -> int:  # slots free in pairs at the second service's start (the first one alone)
       st_ = lds_starts[sm]
@@ -187,7 +202,7 @@ def make_encoder():
       reads = _regs(inst, ("src0", "src1", "src2", "vsrc1", "addr", "data0", "data1", "data", "saddr", "ssrc0", "ssrc1",
                          "srcx0", "vsrcx1", "srcy0", "vsrcy1"))
       writes = _regs(inst, ("vdst", "sdst", "vdstx", "vdsty"))
-      need = cycle
+      need = max(cycle, line_ready(pcs[w][ph][s["i"]] // 64, cycle))
       if cls == "VALU" and len(s["valu_execs"]) >= VALU_QUEUE:  # the per-wave VALU queue holds 13; a slot frees at exec + 4
         need = max(need, s["valu_execs"][-VALU_QUEUE] + 4)
       if cls == "LDS" and lds_issued[simd[w]] - lds_credits(simd[w], cycle) >= LDS_QUEUE: need = max(need, cycle + 1)
@@ -226,6 +241,7 @@ def make_encoder():
       s["pend"] = [[c - 1, d] for c, d in s["pend"] if c > 0]
       s["last_cls"], s["last_issue"] = cls, cycle
       if cls == "IMM":
+        if _name(inst) == "S_SET_INST_PREFETCH_DISTANCE": icache["ahead"] = inst.simm16 & 3
         if "WAITCNT" in _name(inst):
           for q, n in zip((s["lgkm"], s["vm"]), _waits(inst)): del q[:max(0, len(q) - n)]
           if not s["blocked"]: s["ready"] = cycle + WAITCNT_FREE_PENALTY
