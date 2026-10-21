@@ -55,8 +55,6 @@ class LinearScanRegallocContext:
       if u.op in PSEUDO_OPS: continue
       # allocate uses
       for s in u.src:
-        # HACK: cause of later hacks to lower range
-        if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), Register): continue
         if v not in live: live[v] = fill(v, i)
         self.reals.setdefault(i, {})[v] = live[v]
@@ -71,8 +69,7 @@ class LinearScanRegallocContext:
             if ren.is_two_address(u) and j == 0:
               uses = tuple(live.get(rdef(s)) for s in u.src)
               cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
-            # HACK: cause the range is missing the comparison
-            live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
+            live[v] = alloc(cons, i+1)
           self.reals.setdefault(i, {})[v] = live[v]
 
       # loop prologue, avoid loading inside the loop
