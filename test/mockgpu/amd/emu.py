@@ -516,17 +516,16 @@ class _Ctx:
     """Read PC as 64-bit byte address."""
     # Index at PC_LO, then cast to uint64 ptr and load
     return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
-
   def wpc(self, val:UOp) -> list[UOp]:
     if val.op is Ops.WHERE: self.branch_cond = val.src[0]
-    # With an explicit instruction address, control flow belongs to the caller's CFG.
     if self.inst_addr is not None: return []
     lo, hi = _split64(val.cast(dtypes.uint64))
     return [self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)]
 
   def inc_pc(self) -> list[UOp]:
     """Increment PC by instruction size in bytes. Returns [store]."""
-    return self.wpc(self.rpc() + UOp.const(self.inst_size, dtypes.uint64))
+    new_pc = self.rpc() + UOp.const(self.inst_size, dtypes.uint64)
+    return self.wpc(new_pc)
 
   def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
     """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
@@ -689,8 +688,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
             'VCCZ': vcc.eq(UOp.const(0, vcc.dtype)).cast(dtypes.uint32),
             'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
-      if dest.startswith('PC'):
-        return UOp.sink(*ctx.wpc(val))
+      if dest.startswith('PC'): return UOp.sink(*ctx.wpc(val))
   return UOp.sink(*ctx.inc_pc())
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
@@ -1968,17 +1966,17 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   return st
 
 # lift assembly to a CALL graph and execute
-ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 1), getenv("ASM_CALL_BACKEND", "CPU")
+ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND", "CPU")
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   if ASM_CALL:
-    from test.mockgpu.amd.call import lift, get_call_runtime
+    from test.mockgpu.amd.call import lift
     prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND, name=name)
     vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_call_runtime(ASM_CALL_BACKEND, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
+      get_runtime(ASM_CALL_BACKEND, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)

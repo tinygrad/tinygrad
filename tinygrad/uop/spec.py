@@ -119,7 +119,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
   # assembly instruction
-  (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[1], DType)),
+  (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and isinstance(x.arg[1], DType)),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE; a STORE's value matches its target's dtype
   (UPat(Ops.STORE, src=(UPat(name="t"), UPat(name="v")), allow_any_len=True),
@@ -165,7 +165,8 @@ spec_tensor = PatternMatcher([
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.ints+(dtypes.weakint, dtypes.void)))), lambda: True),
   (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(), UPat()), name="x"), lambda x: x.src[1].shape == x.src[2].shape),
-  (UPat(Ops.PERMUTE, name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
+  (UPat(Ops.PERMUTE, name="mv", src=(UPat(), UPat(Ops.STACK, src=UPat.cvar(dtype=dtypes.weakint), name="s"))),
+   lambda mv, s: len(s.src) >= 2 and sorted(v.arg for v in s.src) == list(range(len(s.src)))),
 
   # REDUCE has arg=(op, num_axes), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),

@@ -131,8 +131,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
       return arg[1]
     case Ops.INS:
-      # arg is (instruction, dtype), a queue command or an asm line is void
-      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType), got {arg}"
+      # arg is (instruction, dtype, *registers), a queue command or an asm line is void
+      assert isinstance(arg, tuple) and len(arg) >= 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType, *registers), got {arg}"
       return arg[1]
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
@@ -600,7 +600,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
-  def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("src", self.src), (arg, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
+  def ins(self, arg, *regs, **kwargs): return UOp(Ops.INS, kwargs.pop("src", self.src), (arg, kwargs.pop("dtype", self.dtype), *regs))
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -793,7 +793,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape
       case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape, self.src[2].as_shape))
-      case Ops.PERMUTE: return self.arg
+      case Ops.PERMUTE: return self.src[1].as_shape
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg) -> UOp:
@@ -805,14 +805,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
-      case Ops.PERMUTE: src_args = []
+      case Ops.PERMUTE: src_args = [arg]
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
         dtype = dtype_from_uop(Ops.STACK, srcs, None)
         return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else u.ccast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
-    if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
     return UOp(op, src=(self,)+UOp.sink(*usrcs).simplify().src)
 
   # *** uop Buffer stuff ***

@@ -275,7 +275,8 @@ class TestAsmKernel(unittest.TestCase):
 
   def test_jit_call_reuse(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
-    libraries = Device["CPU"].libraries
+    from test.mockgpu.amd.emu import ASM_CALL_BACKEND
+    libraries = Device[ASM_CALL_BACKEND].libraries
     def kernel(out:UOp, second=False):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
