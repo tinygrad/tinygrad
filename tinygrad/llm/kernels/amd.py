@@ -305,34 +305,41 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   lanes = min((l for l in (32, 16, 8) if out_features % (32//l) == 0), key=lambda l: (waste(l), -l))
   outs_per_wave, slots = 32 // lanes, (group_count+lanes-1)//lanes
   per = (slots + 15) // 16
+  if active is not None and getenv("MOE_PER", 4): per = min(getenv("MOE_PER", 4), slots)
   chunks = (slots + per-1) // per
-  rows = math.gcd(out_features // outs_per_wave, 4)
-  while rows > 1 and rows*chunks > 16: rows //= 2
+  rows = math.gcd(out_features // outs_per_wave, getenv("MOE_ROWS", 4) if active is not None else 4)
+  while rows > 1 and rows*chunks > (32 if active is not None else 16): rows //= 2
   assert multi == 1 or (active is None and out.shape[0] == multi), "multi: every row of out, no inactive tokens"
-  row = UOp.range(out.shape[0]//multi*out_features//(rows*outs_per_wave), 0, AxisType.GLOBAL)
+  # rep: the outputs a lane computes (active rows: a wave reads more than the few hundred bytes of one output of a narrow input)
+  rep = getenv("MOE_REP", 2) if active is not None else 1
+  while rep > 1 and out_features % (rows*outs_per_wave*rep): rep //= 2
+  row = UOp.range(out.shape[0]//multi*out_features//(rows*outs_per_wave*rep), 0, AxisType.GLOBAL)
   wave, chunk, lane = UOp.range(rows, 1, AxisType.LOCAL), UOp.range(chunks, 3, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   sub, which = lane % lanes, lane // lanes
-  token_output = (row*rows+wave)*outs_per_wave + which
-  output = token_output % out_features
-  tokens = [token_output // out_features] if multi == 1 else [UOp.const(t, dtypes.weakint) for t in range(multi)]
-  def dot(token:UOp, group:UOp) -> UOp:
+  token_outputs = [((row*rows+wave)*rep + r)*outs_per_wave + which for r in range(rep)]
+  outputs = [t % out_features for t in token_outputs]
+  tokens = [token_outputs[0] // out_features] if multi == 1 else [UOp.const(t, dtypes.weakint) for t in range(multi)]
+  def dot(token:UOp, group:UOp, output:UOp=outputs[0]) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
   if active is None:
     totals = [functools.reduce(lambda a,s: a + dot(t, sub+(chunk*per+s)*lanes), range(1, per), dot(t, sub+chunk*per*lanes)) for t in tokens]
   else:
     # a data dependent loop: inactive tokens run it 0 times
     s = UOp.range(active(tokens[0]).where(per, 0), 5, AxisType.LOOP)
-    acc = _reg((1,), 0)
-    totals = [acc.after(acc[0].store(acc.after(s)[0].load() + dot(tokens[0], sub+(chunk*per+s)*lanes)).end(s))[0].load()]
+    acc = _reg((rep,), 0)
+    acc = acc.after(UOp.group(*[acc[r].store(acc.after(s)[r].load() + dot(tokens[0], sub+(chunk*per+s)*lanes, outputs[r])) for r in range(rep)]).end(s))
+    totals = [acc[r].load() for r in range(rep)]
   for offset in (16, 8, 4, 2, 1)[(32//lanes).bit_length()-1:]:
     totals = [total + UOp(Ops.CUSTOM, src=(total,), arg=
       (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
       for total in totals]
   if chunks > 1:
-    lds = UOp.alloc((multi, rows, chunks, outs_per_wave), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    lds = UOp.alloc((len(totals), rows, chunks, outs_per_wave), dtypes.float32, addrspace=AddrSpace.LOCAL)
     lds = lds.after(UOp.group(*(lds[t, wave, chunk, which.valid(sub.eq(0))].store(total) for t, total in enumerate(totals))).barrier())
-    totals = [functools.reduce(lambda a,c: a + lds[t, wave, c, which].load(), range(1, chunks), lds[t, wave, 0, which].load()) for t in range(multi)]
-  stores = [out[token, output.valid(sub.eq(0) & chunk.eq(0))].store(total.cast(out.dtype)) for token, total in zip(tokens, totals)]
+    totals = [functools.reduce(lambda a,c: a + lds[t, wave, c, which].load(), range(1, chunks), lds[t, wave, 0, which].load())
+              for t in range(len(totals))]
+  if active is None: stores = [out[token, outputs[0].valid(sub.eq(0) & chunk.eq(0))].store(total.cast(out.dtype)) for token, total in zip(tokens, totals)]
+  else: stores = [out[tokens[0], outputs[r].valid(sub.eq(0) & chunk.eq(0))].store(totals[r].cast(out.dtype)) for r in range(rep)]
   return UOp.group(*stores).end(row, wave, chunk, lane).sink(arg=KernelInfo(name=name, opts_to_apply=(), estimates=estimates))
 
 def _decode_linear_loop(out:UOp, out_features:int, group_count:int, group_dot, name:str, waves:int=4, active:Callable|None=None,
