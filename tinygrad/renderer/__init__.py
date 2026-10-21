@@ -36,6 +36,7 @@ class Estimates:
   def from_uops(sink:UOp, ignore_indexing=False) -> Estimates:
     @functools.cache
     def mults(ranges:tuple[UOp,...]) -> sint:
+      ranges = tuple(r for r in ranges if r.dtype is not dtypes.void and not any(u.addrspace is not AddrSpace.ALU for u in r.backward_slice))
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
