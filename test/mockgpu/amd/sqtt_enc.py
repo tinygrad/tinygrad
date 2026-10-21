@@ -3,7 +3,7 @@
 from __future__ import annotations
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd.sqtt import (_build_decode_tables, PACKET_TYPES_RDNA3, PacketType, InstOp,
-                                        LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST)
+                                        LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, TS_DELTA_OR_MARK)
 
 _NIB_COUNTS = {cls: nc for _, (cls, nc, *_) in _build_decode_tables(PACKET_TYPES_RDNA3)[0].items()}
 
@@ -63,35 +63,72 @@ def make_encoder():
     if issubclass(t, _FLAT) or issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
 
-  nibbles: list[int] = []
-  started: set[int] = set()
-  _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
+  # Timing model. The emulator runs each wave until s_barrier/s_endpgm, so packets arrive out of time order: each wave
+  # keeps its own clock, packets are recorded with a timestamp and sorted in finalize(). Constants are fitted to the
+  # gfx1100 lds_sync capture (extra/sqtt/examples/gfx1100/profile_sync_run_*.pkl); global-memory waits are not modeled.
+  MEM_AFTER_VALU, WAIT_AFTER_MEM, BARRIER_RELEASE = 16, 31, 21
+  _MEM = {InstOp.LDS_WR_2, InstOp.LDS_RD, InstOp.SGMEM_WR_2, InstOp.SGMEM_RD_1, InstOp.FLAT_WR_3, InstOp.FLAT_RD_2}
+
+  def _cycles(op: InstOp) -> int:
+    """Issue cycles encoded in the op name (LDS_WR_2 -> 2); 1 when the name carries none."""
+    return int(m.group(1)) if (m := re.search(r'_(\d+)$', op.name)) else 1
+
+  records: list[tuple[int, int, type[PacketType], dict]] = []  # (time, seq, packet class, fields)
+  clock: dict[int, int] = {}
+  prev: dict[int, InstOp|str] = {}
+  at_barrier: dict[int, int] = {}
+
+  def _record(wave_id: int, cost: int, pkt_cls: type[PacketType], kind: InstOp|str, **kw):
+    if wave_id in at_barrier:  # resuming after s_barrier: every wave has arrived by the time the emulator runs us again
+      clock[wave_id] = max(at_barrier.values()) + BARRIER_RELEASE - cost
+      del at_barrier[wave_id]
+    clock[wave_id] += cost
+    records.append((clock[wave_id], len(records), pkt_cls, kw))
+    prev[wave_id] = kind
 
   def emit(wave_id: int, inst: Inst, branch_taken: bool|None):
-    """Emit an SQTT packet for one executed instruction."""
+    """Record an SQTT packet for one executed instruction."""
     w = wave_id & 0x1F
-    if wave_id not in started:
-      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, wgp=0, wave=w, id7=wave_id)
-      started.add(wave_id)
+    if wave_id not in clock:
+      clock[wave_id] = wave_id
+      records.append((wave_id, len(records), WAVESTART, dict(simd=0, wgp=0, wave=w, id7=wave_id)))
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
+    last = prev.get(wave_id)
     if issubclass(inst_type, _SOPP):
       if inst_op in _SOPP_SKIP: return
-      if inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
-      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
-      elif inst_op in _SOPP_BRANCH: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
-      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+      if inst_op in _SOPP_IMMEDIATE:
+        _record(wave_id, WAIT_AFTER_MEM + _cycles(last) if last in _MEM else 1, IMMEDIATE, "IMMEDIATE", wave=w)
+      elif inst_op in _SOPP_BARRIER:
+        _record(wave_id, 1, INST, InstOp.BARRIER, wave=w, op=InstOp.BARRIER)
+        at_barrier[wave_id] = clock[wave_id]
+      elif inst_op in _SOPP_BRANCH:
+        op = InstOp.JUMP if branch_taken else InstOp.JUMP_NO
+        _record(wave_id, 1, INST, op, wave=w, op=op)
+      else: _record(wave_id, 1, INST, InstOp.SALU, wave=w, op=InstOp.SALU)
     elif issubclass(inst_type, _VALU):
-      if (op := _valu_op(op_name)) is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
-      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
-    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM_RD)
-    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
+      if (op := _valu_op(op_name)) is None: _record(wave_id, 1, VALUINST, "VALU", wave=w)
+      else: _record(wave_id, 1, INST, op, wave=w, op=op)
+    elif issubclass(inst_type, _SMEM): _record(wave_id, 1, INST, InstOp.SMEM_RD, wave=w, op=InstOp.SMEM_RD)
+    else:
+      op = _mem_op(inst_type, op_name)
+      _record(wave_id, MEM_AFTER_VALU + _cycles(op) if last == "VALU" and op in _MEM else 1, INST, op, wave=w, op=op)
 
   def finish(wave_id: int):
-    """Emit WAVEEND for a completed wave."""
-    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, wgp=0, wave=wave_id & 0x1F)
+    """Record WAVEEND for a completed wave."""
+    if wave_id in clock: _record(wave_id, 1, WAVEEND, "WAVEEND", simd=0, wgp=0, wave=wave_id & 0x1F)
 
   def finalize() -> bytes:
-    """Pad and return the encoded SQTT blob."""
+    """Sort the recorded packets by time, encode the gaps, pad and return the SQTT blob."""
+    nibbles: list[int] = []
+    _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
+    now = 0
+    for t, _, pkt_cls, kw in sorted(records, key=lambda r: (r[0], r[1])):
+      gap, room = t - now, pkt_cls.__dict__['delta'].mask
+      if gap > room:  # a long gap goes in a timestamp packet ahead of the instruction packet
+        _emit_nibbles(nibbles, TS_DELTA_OR_MARK, delta=gap - room)
+        gap = room
+      _emit_nibbles(nibbles, pkt_cls, delta=gap, **kw)
+      now = t
     while len(nibbles) % 2 != 0: nibbles.append(0)
     nibbles.extend([0] * 32)
     while len(nibbles) % 64 != 0: nibbles.append(0)
