@@ -255,7 +255,7 @@ class PCIDevice:
   def bar_info(self, bar_idx:int) -> tuple[int, int]: # the address devices reach the bar at (behind the iommu: an iova), the size
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
     addr, sz = int(s, 16), int(e, 16) - int(s, 16) + 1
-    if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.bar_fd(bar_idx).mmap(0, sz, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, 0), sz, sz)
+    if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.map_bar(bar_idx, size=sz).addr, sz, sz)
     return addr, sz
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
