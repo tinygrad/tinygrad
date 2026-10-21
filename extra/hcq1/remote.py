@@ -1,9 +1,9 @@
 from __future__ import annotations
-import os, mmap, array, functools, contextlib, itertools, struct, socket, subprocess, time, enum, atexit
-from tinygrad.helpers import getenv, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten
+import mmap, array, functools, contextlib, itertools, struct, socket, subprocess, time, enum, atexit
+from tinygrad.helpers import getenv, temp, ceildiv, unwrap, DEBUG, flatten
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.system import FileIOInterface
-from tinygrad.runtime.support.system import PCIDevice, System
+from tinygrad.runtime.support.system import PCIDevice, System, TinyGPUApp
 
 class RemoteCmd(enum.IntEnum):
   PROBE,MAP_BAR,MAP_SYSMEM_FD,CFG_READ,CFG_WRITE,RESET,MMIO_READ,MMIO_WRITE,MAP_SYSMEM,SYSMEM_READ,SYSMEM_WRITE,RESIZE_BAR,PING = range(13)
@@ -110,19 +110,7 @@ class RemotePCIDevice(PCIDevice):
     return RemoteMMIOInterface(self, bar, size or self.bar_info(bar)[1], fmt).view(off, size, fmt)
   def resize_bar(self, bar_idx:int): self._rpc(self.sock, self.dev_id, RemoteCmd.RESIZE_BAR, bar=bar_idx)
 
-class APLRemotePCIDevice(RemotePCIDevice):
-  APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
-
-  @classmethod
-  def ensure_app(cls):
-    commit = "c0d024f9ff0e1dc8fdf217f255da7101d91e8323"
-    app_name = f"TinyGPU_{commit}.zip"
-    if (_ensure_downloads_dir() / app_name).is_file() and os.path.exists(cls.APP_PATH): return
-    print("Downloading TinyGPU.app...")
-    with contextlib.suppress(RuntimeError): system("pkill -f TinyGPU")
-    system(f"ditto -xk {fetch(f'https://github.com/tinygrad/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
-    print(system(f"{cls.APP_PATH} install"))
-
+class APLRemotePCIDevice(RemotePCIDevice, TinyGPUApp):
   def __init__(self, devpref:str, pcibus:str):
     self.ensure_app()
     sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

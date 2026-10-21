@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools
 import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
-from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
+from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV, fetch, system, _ensure_downloads_dir
 from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
@@ -198,6 +198,21 @@ class _System:
     return self.lock_fd
 
 System = _System()
+
+# *** macOS TinyGPU driver
+
+class TinyGPUApp:
+  APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
+
+  @classmethod
+  def ensure_app(cls):
+    commit = "c0d024f9ff0e1dc8fdf217f255da7101d91e8323"
+    app_name = f"TinyGPU_{commit}.zip"
+    if (_ensure_downloads_dir() / app_name).is_file() and os.path.exists(cls.APP_PATH): return
+    print("Downloading TinyGPU.app...")
+    with contextlib.suppress(RuntimeError): system("pkill -f TinyGPU")
+    system(f"ditto -xk {fetch(f'https://github.com/tinygrad/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
+    print(system(f"{cls.APP_PATH} install"))
 
 # *** PCI Devices
 
