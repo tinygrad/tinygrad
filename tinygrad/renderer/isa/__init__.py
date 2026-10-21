@@ -19,7 +19,6 @@ class Register:
 class IselContext:
   def __init__(self, sink:UOp):
     self.reg_n = itertools.count()
-    self.alloc_n = itertools.count(max((u.arg.slot for u in sink.toposort() if u.op is Ops.ALLOC), default=-1)+1)
     params = sorted([u for u in sink.toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
     self.arg_offsets = {u: o for u, (o, _) in zip(params, TinyELF.iter_sig(tuple((None, u.addrspace, u.dtype, ()) for u in params)))}
 
