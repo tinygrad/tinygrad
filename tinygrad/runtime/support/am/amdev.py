@@ -195,7 +195,7 @@ class AMDev:
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
-        # Quiesce first: mode1 reset over live engines at max clocks can wedge the GPU until power cycled.
+        # Quiesce first: mode1 reset over live engines can wedge the GPU until power cycled.
         self.gfx.fini_hw()
         self.gfx.halt_engines()
         self.sdma.halt_engines()
