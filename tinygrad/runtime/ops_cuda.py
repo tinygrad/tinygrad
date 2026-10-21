@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
-from typing import Any
+from typing import Any, Callable
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap, to_name
 from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
@@ -44,7 +44,7 @@ pm_cuda = PatternMatcher([ # None is the stream
                      sig[1:2].getaddr(ctx.device))),
 ])
 
-def cuda_submit(s:UOp, ccallfn=ccall) -> UOp:
+def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> UOp:
   (call, *deps), q = s.src, s.src[0].src[1]
   rt_vars = UOp.param(0, dtypes.uint64, 3, q.device, name="rt_vars") # [ctx, compute stream, copy stream]
   h = ccallfn(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
