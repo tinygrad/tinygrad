@@ -125,8 +125,6 @@ const drawGraph = (data) => {
   nodes.selectAll("foreignObject.source-node").data(d => d.source != null ? [d] : []).join("foreignObject").attr("class", "source-node")
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("width", d => d.width).attr("height", d => d.height)
     .each((d, i, nodes) => nodes[i].replaceChildren(codeBlock(d.source, d.lang)));
-  addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
-    .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
     .attr("transform", d => `translate(${d.width/2-8}, ${-d.height/2+8})`).datum(e => ({ rect:true, width:10, height:10, fill:e.addrspace, stroke:"none" })));
   const CALL_TAG_WIDTH = 14;

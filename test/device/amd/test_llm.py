@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, _wmma_rdna4, _use_i8_wmma)
+                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4, _use_i8_wmma)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -58,6 +58,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_q4_k_linear(self): self._test_quant_linear(12, 144)
   def test_iq4_linear(self): self._test_quant_linear(23, 136)
   def test_q5_linear(self): self._test_quant_linear(13, 176)
+  def test_q8_0_linear_small_blocks(self): self._test_quant_linear(8, 272, in_features=288, out_features=16, token_counts=(1, 16))
   def test_q6_linear_odd_blocks(self): self._test_quant_linear(14, 210, in_features=768, out_features=3, token_counts=(1, 3, 16))
   def test_q2_k_linear(self): self._test_quant_linear(10, 84, in_features=768, token_counts=(1, 3, 16))
   def test_q3_k_linear(self): self._test_quant_linear(11, 110, in_features=768, token_counts=(1, 3, 16))
@@ -87,7 +88,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     for typ, size in QUANT_SIZES.items():
       with self.subTest(ggml_type=typ):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
-        blocks = packed.reshape(-1, 18) if typ == 20 else packed.reshape(-1, 34) if typ == 8 else packed  # a scale in every block
+        blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ]*2) if typ in SMALL_BLOCK_QUANTS else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
         blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
         if typ in (10, 12, 13):

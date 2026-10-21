@@ -615,10 +615,8 @@ class TestJitFree(unittest.TestCase):
       return x
     for _ in range(5): fxn(Tensor([1]))
     self.assertEqual(x.item(), 6)
-    pre_free = GlobalCounters.mem_used
     fxn.captured.free_intermediates()
-    savings_after_free = pre_free - GlobalCounters.mem_used
-    self.assertEqual(savings_after_free, 0)
+    self.assertTrue(x.uop.base.buffer.is_allocated())
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 

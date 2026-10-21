@@ -240,8 +240,9 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
       for j in range(1, len(sorted_lines)):
         prev_page, prev_y, _ = sorted_lines[j-1]
         curr_page, curr_y, _ = sorted_lines[j]
-        if depth == 0 and curr_page == prev_page and prev_y - curr_y > 30: break
-        if depth == 0 and curr_page != prev_page and prev_y > 60 and curr_y < 730: break
+        if depth == 0 and ((curr_page == prev_page and prev_y - curr_y > 30) or (curr_page != prev_page and prev_y > 60 and curr_y < 730)):
+          if any(' = ' in t for *_, t in filtered) or not any(' = ' in t for *_, t in sorted_lines[j:]): break
+          filtered = []
         filtered.append(sorted_lines[j])
         code = sorted_lines[j][2].split("//")[0]
         depth += code.count("{") - code.count("}")

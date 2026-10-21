@@ -110,14 +110,16 @@ def fix_store_hazard(target:UOp, src:UOp):
   # (a source that doesn't read the target's buffer at all: no walk)
   if (base:=target.base).op in GroupOp.Defines and base not in src.defines_slice: return None
   # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk (looked up only if a reached SHRINK needs it)
+  view = target
+  while view.op is Ops.RESHAPE: view = view.src[0]
   reaches_base: dict[UOp, bool] = {}
   target_shrunk: bool|None = None
   for s in src.toposort(gate=store_hazard_boundary):
-    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
+    reaches_base[s] = any(c is base or reaches_base.get(c) for c in s.src)
     if not reaches_base[s]: continue
     if s.op is Ops.PERMUTE: return target.store(src.contiguous())
-    if s.op is Ops.SHRINK and s is not target:
-      if target_shrunk is None: target_shrunk = target.op_in_backward_slice_with_self(Ops.SHRINK)
+    if s.op is Ops.SHRINK and s is not view:
+      if target_shrunk is None: target_shrunk = any(u.op is Ops.SHRINK for u in target.toposort(gate=lambda u: u is not base))
       if target_shrunk: return target.store(src.contiguous())
 
 def split_reduceop(reduce:UOp, x:UOp):

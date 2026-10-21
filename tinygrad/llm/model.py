@@ -132,11 +132,17 @@ def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|Non
   sig = (gate * alpha).sigmoid()
   return gate * (sig if amd_custom_kernels_supported(gate.device) else sig.contiguous()) * (up + up_bias)
 
-def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
+def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
+  if interleaved: x = x.rearrange("b h t (d two) -> b h t (two d)", two=2)
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+
+def permute_rope(w:Tensor, n_heads:int, rope_dim:int) -> Tensor:
+  x = w.reshape(n_heads, w.shape[0]//n_heads, -1)
+  prefix = x.shape[1]-rope_dim
+  return x[:, :prefix].cat(x[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(w.shape)
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
@@ -186,12 +192,14 @@ class HCConfig:  # manifold-constrained hyper-connections: count residual stream
   eps: float
 
 @dataclass(frozen=True)
-class IndexerConfig:  # a query attends to the top_k keys picked by an indexer scoring pools of kpool keys
+class IndexerConfig:  # select top_k tokens by scoring individual keys or pools of kpool keys
   n_heads: int
   head_dim: int
   top_k: int
-  kpool: int
-  norm_eps: float
+  kpool: int = 1
+  norm_eps: float = 1e-6
+  rope_dim: int = 0
+  rope_interleave: bool = True
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -236,6 +244,7 @@ class TransformerConfig:
   sliding_window_pattern: int = 0
   hc: HCConfig|None = None
   indexer: IndexerConfig|None = None
+  indexer_shared: tuple[bool, ...] = ()
   mtp: bool = False  # the next token prediction layer (MTPBlock)
   spec_drafts: int = 0  # speculative decoding: the tokens the MTP layer drafts for every step of the model
   @property
@@ -691,7 +700,8 @@ class Indexer:
     self.idx, self.max_context, self.rewind = (idx:=unwrap(config.indexer)), config.max_context, config.rewind
     self.attn_q_b, self.attn_k = Linear(config.q_lora_rank, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
     self.proj, self.k_norm = Linear(config.dim, idx.n_heads, bias=False), nn.LayerNorm(idx.head_dim, eps=idx.norm_eps)
-    self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
+    if idx.kpool > 1:
+      self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
   def _init_state(self, x:Tensor):
     if hasattr(self, "cache_pk"): return
@@ -1022,6 +1032,7 @@ class Transformer:
     for i in range(config.num_blocks):
       c = dense_config if i < config.leading_dense_blocks else config
       if config.sliding_window_pattern != 0 and (i+1) % config.sliding_window_pattern == 0: c = replace(c, sliding_window=0)
+      if config.indexer_shared and config.indexer_shared[i]: c = replace(c, indexer=None)
       self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else block_cls(c))
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -1338,14 +1349,11 @@ class Transformer:
     for name in state_dict:
       if arch in ('kimi-linear', 'glm5-next'): continue
       if ('attn_q.weight' in name or 'attn_q_b.weight' in name) and (arch == 'llama' or kv_lora_rank):
-        w = state_dict[name].reshape(n_heads, state_dict[name].shape[0]//n_heads, -1)
-        prefix = head_dim-rope_dim
-        state_dict[name] = w[:, :prefix].cat(w[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(-1, w.shape[-1])
+        state_dict[name] = permute_rope(state_dict[name], n_heads, rope_dim)
       elif arch == 'llama' and 'attn_k.weight' in name:
-        w = state_dict[name].reshape(n_kv_heads, state_dict[name].shape[0]//n_kv_heads, -1)
-        state_dict[name] = w.rearrange("n (h two) d -> n (two h) d", two=2).reshape(-1, w.shape[-1])
+        state_dict[name] = permute_rope(state_dict[name], n_kv_heads, state_dict[name].shape[0]//n_kv_heads)
       elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
-        state_dict[name] = state_dict[name][:kv_lora_rank].cat(state_dict[name][kv_lora_rank:].rearrange("(h two) d -> (two h) d", two=2), dim=0)
+        state_dict[name] = permute_rope(state_dict[name], 1, state_dict[name].shape[0]-kv_lora_rank)
     config = TransformerConfig(
       num_blocks=num_blocks, dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', sizes.get('blk.0.ffn_gate.weight', kv.get(f'{arch}.feed_forward_length', 0))),

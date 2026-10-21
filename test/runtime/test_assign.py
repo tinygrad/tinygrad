@@ -99,9 +99,11 @@ class TestAssign(unittest.TestCase):
     for T in (1, 2, 10, 100):
       x = Tensor([0, 0]).realize()
       buf = x.uop.base.realized
+      GlobalCounters.reset()
       for _ in range(T):
         x[0] += 1
       x.realize()
+      assert_kernel_count(T)
       assert x.tolist() == [T, 0]
       assert x.uop.base.realized is buf
 
@@ -437,6 +439,12 @@ class TestAssign(unittest.TestCase):
     expected[shift:] = expected[:N-shift].copy()
     with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
+
+  def test_overlapping_shrink_assignment_pending(self):
+    a = Tensor.arange(6).clone().realize()
+    a += 1
+    a[1:] = a[:-1]
+    self.assertEqual(a.tolist(), [1, 1, 2, 3, 4, 5])
 
   def test_nonoverlapping_shrink_assignment(self):
     # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
