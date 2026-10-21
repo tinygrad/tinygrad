@@ -1645,7 +1645,8 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       if 'D16' in op_name: data['RETURN_DATA'] = _rvdata(vdst_reg, lane)
       # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
-              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data}
+              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1,
+              '_active': _lane_active(exec_mask, lane), **data}
     active = _lane_active(exec_mask, lane)
     # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(False)
