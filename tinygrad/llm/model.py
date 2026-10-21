@@ -1468,8 +1468,9 @@ class Transformer:
     """the jits of the prefill chunk sizes and of speculative decoding compiled at the same time (in forked processes), called as generate does"""
     if not (devs:=self.token_embd.weight.device) or not amd_custom_kernels_supported(devs): return
     self._init_states()
-    from tinygrad.llm.kernels.amd import host_allreduce
-    if isinstance(devs, tuple): host_allreduce(devs)  # (the device memory the jits use is made here: not in the processes)
+    from tinygrad.llm.kernels.amd import host_allreduce, p2p_allreduce
+    # (the device memory the jits use is made here: not in the processes)
+    if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
     temp = Tensor([0.0]).to(devs).realize()
     v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), cast(list[tuple[Any, Callable[[], Any]]], [])

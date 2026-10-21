@@ -1086,8 +1086,11 @@ class HostAllreduce:
       counters = [Buffer(d, (self.groups+1)*4, initial_value=bytes(self.groups*4)+i.to_bytes(4, "little")) for i,d in enumerate(devs)]
     self.mbox, self.counter = multi(mbox, dtypes.uint64), multi(counters, dtypes.int32)
 
-@functools.cache
 def host_allreduce(devs:tuple[str, ...]) -> HostAllreduce|None:
+  # (the devices by their canonical names: a tensor on other names of them is a copy, the kernel's writes wouldn't reach the mailbox)
+  return _host_allreduce(tuple(Device.canonicalize(d) for d in devs))
+@functools.cache
+def _host_allreduce(devs:tuple[str, ...]) -> HostAllreduce|None:
   if not getenv("HOST_ALLREDUCE", 1) or len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
   return HostAllreduce(devs)
 
@@ -1124,6 +1127,11 @@ def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int, 
     loaded = words.after(loop).store(UOp.stack(*(mbox.after(loop)[s if gate is None else s.valid(gate)].load() for s in slots)))
     waiting = functools.reduce(lambda a,b: a | b, [stale(words.after(loaded)[i].load()) for i in range(len(slots))])
     if gate is not None: waiting = waiting & gate
+    # (bounded: AR_POLL_LIMIT polls, then wrong values rather than a device that never finishes)
+    cnt = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+    cnt = cnt.after(cnt.store(UOp.const(0, dtypes.int32)))
+    c = cnt.after(loop)
+    waiting = waiting & (cnt.after(c.store(c[0].load() + 1))[0].load() < getenv("AR_POLL_LIMIT", 1 << 26))
     pause = UOp(Ops.CUSTOM, src=(waiting,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
     words = words.after(pause.backedge(loop, waiting))
     return [(words[i].load() & 0xFFFFFFFF).cast(dtypes.uint32).bitcast(dtypes.float32) for i in range(len(slots))]
@@ -1141,6 +1149,90 @@ def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int, 
   # the next epoch is stored once every thread of the workgroup read the counter
   done = counter.after(UOp.group(store).barrier())[wg.valid(t.eq(0))].store(epoch)
   return UOp.group(store, done).end(wg, t).sink(arg=KernelInfo(name="host_allreduce", opts_to_apply=()))
+
+# ******** allreduce through the devices' memory (peer to peer): writes to the peers, reads of a device's own memory only ********
+
+# every device has a mailbox in its memory (uncached), mapped into every other device: a device writes its partial of an element to the
+# mailbox of the element's owner, the owner polls its own mailbox for the partials of every device, sums them and writes the sums to the
+# mailboxes of all the devices, they poll their own. no reads over the links (posted writes only), no host memory
+
+class P2PAllreduce:
+  def __init__(self, devs:tuple[str, ...]):
+    from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
+    N, self.groups = len(devs), HOST_AR_MAXN // HOST_AR_THREADS
+    nbytes = 2*(N+1)*HOST_AR_MAXN*8  # (as HostAllreduce: two parities of a slot per device and of the sums, the value and the epoch in a word)
+    with Context(ALLOW_DEVICE_USAGE=1):
+      own = [Buffer(d, nbytes, options=BufferSpec(uncached=True)).ensure_allocated() for d in devs]
+      for b in own: Tensor(UOp.from_buffer(b, dtypes.uint8, b.device)).assign(Tensor.zeros(nbytes, dtype=dtypes.uint8, device=b.device)).realize()
+      def alias(b:Buffer, d:str) -> Buffer:
+        return Buffer(d, nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
+      # mailbox k of device d is the one of device (d+k)%N (0: its own)
+      self.mboxes = []
+      for k in range(N):
+        (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % N], devs[d]) for d in range(N)]
+        self.mboxes.append(Tensor(UOp.from_buffer(mb, dtypes.uint64, devs)))
+      counters = [Buffer(d, (self.groups+1)*4, initial_value=bytes(self.groups*4)+i.to_bytes(4, "little")) for i,d in enumerate(devs)]
+      (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
+      self.counter = Tensor(UOp.from_buffer(cb, dtypes.int32, devs))
+      for d in devs: Device[d].synchronize()
+
+def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None: return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
+@functools.cache
+def _p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
+  # (opt in: the kernels' writes of every device to every other at once are slow over the links of a machine with gpus behind several root
+  # complexes, ~0.1 GB/s a device: slower than the host mailbox)
+  if not getenv("P2P_ALLREDUCE", 0) or len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
+  return P2PAllreduce(devs)
+
+@functools.cache
+def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mboxes:UOp, N:int, n:int, gather:bool=False) -> UOp:
+  # workgroup g owns its epoch counter and the elements g*THREADS..: device g%N sums them. a value and its epoch in a word (one store, one
+  # load: no torn reads), the parity of the epoch picks the slot (a device can't get two allreduces ahead, see _host_allreduce_kernel). the
+  # polls are of the device's own memory, bounded (AR_POLL_LIMIT polls: wrong values, not a hang)
+  limit = getenv("AR_POLL_LIMIT", 1 << 26)
+  wg, t = UOp.range(n // HOST_AR_THREADS, 0, AxisType.GLOBAL), UOp.range(HOST_AR_THREADS, 1, AxisType.LOCAL)
+  e = wg * HOST_AR_THREADS + t
+  epoch, me = counter[wg].load() + 1, counter[HOST_AR_MAXN // HOST_AR_THREADS].load()
+  def slot(p:UOp|int) -> UOp: return ((epoch & 1) * N + p) * HOST_AR_MAXN + e
+  def sums() -> UOp: return ((epoch & 1) + 2*N) * HOST_AR_MAXN + e
+  mboxes = tuple(mb.replace(arg=replace(mb.arg, volatile=True)) for mb in mboxes)
+  val = x[0, e].load().float()
+  def word(v:UOp) -> UOp: return (epoch.cast(dtypes.uint64) << 32) | v.bitcast(dtypes.uint32).cast(dtypes.uint64)
+  def stale(w:UOp) -> UOp: return (w >> 32).cast(dtypes.uint32).ne(epoch.cast(dtypes.uint32))
+  owner = (wg % N).cast(dtypes.int32)
+  k_owner = (owner - me + N) % N  # the mailbox of the owner among this device's
+  def spin(after:UOp, slots:list[UOp], gate:UOp) -> list[UOp]:
+    # every thread polls its words in its own device's mailbox until they have the epoch (gate: the workgroups that wait)
+    loop = UOp.range(UOp(Ops.NOOP).after(after), next(UOp.unique_num), dtype=dtypes.void)
+    cnt = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+    cnt = cnt.after(cnt.store(UOp.const(0, dtypes.int32)))
+    words = UOp.alloc((len(slots),), dtypes.uint64, addrspace=AddrSpace.REG)
+    loaded = words.after(loop).store(UOp.stack(*(mboxes[0].after(loop)[s.valid(gate)].load() for s in slots)))
+    c = cnt.after(loop)
+    bumped = c.store(c[0].load() + 1)
+    waiting = functools.reduce(lambda a,b: a | b, [stale(words.after(loaded)[i].load()) for i in range(len(slots))]) & gate & \
+      (cnt.after(bumped)[0].load() < limit)
+    pause = UOp(Ops.CUSTOM, src=(waiting,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
+    words = words.after(pause.backedge(loop, waiting))
+    return [(words[i].load() & 0xFFFFFFFF).cast(dtypes.uint32).bitcast(dtypes.float32) for i in range(len(slots))]
+  if gather:
+    # out (N, n): the values of every device. every device writes its own to the mailboxes of all, polls its own for the others'
+    write = UOp.group(*(mb[slot(me)].store(word(val)) for mb in mboxes))
+    vals = spin(write, [slot(p) for p in range(N)], UOp.const(True, dtypes.bool))
+    store = UOp.group(*(out[p*n + e].store(me.eq(p).where(val, v)) for p, v in enumerate(vals)))
+    done = counter.after(store.barrier())[wg.valid(t.eq(0))].store(epoch)
+    return UOp.group(store, done).end(wg, t).sink(arg=KernelInfo(name="p2p_allgather", opts_to_apply=()))
+  # the partial to the owner's mailbox
+  write = UOp.group(*(mb[slot(me).valid(k_owner.eq(k))].store(word(val)) for k, mb in enumerate(mboxes)))
+  is_owner = owner.eq(me)
+  parts = spin(write, [slot(p) for p in range(N)], is_owner)
+  summed = functools.reduce(lambda a,b: a+b, [me.eq(p).where(val, w) for p, w in enumerate(parts)])
+  # the sums to every device's mailbox, the others poll theirs
+  publish = UOp.group(*(mb[sums().valid(is_owner)].store(word(summed)) for mb in mboxes))
+  got = spin(publish, [sums()], is_owner.logical_not())[0]
+  store = out[e].store(is_owner.where(summed, got))
+  done = counter.after(UOp.group(store).barrier())[wg.valid(t.eq(0))].store(epoch)
+  return UOp.group(store, done).end(wg, t).sink(arg=KernelInfo(name="p2p_allreduce", opts_to_apply=()))
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
 
@@ -1248,11 +1340,18 @@ def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
   return Tensor(UOp.mstack(*[w.contiguous().uop for w in whole]))
 
 def host_allgather(x:Tensor) -> Tensor|None:
-  """x (devices, n) floats, a row on every device: the whole (devices, n) on every device, through the host mailbox (None: not supported)"""
+  """
+  x (devices, n) floats, a row on every device: the whole (devices, n) on every device, written to the others' memory (or through the host
+  mailbox. None: not supported)
+  """
   N, n = int(x.shape[0]), int(x.shape[1])
-  if not (isinstance(x.device, tuple) and (comm:=host_allreduce(x.device)) is not None): return None
+  if not isinstance(x.device, tuple): return None
   m = round_up(n, HOST_AR_THREADS)
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
+  if (p2p:=p2p_allreduce(x.device)) is not None:
+    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m, gather=True)
+    return Tensor.custom_kernel(out, x.float().pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
+  if (comm:=host_allreduce(x.device)) is None: return None
   fxn = functools.partial(_host_allreduce_kernel, N=N, n=m, gather=True)
   return Tensor.custom_kernel(out, x.float().pad((None, (0, m-n))).contiguous(), comm.mbox, comm.counter, fxn=fxn)[0].reshape(N, m)[:, :n]
 
@@ -1312,13 +1411,13 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
   n = prod(x.shape[1:])
+  if isinstance(x.device, tuple) and isinstance(n, int) and n % HOST_AR_THREADS == 0 and n <= HOST_AR_MAXN and (p2p:=p2p_allreduce(x.device)):
+    # the devices write to each other's memory
+    out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
+    fxn = functools.partial(_p2p_allreduce_kernel, N=len(x.device), n=n)
+    return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and n % HOST_AR_THREADS == 0 and n <= HOST_AR_MAXN and (comm:=host_allreduce(x.device)):
     out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
-    if getenv("NO_AR"):
-      def cp(o:UOp, xx:UOp) -> UOp:
-        e = UOp.range(n, 0, AxisType.GLOBAL)
-        return o[e].store(xx.flatten()[e].load()).end(e).sink(arg=KernelInfo(name="no_ar", opts_to_apply=()))
-      return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), fxn=cp)[0].reshape(x.shape[1:])
     # many elements (the tokens of speculative decoding): every device sums a part (fewer reads over the links, a second wait)
     fxn = functools.partial(_host_allreduce_kernel, N=len(x.device), n=n, scatter=n >= getenv("HOST_AR_SCATTER", 8192))
     return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), comm.mbox, comm.counter, fxn=fxn)[0].reshape(x.shape[1:])
