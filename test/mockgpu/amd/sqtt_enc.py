@@ -78,6 +78,7 @@ def make_encoder():
   LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}  # load data return: (extra latency, cycles on the return path)
   VALU_TO_SCALAR, IMM_AFTER_ALU, VALU_AFTER_SALU, SLEEP_CYCLES = 9, 3, 5, 24  # s_sleep 1 measured once
   ICACHE_LINE_LAT = 530
+  LDS_ACCEPT_LATE = 8
   LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
   BRANCH_NEW_LINE = 20  # taken branch whose target is in another 64 B instruction line
@@ -170,22 +171,14 @@ def make_encoder():
       st_ = lds_starts[sm]
       return sum(1 for n in range(len(st_)) if (i := ((n + 1) | 1) - 1) < len(st_) and st_[i] <= cycle)
     lds_q: list[tuple[int, int, bool, int, str|None]] = []  # (accept, wave, store, occupancy, load width), served by serve_lds
-    ret_free = {0: 0, 2: 0}
-
-    lds_tie = dict(store=None, n=0)  # same-slot ties between SIMDs alternate, simd 2 first, within a run of stores or loads
+    ret_free, lds_last = {0: 0, 2: 0}, {}
 
     def serve_lds(upto: int):
       """Start every queued LDS request whose service slot is decidable by cycle upto (accept = issue + LDS_ACCEPT)."""
       while lds_q and (t := max(unit["lds"], min(r[0] for r in lds_q))) < upto + LDS_ACCEPT:
-        cand = [r for r in lds_q if r[0] <= t]
-        top = min(slot[r[1]] for r in cand)
-        cand = [r for r in cand if slot[r[1]] == top]
-        if len({simd[r[1]] for r in cand}) > 1:
-          if lds_tie["store"] != cand[0][2]: lds_tie.update(store=cand[0][2], n=0)
-          want = 2 if lds_tie["n"] % 2 == 0 else 0
-          lds_tie["n"] += 1
-          cand = [r for r in cand if simd[r[1]] == want]
-        r = cand[0]
+        cand = [r for r in lds_q if r[0] <= t]  # the traced SIMD's port wins whenever it has a ready request, FIFO within a SIMD
+        idle_tie = t > unit["lds"] and len({simd[r[1]] for r in cand}) > 1  # both ports became ready while the server sat idle
+        r = next((r for r in cand if simd[r[1]] == (2 if idle_tie else 0)), cand[0])
         lds_q.remove(r)
         lds_starts[simd[r[1]]].append(t)
         unit["lds"] = t + r[3]
@@ -270,7 +263,10 @@ def make_encoder():
         store = "STORE" in _name(inst)
         occ = _cycles(op) if store else 1
         width = (m.group(1) if (m := re.search(r'_B(32|64|96|128)$', _name(inst))) else "32") if not store else None
-        lds_q.append((cycle + LDS_ACCEPT, w, store, occ, width))
+        last = lds_last.get(simd[w])  # another wave's request on this SIMD within 3 cycles: accepted late (sync s0w1 store, issue + 8)
+        acc = LDS_ACCEPT_LATE if last is not None and last[0] != w and store and cycle - last[1] < 3 else LDS_ACCEPT
+        lds_last[simd[w]] = (w, cycle)
+        lds_q.append((cycle + acc, w, store, occ, width))
         lds_issued[simd[w]] += 1
         s["lds_wait"] += 1
         s["mem_issue"] = cycle
