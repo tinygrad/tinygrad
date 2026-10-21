@@ -62,8 +62,6 @@ class Estimates:
 
 class Renderer:
   separate_calls = False
-  @staticmethod
-  def call_name(body:UOp) -> str: return f"{body.arg}_{body.key.hex()}"
   def render_function(self, body:UOp) -> str: raise NotImplementedError
 
   target: Target

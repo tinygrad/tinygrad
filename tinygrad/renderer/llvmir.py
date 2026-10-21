@@ -170,7 +170,8 @@ class LLVMRenderer(Renderer):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False,
+                 extra_args:tuple[str,...]=()) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
     sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
@@ -178,6 +179,7 @@ class LLVMRenderer(Renderer):
       args_t = "{ " + ", ".join(tys) + " }"
       kernel = [f"  %args_t = load {args_t}, ptr %args"] + [f"  {n} = extractvalue {args_t} %args_t, {i}" for i,(n,_) in enumerate(args)] + kernel
       sargs = "ptr %args"
+    sargs = ', '.join(filter(None, (sargs, *extra_args)))
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", fns:dict[UOp, str]|None=None,
                      args_struct=False) -> tuple[tuple[str, ...], str]:
@@ -229,21 +231,30 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
-  string_rewrite = base_rewrite
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
+      f"  call void {ctx[body]}(" + ', '.join([*(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}"
+        for p in body.src if p.op is Ops.PARAM), f"ptr {ctx[body]}_env"]) + f") ; {body.arg}"),
+  ]) + base_rewrite
   def render(self, uops: list[UOp]) -> str:
     return self._render_module(uops, args_struct=True)
 
-  def _call_declarations(self, fns:dict[UOp, str]) -> str:
-    return "\n".join(f"declare void @{name}({', '.join(ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in b.src if p.op is Ops.PARAM)})"
-                     for b,name in fns.items())
-
   def render_function(self, body:UOp) -> str:
-    return self._render_module(list(body.src), name=self.call_name(body))
+    return self._render_module(list(body.src), name=body.arg)
 
   def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
-    fns = {u.body:self.call_name(u.body) for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
-    k = self._render_kernel(uops, name=name, fns=fns, args_struct=args_struct)
-    return "\n".join((*k[0], k[1], self._call_declarations(fns), self._render_footer(uops)))
+    self.fn_names = {b:f"%callee{i}" for i,b in enumerate(dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR))}
+    k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct)
+    return "\n".join((*k[0], k[1], self._render_footer(uops)))
+
+  def _render_fn(self, name, args, kernel, prefix=None, args_struct=False, extra_args=()):
+    bindings = []
+    for i, fn in enumerate(self.fn_names.values()):
+      for offset, suffix in ((0, ''), (1, '_env')):
+        bindings += [f"  {fn}{suffix}_slot = getelementptr ptr, ptr %__calls, i32 {2*i+offset}",
+                     f"  {fn}{suffix} = load ptr, ptr {fn}{suffix}_slot"]
+    return super()._render_fn(name, args, bindings+kernel, prefix, args_struct,
+                             extra_args + (('ptr %__calls',) if not args_struct or self.fn_names else ()))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}

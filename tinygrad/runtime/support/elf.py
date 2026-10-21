@@ -6,31 +6,39 @@ from tinygrad.runtime.autogen import libc
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:bytes # noqa: E702
 
-def link_sym(sym:str, libs:list[ctypes.CDLL], symbols:dict[str, int]|None=None) -> int:
-  if symbols is not None and sym in symbols: return symbols[sym]
+def link_sym(sym:str, libs:list[ctypes.CDLL]) -> int:
   for lib in libs:
     try: return unwrap(ctypes.cast(getattr(lib, sym), ctypes.c_void_p).value)
     except (OSError, AttributeError, TypeError): pass
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 
-def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
-               symbols:dict[str, int]|None=None, exports:dict[str, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+def _strtab(blob:bytes, idx:int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
+
+def elf_sections(blob:bytes) -> tuple[str, list[ElfSection]]:
   assert blob[:4] == libc.ELFMAG.encode(), "blob is not an ELF, missing magic bytes"
   ecls = {libc.ELFCLASS32: "Elf32", libc.ELFCLASS64: "Elf64"}[blob[libc.EI_CLASS]]
-
-  def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = getattr(libc, f"{ecls}_Ehdr").from_buffer_copy(blob)
   section_headers = (getattr(libc, f"{ecls}_Shdr") * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
   sh_strtab = blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size]
   sections = [ElfSection(_strtab(sh_strtab, sh.sh_name), sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
+  return ecls, sections
 
-  def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
-  rel = [(sh, sh.name[4:], _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
-  rela = [(sh, sh.name[5:], _to_carray(sh, getattr(libc, f"{ecls}_Rela"))) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
+def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
+
+def elf_symbols(ecls:str, sections:list[ElfSection]) -> list[tuple[str, libc.Elf64_Sym|libc.Elf32_Sym]]:
   symsec = next((sh for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB), None)
-  symtab = _to_carray(symsec, getattr(libc, f"{ecls}_Sym")) if symsec is not None else None
-  symstr = sections[symsec.header.sh_link].content if symsec is not None else b""
+  if symsec is None: return []
+  strings = sections[symsec.header.sh_link].content
+  return [(_strtab(strings, sym.st_name), sym) for sym in _to_carray(symsec, getattr(libc, f"{ecls}_Sym"))]
+
+def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
+               exports:dict[int, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+  ecls, sections = elf_sections(blob)
+
+  rel = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
+  rela = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rela"))) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
+  symtab = elf_symbols(ecls, sections)
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
   # Prealloc image for all fixed addresses.
@@ -42,26 +50,28 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
       sh.header.sh_addr = len(image) - len(sh.content)
 
   if exports is not None:
-    for sym in symtab or []:
+    for idx, (_, sym) in enumerate(symtab):
       if 0 < sym.st_shndx < len(sections) and sym.st_info >> 4 == libc.STB_GLOBAL and sym.st_info & 15 == libc.STT_FUNC:
-        exports[_strtab(symstr, sym.st_name)] = sections[sym.st_shndx].header.sh_addr + sym.st_value
+        exports[idx] = sections[sym.st_shndx].header.sh_addr + sym.st_value
 
   # Relocations
   relocs = []
-  for sh, trgt_sh_name, c_rels in rel + rela:
-    if trgt_sh_name == ".eh_frame": continue
-    target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
-    rels = [(r.r_offset, unwrap(symtab)[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)], getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
+  for sh, c_rels in rel + rela:
+    if sections[sh.header.sh_info].name == ".eh_frame": continue
+    target_image_off = sections[sh.header.sh_info].header.sh_addr
+    rels = [(r.r_offset, getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info), getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
              getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, link_sym(_strtab(symstr, sym.st_name), link_libs or [], symbols) if sym.st_shndx == 0 else
-                sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
+    for roff, idx, rtype, raddend in rels:
+      name, sym = symtab[idx]
+      value = link_sym(name, link_libs or []) if sym.st_shndx == 0 else sections[sym.st_shndx].header.sh_addr + sym.st_value
+      relocs.append((target_image_off + roff, value, rtype, raddend))
 
   return memoryview(image), sections, relocs
 
 def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
-               symbols:dict[str, int]|None=None, exports:dict[str, int]|None=None) -> bytes:
-  image_, _, relocs = elf_loader(obj, link_libs=link_libs, symbols=symbols, exports=exports)
-  if exports is not None: exports.update({name:base+offset for name,offset in exports.items()})
+               exports:dict[int, int]|None=None) -> bytes:
+  image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports)
+  if exports is not None: exports.update({idx:base+offset for idx,offset in exports.items()})
   image = bytearray(image_)
 
   def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int, addend: int):

@@ -474,9 +474,9 @@ def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
     deps.append(obj)
   return tuple(deps)
 
-@rewrite_group(name=lambda ctx,body,ret: TracingKey(ctx.call_name(body), (ret.key, ctx.call_name(body)), ret=ctx))
+@rewrite_group(name=lambda ctx,body,ret: TracingKey(body.arg, (ret.key, body.arg), ret=ctx))
 def do_compile_function(ctx:Renderer, body:UOp) -> UOp:
-  prg = UOp(Ops.PROGRAM, src=(UOp.sink(arg=KernelInfo(ctx.call_name(body))), body, UOp(Ops.SOURCE, arg=ctx.render_function(body))))
+  prg = UOp(Ops.PROGRAM, src=(UOp.sink(arg=KernelInfo(body.arg)), body, UOp(Ops.SOURCE, arg=ctx.render_function(body))))
   prg = graph_rewrite(prg, pm_to_program, ctx=ctx, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg.src[3]

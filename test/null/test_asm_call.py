@@ -1,6 +1,7 @@
 import unittest
-import ctypes, subprocess, tempfile, pickle, sys
+import ctypes, subprocess, tempfile, pickle, sys, itertools
 from tinygrad import dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.codegen import to_program
 from tinygrad.uop.ops import UOp, KernelInfo
@@ -10,26 +11,40 @@ from test.mockgpu.amd.call import cfg_regions
 
 class TestCallJIT(unittest.TestCase):
   def test_default_names_resolve_to_their_own_module(self):
-    out = UOp.param(0, dtypes.int, (1,))
-    for backend in ("CPU", "CPU:CLANG"):
-      with self.subTest(backend=backend):
+    out = UOp.param(0, dtypes.int, (2,))
+    value = UOp.param(1, dtypes.int, addrspace=AddrSpace.ALU)
+    for backend, name in itertools.product(("CPU", "CPU:CLANG"), ("test", "asm_waves")):
+      with self.subTest(backend=backend, name=name):
         renderer = call.backend_renderer(backend)
         with Context(ALLOW_DEVICE_USAGE=0):
-          programs = [to_program(out[0].store(v).sink(arg=KernelInfo()), renderer) for v in (7, 19)]
+          programs = []
+          for v in (7, 19):
+            calls = (out[0].store(v).sink().call(out, name=name), out[1].store(value).sink().call(out, UOp.const(v+1, dtypes.int), name=name))
+            programs.append(to_program(UOp.sink(*(c.sink().call(out, name=name) for c in calls), arg=KernelInfo(name)), renderer))
         self.assertEqual(programs[0].to_elf().name, programs[1].to_elf().name)
+        self.assertEqual(programs[0].src[3].arg, programs[1].src[3].arg)
+        if backend == "CPU:CLANG": self.assertIn(f"void (*{name})", programs[0].src[2].arg)
         for prg, expected in zip(programs, (7, 19)):
-          result = ctypes.c_int()
+          result = (ctypes.c_int * 2)()
           call.get_call_runtime(backend, prg)(ctypes.addressof(result))
-          self.assertEqual(result.value, expected)
+          self.assertEqual(list(result), [expected, expected+1])
 
   def test_static_functions_are_not_exported(self):
     from tinygrad.device import Device, TinyELF
+    from tinygrad.runtime.support.elf import elf_sections, elf_symbols
     compiler = call.backend_renderer("CPU").compiler
-    lib = compiler.compile_cached("define internal void @asm_fn_local(ptr %out) noinline { store i32 42, ptr %out\n ret void }\n"
-                                  "define void @asm_fn_entry(ptr %out) noinline { call void @asm_fn_local(ptr %out)\n ret void }")
+    lib = compiler.compile_cached("define internal void @asm_fn_local(ptr %out) noinline { store i32 41, ptr %out\n ret void }\n"
+                                  "define void @asm_fn_entry(ptr %out) noinline { call void @asm_fn_local(ptr %out)\n"
+                                  "%x = load i32, ptr %out\n %y = add i32 %x, 1\n store i32 %y, ptr %out\n ret void }")
+    # ELF permits local and global symbols to share a name; their table indices still identify distinct functions.
+    lib = lib.replace(b"asm_fn_entry\x00", b"asm_fn_local\x00")
     runtime = Device["CPU"].runtime(TinyELF(lib, "asm_fn_entry", call.backend_renderer("CPU").target, ()))
-    self.assertIn("asm_fn_entry", runtime.exports)
-    self.assertNotIn("asm_fn_local", runtime.exports)
+    symbols = elf_symbols(*elf_sections(lib))
+    self.assertEqual([symbols[i][0] for i in runtime.exports], ["asm_fn_local"])
+    self.assertEqual(sum(name == "asm_fn_local" for name,_ in symbols), 2)
+    result = ctypes.c_int()
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(runtime.entry)(ctypes.addressof(result))
+    self.assertEqual(result.value, 42)
 
   def test_program_preserves_elf(self):
     out = UOp.param(0, dtypes.int, (1,))

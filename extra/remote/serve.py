@@ -79,7 +79,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     deps = struct.unpack(f"<{arg1}Q", conn.recv(arg1 * 8, socket.MSG_WAITALL)) if arg1 else ()
     obj = TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), (), libraries=tuple(programs[i].obj for i in deps))
     programs.append(Device["CPU"].runtime(obj))
-    Device["CPU"].libraries[obj.lib] = programs[-1]
+    Device["CPU"].libraries[(obj.lib, tuple(programs[i] for i in deps))] = programs[-1]
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
     kernargs = ctypes.create_string_buffer(conn.recv(arg1, socket.MSG_WAITALL))
