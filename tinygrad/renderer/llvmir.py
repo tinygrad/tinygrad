@@ -110,9 +110,6 @@ base_rewrite = PatternMatcher([
   # unary/binary/ternary ops
   (UPat(Ops.MULACC, dtype=dtypes.floats, name="x"), lambda ctx,x:
    f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.fma.{ldt(x.dtype)}({', '.join(f'{ldt(s.dtype)} {ctx[s]}' for s in x.src)})"),
-  (UPat(Ops.MULACC, name="x"), lambda ctx,x:
-   f"  {ctx[x]}_mul = mul {ldt(x.dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n"
-   f"  {ctx[x]} = add {ldt(x.dtype)} {ctx[x]}_mul, {ctx[x.src[2]]}"),
   (UPat(tuple(llvm_intrinsics), name="x"),
    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
@@ -169,12 +166,15 @@ pm_widen_uidx = PatternMatcher([
 class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, **{op: lambda: None for op in (*llvm_intrinsics, Ops.MULACC)}}
+  code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, **{op: lambda: None for op in llvm_intrinsics}}
 
   def __init__(self, target:Target):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
+    self.extra_matcher += PatternMatcher([
+      (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
+    ])
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
