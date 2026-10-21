@@ -1,28 +1,14 @@
-import itertools, functools, struct
+import itertools, struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, rewrite_group, uopfunc
 from tinygrad.codegen import to_program, to_program_config, lower_call
 from tinygrad.device import Device
-from tinygrad.engine.realize import get_runtime
-from tinygrad.renderer.llvmir import CPULLVMRenderer
-from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, Target, to_mv
+from tinygrad.helpers import Context, DEV, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
-
-@functools.cache
-def cpu_renderer(arch:str, renderer:str="LLVM"):
-  return {"LLVM":CPULLVMRenderer, "CLANG":ClangRenderer}[renderer](Target("CPU", renderer, arch))
-
-def backend_renderer(backend:str):
-  return cpu_renderer(Device["CPU"].renderer.target.arch, backend.partition(':')[2] or "LLVM") \
-    if backend.split(':')[0] == "CPU" else Device[backend].renderer
-
-def get_call_runtime(backend:str, prg:UOp):
-  return get_runtime("CPU" if backend.split(':')[0] == "CPU" else backend, prg)
 
 InstructionCall = tuple[UOp, list[UOp]]
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[InstructionCall|None, UOp|None]]]] = {}
@@ -190,28 +176,28 @@ def decode_cfg(insts:dict[int, Inst]):
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1, LLVM_OPTNONE=1)
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
-def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str,
-         user_data_count:int, backend:str, name:str="") -> UOp:
-  view = to_mv(lib, lib_sz)
-  dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count)
-  renderer = backend_renderer(backend)
-  key = (lib_sz, arch, backend, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
-  entries = dispatch_cache.setdefault(key, [])
-  for code, prg in entries:
-    if bytes(view[:len(code)]) == code: return prg
-  insts = amd_decode(view, arch)
-  code = bytes(view)
-  prg = _lift(insts, arch, backend, dispatch, name)
-  entries.append((code, prg))
-  return prg
+def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
+         user_data_count:int=0, name:str="") -> UOp:
+  with Context(DEV=DEV.target('CPU', renderer='LLVM')):
+    view = to_mv(lib, lib_sz)
+    dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count)
+    renderer = Device['CPU'].renderer
+    key = (lib_sz, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
+    entries = dispatch_cache.setdefault(key, [])
+    for code, prg in entries:
+      if bytes(view[:len(code)]) == code: return prg
+    insts = amd_decode(view, arch)
+    code = bytes(view)
+    prg = _lift(insts, arch, renderer, dispatch, name)
+    entries.append((code, prg))
+    return prg
 
 dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
 
-def _lift(insts:dict[int, Inst], arch:str, backend:str, dispatch:tuple, name:str="") -> UOp:
+def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
     if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"ASM_CALL does not support {inst_st}")
-  renderer = backend_renderer(backend)
   cfg, regions = decode_cfg(insts)
   # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
   unconditional:set[int] = set()

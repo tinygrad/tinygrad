@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
@@ -135,9 +135,4 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
                                  n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)])
         else: grads[k] = grads[k] + v
       else: grads[k] = v
-      if len(forward_metadata:=all_metadata.get(t0, ())):
-        backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
-        # we add the backward metadata to everything new in the graph
-        for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
-          all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
   return grads

@@ -373,12 +373,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", -5, 5)*4 < -13, 0, 1, "(a<-3)")
-    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "((a*-1)<4)")
+    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "(-4<a)")
     c0, c1 = 2, 2**54+1
     self.helper_test_variable(Variable("a", 0, c1)*c0 < c1, 0, 1, f"(a<{2**53+1})")
     c0, c1 = -2, -(2**54-1)
-    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"((a*-1)<{-(2**53-1)})")
-    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
+    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"({2**53-1}<a)")
+    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "(0<a)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
 
@@ -1296,10 +1296,6 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
-  def test_sym_infer_tagged(self):
-    a = Variable("a", 0, 10)
-    assert sym_infer((a*3+1).rtag("t"), {a.expr: 2}) == 7
-
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
     # max(x, negative_const) can't be simplified when x can be negative, so nesting compounds

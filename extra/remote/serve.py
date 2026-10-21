@@ -12,6 +12,7 @@ def resp_err(msg): return resp(len(err:=msg.encode()), status=1) + err
 discovered_devices: list[tuple[type, str]] = []
 opened_devices: dict[int, PCIDevice] = {}
 mapped_bars: dict[tuple[int, int], object] = {}
+sysmem_iovas: dict[int, int] = {}
 programs: list = []
 
 def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
@@ -66,6 +67,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     else: bar_view[arg0:arg0+arg1] = data
   elif cmd == RemoteCmd.MAP_SYSMEM:
     memview, paddrs = System.alloc_sysmem(arg0, vaddr=arg2, contiguous=bool(arg1))
+    if System.vfio is not None: sysmem_iovas[memview.addr] = paddrs[0]
     paddrs_bytes = struct.pack(f'<{len(paddrs) + 1}Q', memview.addr, *paddrs)
     conn.sendall(resp(len(paddrs_bytes)) + paddrs_bytes)
   elif cmd == RemoteCmd.SYSMEM_READ:
@@ -73,6 +75,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
   elif cmd == RemoteCmd.SYSMEM_WRITE:
     to_mv(arg0, arg1)[:] = conn.recv(arg1, socket.MSG_WAITALL)
   elif cmd == RemoteCmd.UNMAP_SYSMEM:
+    if (iova:=sysmem_iovas.pop(arg0, None)) is not None: System.vfio_unmap(iova, arg1)
     FileIOInterface.munmap(arg0, arg1)
     conn.sendall(resp())
   elif cmd == RemoteCmd.LOAD_PROG:

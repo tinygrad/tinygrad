@@ -6,10 +6,10 @@ from typing import Callable
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
+from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile, get_runtime
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, DEV
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -231,13 +231,12 @@ class TestAsmKernel(unittest.TestCase):
       buf.raw, out.value = code(value), 0
       run_asm(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, ctypes.addressof(args), arch="rdna3")
       self.assertEqual(out.value, value)
-      prg = call.lift(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, 0x19c, 0, "rdna3", 0, getenv("ASM_CALL_BACKEND", "CPU"))
+      prg = call.lift(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, 0x19c, 0, "rdna3", 0)
       self.assertIs(prg, programs.setdefault(value, prg))
     # Operands are read from the current code allocation, so these share the compiled graph too.
     self.assertIs(programs[4], programs[5])
     with Context(NOOPT=1, EMULATED_DTYPES="float16"):
-      self.assertTrue(prg is call.lift(ctypes.addressof(other), len(other), 1, 1, 1, 1, 1, 1, 0x19c, 0, "rdna3", 0,
-                                     getenv("ASM_CALL_BACKEND", "CPU")))
+      self.assertTrue(prg is call.lift(ctypes.addressof(other), len(other), 1, 1, 1, 1, 1, 1, 0x19c, 0, "rdna3", 0))
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
@@ -259,7 +258,6 @@ class TestAsmKernel(unittest.TestCase):
       self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), list(range(17*19*2)))
 
   def test_jit_entry_mixed_width_args(self):
-    from test.mockgpu.amd import call
     from tinygrad.codegen import to_program
     # Enough uint32 arguments to spill onto the stack before the final uint64 argument.
     values = [0x80000000+i for i in range(12)] + [0x123456789abcdef0]
@@ -267,16 +265,15 @@ class TestAsmKernel(unittest.TestCase):
     out = UOp.param(0, dtypes.uint64, (len(values),), name="out")
     sink = UOp.sink(*(out.index(i).store(v.cast(dtypes.uint64)) for i,v in enumerate(variables)),
                     arg=KernelInfo(name="asm_call_mixed_width_args", opts_to_apply=()))
-    prg = to_program(sink, call.backend_renderer("CPU"))
+    with Context(DEV=DEV.target('CPU', renderer='LLVM')): prg = to_program(sink, Device['CPU'].renderer)
     result = (ctypes.c_uint64*len(values))()
     vals = dict(zip((v.arg.name for v in variables), values))
-    call.get_call_runtime("CPU", prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else ctypes.addressof(result) for p in prg.kernel_params])
+    get_runtime("CPU", prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else ctypes.addressof(result) for p in prg.kernel_params])
     self.assertEqual(list(result), values)
 
   def test_jit_call_reuse(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
-    from test.mockgpu.amd.emu import ASM_CALL_BACKEND
-    libraries = Device[ASM_CALL_BACKEND].libraries
+    libraries = Device["CPU"].libraries
     def kernel(out:UOp, second=False):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
