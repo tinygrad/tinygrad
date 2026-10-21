@@ -3,6 +3,14 @@ import collections, functools, dataclasses, enum, struct
 from typing import Any
 from tinygrad.helpers import round_up, getenv, to_mv
 
+@functools.cache
+def _tlsf_lv1(size:int) -> int: return size.bit_length()
+
+@functools.cache
+def _tlsf_lv2(l2_cnt:int, size:int) -> int:
+  return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - l2_cnt))
+
+
 class MMIOInterface:
   def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
   def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
@@ -39,11 +47,9 @@ class TLSFAllocator:
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
     if size > 0: self._insert_block(0, size)
 
-  @functools.cache # pylint: disable=method-cache-max-size-none
-  def lv1(self, size): return size.bit_length()
+  def lv1(self, size): return _tlsf_lv1(size)
 
-  @functools.cache # pylint: disable=method-cache-max-size-none
-  def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
+  def lv2(self, size): return _tlsf_lv2(self.l2_cnt, size)
 
   def _insert_block(self, start:int, size:int, prev:int|None=None):
     if prev is None: prev = self.blocks[start][2]
