@@ -1,5 +1,4 @@
 from __future__ import annotations
-# flake8: noqa: E702
 from typing import Callable, cast
 from dataclasses import dataclass, replace
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
@@ -61,7 +60,8 @@ class Estimates:
           inline = process_body(u.body, mult, child_bindings) # noqa: F821
           for (buf,op),accessed in inline[2].items():
             mem[(buf,op)] = smin(mem.get((buf,op),0) + accessed, buf.max_numel() * buf.dtype.itemsize)
-          flops += inline[0]; lds += inline[1]
+          flops += inline[0]
+          lds += inline[1]
         elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
           lds += u.max_numel() * u.dtype.itemsize * mult
         elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
