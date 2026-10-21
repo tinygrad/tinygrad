@@ -125,8 +125,26 @@ def make_encoder():
     waves = sorted(recs)
     simd, slot = {w: 2 * (w % 2) for w in waves}, {w: w // 2 for w in waves}
     st = {w: dict(i=0, ready=w + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, mem_issue=None, reg_ready={},
-                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, valu_issues=[], pend=[], last_cls=None) for w in waves}
+                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_issues=[], pend=[], last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
+    lds_q: list[tuple[int, int, bool, int]] = []  # (accept, wave, store, occupancy), served by serve_lds
+
+    lds_tie = dict(store=None, n=0)  # same-slot ties between SIMDs alternate, simd 2 first, within a run of stores or loads
+
+    def serve_lds(upto: int):
+      """Start every queued LDS request whose service slot is decidable by cycle upto (accept = issue + LDS_ACCEPT)."""
+      while lds_q and (t := max(unit["lds"], min(r[0] for r in lds_q))) <= upto + LDS_ACCEPT:
+        cand = [r for r in lds_q if r[0] <= t]
+        top = min(slot[r[1]] for r in cand)
+        cand = [r for r in cand if slot[r[1]] == top]
+        if len({simd[r[1]] for r in cand}) > 1:
+          if lds_tie["store"] != cand[0][2]: lds_tie.update(store=cand[0][2], n=0)
+          want = 2 if lds_tie["n"] % 2 == 0 else 0
+          lds_tie["n"] += 1
+          cand = [r for r in cand if simd[r[1]] == want]
+        r = cand[0]
+        lds_q.remove(r); unit["lds"] = t + r[3]
+        st[r[1]]["lgkm"].append(t + LDS_RET + (2 if r[2] else 0)); st[r[1]]["lds_wait"] -= 1
     for w in waves: put(w, WAVESTART, simd=simd[w], wgp=0, wave=slot[w], id7=w)
 
     def issue(w: int, cls: str, op: InstOp|None, inst: Inst, cycle: int) -> bool:
@@ -149,6 +167,8 @@ def make_encoder():
         if s["mem_issue"] is not None: need = max(need, s["mem_issue"] + IMM_AFTER_MEM)
         if "WAITCNT" in _name(inst):
           wait = inst.simm16
+          if s["lds_wait"] and len(s["lgkm"]) < len(s["lgkm"]) + s["lds_wait"] - ((wait >> 4) & 0x3f):
+            s["ready"], s["blocked"] = cycle + 1, True; return False  # a counted LDS request is not served yet
           for q, n in ((s["lgkm"], (wait >> 4) & 0x3f), (s["vm"], (wait >> 10) & 0x3f)):
             q.sort()
             if len(q) > n:
@@ -180,8 +200,7 @@ def make_encoder():
       elif cls == "LDS":
         store = "STORE" in _name(inst)
         occ = _cycles(op) if store else 1
-        start = max(cycle + LDS_ACCEPT, unit["lds"]); unit["lds"] = start + occ
-        s["lgkm"].append(start + LDS_RET + (2 if store else 0)); s["mem_issue"] = cycle
+        lds_q.append((cycle + LDS_ACCEPT, w, store, occ)); s["lds_wait"] += 1; s["mem_issue"] = cycle
         put(cycle, INST, wave=sl, op=op if primary else InstOp(0x50 + occ - 1))
       elif cls == "VMEM":
         store = "STORE" in _name(inst)
@@ -203,6 +222,7 @@ def make_encoder():
       for w in live: st[w]["i"] = 0
       cycle = min(st[w]["ready"] for w in live)
       while live:
+        serve_lds(cycle)
         busy: set[tuple[int, str]] = set()  # one issue per (simd, class) per cycle, one per wave per cycle
         for w in sorted(live, key=lambda w: (simd[w] == 0, w)):  # paired SIMD first: it wins LDS ties (sync loads)
           s = st[w]
