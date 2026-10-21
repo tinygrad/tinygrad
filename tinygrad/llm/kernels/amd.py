@@ -1295,6 +1295,11 @@ def partial_sum(x:Tensor) -> Tensor:
   n = prod(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and n % HOST_AR_THREADS == 0 and n <= HOST_AR_MAXN and (comm:=host_allreduce(x.device)):
     out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
+    if getenv("NO_AR"):
+      def cp(o:UOp, xx:UOp) -> UOp:
+        e = UOp.range(n, 0, AxisType.GLOBAL)
+        return o[e].store(xx.flatten()[e].load()).end(e).sink(arg=KernelInfo(name="no_ar", opts_to_apply=()))
+      return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), fxn=cp)[0].reshape(x.shape[1:])
     # many elements (the tokens of speculative decoding): every device sums a part (fewer reads over the links, a second wait)
     fxn = functools.partial(_host_allreduce_kernel, N=len(x.device), n=n, scatter=n >= getenv("HOST_AR_SCATTER", 8192))
     return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), comm.mbox, comm.counter, fxn=fxn)[0].reshape(x.shape[1:])
@@ -1315,10 +1320,13 @@ def _moe_router_kernel(sel:UOp, probs:UOp, logits:UOp, bias:UOp, k:int, scale:fl
   key = score + bias[i].load().float()
   lds = UOp.alloc((n,), dtypes.float32, addrspace=AddrSpace.LOCAL)
   lds = lds.after(lds[i].store(key).barrier())
-  j = UOp.range(n, 2, AxisType.LOOP)
-  other = lds[j].load()
-  below = ((key > other) | (key.eq(other) & (i < j))).where(UOp.const(1, dtypes.int32), UOp.const(0, dtypes.int32))
-  rank = _reg_int(below, j)
+  # (u loads an iteration: independent, their latencies overlap)
+  u = next(x for x in (getenv("ROUTER_U", 8), 8, 4, 2, 1) if n % x == 0)
+  j = UOp.range(n // u, 2, AxisType.LOOP)
+  def below(jj:UOp) -> UOp:
+    other = lds[jj].load()
+    return ((key > other) | (key.eq(other) & (i < jj))).where(UOp.const(1, dtypes.int32), UOp.const(0, dtypes.int32))
+  rank = _reg_int(functools.reduce(lambda a, b: a + b, [below(j * u + x) for x in range(u)]), j)
   slot = rank - (n - k)
   picked = slot >= 0
   lds_p = UOp.alloc((k,), dtypes.float32, addrspace=AddrSpace.LOCAL)
@@ -1342,6 +1350,58 @@ def moe_router(logits:Tensor, bias:Tensor, k:int, scale:float) -> tuple[Tensor, 
   fxn = functools.partial(_moe_router_kernel, k=k, scale=scale)
   sel, probs = Tensor.custom_kernel(sel, probs, logits.contiguous(), bias, fxn=fxn)[:2]
   return sel, probs
+
+@functools.cache
+def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UOp, k:int, scale:float) -> UOp:
+  # as _moe_router_kernel (the same scores, picks and probabilities), a wave per token: a lane holds the experts lane+32*m, k rounds take the
+  # largest left (a butterfly over the lanes, ties to the lower index). then the selections as the device's slices (table (E, w): its local
+  # slice ids of every expert, -1 none) and their probabilities, (tokens, k*w)
+  n = cast(int, logits.shape[-1])
+  tokens, M, w = cast(int, logits.numel()) // n, n // 32, cast(int, table.shape[-1])
+  logits, lsel, probs, table = logits.reshape(tokens, n), lsel.reshape(tokens, k*w), probs.reshape(tokens, k*w), table.reshape(n, w)
+  token, lane = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  es = [lane + 32*m for m in range(M)]
+  scores = [(1 + (logits[token, e].load().float() * (-1/math.log(2))).exp2()).reciprocal() for e in es]
+  keys = [sc + bias[e].load().float() for sc, e in zip(scores, es)]
+  taken = [UOp.const(False, dtypes.bool)] * M
+  def better(ka:UOp, ia:UOp, kb:UOp, ib:UOp) -> UOp: return (ka > kb) | (ka.eq(kb) & (ia < ib))
+  def xor_int(v:UOp, off:int) -> UOp: return _lane_xor(v.bitcast(dtypes.float), off).bitcast(dtypes.int32)
+  won:list[tuple[UOp, UOp]] = []  # (expert, score) of every round, the largest first
+  for _ in range(k):
+    bk, bi, bs = UOp.const(-math.inf, dtypes.float), UOp.const(1 << 30, dtypes.int32), UOp.const(0.0, dtypes.float)
+    for m in range(M):
+      kk, ii = taken[m].where(UOp.const(-math.inf, dtypes.float), keys[m]), taken[m].where(UOp.const(1 << 30, dtypes.int32), es[m].cast(dtypes.int32))
+      b = better(kk, ii, bk, bi)
+      bk, bi, bs = b.where(kk, bk), b.where(ii, bi), b.where(scores[m], bs)
+    for off in (16, 8, 4, 2, 1):
+      ok, oi, os_ = _lane_xor(bk, off), xor_int(bi, off), _lane_xor(bs, off)
+      b = better(ok, oi, bk, bi)
+      bk, bi, bs = b.where(ok, bk), b.where(oi, bi), b.where(os_, bs)
+    won.append((bi, bs))
+    taken = [t | es[m].cast(dtypes.int32).eq(bi) for m, t in enumerate(taken)]
+  # slot s is the (k-s)-th largest (pairwise_topk's order), the sum of the scores in slot order
+  slots = won[::-1]
+  total = functools.reduce(lambda a, b: a + b, [sc for _, sc in slots[1:]], slots[0][1])
+  out = lane.valid(lane < k*w)
+  slot, j = lane // w, lane % w
+  def pick(i:int) -> tuple[UOp, UOp]:
+    return slots[i] if i == k-1 else (slot.eq(i).where(slots[i][0], pick(i+1)[0]), slot.eq(i).where(slots[i][1], pick(i+1)[1]))
+  e, sc = pick(0)
+  st = UOp.group(lsel[token, out].store(table[e.cast(dtypes.weakint).minimum(n-1).maximum(0), j.minimum(w-1)].load()),
+                 probs[token, out].store(sc / total * scale))
+  return st.end(token, lane).sink(arg=KernelInfo(name="moe_router", opts_to_apply=()))
+
+def moe_router_local(logits:Tensor, bias:Tensor, k:int, scale:float, table:Tensor) -> tuple[Tensor, Tensor]:
+  """
+  moe_router and select_slices in a kernel (a few tokens): every device's local slices of the top k experts (devices, B, T, k*w) (-1: none)
+  and their probabilities (devices, B, T, k*w)
+  """
+  devs = cast(tuple[str, ...], table.device)
+  shape = (len(devs), *logits.shape[:-1], k*int(table.shape[-1]))
+  lsel = Tensor.empty(*shape, dtype=dtypes.int32, device=devs, axis=0)
+  probs = Tensor.empty(*shape, dtype=dtypes.float32, device=devs, axis=0)
+  fxn = functools.partial(_moe_router_local_kernel, k=k, scale=scale)
+  return tuple(Tensor.custom_kernel(lsel, probs, logits.contiguous(), bias, table, fxn=fxn)[:2])  # type: ignore[return-value]
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, first:UOp, *grids:UOp,

@@ -9,7 +9,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready
+  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
@@ -438,7 +438,12 @@ class FFNBlock:
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
       if gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and isinstance(xr.shape[1], int) and \
          amd_custom_kernels_supported(x.device) and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1):
-        sel, probs = moe_router(logits, bias, self.config.num_experts_per_tok, self.config.routed_scaling_factor)
+        k, scale, exps = self.config.num_experts_per_tok, self.config.routed_scaling_factor, self.ffn_gate_exps
+        exps.set_quantized()
+        if rows is None and xr.shape[1] <= 8 and exps.slices and exps.ggml_type is not None and getenv("MOE_ROUTER_LOCAL", 1):
+          # decoding: the device's slices of the selections in the router's kernel
+          return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table), local=True)
+        sel, probs = moe_router(logits, bias, k, scale)
         if rows is not None: sel, probs = all_gather(sel, 1), all_gather(probs, 1)
         return self._experts(x, h, sel, probs)
       assert rows is None, "sequence parallel routing needs the router kernel"
@@ -459,12 +464,12 @@ class FFNBlock:
       return self._experts(x, h, sel, probs)
     return _out(self.ffn_down, gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit))
 
-  def _experts(self, x:Tensor, h:Tensor, sel:Tensor, probs:Tensor) -> Tensor:
-    """the selected experts (and the shared expert) of every token, summed over the devices"""
+  def _experts(self, x:Tensor, h:Tensor, sel:Tensor, probs:Tensor, local:bool=False) -> Tensor:
+    """the selected experts (and the shared expert) of every token, summed over the devices. local: sel and probs are the slices already"""
     exps = (self.ffn_gate_exps, self.ffn_down_exps) + (() if self.ffn_gate_exps.fused else (self.ffn_up_exps,))
     for e in exps: e.set_quantized()
     # sliced experts: every device runs its slices of the selected experts
-    if self.ffn_gate_exps.slices: sel, probs = self.ffn_gate_exps.select_slices(sel, probs)
+    if self.ffn_gate_exps.slices and not local: sel, probs = self.ffn_gate_exps.select_slices(sel, probs)
     # many tokens: grouped by expert (prefill), a few (the drafts of speculative decoding) as decoding
     grouped = (not isinstance(x.shape[1], int) or x.shape[1] > 8) and all(e.ggml_type is not None for e in exps)
     shexp:Tensor|None = None
