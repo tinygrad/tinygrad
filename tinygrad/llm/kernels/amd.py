@@ -191,12 +191,22 @@ def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp) -> UOp:
   scale = ((low >> (4*subgroup)) & 15) | (((header >> (16+2*subgroup)) & 3) << 4)
   return _half(header) * (scale.cast(dtypes.int32)-32).float()
 
-@functools.cache
+_tables:dict[tuple, Tensor] = {}
+def _table(key:tuple, make:Callable[[], Tensor]) -> Tensor:
+  """
+  a constant table, a buffer made once (not a kernel in every jit that reads it: tables_ready makes them before the jits capture). made while
+  the devices can't be used (a function's capture) it's its kernel in that graph, not kept
+  """
+  if (t:=_tables.get(key)) is not None: return t
+  from tinygrad.helpers import ALLOW_DEVICE_USAGE
+  if not ALLOW_DEVICE_USAGE: return make()
+  t = _tables[key] = make().realize()
+  return t
+
 def iq4_half_lut(device:str|tuple[str, ...]|None) -> Tensor:
-  """(a buffer, made once: not a kernel in every jit that reads it. tables_ready makes them before the jits capture)"""
   from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
-  return Tensor.const(tuple(x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i], kvalues_iq4nl[j])),
-                      dtypes.float16).to(device, force=True).bitcast(dtypes.uint32).contiguous().realize()
+  return _table(("iq4_half_lut", device), lambda: Tensor.const(tuple(x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i],
+    kvalues_iq4nl[j])), dtypes.float16).to(device, force=True).bitcast(dtypes.uint32).contiguous())
 
 @functools.cache
 def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in_features:int) -> UOp:
@@ -390,13 +400,12 @@ def _decode_linear_loop(out:UOp, out_features:int, group_count:int, group_dot, n
   return out[row, inner_row, output.valid(lane.eq(0))].store(total.cast(out.dtype)).end(inner_row).end(row, block, lane, wave).sink(
     arg=KernelInfo(name=name, opts_to_apply=(), estimates=estimates))
 
-@functools.cache
 def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
   grid, words = {IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2),
                  IQ3_XXS: (ggml.iq3xxs_grid, 1), IQ3_S: (ggml.iq3s_grid, 1)}[ggml_type]
-  return Tensor.const(tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(words)),
-                      dtypes.uint32).to(device, force=True).contiguous().realize()
+  return _table(("iq_grid", device, ggml_type), lambda: Tensor.const(tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(words)),
+                                                                 dtypes.uint32).to(device, force=True).contiguous())
 
 def tables_ready(device:str|tuple[str, ...]):
   """the constant tables of the kernels, made (outside a jit: its runs read them)"""
