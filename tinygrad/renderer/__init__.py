@@ -1,4 +1,5 @@
 from __future__ import annotations
+# flake8: noqa: E702
 from typing import Callable, cast
 from dataclasses import dataclass, replace
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
@@ -20,10 +21,6 @@ def idx_alu(uops:list[UOp]):
       excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
   return excluded
 
-@functools.cache
-def mults(ranges:tuple[UOp,...]) -> sint:
-  mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
-  return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
 @dataclass(frozen=True)
 class Estimates:
@@ -37,6 +34,10 @@ class Estimates:
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
   def from_uops(sink:UOp, ignore_indexing=False) -> Estimates:
+    @functools.cache
+    def mults(ranges:tuple[UOp,...]) -> sint:
+      mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
+      return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
     # computes estimates within a given caller scope, inline calls get resolved recursively
     def process_body(uops:UOp|list[UOp], caller_mult:sint, bindings:dict[UOp,UOp]={}):
       flops: sint = 0
@@ -57,7 +58,9 @@ class Estimates:
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
           inline = process_body(u.body, mult, child_bindings)
-          flops += inline[0]; lds += inline[1]; mem |= inline[2]
+          for (buf,op),accessed in inline[2].items():
+            mem[(buf,op)] = smin(mem.get((buf,op),0) + accessed, buf.max_numel() * buf.dtype.itemsize)
+          flops += inline[0]; lds += inline[1]
         elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
           lds += u.max_numel() * u.dtype.itemsize * mult
         elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
@@ -71,6 +74,7 @@ class Estimates:
     uops = list(sink.toposort(enter_calls=False))
     special_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
     flops,lds,mem = process_body(uops, special_mult)
+    del process_body
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
