@@ -68,22 +68,23 @@ def make_encoder():
     if issubclass(t, _FLAT) or issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
 
-  # Timing is decided after execution, not during it. The emulator runs each wave until s_barrier/s_endpgm, so emit()
-  # and finish() only record what each wave issued; schedule() replays all waves of a workgroup cycle by cycle, one
-  # barrier phase at a time, with per-SIMD issue ports, a shared in-order VALU pipe and one LDS unit for both SIMDs of
-  # the pair. Constants come from the gfx1100 references in extra/sqtt/examples/gfx1100; DRAM latencies are rough.
-  FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 16, 880, 9
-  VALU_EXEC_LAT_NOREAD = 6  # no register operand read: v_mov_b32 v4, -1
-  VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, VALU_QUEUE, MEM_AFTER_EXEC = 8, 9, 5, 13, 9
-  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}  # load data return: (extra latency, cycles on the return path)
-  VALU_TO_SCALAR, IMM_AFTER_ALU, VALU_AFTER_SALU, SLEEP_CYCLES = 9, 3, 5, 24  # s_sleep 1 measured once
-  ICACHE_LINE_LAT = 530
-  LDS_ACCEPT_LATE = 8
-  LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
-  SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
-  BRANCH_NEW_LINE = 20  # taken branch whose target is in another 64 B instruction line
-  LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 12
-  VMEM_LOAD_LAT, STORE_ACK = 785, 325
+  # timing is decided after execution: emit()/finish() record what each wave issued, schedule() replays the traced
+  # workgroups cycle by cycle on one WGP pair (simd 0 traced, simd 2 paired), all numbers measured on gfx1100 traces
+  # front end: first fetch, wave end, 64 B icache lines fetched in blocks of 4, half-block prefetch
+  FETCH_LAT, END_LAT, ICACHE_LINE_LAT = 416, 16, 530
+  # VALU: issue -> exec 8 (9 shifts/fma, 6 no register read), result +5, per-wave queue of 13
+  VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_EXEC_LAT_NOREAD, VALU_DEP_LAT, VALU_QUEUE = 8, 9, 6, 5, 13
+  # SALU and branches: exec +4, dependent +2, branch waits for its SCC/VCC producer, taken +10 (+20 into another line)
+  SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN, BRANCH_NEW_LINE = 4, 2, 5, 10, 3, 20
+  # crossings between units: VALU-written SGPR/VCC read by SALU at exec + 9, VALU after SALU exec + 5, s_nop after ALU + 3
+  VALU_TO_SCALAR, VALU_AFTER_SALU, IMM_AFTER_ALU, SLEEP_CYCLES = 9, 5, 3, 24  # s_sleep 1 measured once
+  # memory issue after the last VALU exec, SMEM after SALU, waitcnt token after memory issue
+  MEM_AFTER_EXEC, SMEM_AFTER_SALU, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 9, 9, 3, 4, 12
+  # LDS: one server, accept +3 (+8 for a store racing another wave's on the same SIMD), 8 queued per SIMD
+  LDS_ACCEPT, LDS_ACCEPT_LATE, LDS_RET, LDS_QUEUE = 3, 8, 28, 8
+  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}  # load return: (extra latency, cycles on the return path)
+  # DRAM: rough, not exact targets
+  SMEM_LAT, VMEM_LOAD_LAT, STORE_ACK = 880, 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
   _REG = re.compile(r'([vs])\[(\d+)(?::(\d+))?\]')
 
@@ -304,7 +305,7 @@ def make_encoder():
       while live:
         serve_lds(cycle)
         busy: set[tuple[int, str]] = set()  # one issue per (simd, class) per cycle, one per wave per cycle
-        for w in sorted(live, key=lambda w: (simd[w] == 0, w)):  # paired SIMD first: it wins LDS ties (sync loads)
+        for w in sorted(live):
           s = st[w]
           while (rec := recs[w][ph][s["i"]])[0] is not None and _classify(*rec)[0] == "NONE":  # hints cost no issue slot
             if _name(rec[0]) == "S_DELAY_ALU":  # id0 bits 3:0 -> next instruction; id1 bits 10:7 -> `skip` (6:4) later
