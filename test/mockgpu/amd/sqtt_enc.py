@@ -80,6 +80,7 @@ def make_encoder():
   ICACHE_LINE_LAT = 530
   LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
+  BRANCH_NEW_LINE = 20  # taken branch whose target is in another 64 B instruction line
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
   VMEM_LOAD_LAT, STORE_ACK = 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
@@ -287,7 +288,10 @@ def make_encoder():
           s["salu_issue"] = s["salu_exec"] = max([cycle + SALU_EXEC_LAT] + [s["reg_ready"].get(r, 0) for r in reads if r[0] == "s"])
           s["salu_issue"] = cycle
           for r in writes: s["reg_ready"][r] = s["salu_exec"] + SALU_DEP_LAT
-        if cls == "BR": s["ready"] = cycle + (BRANCH_TAKEN if op == InstOp.JUMP else BRANCH_NOT_TAKEN)
+        if cls == "BR":
+          s["ready"] = cycle + (BRANCH_TAKEN if op == InstOp.JUMP else BRANCH_NOT_TAKEN)
+          nxt = pcs[w][ph][s["i"]] if s["i"] < len(pcs[w][ph]) else None  # s["i"] already points past the branch
+          if op == InstOp.JUMP and nxt is not None and nxt // 64 != pcs[w][ph][s["i"] - 1] // 64: s["ready"] += BRANCH_NEW_LINE
         if cls == "BARRIER": s["arrival"] = cycle
         if primary: put(cycle, INST, wave=sl, op=op)
       return True
