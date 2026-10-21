@@ -127,8 +127,9 @@ def expert_slice_table(units:list[int], experts:int, slices:int) -> list[list[in
 
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
-  # TODO: remove the need for this contiguous
-  return gate * (gate * alpha).sigmoid().contiguous() * (up + up_bias)
+  # TODO: remove the need for this contiguous (gate and up from the custom kernels: one kernel)
+  sig = (gate * alpha).sigmoid()
+  return gate * (sig if amd_custom_kernels_supported(gate.device) else sig.contiguous()) * (up + up_bias)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -376,7 +377,8 @@ class HyperConnection:
       else: out = sublayer(hn if rows else hn[:, :T])
       if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
       ret = out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
-      return ret if rows else ret[:, :T]
+      # (a few tokens: materialized, the next sublayer's kernels read it, one buffer for them)
+      return ret if rows else ret[:, :T].contiguous()
     else:
       flat = xs.flatten(2)
       mix = self.fn(flat.rmsnorm(eps=self.norm_eps))
@@ -1125,8 +1127,12 @@ class Transformer:
     k, pos = self.config.spec_drafts, mtp_pos + j
     if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False),
                                                                 scratch=self._scratch)
-    v_mtp, v_j, v_pos = UOp.variable("mtp_pos", 0, self.max_context-1), UOp.variable("spec_j", 0, k), UOp.variable("start_pos", 0, self.max_context-1)
-    v_par, v_chain = UOp.variable("spec_par", 0, 1), tuple(UOp.variable(f"spec_pos{i}", 0, self.max_context-1) for i in range(k-1))
+    if not hasattr(self, "_spec_vars"):
+      # (made once: a step binds them)
+      pos_var = functools.partial(UOp.variable, min_val=0, max_val=self.max_context-1)
+      self._spec_vars = (pos_var("mtp_pos"), UOp.variable("spec_j", 0, k), pos_var("start_pos"), UOp.variable("spec_par", 0, 1),
+                         tuple(pos_var(f"spec_pos{i}") for i in range(k-1)))
+    v_mtp, v_j, v_pos, v_par, v_chain = self._spec_vars
     self._spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature, *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
 
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:

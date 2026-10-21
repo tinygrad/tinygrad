@@ -249,7 +249,12 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:b
   int8 groups of 32 with their scales and sums (and optionally sums of squares). an input shared by several layers is quantized once.
   NOTE: the cache holds graphs, the model clears it after building one (q8_quantize_cache_clear)
   """
-  return _q8_quantize(x.uop, tokens, in_features, sumsq, split)
+  # (keyed by the rows: the views of an input are quantized once)
+  u = x.uop
+  if not split and x.shape[-1] == in_features and prod(x.shape) == tokens*in_features:
+    while u.op is Ops.RESHAPE: u = u.src[0]
+    u = u.reshape((tokens, in_features))
+  return _q8_quantize(u, tokens, in_features, sumsq, split)
 
 def q8_quantize_cache_clear(): _q8_quantize.cache_clear()
 
@@ -1358,7 +1363,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   out_features = weight.uop.max_shard_shape[0] * weight.dtype.itemsize * 256 // QUANT_SIZES[ggml_type] // in_features // experts
   devices = len(weight.device) if isinstance(weight.device, tuple) else 1
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
-  xq = q8_quantize(x.contiguous(), tokens*x_slots, in_features)
+  xq = q8_quantize(x, tokens*x_slots, in_features)
   # a grid over the (token, slot) rows, or a workgroup loops over the slots of a token
   grid = getenv("MOE_GRID", 1)
   out = Tensor.empty((devices*tokens*slots, out_features) if grid else (devices*tokens, slots, out_features), dtype=dtypes.float32,

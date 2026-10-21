@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import decimal
+import decimal, weakref
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -153,8 +153,23 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
+# the launches of a jit's batch (exec_hcq) on the same inputs: the buffers and constants of its args, the variables filled in at every launch.
+# (a jit's: it holds the buffers, a relinked jit has new calls)
+_launch_args:weakref.WeakKeyDictionary[UOp, dict[tuple[UOp, ...], list]] = weakref.WeakKeyDictionary()
+
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
-  ets:list[float|None] = []
+  if devices is not None and ctx.jit and ctx.cache:
+    if (lanes:=(per:=_launch_args.setdefault(call, {})).get(ctx.input_uops)) is None:
+      lanes = per[ctx.input_uops] = _launch_lanes(ctx, call, ast, devices)
+    ets:list[float|None] = []
+    for rt, template, fixed in lanes:
+      var_vals = {**ctx.var_vals, **fixed}
+      global_sz, local_sz = ast.arg.launch_dims(var_vals)
+      try: args = [var_vals[a] if v else a for v, a in template]
+      except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
+      ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
+    return ets
+  ets = []
   resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
   for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
     if devices is None and device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
@@ -167,6 +182,20 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
     ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
   return ets
+
+def _launch_lanes(ctx:ExecContext, call:UOp, ast:UOp, devices) -> list:
+  # per device: the runtime, the args (True and a variable's name, or False and the value: a buffer, a constant) and the fixed variables
+  lanes = []
+  resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
+  for device, (bufs, device_vars) in zip(devices, unwrap_multi(call, resolved)):
+    fixed = {**device_vars, **{s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}}
+    prg_bufs = {i:b.ensure_allocated() for i,b in zip(ast.arg.globals, bufs)}
+    template = [(True, p.expr) if p.is_variable else (False, _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU
+                else (False, prg_bufs[p.arg.slot].get_buf(device)) for p in ast.kernel_params]
+    # (the variables bound by the call are fixed)
+    template = [(False, fixed[a]) if v and a in fixed else (v, a) for v, a in template]
+    lanes.append((get_runtime(device, ast, cache=ctx.cache), template, fixed))
+  return lanes
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np

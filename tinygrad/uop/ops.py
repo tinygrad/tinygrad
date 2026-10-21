@@ -202,7 +202,9 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
+all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary()
+# a bound Variable's unbound one (see bind)
+_unbound_vars:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property:
@@ -1047,18 +1049,27 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
-    uval = UOp.const(val) if isinstance(val, int) else val
-    assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
-    assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
-    assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
-    return self.replace(arg=replace(self.arg, val=uval.val))
+    if isinstance(val, int) and not isinstance(val, bool):
+      # (an int: checked as is, no CONST)
+      assert self.vmin <= val <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
+      assert val % self.arg.multiple_of == 0, f"bind {val} not divisible by {self.arg.multiple_of}"
+    else:
+      uval = UOp.const(val) if isinstance(val, int) else val
+      assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
+      assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
+      assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
+      val = uval.val
+    ret = self.replace(arg=replace(self.arg, val=val))
+    # (its unbound Variable: unbind doesn't make it again)
+    if self.tag is None: _unbound_vars[ret] = self
+    return ret
   def unbound(self) -> Variable:
     assert self.is_variable, f"op is {self.op}, need Variable"
     # strip the tag too: tags are kernel-graph processing state, the unbound Variable is the canonical node
     return self.replace(arg=replace(self.arg, val=None), tag=None)
   def unbind(self) -> tuple[Variable, int]:
     assert self.is_bound_var, f"can't unbind {self}"
-    return self.unbound(), self.arg.val
+    return (u if (u:=_unbound_vars.get(self)) is not None else self.unbound()), self.arg.val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     bound = {x: x.unbound() for x in self.backward_slice_with_self if x.is_bound_var}
     return self.substitute(bound, walk=True), {v: cast(int, x.arg.val) for x, v in bound.items()}

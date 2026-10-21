@@ -1,4 +1,4 @@
-import gc, itertools, unittest, weakref
+import itertools, unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid, _use_i8_wmma
@@ -51,14 +51,12 @@ class QuantLinearMixin:
     self.assertEqual(linear.ggml_type, ggml_type if custom else None)
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
-  def test_quant_tables_not_retained(self):
-    # one _iq_grid table and the iq4 lut cover both table creation paths
+  def test_quant_tables_made_once(self):
+    # one _iq_grid table and the iq4 lut cover both table creation paths: a buffer made once (not a kernel in every jit that reads it)
     for typ in (18, 23):
-      table = (iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)).realize()
-      ref = weakref.ref(table)
-      del table
-      gc.collect()
-      self.assertIsNone(ref())
+      table = iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)
+      self.assertTrue(table.uop.is_realized)
+      self.assertIs(table, iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ))
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_quant_tables_multidevice(self):

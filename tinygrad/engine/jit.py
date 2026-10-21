@@ -1,11 +1,11 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload
-import functools, os, io, pickle, itertools, threading, warnings, time
+import functools, os, io, pickle, itertools, threading, warnings, time, weakref
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -85,6 +85,14 @@ class CapturedJit(Generic[ReturnType]):
     if not (freed:=[b for b in flatten(b.bufs if isinstance(b, MultiBuffer) else [b] for b in bufs) if b.is_allocated()]): return
     for b in freed: b.deallocate()
     self.__dict__.pop("linear", None) # should be relinked
+    _launch_args.clear()  # (the relinked calls can be the same: their buffers are allocated again)
+
+_input_infos:weakref.WeakKeyDictionary[UOp, tuple] = weakref.WeakKeyDictionary()
+def _input_info(u:UOp) -> tuple[UOp, dict[Variable, int], DType, str|tuple[str, ...]]:
+  # the view of an input without its buffer, its bound variables, dtype and device: the same for every call with it (not kept alive by it)
+  if (ret:=_input_infos.get(u)) is None:
+    ret = _input_infos[u] = (*u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all(), u.dtype, u.device)
+  return ret
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -100,7 +108,7 @@ def _prepare_jit_inputs(args, kwargs):
   # collect buffer UOps (including MultiBuffer)
   input_buf_uops: list[UOp] = [u.base for u in input_uops if u.base.realized is not None]
   if len(set(input_buf_uops)) != len(input_buf_uops): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
+  inputs = [_input_info(u) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
