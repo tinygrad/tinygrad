@@ -245,7 +245,9 @@ def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
   return [ins("wait", ctx.queue_signal(d, q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in waits.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]:
-  return [ins("barrier")] + [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+  # the waits first, then the barrier: what the earlier work wrote (e.g. another device's copy into this one's memory, posted writes over the
+  # links) is flushed into this device's memory and its caches invalidated after it's done, not before
+  return [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]] + [ins("barrier")]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   queue_of = [(dev, queue) for _, dev, queue in ctx.batch] # the (device, queue) of each call by tag
@@ -293,7 +295,9 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    return [ins("kernel_barrier")] * (tag in barriers) + _wait_ins(ctx, call_waits[tag]) + stamps[:1] + [call] + stamps[1:] + signal
+    # (waits for other queues: then the barrier, see _start_ins)
+    waits = _wait_ins(ctx, call_waits[tag]) + ([ins("barrier")] if call_waits[tag] else [])
+    return [ins("kernel_barrier")] * (tag in barriers) + waits + stamps[:1] + [call] + stamps[1:] + signal
 
   # closers advance device timelines
   close_cmds = {dev: _wait_ins(ctx, close_waits[dev]) + [ins("store", timeline(dev), timeline_value(dev) + 1)] for dev in ctx.queues}
