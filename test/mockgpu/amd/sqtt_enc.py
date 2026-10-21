@@ -72,7 +72,7 @@ def make_encoder():
   # the pair. Constants come from the gfx1100 references in extra/sqtt/examples/gfx1100; DRAM latencies are rough.
   FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 160, 880, 9
   VALU_EXEC_LAT_NOREAD = 6  # no register operand read: v_mov_b32 v4, -1
-  VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, FP_ISSUE_DEP, MEM_AFTER_EXEC = 8, 9, 5, 5, 9
+  VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, VALU_QUEUE, MEM_AFTER_EXEC = 8, 9, 5, 13, 9
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
   VMEM_LOAD_LAT, STORE_ACK = 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
@@ -139,7 +139,8 @@ def make_encoder():
     waves = sorted(recs)
     simd, slot = {w: 2 * (w % 2) for w in waves}, {w: w // 2 for w in waves}
     st = {w: dict(i=0, ready=w + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, mem_issue=None, reg_ready={},
-                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_issues=[], pend=[], last_cls=None) for w in waves}
+                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], pend=[],
+                  last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
     lds_q: list[tuple[int, int, bool, int]] = []  # (accept, wave, store, occupancy), served by serve_lds
 
@@ -170,8 +171,8 @@ def make_encoder():
                          "srcx0", "vsrcx1", "srcy0", "vsrcy1"))
       writes = _regs(inst, ("vdst", "sdst", "vdstx", "vdsty"))
       need = cycle
-      if cls == "VALU" and re.search(r'_F(16|32|64)', _name(inst)):  # fp consumer of a VALU result stalls at issue
-        need = max([need] + [s["reg_issue"][r] + FP_ISSUE_DEP for r in reads if r in s["reg_issue"]])
+      if cls == "VALU" and len(s["valu_execs"]) >= VALU_QUEUE:  # the per-wave VALU queue holds 13; a slot frees at exec + 4
+        need = max(need, s["valu_execs"][-VALU_QUEUE] + 4)
       if (cls in ("LDS", "VMEM") or (cls == "BR" and _name(inst).startswith("S_CBRANCH_EXEC"))) and s["valu_exec"] is not None:
         need = max(need, s["valu_exec"] + MEM_AFTER_EXEC)
       if cls == "SMEM" and s["salu_issue"] is not None: need = max(need, s["salu_issue"] + SMEM_AFTER_SALU)
@@ -209,11 +210,11 @@ def make_encoder():
         lat = VALU_EXEC_LAT_NOREAD if not reads else VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT
         base = cycle + lat
         ex = max([base, valu_free[simd[w]]] + [s["reg_ready"].get(r, 0) for r in reads])
-        # a source forwarded the cycle its producer writes back collides with another source read from the same VGPR bank
-        vreads = [r for r in reads if r[0] == "v"]
-        if ex == base and any(s["reg_ready"].get(f) == ex and any(o != f and int(o[1:]) % 4 == int(f[1:]) % 4 for o in vreads)
-                              for f in vreads): ex += 1
+        # accumulating in place: the forwarded register is also the destination and another source shares its VGPR bank
+        if ex == base and any(s["reg_ready"].get(d) == ex and any(o != d and o[0] == "v" and int(o[1:]) % 4 == int(d[1:]) % 4
+                                                                  for o in reads) for d in writes & reads if d[0] == "v"): ex += 1
         valu_free[simd[w]], s["valu_exec"] = ex + 1, ex
+        s["valu_execs"].append(ex)
         s["valu_issues"].append(cycle)
         if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], "VALU")] = cycle + _cycles(op)
         for r in writes: s["reg_ready"][r], s["reg_issue"][r] = ex + VALU_DEP_LAT, cycle
