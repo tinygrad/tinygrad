@@ -82,7 +82,7 @@ def make_encoder():
   LDS_QUEUE = 8  # LDS requests a SIMD may have waiting for service
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN = 4, 2, 5, 10, 3
   BRANCH_NEW_LINE = 20  # taken branch whose target is in another 64 B instruction line
-  LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
+  LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 12
   VMEM_LOAD_LAT, STORE_ACK = 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
   _REG = re.compile(r'([vs])\[(\d+)(?::(\d+))?\]')
