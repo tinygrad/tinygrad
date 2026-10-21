@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar
+from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar, getenv
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -2004,7 +2004,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
     return program[pc]
 
-  def _run_workgroup(gidx: int, gidy: int, gidz: int, tracing: bool):
+  def _run_workgroup(gidx: int, gidy: int, gidz: int, tracing: int|None):  # tracing: wave id base, None = not traced
     """Initialize all wavefronts for one workgroup and execute them with barrier synchronization.
     Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves."""
     waves: list[tuple[WaveState, list]] = []
@@ -2022,26 +2022,25 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           pc = st.pc
           if pc == ENDPGM_PC:
             done[wi] = True
-            if tracing: sqtt_finish(wi)
+            if tracing is not None: sqtt_finish(tracing + wi)
             break
           fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
           if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
           fxn((ctypes.c_uint64 * len(globals_list))(*[c_bufs[g] for g in globals_list]))
-          if tracing:
+          if tracing is not None:
             inst_op = inst.op.value if hasattr(inst, 'op') else 0
-            sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
+            sqtt_emit(tracing + wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
           if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
         else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
       # All waves have either hit barrier or endpgm — release barrier waves for next round
     raise RuntimeError("exceeded 10M total scheduling rounds")
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
-  # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
-  tracing = bool(PROFILE)
+  # Trace the first SQTT_TRACE_WGS workgroups as co-resident on the traced CU (wave id = workgroup * 64 + wave); later ones run untraced
+  trace_wgs = getenv("SQTT_TRACE_WGS", 1) if PROFILE else 0
   with _MXCSRContext():
-    for gidz, gidy, gidx in itertools.product(range(gz), range(gy), range(gx)):
-      _run_workgroup(gidx, gidy, gidz, tracing)
-      tracing = False  # only trace the first workgroup
+    for i, (gidz, gidy, gidx) in enumerate(itertools.product(range(gz), range(gy), range(gx))):
+      _run_workgroup(gidx, gidy, gidz, i * 64 if i < trace_wgs else None)
       if lds_size > 0: ctypes.memset(lds_buf._buf, 0, max(lds_size, 4))  # reset LDS for next workgroup
 
   if PROFILE: sqtt_traces.append(sqtt_finalize())

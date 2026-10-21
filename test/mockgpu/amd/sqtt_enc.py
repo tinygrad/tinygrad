@@ -141,8 +141,9 @@ def make_encoder():
       phases[-1].append((inst, bt))
       if inst is not None and _classify(inst, bt)[0] == "BARRIER": phases.append([])
     waves = sorted(recs)
-    simd, slot = {w: 2 * ((w + SIMD_PARITY) % 2) for w in waves}, {w: w // 2 for w in waves}
-    st = {w: dict(i=0, ready=w + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
+    rank = {w: k for k, w in enumerate(waves)}  # wave id = workgroup * 64 + wave; placement goes by rank across workgroups
+    simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
+    st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], pend=[],
                   last_cls=None) for w in waves}
     valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
@@ -171,7 +172,7 @@ def make_encoder():
         unit["lds"] = t + r[3]
         st[r[1]]["lgkm"].append(t + LDS_RET + (2 if r[2] else 0))
         st[r[1]]["lds_wait"] -= 1
-    for w in waves: put(w, WAVESTART, simd=simd[w], wgp=0, wave=slot[w], id7=w)
+    for w in waves: put(w, WAVESTART, simd=simd[w], wgp=0, wave=slot[w], id7=rank[w])
 
     def issue(w: int, cls: str, op: InstOp|None, inst: Inst, cycle: int) -> bool:
       """Issue one record of wave w at cycle if its readiness rules allow; else push its ready time and return False."""
@@ -261,8 +262,9 @@ def make_encoder():
       live = [w for w in waves if ph < len(recs[w]) and recs[w][ph]]
       if not live: continue
       if ph > 0:
-        release = max(st[w]["arrival"] for w in waves if st[w]["arrival"] is not None) + BARRIER_RELEASE
-        for w in live: st[w]["ready"] = max(st[w]["ready"], release)
+        for w in live:  # a barrier releases its own workgroup only
+          release = max(st[x]["arrival"] for x in waves if x // 64 == w // 64 and st[x]["arrival"] is not None) + BARRIER_RELEASE
+          st[w]["ready"] = max(st[w]["ready"], release)
       for w in live: st[w]["i"] = 0
       cycle = min(st[w]["ready"] for w in live)
       while live:
