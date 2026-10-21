@@ -71,6 +71,7 @@ def make_encoder():
   # barrier phase at a time, with per-SIMD issue ports, a shared in-order VALU pipe and one LDS unit for both SIMDs of
   # the pair. Constants come from the gfx1100 references in extra/sqtt/examples/gfx1100; DRAM latencies are rough.
   FETCH_LAT, END_LAT, SMEM_LAT, SMEM_AFTER_SALU = 416, 160, 880, 9
+  VALU_EXEC_LAT_NOREAD = 6  # no register operand read: v_mov_b32 v4, -1
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_DEP_LAT, FP_ISSUE_DEP, MEM_AFTER_EXEC = 8, 9, 5, 5, 9
   LDS_ACCEPT, LDS_RET, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 3, 28, 3, 4, 14
   VMEM_LOAD_LAT, STORE_ACK = 785, 325
@@ -165,8 +166,9 @@ def make_encoder():
     def issue(w: int, cls: str, op: InstOp|None, inst: Inst, cycle: int) -> bool:
       """Issue one record of wave w at cycle if its readiness rules allow; else push its ready time and return False."""
       s, primary, sl = st[w], simd[w] == 0, slot[w]
-      reads = _regs(inst, ("src0", "src1", "src2", "vsrc1", "addr", "data0", "data1", "data", "saddr", "ssrc0", "ssrc1"))
-      writes = _regs(inst, ("vdst", "sdst"))
+      reads = _regs(inst, ("src0", "src1", "src2", "vsrc1", "addr", "data0", "data1", "data", "saddr", "ssrc0", "ssrc1",
+                         "srcx0", "vsrcx1", "srcy0", "vsrcy1"))
+      writes = _regs(inst, ("vdst", "sdst", "vdstx", "vdsty"))
       need = cycle
       if cls == "VALU" and re.search(r'_F(16|32|64)', _name(inst)):  # fp consumer of a VALU result stalls at issue
         need = max([need] + [s["reg_issue"][r] + FP_ISSUE_DEP for r in reads if r in s["reg_issue"]])
@@ -204,7 +206,8 @@ def make_encoder():
         s["blocked"] = False
         if primary: put(cycle, IMMEDIATE, wave=sl)
       elif cls == "VALU":
-        base = cycle + (VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT)
+        lat = VALU_EXEC_LAT_NOREAD if not reads else VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT
+        base = cycle + lat
         ex = max([base, valu_free[simd[w]]] + [s["reg_ready"].get(r, 0) for r in reads])
         # a source forwarded the cycle its producer writes back collides with another source read from the same VGPR bank
         vreads = [r for r in reads if r[0] == "v"]
