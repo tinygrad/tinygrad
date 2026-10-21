@@ -9,7 +9,8 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, indexer_decode_index_rows
+  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, indexer_decode_index_rows, \
+  mla_bmm
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
@@ -799,7 +800,10 @@ class MLATransformerBlock(FFNBlock):
     # half weights: half copies of the input and the output and a float accumulator use the tensor cores (casts or permutes fused into the
     # matmul don't)
     k_b, half = self.attn_k_b["weight"].transpose(-1, -2), self.attn_k_b["weight"].dtype == dtypes.half and Tq > 1
-    q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
+    # a few tokens: a thread an output (the same values)
+    bmm = half and B == 1 and isinstance(Tq, int) and Tq <= 8 and amd_custom_kernels_supported(x.device) and bool(getenv("MLA_BMM", 1))
+    if bmm: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"])
+    else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
     q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
@@ -828,7 +832,8 @@ class MLATransformerBlock(FFNBlock):
         if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
         attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, int(N), scale, mask)
       v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
-      attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b
+      if bmm: attn = mla_bmm(attn, self.attn_v_b["weight"])
+      else: attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b
       return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
     k = cache[:, :, 0:start_pos+T, :].float()
     v = k[..., :self.config.kv_lora_rank]

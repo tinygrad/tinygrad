@@ -1779,6 +1779,29 @@ def hc_post_quant(out:Tensor, coef:Tensor, xs:Tensor, count:int) -> Tensor:
   q8_quantize_known(ret.flatten(2), rows, count*int(D), True, (outs[1], outs[2], outs[3], outs[4]))
   return ret
 
+@functools.cache
+def _mla_bmm_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
+  # out[h, t, o] = sum over i of the half product of x (as half) and w[h, o, i], in float in the order of i (the generic kernel's: the same
+  # values), a thread an output
+  H, T, I = cast(tuple[int, int, int], x.shape)
+  O = cast(int, w.shape[1])
+  e, tl = UOp.range(H*T*O // 256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
+  idx = e * 256 + tl
+  h, t, o = idx // (T*O), idx // O % T, idx % O
+  acc = _reg((1,), 0)
+  i = UOp.range(I // 4, 2, AxisType.LOOP)
+  prods = [(x[h, t, i*4 + j].load().cast(dtypes.half) * w[h, o, i*4 + j].load()).cast(dtypes.float) for j in range(4)]
+  acc = acc.after(acc[0].store(functools.reduce(lambda a, b: a + b, prods, acc.after(i)[0].load())).end(i))
+  return out[h, t, o].store(acc[0].load()).end(e, tl).sink(arg=KernelInfo(name="mla_bmm", opts_to_apply=()))
+
+def mla_bmm(x:Tensor, w:Tensor) -> Tensor:
+  """(B=1, H, T, I) @ (H, O, I)^T in half products summed in float, (1, H, T, O): x.half().matmul(w.transpose(-1, -2), dtype=float)'s values"""
+  B, H, T, I = x.shape
+  O = w.shape[1]
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  out = Tensor.empty(int(H), int(T), int(O), dtype=dtypes.float32, device=x.device, axis=None if axis is None else 0)
+  return Tensor.custom_kernel(out, x.reshape(H, T, I).contiguous(), w, fxn=_mla_bmm_kernel)[0].reshape(B, H, T, O)
+
 # ******** tiny dense fp16 gemv ********
 
 @functools.cache
