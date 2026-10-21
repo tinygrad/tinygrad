@@ -18,7 +18,7 @@ class LinearScanRegallocContext:
     # compute live ranges
     self.live_range: dict[Register, list[int]] = {}
     lr = self.live_range
-    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last uop that reads that RANGE
+    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last non pseudo uop that reads that RANGE
     for idx,u in reversed(list(enumerate(uops))):
       if u.op in PSEUDO_OPS: continue
       defs = regs(u)
@@ -26,7 +26,7 @@ class LinearScanRegallocContext:
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
         if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
+      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src and x.op not in PSEUDO_OPS)
 
     # allocate registers
     self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
@@ -56,7 +56,7 @@ class LinearScanRegallocContext:
       # allocate uses
       for s in u.src:
         # HACK: cause of later hacks to lower range
-        if u.op in (Ops.END, Ops.BACKEDGE): continue
+        if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), Register): continue
         if v not in live: live[v] = fill(v, i)
         self.reals.setdefault(i, {})[v] = live[v]
@@ -88,8 +88,8 @@ class LinearScanRegallocContext:
           live_in[v] = live[v]
         live_ins.append(live_in)
 
-      # loop epilogue, reload registers that were live at loop entry
-      if u.op in (Ops.END, Ops.BACKEDGE):
+      # loop epilogue at the loop's last reader, reload registers that were live at loop entry
+      if i in loops.values():
         # TODO: if a uop is in a different reg in live out vs live in move between registers instead of loading
         # TODO: don't reload if first use in loop is a load
         live_in = live_ins.pop()
@@ -123,5 +123,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
