@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
-from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
+from tinygrad.helpers import colored, getenv, unwrap, word_wrap, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
@@ -160,7 +160,6 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING LABEL>"
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
-    if TRACEMETA >= 2 and u.metadata is not None: label += "\n"+str(u.metadata)
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
@@ -174,8 +173,8 @@ def _reconstruct(data:VizData, a:int) -> UOp:
     num, visited = stack.pop()
     if num in data.all_uops: continue
     if visited:
-      op, src, arg, *rest = data.trace.uop_fields[num]
-      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+      op, src, arg = data.trace.uop_fields[num]
+      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg)
     else:
       stack.append((num, True))
       stack.extend((s, False) for s in data.trace.uop_fields[num][1])
