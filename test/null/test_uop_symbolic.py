@@ -373,12 +373,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", -5, 5)*4 < -13, 0, 1, "(a<-3)")
-    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "((a*-1)<4)")
+    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "(-4<a)")
     c0, c1 = 2, 2**54+1
     self.helper_test_variable(Variable("a", 0, c1)*c0 < c1, 0, 1, f"(a<{2**53+1})")
     c0, c1 = -2, -(2**54-1)
-    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"((a*-1)<{-(2**53-1)})")
-    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
+    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"({2**53-1}<a)")
+    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "(0<a)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
 
