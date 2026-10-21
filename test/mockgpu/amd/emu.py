@@ -1862,6 +1862,16 @@ if hasattr(ir4.SOP1Op, 'S_BARRIER_SIGNAL'): _BARRIER_SOP1_OPS.add(ir4.SOP1Op.S_B
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
   ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
 
+def _lane_state(st: "WaveState", inst: Inst) -> tuple[int, int]:
+  """(EXEC mask, LDS bank conflict degree): distinct dword addresses per bank of 32, over active lanes, for DS ops."""
+  exec_mask = st._sgpr_mv[EXEC_LO.offset] | (st._sgpr_mv[EXEC_LO.offset + 1] << 32 if st.wave_size == 64 else 0)
+  if not isinstance(inst, (ir3.DS, ir4.DS)) or not hasattr(inst, 'addr') or re.search(r'_B(64|96|128)$', inst.op.name): return exec_mask, 1
+  base, off = inst.addr.offset - 256, getattr(inst, 'offset0', 0) | (getattr(inst, 'offset1', 0) << 8)
+  banks: dict[int, set[int]] = {}
+  for lane in range(st.wave_size):
+    if exec_mask >> lane & 1: banks.setdefault((a := (st._vgpr_mv[base * st.wave_size + lane] + off) >> 2) % 32, set()).add(a)
+  return exec_mask, max((len(x) for x in banks.values()), default=1)
+
 def _decode_at(pc: int, arch: str):
   """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
@@ -2027,10 +2037,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             break
           fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
           if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
+          lanes = _lane_state(st, inst) if tracing is not None else (0, 1)  # read before the instruction overwrites its address
           fxn((ctypes.c_uint64 * len(globals_list))(*[c_bufs[g] for g in globals_list]))
           if tracing is not None:
             inst_op = inst.op.value if hasattr(inst, 'op') else 0
-            sqtt_emit(tracing + wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, pc - lib)
+            sqtt_emit(tracing + wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, pc - lib,
+                      *lanes)
           if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
         else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
       # All waves have either hit barrier or endpgm — release barrier waves for next round

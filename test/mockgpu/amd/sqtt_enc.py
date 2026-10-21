@@ -75,6 +75,7 @@ def make_encoder():
   # VALU: issue -> exec 8 (9 shifts/fma, 6 no register read), result +5, per-wave queue of 13
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_EXEC_LAT_NOREAD, VALU_DEP_LAT, VALU_QUEUE = 8, 9, 6, 5, 13
   WMMA_LAT, WMMA_INFLIGHT = 34, 6  # a WMMA holds the pipe 34 cycles; issue stalls with 6 in flight
+  VALU_AFTER_LDS_WAIT = 2  # VALU right after a wait blocked on LDS executes 2 earlier
   TRANS_OCC, TRANS_DEP_LAT = 4, 10  # transcendental execs at least 4 apart, result +10
   # SALU and branches: exec +4, dependent +2, branch waits for its SCC/VCC producer, taken +10 (+20 into another line)
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN, BRANCH_NEW_LINE = 4, 2, 5, 10, 3, 20
@@ -133,15 +134,15 @@ def make_encoder():
     op = _mem_op(inst_type, op_name, bool(_regs(inst, ("saddr",))))
     return ("LDS" if issubclass(inst_type, _DS) else "VMEM" if op != InstOp.SALU else "SALU"), op
 
-  events: list[tuple[int, Inst|None, bool|None, int]] = []  # (wave_id, inst, branch_taken, pc); inst None = end of wave
+  events: list[tuple[int, Inst|None, bool|None, int, tuple[int, int]]] = []  # (wave_id, inst, branch_taken, pc, (exec, bank degree))
 
-  def emit(wave_id: int, inst: Inst, branch_taken: bool|None, pc: int):
+  def emit(wave_id: int, inst: Inst, branch_taken: bool|None, pc: int, exec_mask: int = -1, bank_degree: int = 1):
     """Record one executed instruction; timing is assigned later by schedule()."""
-    events.append((wave_id, inst, branch_taken, pc))
+    events.append((wave_id, inst, branch_taken, pc, (exec_mask, bank_degree)))
 
   def finish(wave_id: int):
     """Record the end of a wave."""
-    if any(e[0] == wave_id for e in events): events.append((wave_id, None, None, 0))
+    if any(e[0] == wave_id for e in events): events.append((wave_id, None, None, 0, (-1, 1)))
 
   def schedule() -> list[tuple[int, int, type[PacketType], dict]]:
     """Assign a cycle to every recorded instruction. Returns (cycle, seq, packet class, fields)."""
@@ -149,18 +150,22 @@ def make_encoder():
     def put(t: int, pkt_cls: type[PacketType], **kw): out.append((t, len(out), pkt_cls, kw))
     recs: dict[int, list[list[tuple[Inst|None, bool|None]]]] = {}  # wave -> barrier phases -> records
     pcs: dict[int, list[list[int]]] = {}  # same shape as recs: byte offset of each record in the code
-    for wave_id, inst, bt, pc in events:
+    lanes: dict[int, list[list[tuple[int, int]]]] = {}  # same shape: (exec mask, LDS bank conflict degree)
+    for wave_id, inst, bt, pc, ln in events:
       pcs.setdefault(wave_id, [[]])[-1].append(pc)
+      lanes.setdefault(wave_id, [[]])[-1].append(ln)
       phases = recs.setdefault(wave_id, [[]])
       phases[-1].append((inst, bt))
       if inst is not None and _classify(inst, bt)[0] == "BARRIER":
         phases.append([])
         pcs[wave_id].append([])
+        lanes[wave_id].append([])
     waves = sorted(recs)
     rank = {w: k for k, w in enumerate(waves)}  # wave id = workgroup * 64 + wave; placement goes by rank across workgroups
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
     st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
+                  early_valu=False, last_mem=None, lds_dst=set(),
                   wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0,
                   last_cls=None) for w in waves}
     valu_free, trans_free, unit, port_free = {0: 0, 2: 0}, {0: 0, 2: 0}, dict(lds=0), {}
@@ -178,7 +183,7 @@ def make_encoder():
     def lds_credits(sm: int, cycle: int) -> int:  # slots free in pairs at the second service's start (the first one alone)
       st_ = lds_starts[sm]
       return sum(1 for n in range(len(st_)) if (i := ((n + 1) | 1) - 1) < len(st_) and st_[i] <= cycle)
-    lds_q: list[tuple[int, int, bool, int, str|None]] = []  # (accept, wave, store, occupancy, load width), served by serve_lds
+    lds_q: list[tuple[int, int, bool, int, str|None, int]] = []  # (accept, wave, store, occupancy, load width, conflict cycles)
     ret_free, lds_last = {0: 0, 2: 0}, {}
 
     def serve_lds(upto: int):
@@ -190,6 +195,7 @@ def make_encoder():
         lds_q.remove(r)
         lds_starts[simd[r[1]]].append(t)
         unit["lds"] = t + r[3]
+        t += r[5]
         if r[2]: st[r[1]]["lgkm"].append(t + LDS_RET + 2)
         else:  # loads return their data one after another per SIMD
           extra, beat = LDS_RET_WIDE[r[4]]
@@ -249,6 +255,7 @@ def make_encoder():
         if "WAITCNT" in _name(inst):
           for q, n in zip((s["lgkm"], s["vm"]), _waits(inst)): del q[:max(0, len(q) - n)]
           if not s["blocked"]: s["ready"] = cycle + WAITCNT_FREE_PENALTY
+          s["early_valu"] = s["blocked"] and s["last_mem"] == "LDS"  # an LDS return is known ahead: the next VALU starts early
         s["blocked"] = False
         # s_nop N / s_sleep N hold the wave; the token is stamped when they end
         hold = inst.simm16 & 0xf if _name(inst) == "S_NOP" else SLEEP_CYCLES * (inst.simm16 & 0x7f) if _name(inst) == "S_SLEEP" else 0
@@ -256,6 +263,8 @@ def make_encoder():
         if primary: put(cycle + hold, IMMEDIATE, wave=sl)
       elif cls == "VALU":
         lat = VALU_EXEC_LAT_NOREAD if not reads else VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT
+        if s["early_valu"] and not reads & s["lds_dst"]: lat = max(VALU_EXEC_LAT_NOREAD, lat - VALU_AFTER_LDS_WAIT)
+        s["early_valu"] = False
         base = cycle + lat
         wmma = _name(inst).startswith("V_WMMA")
         ready, trans = s["wmma_ready"] if wmma else s["reg_ready"], _port(op) == "TRANS"
@@ -285,20 +294,25 @@ def make_encoder():
         last = lds_last.get(simd[w])  # another wave's request on this SIMD within 3 cycles: accepted late (sync s0w1 store, issue + 8)
         acc = LDS_ACCEPT_LATE if last is not None and last[0] != w and store and cycle - last[1] < 3 else LDS_ACCEPT
         lds_last[simd[w]] = (w, cycle)
-        lds_q.append((cycle + acc, w, store, occ, width))
+        if not store: s["lds_dst"] |= writes
+        conflict = lanes[w][ph][s["i"] - 1][1] - 1  # bank conflicts serialize the access, the data follows it
+        lds_q.append((cycle + acc, w, store, occ + conflict, width, conflict))
         lds_issued[simd[w]] += 1
         s["lds_wait"] += 1
         s["mem_issue"] = cycle
+        s["last_mem"] = cls
         put(cycle, INST, wave=sl, op=op if primary else InstOp(0x50 + occ - 1))
       elif cls == "VMEM":
         store = "STORE" in _name(inst)
         (s["vs"] if store else s["vm"]).append(cycle + (STORE_ACK if store else VMEM_LOAD_LAT))
         s["mem_issue"] = cycle
+        s["last_mem"] = cls
         put(cycle, INST, wave=sl, op=op if primary else InstOp(0x5a + _cycles(op) - 1))
       else:
         if cls == "SMEM":
           s["lgkm"].append(cycle + SMEM_LAT)
           s["mem_issue"] = cycle
+          s["last_mem"] = cls
         if cls == "SALU":
           s["salu_issue"] = s["salu_exec"] = max([cycle + SALU_EXEC_LAT] + [s["reg_ready"].get(r, 0) for r in reads if r[0] == "s"])
           s["salu_issue"] = cycle
