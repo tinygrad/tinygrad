@@ -517,11 +517,16 @@ class _Ctx:
     # Index at PC_LO, then cast to uint64 ptr and load
     return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
 
+  def wpc(self, val:UOp) -> UOp:
+    if val.op is Ops.WHERE: self.branch_cond = val.src[0]
+    if self.inst_addr is not None: return []
+    lo, hi = _split64(val.cast(dtypes.uint64))
+    return [self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)]
+
   def inc_pc(self) -> list[UOp]:
     """Increment PC by instruction size in bytes. Returns [store]."""
     new_pc = self.rpc() + UOp.const(self.inst_size, dtypes.uint64)
-    lo, hi = _split64(new_pc)
-    return [self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)]
+    return self.wpc(new_pc)
 
   def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
     """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
@@ -540,8 +545,7 @@ class _Ctx:
         else: stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.extend(self.wmask(_c(VCC_LO.offset), val))
       elif dest.startswith('PC'):  # S_SETPC/S_SWAPPC jump: write PC directly (caller skips inc_pc)
-        lo, hi = _split64(val.cast(dtypes.uint64))
-        stores.extend([self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)])
+        return UOp.sink(*ctx.wpc(val))
     return stores
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp | int], sdst_reg: UOp, sdst_size: int) -> UOp:
@@ -670,8 +674,7 @@ class _Ctx:
 def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
-    return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(0xFFFFFFFF, dtypes.uint32)),
-                          ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(0xFFFFFFFF, dtypes.uint32)))
+    return UOp.sink(*ctx.wpc(UOp.const(0xFFFFFFFFFFFFFFFF, dtypes.uint64)))
   # S_BARRIER: advance PC past the barrier instruction. The execution loop detects barriers before executing and handles synchronization.
   if inst.op in _BARRIER_OPS: return UOp.sink(*ctx.inc_pc())
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
@@ -685,10 +688,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
             'VCCZ': vcc.eq(UOp.const(0, vcc.dtype)).cast(dtypes.uint32),
             'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
-      if dest.startswith('PC'):
-        if val.op is Ops.WHERE: ctx.branch_cond = val.src[0]
-        lo, hi = _split64(val.cast(dtypes.uint64))
-        return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
+      if dest.startswith('PC'): return UOp.sink(*ctx.wpc(val))
   return UOp.sink(*ctx.inc_pc())
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:

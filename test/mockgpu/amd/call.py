@@ -44,10 +44,6 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int
   return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32))
                              for i,v in dict(initial).items()))
 
-def pc_index(idx:int) -> UPat:
-  reg, null = UPat.const(idx).cast(), UPat.const(124).cast()
-  return UPat.any(reg, reg.ne(null).where(reg, UPat.const(Invalid)))
-
 def move_const_idxs(call:UOp) -> UOp|None:
   idxs = dedup(u.src[1] for u in call.body.toposort() if u.op is Ops.INDEX and u.src[0].op is Ops.PARAM and u.src[0].arg.name == "vmem"
                and u.src[1].op is Ops.CONST)
@@ -56,9 +52,6 @@ def move_const_idxs(call:UOp) -> UOp|None:
   return call.replace(src=(call.body.substitute(rep, walk=True), *call.src[1:], *idxs))
 
 pm_asm_call = PatternMatcher([
-  # remove PC from CALL body
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.PARAM, name="buf").index(UPat.any(pc_index(PC_LO_IDX), pc_index(PC_HI_IDX))),), allow_any_len=True),
-   lambda buf: UOp(Ops.NOOP) if buf.arg.name == "sgpr" else None),
   # move CONST outside CALL body
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), move_const_idxs),
 ])
