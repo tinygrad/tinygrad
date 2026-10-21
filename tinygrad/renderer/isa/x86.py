@@ -452,7 +452,7 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
@@ -467,7 +467,7 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
