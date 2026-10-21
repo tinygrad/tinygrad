@@ -43,7 +43,7 @@ def wave_deltas(blob:bytes) -> list[list[tuple[str, int]]]:
     elif isinstance(p, (INST, VALUINST, IMMEDIATE)) and p.wave in last:
       kind = p.op.name if isinstance(p, INST) else type(p).__name__
       if kind.startswith("OTHER_"): continue
-      out[p.wave].append((kind.replace("SGMEM_RD_2", "SGMEM_RD_1"), p._time - last[p.wave]))
+      out[p.wave].append((kind, p._time - last[p.wave]))
       last[p.wave] = p._time
     elif isinstance(p, WAVEEND) and p.wave in last: out[p.wave].append(("WAVEEND", p._time - last.pop(p.wave)))
   return [s for _, s in sorted(out.items()) if s]

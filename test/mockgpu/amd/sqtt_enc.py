@@ -56,13 +56,13 @@ def make_encoder():
     if _VALUT_4_RE.search(op_name): return InstOp.VALUT_4
     return None
 
-  def _mem_op(t: type[Inst], op_name: str) -> InstOp:
+  def _mem_op(t: type[Inst], op_name: str, saddr: bool) -> InstOp:  # saddr: SGPR base, else 64-bit VGPR address
     is_store = "STORE" in op_name
     if issubclass(t, _DS):  # stores: one cycle plus one per dword (b32 -> LDS_WR_2, b64 -> LDS_WR_3)
       if not is_store: return InstOp.LDS_RD
       m = re.search(r'_B(\d+)$', op_name)
       return InstOp[f"LDS_WR_{min(5, 1 + max(1, int(m.group(1)) // 32 if m else 1))}"]
-    if issubclass(t, _GLOBAL): return InstOp.SGMEM_WR_2 if is_store else InstOp.SGMEM_RD_1
+    if issubclass(t, _GLOBAL): return InstOp.SGMEM_WR_2 if is_store else InstOp.SGMEM_RD_1 if saddr else InstOp.SGMEM_RD_2
     if issubclass(t, _FLAT) or issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
 
@@ -114,7 +114,7 @@ def make_encoder():
       return "SALU", InstOp.SALU
     if issubclass(inst_type, _VALU): return "VALU", _valu_op(op_name)
     if issubclass(inst_type, _SMEM): return "SMEM", InstOp.SMEM_RD
-    op = _mem_op(inst_type, op_name)
+    op = _mem_op(inst_type, op_name, bool(_regs(inst, ("saddr",))))
     return ("LDS" if issubclass(inst_type, _DS) else "VMEM" if op != InstOp.SALU else "SALU"), op
 
   events: list[tuple[int, Inst|None, bool|None]] = []  # (wave_id, inst, branch_taken); inst None = end of wave
