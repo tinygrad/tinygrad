@@ -38,6 +38,7 @@ class Estimates:
     def mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
+
     # computes estimates within a given caller scope, inline calls get resolved recursively
     def process_body(uops:UOp|list[UOp], caller_mult:sint, bindings:dict[UOp,UOp]={}):
       flops: sint = 0
@@ -57,7 +58,7 @@ class Estimates:
         if u.op is Ops.CALL:
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
-          inline = process_body(u.body, mult, child_bindings)
+          inline = process_body(u.body, mult, child_bindings) # noqa: F821
           for (buf,op),accessed in inline[2].items():
             mem[(buf,op)] = smin(mem.get((buf,op),0) + accessed, buf.max_numel() * buf.dtype.itemsize)
           flops += inline[0]; lds += inline[1]
@@ -74,7 +75,7 @@ class Estimates:
     uops = list(sink.toposort(enter_calls=False))
     special_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
     flops,lds,mem = process_body(uops, special_mult)
-    del process_body
+    del process_body # flush cache
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
