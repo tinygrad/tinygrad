@@ -20,8 +20,8 @@ def make_encoder():
   from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
   from tinygrad.runtime.autogen.amd.cdna import ins as irc
   import re
-  from tinygrad.helpers import ContextVar
-  SQTT_SIMD_PARITY = ContextVar("SQTT_SIMD_PARITY", 0)  # which SIMD of the pair gets wave 0: the dispatcher's round robin carries over
+  from tinygrad.helpers import getenv
+  SIMD_PARITY = getenv("SQTT_SIMD_PARITY", 0)  # which SIMD of the pair gets wave 0: the dispatcher's round robin carries over
 
   def _kinds(*names: str) -> tuple[type[Inst], ...]:
     return tuple(getattr(m, n) for m in (ir3, ir4, irc) for n in names if hasattr(m, n))
@@ -140,7 +140,7 @@ def make_encoder():
       phases[-1].append((inst, bt))
       if inst is not None and _classify(inst, bt)[0] == "BARRIER": phases.append([])
     waves = sorted(recs)
-    simd, slot = {w: 2 * ((w + SQTT_SIMD_PARITY.value) % 2) for w in waves}, {w: w // 2 for w in waves}
+    simd, slot = {w: 2 * ((w + SIMD_PARITY) % 2) for w in waves}, {w: w // 2 for w in waves}
     st = {w: dict(i=0, ready=w + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], pend=[],
                   last_cls=None) for w in waves}
