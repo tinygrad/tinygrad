@@ -74,6 +74,8 @@ def make_encoder():
   FETCH_LAT, END_LAT, ICACHE_LINE_LAT = 416, 16, 530
   # VALU: issue -> exec 8 (9 shifts/fma, 6 no register read), result +5, per-wave queue of 13
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_EXEC_LAT_NOREAD, VALU_DEP_LAT, VALU_QUEUE = 8, 9, 6, 5, 13
+  WMMA_LAT, WMMA_INFLIGHT = 34, 6  # a WMMA holds the pipe 34 cycles; issue stalls with 6 in flight
+  TRANS_OCC, TRANS_DEP_LAT = 4, 10  # transcendental execs at least 4 apart, result +10
   # SALU and branches: exec +4, dependent +2, branch waits for its SCC/VCC producer, taken +10 (+20 into another line)
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN, BRANCH_NEW_LINE = 4, 2, 5, 10, 3, 20
   # crossings between units: VALU-written SGPR/VCC read by SALU at exec + 9, VALU after SALU exec + 5, s_nop after ALU + 3
@@ -82,11 +84,15 @@ def make_encoder():
   MEM_AFTER_EXEC, SMEM_AFTER_SALU, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 9, 9, 3, 4, 12
   # LDS: one server, accept +3 (+8 for a store racing another wave's on the same SIMD), 8 queued per SIMD
   LDS_ACCEPT, LDS_ACCEPT_LATE, LDS_RET, LDS_QUEUE = 3, 8, 28, 8
-  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}  # load return: (extra latency, cycles on the return path)
+  # load return per width: (extra latency, cycles on the return path)
+  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}
   # DRAM: rough, not exact targets
   SMEM_LAT, VMEM_LOAD_LAT, STORE_ACK = 880, 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
   _REG = re.compile(r'([vs])\[(\d+)(?::(\d+))?\]')
+
+  def _port(op: InstOp|None) -> str:  # transcendentals issue on their own port, every 4 cycles, beside plain VALU
+    return "TRANS" if op is not None and op.name.startswith("VALUT_") else "VALU"
 
   def _cycles(op: InstOp) -> int:
     """Issue cycles encoded in the op name (LDS_WR_2 -> 2); 1 when the name carries none."""
@@ -154,9 +160,10 @@ def make_encoder():
     rank = {w: k for k, w in enumerate(waves)}  # wave id = workgroup * 64 + wave; placement goes by rank across workgroups
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
     st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
-                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[], vsgpr_exec={}, pend=[], last_issue=0,
+                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
+                  wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0,
                   last_cls=None) for w in waves}
-    valu_free, unit, port_free = {0: 0, 2: 0}, dict(lds=0), {}
+    valu_free, trans_free, unit, port_free = {0: 0, 2: 0}, {0: 0, 2: 0}, dict(lds=0), {}
     # instruction cache: 64 B lines fetched in aligned blocks of ahead + 1 lines (s_set_inst_prefetch_distance, default 3);
     # a miss fetches the line's block, entering the second half of a block prefetches the next one
     icache = dict(ahead=3, ready={line: FETCH_LAT for line in range(4)})
@@ -198,6 +205,8 @@ def make_encoder():
                          "srcx0", "vsrcx1", "srcy0", "vsrcy1"))
       writes = _regs(inst, ("vdst", "sdst", "vdstx", "vdsty"))
       need = max(cycle, line_ready(pcs[w][ph][s["i"]] // 64, cycle))
+      if cls == "VALU" and len(busy_wmma := [d for d in s["wmma_done"] if d - 1 > cycle]) >= WMMA_INFLIGHT:
+        need = max(need, min(busy_wmma) - 1)
       if cls == "VALU" and len(s["valu_execs"]) >= VALU_QUEUE:  # the per-wave VALU queue holds 13; a slot frees at exec + 4
         need = max(need, s["valu_execs"][-VALU_QUEUE] + 4)
       if cls == "LDS" and lds_issued[simd[w]] - lds_credits(simd[w], cycle) >= LDS_QUEUE: need = max(need, cycle + 1)
@@ -248,17 +257,26 @@ def make_encoder():
       elif cls == "VALU":
         lat = VALU_EXEC_LAT_NOREAD if not reads else VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT
         base = cycle + lat
-        ex = max([base, valu_free[simd[w]]] + [s["reg_ready"].get(r, 0) for r in reads])
+        wmma = _name(inst).startswith("V_WMMA")
+        ready, trans = s["wmma_ready"] if wmma else s["reg_ready"], _port(op) == "TRANS"
+        ex = max([base, valu_free[simd[w]], trans_free[simd[w]] if trans else 0] + [ready.get(r, 0) for r in reads])
+        if trans: trans_free[simd[w]] = ex + TRANS_OCC
         # accumulating in place: the forwarded register is also the destination and another source shares its VGPR bank
         if ex == base and any(s["reg_ready"].get(d) == ex and any(o != d and o[0] == "v" and int(o[1:]) % 4 == int(d[1:]) % 4
                                                                   for o in reads) for d in writes & reads if d[0] == "v"): ex += 1
         valu_free[simd[w]], s["valu_exec"] = ex + 1, ex
+        if wmma:  # holds the pipe WMMA_LAT cycles; its exec token marks completion
+          ex += WMMA_LAT
+          valu_free[simd[w]], s["valu_exec"] = ex + 1, ex
+          s["wmma_done"].append(ex)
         s["valu_execs"].append(ex)
         for r in writes | ({"s106"} if re.search(r"V_CMP|V_ADD_CO|V_SUB_CO", _name(inst)) else set()):
           if r[0] == "s": s["vsgpr_exec"][r] = ex
         s["valu_issues"].append(cycle)
-        if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], "VALU")] = cycle + _cycles(op)
-        for r in writes: s["reg_ready"][r], s["reg_issue"][r] = ex + VALU_DEP_LAT, cycle
+        if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], _port(op))] = cycle + _cycles(op)
+        for r in writes:
+          s["reg_ready"][r], s["reg_issue"][r] = ex + (2 if wmma else TRANS_DEP_LAT if trans else VALU_DEP_LAT), cycle
+          s["wmma_ready"][r] = ex + 1  # a WMMA takes its operands one cycle after the producer, VALU or WMMA
         if primary: put(cycle, VALUINST, wave=sl) if op is None else put(cycle, INST, wave=sl, op=op)
       elif cls == "LDS":
         store = "STORE" in _name(inst)
@@ -320,7 +338,8 @@ def make_encoder():
               s["i"] += 1
           else:
             cls, op = _classify(inst, bt)
-            if cycle >= s["ready"] and cycle >= port_free.get((simd[w], cls), 0) and (simd[w], cls) not in busy \
+            port = _port(op) if cls == "VALU" else cls
+            if cycle >= s["ready"] and cycle >= port_free.get((simd[w], port), 0) and (simd[w], cls) not in busy \
                  and issue(w, cls, op, inst, cycle): busy.add((simd[w], cls))
           if s["i"] >= len(recs[w][ph]): live.remove(w)
         cycle = max(cycle + 1, min((st[w]["ready"] for w in live), default=cycle + 1))
