@@ -1,6 +1,7 @@
 # SQTT trace encoder for the emulator (the decoder lives in tinygrad/renderer/amd/sqtt.py).
 # run_asm emits packets inline as instructions execute; finished traces end up in emu.sqtt_traces.
 from __future__ import annotations
+from typing import Any
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd.sqtt import (_build_decode_tables, PACKET_TYPES_RDNA3, PacketType, InstOp,
                                         LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, IMMEDIATE_MASK, VALUINST, TS_DELTA_OR_MARK)
@@ -109,7 +110,7 @@ def make_encoder():
 
   def _waits(inst: Inst) -> tuple[int, int]:
     """(lgkmcnt, vmcnt) targets of s_waitcnt or the SOPK s_waitcnt_<counter> form (null sdst: the immediate is the count)."""
-    name, v = _name(inst), inst.simm16
+    name, v = _name(inst), getattr(inst, "simm16")
     if name == "S_WAITCNT_LGKMCNT": return v & 0x3f, 0x3f
     if name == "S_WAITCNT_VMCNT": return 0x3f, v & 0x3f
     if name.startswith("S_WAITCNT_"): return 0x3f, 0x3f
@@ -117,7 +118,7 @@ def make_encoder():
 
   def _name(inst: Inst) -> str:
     """Op name; a VOPD pair is named by both halves."""
-    return inst.op.name if hasattr(inst, 'op') else f"{inst.opx.name}::{inst.opy.name}" if hasattr(inst, 'opx') else ""
+    return inst.op.name if hasattr(inst, 'op') else f"{getattr(inst, 'opx').name}::{getattr(inst, 'opy').name}" if hasattr(inst, 'opx') else ""
 
   def _classify(inst: Inst, branch_taken: bool|None) -> tuple[str, InstOp|None]:
     """Issue class and INST op of one instruction; class NONE is not traced."""
@@ -163,15 +164,17 @@ def make_encoder():
     waves = sorted(recs)
     rank = {w: k for k, w in enumerate(waves)}  # wave id = workgroup * 64 + wave; placement goes by rank across workgroups
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
-    st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
+    st: dict[int, dict[str, Any]] = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None,
+                  mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
                   early_valu=False, last_mem=None, lds_dst=set(), valu_sread={},
                   wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0, salu_gate=False,
                   last_cls=None) for w in waves}
-    valu_free, trans_free, unit, port_free = {0: 0, 2: 0}, {0: 0, 2: 0}, dict(lds=0), {}
+    valu_free, trans_free, unit = {0: 0, 2: 0}, {0: 0, 2: 0}, dict(lds=0)
+    port_free: dict[tuple[int, str], int] = {}
     # instruction cache: 64 B lines fetched in aligned blocks of ahead + 1 lines (s_set_inst_prefetch_distance, default 3);
     # a miss fetches the line's block, entering the second half of a block prefetches the next one
-    icache = dict(ahead=3, ready={line: FETCH_LAT for line in range(4)})
+    icache: dict[str, Any] = dict(ahead=3, ready={line: FETCH_LAT for line in range(4)})
     def line_ready(line: int, cycle: int) -> int:
       n = icache["ahead"] + 1
       def fetch(block: int):
@@ -179,12 +182,13 @@ def make_encoder():
       if line not in icache["ready"]: fetch(line // n)
       if line % n >= n // 2: fetch(line // n + 1)
       return icache["ready"][line]
-    lds_issued, lds_starts = {0: 0, 2: 0}, {0: [], 2: []}  # per SIMD: requests issued, service start times in order
+    lds_issued, lds_starts = {0: 0, 2: 0}, {0: list[int](), 2: list[int]()}  # per SIMD: requests issued, service start times in order
     def lds_credits(sm: int, cycle: int) -> int:  # slots free in pairs at the second service's start (the first one alone)
       st_ = lds_starts[sm]
       return sum(1 for n in range(len(st_)) if (i := ((n + 1) | 1) - 1) < len(st_) and st_[i] <= cycle)
     lds_q: list[tuple[int, int, bool, int, str|None, int]] = []  # (accept, wave, store, occupancy, load width, conflict cycles)
-    ret_free, lds_last = {0: 0, 2: 0}, {}
+    ret_free: dict[int, float] = {0: 0, 2: 0}
+    lds_last: dict[int, tuple[int, int]] = {}
 
     def serve_lds(upto: int):
       """Start every queued LDS request whose service slot is decidable by cycle upto (accept = issue + LDS_ACCEPT)."""
@@ -198,7 +202,7 @@ def make_encoder():
         t += r[5]
         if r[2]: st[r[1]]["lgkm"].append(t + LDS_RET + 2)
         else:  # loads return their data one after another per SIMD
-          extra, beat = LDS_RET_WIDE[r[4]]
+          extra, beat = LDS_RET_WIDE[r[4] or "32"]
           ret_free[simd[r[1]]] = done = max(t + LDS_RET + extra, ret_free[simd[r[1]]] + beat)
           st[r[1]]["lgkm"].append(math.ceil(done))
         st[r[1]]["lds_wait"] -= 1
@@ -257,7 +261,7 @@ def make_encoder():
       elif _name(inst) == "S_NOP" and s["salu_exec"] is not None: s["salu_gate"] = True
       elif cls == "VALU": s["salu_gate"] = False
       if cls == "IMM":
-        if _name(inst) == "S_SET_INST_PREFETCH_DISTANCE": icache["ahead"] = inst.simm16 & 3
+        if _name(inst) == "S_SET_INST_PREFETCH_DISTANCE": icache["ahead"] = getattr(inst, "simm16") & 3
         if "WAITCNT" in _name(inst):
           pending = bool(s["lgkm"] or s["vm"] or s["lds_wait"])  # a wait with nothing outstanding costs nothing extra
           for q, n in zip((s["lgkm"], s["vm"]), _waits(inst)): del q[:max(0, len(q) - n)]
@@ -265,7 +269,8 @@ def make_encoder():
           s["early_valu"] = s["blocked"] and s["last_mem"] == "LDS"  # an LDS return is known ahead: the next VALU starts early
         s["blocked"] = False
         # s_nop N / s_sleep N hold the wave; the token is stamped when they end
-        hold = inst.simm16 & 0xf if _name(inst) == "S_NOP" else SLEEP_CYCLES * (inst.simm16 & 0x7f) if _name(inst) == "S_SLEEP" else 0
+        imm16 = getattr(inst, "simm16")
+        hold = imm16 & 0xf if _name(inst) == "S_NOP" else SLEEP_CYCLES * (imm16 & 0x7f) if _name(inst) == "S_SLEEP" else 0
         if hold: s["ready"] = max(s["ready"], cycle + hold + 1)
         if primary: put(cycle + hold, IMMEDIATE, wave=sl)
       elif cls == "VALU":
@@ -291,7 +296,7 @@ def make_encoder():
         for r in writes | ({"s106"} if re.search(r"V_CMP|V_ADD_CO|V_SUB_CO", _name(inst)) else set()):
           if r[0] == "s": s["vsgpr_exec"][r] = ex
         s["valu_issues"].append(cycle)
-        if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], _port(op))] = cycle + _cycles(op)
+        if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], _port(op))] = cycle + (_cycles(op) if op else 1)
         for r in writes:
           s["reg_ready"][r], s["reg_issue"][r] = ex + (2 if wmma else TRANS_DEP_LAT if trans else VALU_DEP_LAT), cycle
           s["wmma_ready"][r] = ex + 1  # a WMMA takes its operands one cycle after the producer, VALU or WMMA
@@ -300,7 +305,7 @@ def make_encoder():
         if primary: put(cycle, IMMEDIATE, wave=sl)
       elif cls == "LDS":
         store = "STORE" in _name(inst)
-        occ = _cycles(op) if store else 1
+        occ = (_cycles(op) if op else 1) if store else 1
         width = (m.group(1) if (m := re.search(r'_B(32|64|96|128)$', _name(inst))) else "32") if not store else None
         last = lds_last.get(simd[w])  # another wave's request on this SIMD within 3 cycles: accepted late (sync s0w1 store, issue + 8)
         acc = LDS_ACCEPT_LATE if last is not None and last[0] != w and store and cycle - last[1] < 3 else LDS_ACCEPT
@@ -318,7 +323,7 @@ def make_encoder():
         (s["vs"] if store else s["vm"]).append(cycle + (STORE_ACK if store else VMEM_LOAD_LAT))
         s["mem_issue"] = cycle
         s["last_mem"] = cls
-        put(cycle, INST, wave=sl, op=op if primary else InstOp(0x5a + _cycles(op) - 1))
+        put(cycle, INST, wave=sl, op=op if primary else InstOp(0x5a + (_cycles(op) if op else 1) - 1))
       else:
         if cls == "SMEM":
           s["lgkm"].append(cycle + SMEM_LAT)
@@ -352,7 +357,7 @@ def make_encoder():
           s = st[w]
           while (rec := recs[w][ph][s["i"]])[0] is not None and _classify(*rec)[0] == "NONE":  # hints cost no issue slot
             if _name(rec[0]) == "S_DELAY_ALU":  # id0 bits 3:0 -> next instruction; id1 bits 10:7 -> `skip` (6:4) later
-              v = rec[0].simm16  # a newer s_delay_alu replaces the pending one
+              v = getattr(rec[0], "simm16")  # a newer s_delay_alu replaces the pending one
               s["pend"] = [[0, v & 0xf]] + ([[(v >> 4) & 7, (v >> 7) & 0xf]] if (v >> 7) & 0xf else [])
               if s["last_cls"] == "IMM": s["ready"] = max(s["ready"], cycle + 1)
             s["i"] += 1
@@ -375,7 +380,8 @@ def make_encoder():
     nibbles: list[int] = []
     _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
     now = 0
-    recs, imm = [], {}
+    recs: list[tuple[int, int, type[PacketType], dict]] = []
+    imm: dict[int, tuple[int, int, type[PacketType], dict]] = {}
     for r in sorted(schedule(), key=lambda r: (r[0], r[1])):  # waits of several waves done in one cycle share an IMMEDIATE_MASK
       if r[2] is not IMMEDIATE: recs.append(r)
       elif r[0] in imm: imm[r[0]][3]["mask"] |= 1 << r[3]["wave"]
