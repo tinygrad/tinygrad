@@ -166,8 +166,12 @@ def make_encoder():
         s["blocked"] = False
         if primary: put(cycle, IMMEDIATE, wave=sl)
       elif cls == "VALU":
-        ex = max([cycle + (VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT), valu_free[simd[w]]] +
-                 [s["reg_ready"].get(r, 0) for r in reads])
+        base = cycle + (VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT)
+        ex = max([base, valu_free[simd[w]]] + [s["reg_ready"].get(r, 0) for r in reads])
+        # a source forwarded the cycle its producer writes back collides with another source read from the same VGPR bank
+        vreads = [r for r in reads if r[0] == "v"]
+        if ex == base and any(s["reg_ready"].get(f) == ex and any(o != f and int(o[1:]) % 4 == int(f[1:]) % 4 for o in vreads)
+                              for f in vreads): ex += 1
         valu_free[simd[w]], s["valu_exec"] = ex + 1, ex
         s["valu_issues"].append(cycle)
         if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], "VALU")] = cycle + _cycles(op)
