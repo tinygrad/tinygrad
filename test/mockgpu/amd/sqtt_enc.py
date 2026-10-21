@@ -166,7 +166,7 @@ def make_encoder():
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
     st: dict[int, dict[str, Any]] = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None,
                   mem_issue=None, reg_ready={},
-                  reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
+                  lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
                   early_valu=False, last_mem=None, lds_dst=set(), valu_sread={},
                   wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0, salu_gate=False,
                   last_cls=None) for w in waves}
@@ -298,7 +298,7 @@ def make_encoder():
         s["valu_issues"].append(cycle)
         if op is not None and op.name.startswith(("VALUB_", "VALUT_")): port_free[(simd[w], _port(op))] = cycle + (_cycles(op) if op else 1)
         for r in writes:
-          s["reg_ready"][r], s["reg_issue"][r] = ex + (2 if wmma else TRANS_DEP_LAT if trans else VALU_DEP_LAT), cycle
+          s["reg_ready"][r] = ex + (2 if wmma else TRANS_DEP_LAT if trans else VALU_DEP_LAT)
           s["wmma_ready"][r] = ex + 1  # a WMMA takes its operands one cycle after the producer, VALU or WMMA
         if primary: put(cycle, VALUINST, wave=sl) if op is None else put(cycle, INST, wave=sl, op=op)
       elif exec0:
@@ -330,8 +330,7 @@ def make_encoder():
           s["mem_issue"] = cycle
           s["last_mem"] = cls
         if cls == "SALU":
-          s["salu_issue"] = s["salu_exec"] = max([cycle + SALU_EXEC_LAT] + [s["reg_ready"].get(r, 0) for r in reads if r[0] == "s"])
-          s["salu_issue"] = cycle
+          s["salu_issue"], s["salu_exec"] = cycle, max([cycle + SALU_EXEC_LAT] + [s["reg_ready"].get(r, 0) for r in reads if r[0] == "s"])
           for r in writes: s["reg_ready"][r] = s["salu_exec"] + SALU_DEP_LAT
         if cls == "BR":
           s["ready"] = cycle + (BRANCH_TAKEN if op == InstOp.JUMP else BRANCH_NOT_TAKEN)
