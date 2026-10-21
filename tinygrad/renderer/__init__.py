@@ -13,6 +13,18 @@ def with_storage(x:UOp, dt:DType) -> UOp:
   if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
+def idx_alu(uops:list[UOp]):
+  excluded: set[UOp] = set()
+  for u in uops:
+    if u.op in {Ops.INDEX, Ops.SHRINK}:
+      excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+  return excluded
+
+@functools.cache
+def mults(ranges:tuple[UOp,...]) -> sint:
+  mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
+  return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
+
 @dataclass(frozen=True)
 class Estimates:
   # number of FLOPS used in the Kernel
@@ -25,27 +37,12 @@ class Estimates:
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
   def from_uops(sink:UOp, ignore_indexing=False) -> Estimates:
-    flops: sint = 0
-    lds: sint = 0
-    mem: dict[tuple[UOp, Ops], sint] = {}
-    uops = list(sink.toposort(enter_calls=False))
-
-    def idx_alu(uops:list[UOp]):
-      excluded: set[UOp] = set()
-      for u in uops:
-        if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
-      return excluded
-
-    @functools.cache
-    def mults(ranges:tuple[UOp,...]) -> sint:
-      mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype is not dtypes.void])
-      return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
-
     # computes estimates within a given caller scope, inline calls get resolved recursively
-    def process_body(u:UOp, caller_mult:sint, bindings:dict[UOp,UOp]={}):
-      nonlocal flops, lds, mem
-      uops = list(u.toposort(enter_calls=False))
+    def process_body(uops:UOp|list[UOp], caller_mult:sint, bindings:dict[UOp,UOp]={}):
+      flops: sint = 0
+      lds: sint = 0
+      mem: dict[tuple[UOp, Ops], sint] = {}
+      uops = uops if isinstance(uops, list) else list(uops.toposort(enter_calls=False))
       excluded = idx_alu(uops) if ignore_indexing else set()
       rcache: dict[tuple[UOp,...], tuple[UOp,...]] = {}
       for u in uops:
@@ -59,7 +56,8 @@ class Estimates:
         if u.op is Ops.CALL:
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
-          process_body(u.body, mult, child_bindings)
+          inline = process_body(u.body, mult, child_bindings)
+          flops += inline[0]; lds += inline[1]; mem |= inline[2]
         elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
           lds += u.max_numel() * u.dtype.itemsize * mult
         elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
@@ -68,9 +66,11 @@ class Estimates:
           flops += (mult * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
         elif u.op is Ops.WMMA and u not in excluded:
           flops += 2 * prod(u.arg[0]) // u.arg[2] * mult
+      return (flops,lds,mem)
 
+    uops = list(sink.toposort(enter_calls=False))
     special_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
-    process_body(sink, special_mult)
+    flops,lds,mem = process_body(uops, special_mult)
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
