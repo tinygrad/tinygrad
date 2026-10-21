@@ -268,8 +268,6 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
-pm_remove_range = PatternMatcher([(UPat((Ops.RANGE, Ops.END), name="x"), lambda ctx,x: ctx.get(x))])
-
 def remove_range(sink:UOp):
   uops = list(sink.toposort())
   loop_ids = itertools.count(max((aid for u in uops if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
@@ -294,7 +292,7 @@ def remove_range(sink:UOp):
       inc = acc.after(acc[0].store(acc.after(body)[0].load() + 1))
       end = body.backedge(loop, inc[0].load() < u.src[0])
       replacements[e] = end if gate is None else UOp(Ops.ENDIF, src=(gate, end))
-  return graph_rewrite(sink, pm_remove_range+pm_cast_const, ctx=replacements, bottom_up=True, name="remove range")
+  return graph_rewrite(sink.substitute(replacements, name="remove range"), pm_cast_const)
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
