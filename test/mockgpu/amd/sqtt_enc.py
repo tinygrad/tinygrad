@@ -166,7 +166,7 @@ def make_encoder():
     st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
                   early_valu=False, last_mem=None, lds_dst=set(),
-                  wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0,
+                  wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0, salu_gate=False,
                   last_cls=None) for w in waves}
     valu_free, trans_free, unit, port_free = {0: 0, 2: 0}, {0: 0, 2: 0}, dict(lds=0), {}
     # instruction cache: 64 B lines fetched in aligned blocks of ahead + 1 lines (s_set_inst_prefetch_distance, default 3);
@@ -230,7 +230,7 @@ def make_encoder():
           need = max(need, s["valu_issues"][-n] + VALU_DEP_LAT)
         elif 9 <= dep <= 11 and s["salu_issue"] is not None: need = max(need, s["salu_issue"] + 1 + dep - 8)
       if cls == "IMM" and s["last_cls"] in ("SALU", "VALU"): need = max(need, s["last_issue"] + IMM_AFTER_ALU)
-      if cls == "VALU" and s["salu_exec"] is not None: need = max(need, s["salu_exec"] + VALU_AFTER_SALU)
+      if cls == "VALU" and s["salu_gate"]: need = max(need, s["salu_exec"] + VALU_AFTER_SALU)  # SALU wrote EXEC, or an s_nop followed it
       if cls == "IMM":
         if s["mem_issue"] is not None: need = max(need, s["mem_issue"] + IMM_AFTER_MEM)
         if "WAITCNT" in _name(inst):
@@ -246,15 +246,20 @@ def make_encoder():
       if need > cycle:
         s["ready"] = need
         return False
+      exec0 = cls in ("LDS", "VMEM") and lanes[w][ph][s["i"]][0] == 0  # no active lane: traced as an immediate, no memory access
       s["i"] += 1
       s["ready"] = cycle + 1
       s["pend"] = [[c - 1, d] for c, d in s["pend"] if c > 0]
       s["last_cls"], s["last_issue"] = cls, cycle
+      if cls == "SALU": s["salu_gate"] = "EXEC" in repr(getattr(inst, "sdst", ""))
+      elif _name(inst) == "S_NOP" and s["salu_exec"] is not None: s["salu_gate"] = True
+      elif cls == "VALU": s["salu_gate"] = False
       if cls == "IMM":
         if _name(inst) == "S_SET_INST_PREFETCH_DISTANCE": icache["ahead"] = inst.simm16 & 3
         if "WAITCNT" in _name(inst):
+          pending = bool(s["lgkm"] or s["vm"] or s["lds_wait"])  # a wait with nothing outstanding costs nothing extra
           for q, n in zip((s["lgkm"], s["vm"]), _waits(inst)): del q[:max(0, len(q) - n)]
-          if not s["blocked"]: s["ready"] = cycle + WAITCNT_FREE_PENALTY
+          if not s["blocked"] and pending: s["ready"] = cycle + WAITCNT_FREE_PENALTY
           s["early_valu"] = s["blocked"] and s["last_mem"] == "LDS"  # an LDS return is known ahead: the next VALU starts early
         s["blocked"] = False
         # s_nop N / s_sleep N hold the wave; the token is stamped when they end
@@ -287,6 +292,8 @@ def make_encoder():
           s["reg_ready"][r], s["reg_issue"][r] = ex + (2 if wmma else TRANS_DEP_LAT if trans else VALU_DEP_LAT), cycle
           s["wmma_ready"][r] = ex + 1  # a WMMA takes its operands one cycle after the producer, VALU or WMMA
         if primary: put(cycle, VALUINST, wave=sl) if op is None else put(cycle, INST, wave=sl, op=op)
+      elif exec0:
+        if primary: put(cycle, IMMEDIATE, wave=sl)
       elif cls == "LDS":
         store = "STORE" in _name(inst)
         occ = _cycles(op) if store else 1
@@ -322,7 +329,7 @@ def make_encoder():
           nxt = pcs[w][ph][s["i"]] if s["i"] < len(pcs[w][ph]) else None  # s["i"] already points past the branch
           if op == InstOp.JUMP and nxt is not None and nxt // 64 != pcs[w][ph][s["i"] - 1] // 64: s["ready"] += BRANCH_NEW_LINE
         if cls == "BARRIER": s["arrival"] = cycle
-        if primary: put(cycle, INST, wave=sl, op=op)
+        if primary: put(cycle, INST, wave=sl, op=InstOp.SALU_WR_EXEC if cls == "SALU" and "EXEC" in repr(getattr(inst, "sdst", "")) else op)
       return True
 
     for ph in range(max(len(p) for p in recs.values())):
