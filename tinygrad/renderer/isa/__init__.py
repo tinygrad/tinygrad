@@ -31,7 +31,7 @@ def regs(u:UOp) -> tuple[Register, ...]: return u.arg[2:] if u.op is Ops.INS els
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp: return u.replace(arg=u.arg[:2]+r) if u.op is Ops.INS else u.replace(tag=r)
 
 def rdef(u:UOp):
-  if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return rdef(u.src[0])
+  if u.op in {Ops.AFTER, Ops.BITCAST}: return rdef(u.src[0])
   return r[0] if (r:=regs(u)) else None
 
 class LinearContext:
