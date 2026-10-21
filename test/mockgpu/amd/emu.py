@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv, ContextVar
+from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -1848,7 +1848,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   sink = sink.replace(arg=KernelInfo(name=canonical_name))
 
   # NOTE: renderer output is not reproducible because of _MXCSRContext.
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+  with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(sink, Device['CPU'].renderer)
     runtime = get_runtime('CPU', prg)
   _canonical_runner_cache.append((type(inst), base, mask, size, (prg, runtime)))
@@ -1963,17 +1963,17 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   return st
 
 # lift assembly to a CALL graph and execute
-ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND", "CPU")
+ASM_CALL = ContextVar("ASM_CALL", 0)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   if ASM_CALL:
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND, name=name)
+    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
     vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_runtime(ASM_CALL_BACKEND, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
+      get_runtime('CPU', prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
