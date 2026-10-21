@@ -1845,7 +1845,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   ctx = _Ctx(inst_size, _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
   base, mask, size, canonical_name = _canonical_info(inst, ctx, inst_bytes)
-  sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
+  sink = sink.replace(arg=KernelInfo(name=canonical_name))
 
   # NOTE: renderer output is not reproducible because of _MXCSRContext.
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):

@@ -291,11 +291,9 @@ class TestViz(unittest.TestCase):
 
 # VIZ displays nested graph_rewrites in a tree view
 
-def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
-leaf = TrackedPatternMatcher([(UPat(Ops.PARAM, name="x"), leaf_rewrite)])
+leaf = TrackedPatternMatcher([(UPat(Ops.PARAM, name="x"), lambda x: x.const_like(0))])
 
 def branch_rewrite(x:UOp, y:UOp):
-  if x.tag is not None: return
   x2 = graph_rewrite(x, leaf, name="leaf_left")
   y2 = graph_rewrite(y, leaf, name="leaf_right")
   return x2 * y2
