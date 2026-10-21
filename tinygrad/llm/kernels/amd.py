@@ -327,7 +327,8 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
     # a data dependent loop: inactive tokens run it 0 times
     s = UOp.range(active(tokens[0]).where(per, 0), 5, AxisType.LOOP)
     acc = _reg((rep,), 0)
-    acc = acc.after(UOp.group(*[acc[r].store(acc.after(s)[r].load() + dot(tokens[0], sub+(chunk*per+s)*lanes, outputs[r])) for r in range(rep)]).end(s))
+    group = sub+(chunk*per+s)*lanes
+    acc = acc.after(UOp.group(*[acc[r].store(acc.after(s)[r].load() + dot(tokens[0], group, outputs[r])) for r in range(rep)]).end(s))
     totals = [acc[r].load() for r in range(rep)]
   for offset in (16, 8, 4, 2, 1)[(32//lanes).bit_length()-1:]:
     totals = [total + UOp(Ops.CUSTOM, src=(total,), arg=
@@ -338,8 +339,9 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
     lds = lds.after(UOp.group(*(lds[t, wave, chunk, which.valid(sub.eq(0))].store(total) for t, total in enumerate(totals))).barrier())
     totals = [functools.reduce(lambda a,c: a + lds[t, wave, c, which].load(), range(1, chunks), lds[t, wave, 0, which].load())
               for t in range(len(totals))]
-  if active is None: stores = [out[token, outputs[0].valid(sub.eq(0) & chunk.eq(0))].store(total.cast(out.dtype)) for token, total in zip(tokens, totals)]
-  else: stores = [out[tokens[0], outputs[r].valid(sub.eq(0) & chunk.eq(0))].store(totals[r].cast(out.dtype)) for r in range(rep)]
+  first = sub.eq(0) & chunk.eq(0)
+  if active is None: stores = [out[token, outputs[0].valid(first)].store(total.cast(out.dtype)) for token, total in zip(tokens, totals)]
+  else: stores = [out[tokens[0], outputs[r].valid(first)].store(totals[r].cast(out.dtype)) for r in range(rep)]
   return UOp.group(*stores).end(row, wave, chunk, lane).sink(arg=KernelInfo(name=name, opts_to_apply=(), estimates=estimates))
 
 def _decode_linear_loop(out:UOp, out_features:int, group_count:int, group_dot, name:str, waves:int=4, active:Callable|None=None,
