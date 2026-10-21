@@ -940,7 +940,7 @@ def _load_vsrc0(ctx: _Ctx, inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3
     return s0, None
   src0_off = ctx.inst_field(type(inst).src0)
   s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, is_f64)
-  if bits['s0'] == 16:  # src0 >= 384 means hi half of v[src0-384]. Guard index against OOB access.
+  if bits['s0'] == 16 and not isinstance(inst, (irc.VOP1, irc.VOP2)):  # src0 >= 384 means hi half of v[src0-384]. Guard index against OOB access.
     src0_hi = src0_off >= _c(384)
     s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_hi.where(src0_off - _c(384), _c(0)), lane)), s0)
   return s0, src0_off
@@ -963,7 +963,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
   is_float = any(x in op_name for x in ('F16', 'F32', 'F64'))
   is_dpp16 = hasattr(type(inst), 'dpp') and hasattr(type(inst), 'vsrc0')
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  write_hi_half = bits['d'] == 16 and (vdst_reg >= _c(128))
+  write_hi_half = bits['d'] == 16 and not isinstance(inst, (irc.VOP1, irc.VOP2)) and (vdst_reg >= _c(128))
   if isinstance(write_hi_half, UOp): vdst_reg = write_hi_half.where(vdst_reg - _c(128), vdst_reg)
   elif write_hi_half: vdst_reg -= 128
   if isinstance(inst, (ir3.VOP1, ir4.VOP1, irc.VOP1)):
@@ -972,7 +972,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
     srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0, 'OPSEL': _c(0)}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
-    vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
+    vsrc1_hi = bits['s0'] == 16 and not isinstance(inst, irc.VOP2) and (vsrc1_reg >= _c(128))
     if bits['s1'] == 64:
       s1 = _u64(ctx.rvgpr_dyn(vsrc1_reg, lane), ctx.rvgpr_dyn(vsrc1_reg + _c(1), lane))
       d0 = _u64(ctx.rvgpr_dyn(vdst_reg, lane), ctx.rvgpr_dyn(vdst_reg + _c(1), lane))
@@ -1000,7 +1000,7 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
     src0_off = ctx.inst_field(type(inst).src0)
     vsrc1_off = ctx.inst_field(type(inst).vsrc1)  # type: ignore[union-attr]
     # For 16-bit ops, vsrc1 >= 128 means hi-half of v[vsrc1-128]
-    if bits['s0'] == 16:
+    if bits['s0'] == 16 and not isinstance(inst, irc.VOPC):
       vsrc1_hi = vsrc1_off >= _c(128)
       src1_off = _c(256) + vsrc1_hi.where(vsrc1_off - _c(128), vsrc1_off)
     else:

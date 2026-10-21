@@ -87,3 +87,27 @@ class TestCDNAVOP3(unittest.TestCase):
           cdna.v_cvt_pk_bf8_f32(cdna.v[2], cdna.v[0], cdna.v[1]),
         ])
         self.assertEqual(out, 0xdead3c00 | expected)
+
+# CDNA has no RDNA true16: v128+ in a 16-bit e32 operand is that register, not the hi half of v[n-128]
+class TestCDNATrue16(unittest.TestCase):
+  def test_v_add_f16_e32(self):
+    out = run_cdna([
+      cdna.v_mov_b32_e32(cdna.v[130], 0x4000),  # 2.0
+      cdna.v_mov_b32_e32(cdna.v[131], 0x4200),  # 3.0
+      cdna.v_add_f16_e32(cdna.v[132], cdna.v[130], cdna.v[131]),
+      cdna.v_mov_b32_e32(cdna.v[2], cdna.v[132]),
+    ])
+    self.assertEqual(out & 0xffff, 0x4500)  # 5.0
+
+  def test_v_cmp_lt_f16_e32(self):
+    out = run_cdna([
+      cdna.v_mov_b32_e32(cdna.v[130], 0x4000),  # 2.0
+      cdna.v_mov_b32_e32(cdna.v[131], 0x4200),  # 3.0
+      cdna.v_cmp_lt_f16_e32(cdna.v[130], cdna.v[131]),
+      cdna.s_nop(1),
+      cdna.v_mov_b32_e32(cdna.v[2], cdna.VCC_LO),
+    ])
+    self.assertEqual(out & 1, 1)
+
+if __name__ == "__main__":
+  unittest.main()
