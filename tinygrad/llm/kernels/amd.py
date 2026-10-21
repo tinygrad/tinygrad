@@ -33,8 +33,7 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   if device is None or device.split(":")[0] != "AMD": return False
   # @function contexts set ALLOW_DEVICE_USAGE=0 (scheduling must not open devices); the device is always open here
   with Context(ALLOW_DEVICE_USAGE=1):
-    return (t:=getattr(Device[device], "target", None)) is not None and (t[0] in (11, 12) or _cdna(device)) and \
-      isinstance(Device[device].renderer, HIPRenderer)
+    return (t:=getattr(Device[device], "target", None)) is not None and t[0] in (11, 12, 9) and isinstance(Device[device].renderer, HIPRenderer)
 
 @functools.cache
 def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
@@ -44,7 +43,7 @@ def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
 @functools.cache
 def _cdna(device:str|tuple[str, ...]) -> bool:
   if isinstance(device, tuple): device = device[0]
-  with Context(ALLOW_DEVICE_USAGE=1): return HIPRenderer.is_cdna(Device[device].renderer.target.arch)
+  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[device], "target")[0] == 9
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
@@ -118,7 +117,7 @@ class Linear(nn.Linear):
     return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
-  if cdna: return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sdot4({}, {}, {}, false)", dtypes.int32))
+  if cdna: return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sdot4({}, {}, {}, false)", dtypes.int32))  # CDNA has no sudot4 (dot8-insts)
   return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
