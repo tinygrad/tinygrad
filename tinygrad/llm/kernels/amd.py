@@ -28,13 +28,13 @@ def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp
 @functools.cache
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   if getenv("DISABLE_AMD_KERNELS"): return False
-  # Wave32 kernels support RDNA3/4 and CDNA (a wave64 runs two 32-lane groups, ds_swizzle stays in its group).
+  # Wave32 and WMMA kernels support RDNA3/4 and CDNA3/4 (on CDNA a 32-lane kernel runs in half a wave64, ds_swizzle stays within 32 lanes).
   if isinstance(device, tuple): device = device[0]
   if device is None or device.split(":")[0] != "AMD": return False
   # @function contexts set ALLOW_DEVICE_USAGE=0 (scheduling must not open devices); the device is always open here
   with Context(ALLOW_DEVICE_USAGE=1):
-    return (t:=getattr(Device[device], "target", None)) is not None and isinstance(r:=Device[device].renderer, HIPRenderer) and \
-      (t[0] in (11, 12) or r.is_cdna(r.target.arch))
+    return (t:=getattr(Device[device], "target", None)) is not None and (t[0] in (11, 12) or _cdna(device)) and \
+      isinstance(Device[device].renderer, HIPRenderer)
 
 @functools.cache
 def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
@@ -44,7 +44,7 @@ def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
 @functools.cache
 def _cdna(device:str|tuple[str, ...]) -> bool:
   if isinstance(device, tuple): device = device[0]
-  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[device], "target")[0] == 9
+  with Context(ALLOW_DEVICE_USAGE=1): return HIPRenderer.is_cdna(Device[device].renderer.target.arch)
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
@@ -315,7 +315,7 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
     return total * xd[token, group]
   return _decode_linear(out, out_features, in_features//32, group_dot, "linear_"+QUANT_NAMES[ggml_type])
 
-# kgroups: 2**(the k bits of the lane index) of a 16x16x16 fragment, as in tc.py's frag_a: 1 on RDNA3, 2 on RDNA4 (k2), 4 on CDNA (k2, k3)
+# kgroups: lane groups of 16 that split k in a 16x16x16 fragment (k bits in tc.py's frag_a lanes): RDNA3 1, RDNA4 2 (k2), CDNA 4 (k2, k3)
 def _wmma_lanes(kgroups:int) -> int: return 16*max(kgroups, 2)
 def _wmma_words(part:UOp, kgroups:int) -> tuple[UOp|int, ...]:
   return tuple(range(4)) if kgroups == 1 else tuple(part + kgroups*j for j in range(4//kgroups))
@@ -334,7 +334,7 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, kg
   return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens
 
 def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_waves, kgroups):
-  # RDNA4 and CDNA own consecutive rows per lane group, matching tokens directly.
+  # RDNA4 and CDNA (kgroups > 1) own consecutive rows per lane group, matching tokens directly.
   if kgroups > 1:
     return [out[token, output].store(acc.after(update)[i].load()) for output,output_accs in zip(outputs, accs)
             for tile_tokens,acc in zip(tokens, output_accs) for i,token in enumerate(tile_tokens)]

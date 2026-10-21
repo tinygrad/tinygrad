@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
+from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
                                       QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4, _cdna)
 from tinygrad.llm.gguf import ggml_data_to_tensor
@@ -411,7 +412,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     np.testing.assert_allclose(flash_attention(q, cache, valid_kv_len).numpy(), 5500, rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_unaligned_start(self):
-    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device) or _cdna(d): self.skipTest("RDNA3 required")
+    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    if _cdna(d) and DEV.interface.startswith("MOCK"): self.skipTest("too slow on the CDNA emulator")
     rng = np.random.default_rng(42)
     start_pos = 1718
     q = Tensor.zeros(1, 8, 32, 128)
