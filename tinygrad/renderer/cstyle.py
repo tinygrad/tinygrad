@@ -289,7 +289,8 @@ class CStyleLanguage(Renderer):
 class ClangRenderer(CStyleLanguage):
   separate_calls = True
   string_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: ctx.render_call(x, body)),
+    (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"),
+     lambda ctx,x,body: ctx.render_call(x, body) if ctx.separate_calls else None),
   ]) + base_rewrite
 
   def render_call(self, x:UOp, body:UOp) -> str:
@@ -306,6 +307,7 @@ class ClangRenderer(CStyleLanguage):
   def render(self, uops:list[UOp]) -> str:
     if not self.separate_calls: return super().render(uops)
     prefix = self._call_declarations(uops)
+    self.extra_args = ['void **__calls'] if self.call_indices else []
     return self.render_kernel(*self._render(uops), uops, prefix)
 
   def render_function(self, body:UOp) -> str:
@@ -349,7 +351,6 @@ class ClangRenderer(CStyleLanguage):
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str: return ""
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    self.extra_args = ['void **__calls'] if self.call_indices else []
     defines = '\n'.join(self._render_defines(uops))
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
