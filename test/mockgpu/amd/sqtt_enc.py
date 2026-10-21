@@ -82,7 +82,8 @@ def make_encoder():
     out: set[str] = set()
     for n in names:
       for m in _REG.finditer(repr(getattr(inst, n, ""))):
-        lo = int(m.group(2)); out |= {f"{m.group(1)}{r}" for r in range(lo, int(m.group(3) or lo) + 1)}
+        lo = int(m.group(2))
+        out |= {f"{m.group(1)}{r}" for r in range(lo, int(m.group(3) or lo) + 1)}
     return out
 
   def _name(inst: Inst) -> str:
@@ -143,8 +144,10 @@ def make_encoder():
           lds_tie["n"] += 1
           cand = [r for r in cand if simd[r[1]] == want]
         r = cand[0]
-        lds_q.remove(r); unit["lds"] = t + r[3]
-        st[r[1]]["lgkm"].append(t + LDS_RET + (2 if r[2] else 0)); st[r[1]]["lds_wait"] -= 1
+        lds_q.remove(r)
+        unit["lds"] = t + r[3]
+        st[r[1]]["lgkm"].append(t + LDS_RET + (2 if r[2] else 0))
+        st[r[1]]["lds_wait"] -= 1
     for w in waves: put(w, WAVESTART, simd=simd[w], wgp=0, wave=slot[w], id7=w)
 
     def issue(w: int, cls: str, op: InstOp|None, inst: Inst, cycle: int) -> bool:
@@ -168,14 +171,18 @@ def make_encoder():
         if "WAITCNT" in _name(inst):
           wait = inst.simm16
           if s["lds_wait"] and len(s["lgkm"]) < len(s["lgkm"]) + s["lds_wait"] - ((wait >> 4) & 0x3f):
-            s["ready"], s["blocked"] = cycle + 1, True; return False  # a counted LDS request is not served yet
+            s["ready"], s["blocked"] = cycle + 1, True
+            return False  # a counted LDS request is not served yet
           for q, n in ((s["lgkm"], ((wait >> 4) & 0x3f) - s["lds_wait"]), (s["vm"], (wait >> 10) & 0x3f)):  # unserved LDS are newest
             q.sort()
             if len(q) > n:
               sat = q[len(q) - n - 1]
               if sat > need: need, s["blocked"] = sat, True
-      if need > cycle: s["ready"] = need; return False
-      s["i"] += 1; s["ready"] = cycle + 1
+      if need > cycle:
+        s["ready"] = need
+        return False
+      s["i"] += 1
+      s["ready"] = cycle + 1
       s["pend"] = [[c - 1, d] for c, d in s["pend"] if c > 0]
       s["last_cls"] = cls
       if cls == "IMM":
@@ -200,14 +207,19 @@ def make_encoder():
       elif cls == "LDS":
         store = "STORE" in _name(inst)
         occ = _cycles(op) if store else 1
-        lds_q.append((cycle + LDS_ACCEPT, w, store, occ)); s["lds_wait"] += 1; s["mem_issue"] = cycle
+        lds_q.append((cycle + LDS_ACCEPT, w, store, occ))
+        s["lds_wait"] += 1
+        s["mem_issue"] = cycle
         put(cycle, INST, wave=sl, op=op if primary else InstOp(0x50 + occ - 1))
       elif cls == "VMEM":
         store = "STORE" in _name(inst)
-        (s["vs"] if store else s["vm"]).append(cycle + (STORE_ACK if store else VMEM_LOAD_LAT)); s["mem_issue"] = cycle
+        (s["vs"] if store else s["vm"]).append(cycle + (STORE_ACK if store else VMEM_LOAD_LAT))
+        s["mem_issue"] = cycle
         put(cycle, INST, wave=sl, op=op if primary else InstOp(0x5a + _cycles(op) - 1))
       else:
-        if cls == "SMEM": s["lgkm"].append(cycle + SMEM_LAT); s["mem_issue"] = cycle
+        if cls == "SMEM":
+          s["lgkm"].append(cycle + SMEM_LAT)
+          s["mem_issue"] = cycle
         if cls == "SALU": s["salu_issue"] = cycle
         if cls == "BARRIER": s["arrival"] = cycle
         if primary: put(cycle, INST, wave=sl, op=op)
@@ -235,7 +247,8 @@ def make_encoder():
           inst, bt = recs[w][ph][s["i"]]
           if inst is None:
             if cycle >= s["ready"]:
-              put(max(cycle + END_LAT, max(s["vs"], default=0)), WAVEEND, simd=simd[w], wgp=0, wave=slot[w]); s["i"] += 1
+              put(max(cycle + END_LAT, max(s["vs"], default=0)), WAVEEND, simd=simd[w], wgp=0, wave=slot[w])
+              s["i"] += 1
           else:
             cls, op = _classify(inst, bt)
             if cycle >= s["ready"] and cycle >= port_free.get((simd[w], cls), 0) and (simd[w], cls) not in busy \
