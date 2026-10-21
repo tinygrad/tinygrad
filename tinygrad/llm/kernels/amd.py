@@ -205,6 +205,11 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, 
   token_group, lane = UOp.range(tokens*groups, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group = token_group//groups, token_group%groups
   value = x.reshape(tokens, groups, 32)[token, group, lane].load().float()
+  stores = _q8_narrow_stores(value, q, scale, xsum, sq[0] if sq else None, token, group, lane)
+  return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
+
+def _q8_narrow_stores(value:UOp, q:UOp, scale:UOp, xsum:UOp, sq:UOp|None, token:UOp, group:UOp, lane:UOp) -> list[UOp]:
+  # a lane's value of a group of 32 (a wave): its words, scale, sums (and squares)
   # Quantize each input once, then pack four neighboring lanes into one word.
   # Keep divisions intact: reciprocal multiplication can move half-precision inputs across rounding ties.
   d = UOp(Ops.CUSTOM, src=(warp_reduce(value.abs(), maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
@@ -213,12 +218,12 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, 
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
   for offset in (1, 2):
     word |= UOp(Ops.CUSTOM, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | offset<<10})", dtypes.uint32))
-  stores:tuple[UOp, ...] = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
+  stores:list[UOp] = [q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
             scale[token, group.valid(lane.eq(0))].store(d),
-            xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
+            xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float()))]
   # optionally the sum of squares of each group, for an rms norm applied after a linear layer
-  if sq: stores += (sq[0][token, group.valid(lane.eq(0))].store(warp_reduce(value*value, full_wave=True)),)
-  return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
+  if sq is not None: stores.append(sq[token, group.valid(lane.eq(0))].store(warp_reduce(value*value, full_wave=True)))
+  return stores
 
 def _q8_quantize_wide(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in_features:int) -> UOp:
   # as _q8_quantize_kernel, a wave quantizes 8 groups: a lane eight neighboring inputs (wide loads), four lanes a group. the same values: the
@@ -2638,7 +2643,9 @@ KDA_WAVES = 8
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
-                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float) -> UOp:
+                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0) -> UOp:
+  # R: the rows of a head split over R workgroups (each makes the convolutions, norms and decays of the head), z the outputs before their norm
+  # (float, kda_out normalizes them): more workgroups, fewer rows in a row
   # a few tokens (T) of a kda layer, a workgroup per head: the short convolutions of q, k and v (shifting their states), the l2 norms of q and
   # k, the decay and the delta rule update of the head's state token by token, the rms norm of the outputs and their sigmoid gates.
   # the states (S, ...) at a position p are p%S: read at start_pos, the ones after every token written (the others keep the states before)
@@ -2646,13 +2653,15 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else getenv("KDA_MULTI_WAVES", 2)), cast(int, wq.shape[-1])
+  if R: W = getenv("KDA_SPLIT_WAVES", 8)
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
   assert T < S, "the states of the T tokens and the one before"
   state, z = state.reshape(S*heads, V, K), z.reshape(T, heads*V)
   cq, ck, cv = (x.reshape(S*(conv-1), heads*K) for x in (cq, ck, cv))
   rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
   pq, pk, pv, gate, alpha = (x.reshape(T, heads*K) for x in (pq, pk, pv, gate, alpha))
-  h, wave, lane = UOp.range(heads, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  hr, wave, lane = UOp.range(heads*max(R, 1), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  h, chunk = (hr // R, hr % R) if R else (hr, UOp.const(0, dtypes.weakint))
   tid, initial = wave * WARP_SIZE + lane, start_pos.eq(0)
   def silu(x:UOp) -> UOp: return x / ((-x * LOG2E).exp2() + 1)
   def sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
@@ -2666,7 +2675,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     for t in range(T):
       window = inputs[t:t+conv]
       out = silu(sum((weights[j] * window[j] for j in range(1, conv)), weights[0] * window[0]))
-      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[wps[t]*(conv-1) + j, ch.valid(active)].store(window[j+1].cast(cs.dtype))
+      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[wps[t]*(conv-1) + j, ch.valid(active & chunk.eq(0))].store(window[j+1].cast(cs.dtype))
                                                             for j in range(conv-1)]
   lds = lds.after(UOp.group(*stores).barrier())
   # every wave: q and k of the head (key column lane + 32*i), l2 normalized, the decay of every column
@@ -2687,11 +2696,11 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     return (sigmoid(g * -A) * lb * LOG2E).exp2()
   decays = [[decay(t, c) for c in cols] for t in range(T)]
   # the delta rule on the rows of this wave, token by token
-  rows_per_wave = V // W
+  rows_per_wave = V // (W * max(R, 1))
   lds_o = UOp.alloc((T, V), dtypes.float, addrspace=AddrSpace.LOCAL)
   ostores, sstores = [], []
   for j in range(rows_per_wave):
-    r = wave * rows_per_wave + j
+    r = (chunk * W + wave) * rows_per_wave + j
     row = [initial.where(0, state[rp*heads + h, r, c].load().float()) for c in cols]
     for t in range(T):
       decayed = [x * d for x, d in zip(row, decays[t])]
@@ -2699,7 +2708,8 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
       delta = (lds[t, 2, r].load() - sk) * b[t]
       row = [x + delta * kk for x, kk in zip(decayed, ks[t])]
       sstores += [state[wps[t]*heads + h, r, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
-      ostores.append(lds_o[t, r.valid(lane.eq(0))].store(sq + delta * kq[t]))
+      ostores.append((z.reshape(T, heads*V)[t, (h*V + r).valid(lane.eq(0))] if R else lds_o[t, r.valid(lane.eq(0))]).store(sq + delta * kq[t]))
+  if R: return UOp.group(*ostores, *sstores).end(hr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
   lds_o = lds_o.after(UOp.group(*ostores).barrier())
   # rms norm of the head's outputs, gated
   zs = []
@@ -2709,7 +2719,24 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     r = tid % V
     out = lds_o[t, r].load() * rinv * norm[r].load().float() * sigmoid(gate[t, h*V + r].load().float())
     zs.append(z[t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
-  return UOp.group(*zs, *sstores).end(h, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+  return UOp.group(*zs, *sstores).end(hr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+
+@functools.cache
+def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp, eps:float, heads:int) -> UOp:
+  # the rms norm of a head's outputs (as _kda_decode_kernel: a lane its columns lane+32i) gated, in half, and its quantization as
+  # _q8_quantize_kernel's: a wave a group of 32
+  T, HV = cast(tuple[int, int], z.shape)
+  V = HV // heads
+  G = V // 32
+  tg, lane = UOp.range(T*heads*G, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  t, h, g = tg // (heads*G), tg // G % heads, tg % G
+  def sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
+  ov = [o[t, h*V + lane + 32*i].load() for i in range(V // 32)]
+  rinv = (warp_reduce(functools.reduce(lambda s,y: s + y*y, ov[1:], ov[0]*ov[0]), full_wave=True) * (1/V) + eps).sqrt().reciprocal()
+  r = g*32 + lane
+  out = (o[t, h*V + r].load() * rinv * norm[r].load().float() * sigmoid(gate[t, h*V + r].load().float())).cast(z.dtype)
+  stores = [z[t, h*V + r].store(out)] + _q8_narrow_stores(out.float(), q, scale, xsum, None, t, h*G + g, lane)
+  return UOp.group(*stores).end(tg, lane).sink(arg=KernelInfo(name="kda_out", opts_to_apply=()))
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float) -> Tensor:
@@ -2720,14 +2747,32 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   _, B, heads, V, K = state.shape
   T = projs[0].shape[1]
   assert B == 1 and start_pos.uop.is_bound_var
-  z = Tensor.empty(1, T, heads*V, dtype=dtypes.half, device=state.device, axis=None if state.uop.axis is None else 2)
+  axis = None if state.uop.axis is None else 2
+  # (R: the rows of a head over R workgroups, the outputs normed and quantized by kda_out)
+  R = r if (r:=getenv("KDA_SPLIT", 4)) and V % (r * getenv("KDA_SPLIT_WAVES", 8)) == 0 and V % 32 == 0 else 0
+  z = Tensor.empty(1, T, heads*V, dtype=dtypes.float if R else dtypes.half, device=state.device, axis=axis)
   # the states are written in place
   inplace = tuple(Tensor(s.uop.after(start_pos.uop)) for s in (state, *conv_states))
   srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps).call(*contig)
-  return Tensor(contig[0].after(call))
+  call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps, R).call(*contig)
+  out = Tensor(contig[0].after(call))
+  if not R: return out
+  # the norm, the gate and the quantization of the outputs (the output projection's input)
+  n = int(heads*V)  # (heads of every device)
+  local = n // len(cast(tuple, state.device)) if axis is not None else n
+  T = int(T)
+  zh = Tensor.empty(1, T, n, dtype=dtypes.half, device=state.device, axis=axis)
+  # (as _q8_quantize's of an input split on its features: every device its groups, a tensor of their shape)
+  q = Tensor.empty(T, local // 32, 8, dtype=dtypes.uint32, device=state.device)
+  scale = Tensor.empty(T, local // 32, dtype=dtypes.float32, device=state.device)
+  xsum = Tensor.empty(T, local // 32, 2, dtype=dtypes.float32, device=state.device)
+  outs = Tensor.custom_kernel(zh.reshape(T, n), q, scale, xsum, out.reshape(T, n), norm.contiguous(), gate.reshape(T, n).contiguous(),
+                              fxn=functools.partial(_kda_out_kernel, eps=eps, heads=local // V))
+  zh = outs[0].reshape(1, T, n)
+  q8_quantize_known(zh, T, local, False, (outs[1], outs[2], outs[3]))
+  return zh
 
 def _kda_conv_kernel(q:UOp, k:UOp, v:UOp, kq:UOp, sq:UOp, sk:UOp, sv:UOp, pq:UOp, pk:UOp, pv:UOp, cq:UOp, ck:UOp, cv:UOp, taps:int,
                      qscale:float) -> UOp:
