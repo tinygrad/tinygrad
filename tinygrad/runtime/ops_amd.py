@@ -791,6 +791,8 @@ class PCIIface(PCIIfaceBase):
 
   def on_device_hang(self):
     self._collect_interrupts(reset=self.dev.can_recover)
+    # (the device isn't finalized as clean: its next boot quiesces and resets it, see AMDev.fini)
+    self.dev_impl.is_err_state = True
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()

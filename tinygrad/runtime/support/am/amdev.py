@@ -259,7 +259,14 @@ class AMDev:
     # a VF may only touch the engines inside an access window, take one so the host does not have to FLR the VF later
     if self.is_vf and not self.vf_access:
       with contextlib.suppress(TimeoutError): self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_FINI_ACCESS)
-    for ip in [self.sdma, self.gfx]: ip.fini_hw()
+    # a device in an error state (e.g. hung: its kernels may still run) gets no bus mastering first: it can't reach memory or the peers once
+    # the process is gone (a stray dma to io addresses that are unmapped then floods the root port with errors). the next boot is a full one
+    if self.is_err_state and not self.is_vf:
+      self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
+    for ip in [self.sdma, self.gfx]:
+      try: ip.fini_hw()
+      except Exception:
+        if not self.is_err_state: raise
     if not self.is_vf: self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
     if not self.is_vf: self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
