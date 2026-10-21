@@ -2496,11 +2496,16 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:in
 @functools.cache
 def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=2) -> UOp:
   # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
-  # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max
-  H, D = cast(tuple[int, int], q.shape)
+  # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max. a few queries: q (T, H, D), w (T, H), out (T, P),
+  # the waves of every query
+  T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
+  H, D = cast(tuple[int, int], q.shape[-2:])
   P = cast(int, k.shape[0])
   G = min(256, P // (16*NP))
-  g, lane = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  q, w, out = q.reshape(T, H, D), w.reshape(T, H), out.reshape(T, P)
+  gr, lane = UOp.range(T*G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  row, g = gr // G, gr % G
+  q, w, out = q[row], w[row], out[row]
   col, half = lane % 16, lane // 16
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 1, AxisType.LOOP)
@@ -2521,7 +2526,7 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:in
   stores = [out[(p0 + n*16 + col).valid(half.eq(0))].store(tot + _swizzle_xor(tot, 16)) for n, tot in enumerate(totals)]
   # a data dependent count of tiles, an upper bound estimate
   est = Estimates(2*H*P*D, P*D*2, P*4)
-  return UOp.group(*stores).end(active).end(g, lane).sink(arg=KernelInfo(name="indexer_scores_decode", opts_to_apply=(), estimates=est))
+  return UOp.group(*stores).end(active).end(gr, lane).sink(arg=KernelInfo(name="indexer_scores_decode", opts_to_apply=(), estimates=est))
 
 DECODE_THREADS = 1024
 
@@ -2638,6 +2643,16 @@ def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UO
   scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(),
                                 fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
   return pool_index_rows(scores.reshape(1, P), q_start, pools, top, kpool).reshape(-1)
+
+def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
+  """indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists"""
+  T, P = int(q.shape[0]), int(k.shape[0])
+  scores = Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
+  if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
+  pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
+  scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(),
+                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
+  return pool_index_rows(scores, q_start, pools, top, kpool)
 
 KDA_WAVES = 8
 
