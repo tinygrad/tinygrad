@@ -3,11 +3,11 @@ from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
-from tinygrad.dtype import Invalid, AddrSpace, dtypes
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import Context, getenv, dedup, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
-from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
+from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
 # this is meant to replace the old emulator
 @uopfunc
@@ -103,7 +103,8 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=inst_addr)
       sink = _get_handler(inst)(inst, ctx)
       *_, canonical_name = _canonical_info(inst, ctx, view[off:])
-      bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
+      deps = UOp.group(sink, ctx.branch_cond) if ctx.branch_cond is not None else sink
+      bufs = sorted((u for u in deps.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
       args = [lib_addr+off if b is inst_addr else afters.get(b, b.after(loop) if loop is not None else b) for b in bufs]
       if ctx.branch_cond is not None and loop_path is not None:
         branch_cond = ctx.branch_cond.substitute(dict(zip(bufs, args)), walk=True)

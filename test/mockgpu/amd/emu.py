@@ -516,7 +516,7 @@ class _Ctx:
     """Read PC as 64-bit byte address."""
     # Index at PC_LO, then cast to uint64 ptr and load
     return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
-  def wpc(self, val:UOp) -> UOp:
+  def wpc(self, val:UOp) -> list[UOp]:
     if val.op is Ops.WHERE: self.branch_cond = val.src[0]
     if self.inst_addr is not None: return []
     lo, hi = _split64(val.cast(dtypes.uint64))
