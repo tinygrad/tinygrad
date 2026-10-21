@@ -516,7 +516,6 @@ class _Ctx:
     """Read PC as 64-bit byte address."""
     # Index at PC_LO, then cast to uint64 ptr and load
     return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
-
   def wpc(self, val:UOp) -> UOp:
     if val.op is Ops.WHERE: self.branch_cond = val.src[0]
     if self.inst_addr is not None: return []
@@ -545,7 +544,8 @@ class _Ctx:
         else: stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.extend(self.wmask(_c(VCC_LO.offset), val))
       elif dest.startswith('PC'):  # S_SETPC/S_SWAPPC jump: write PC directly (caller skips inc_pc)
-        return UOp.sink(*ctx.wpc(val))
+        lo, hi = _split64(val.cast(dtypes.uint64))
+        stores.extend([self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)])
     return stores
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp | int], sdst_reg: UOp, sdst_size: int) -> UOp:
