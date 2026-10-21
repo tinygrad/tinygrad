@@ -9,7 +9,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local
+  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
@@ -362,6 +362,10 @@ class HyperConnection:
       split = token_sharded(xs)  # sequence parallel: the rows of the streams are split over the devices
       *xq, sq = q8_quantize(flat, n, features, sumsq=True, split=split)
       mix = q8_linear(self.fn, flat, xq=tuple(xq), split=split)
+      # a few tokens: the streams after the sublayer and their quantization (the next one's) in a kernel
+      if isinstance(norm, nn.RMSNorm) and norm.weight is not None and not split and not rows and xs.shape[0] == 1 and getenv("HC_POST_QUANT", 1):
+        coef, hn = hc_pre(mix, sq, base, scale, xs, norm.weight, self.count, self.iters, self.eps, self.norm_eps, norm.eps, features, raw=True)
+        return hc_post_quant(sublayer(hn[:, :T]), coef, xs, self.count)
       if isinstance(norm, nn.RMSNorm) and norm.weight is not None and getenv("HC_PRE", 1):
         # one kernel for the coefficients, the mix of the streams and its norm
         pre, post, comb, hn = hc_pre(mix, sq, base, scale, xs, norm.weight, self.count, self.iters, self.eps, self.norm_eps, norm.eps, features,
@@ -1086,8 +1090,10 @@ class Transformer:
     self._spec_h, self._spec_row = Tensor.zeros(2*(k+1), self.config.dim, device=devs).contiguous().realize(), 0
     self.spec_stats = [0, 0]  # the steps and the tokens they gave
     # in host memory: the step's input tokens (the last step's outputs), its sampled tokens and its drafts (the host polls them)
-    self._spec_host, t = _host_ints(cast(str|tuple[str, ...], devs), 3*k+2)
-    self._spec_in, self._spec_out = t[:, :k+1], t[:, k+1:]
+    self._spec_host, self._spec_in = _host_ints(cast(str|tuple[str, ...], devs), k+1)
+    # the outputs are written by one device: the host takes them, resets them and launches the next step once one device wrote them, another
+    # one writing them later would overwrite the reset with the last step's
+    self._spec_host_out, self._spec_out = _host_ints(devs[0] if isinstance(devs, tuple) else cast(str, devs), 2*k+1)
 
   def _mtp_prefill(self, emb:Tensor, x:Tensor, start_pos:UOp, T:UOp) -> Tensor:
     """
@@ -1125,7 +1131,8 @@ class Transformer:
     if hc is not None: x = x.mean(2)
     tok = self._sample(self._spec_h.shrink(((par*(k+1), (par+1)*(k+1)), None)).assign(self.output_norm(x)[0].float()), temperature, y.device)
     q8_quantize_cache_clear()  # don't keep the graph alive
-    return self._spec_out.assign(tok.reshape(1, k+1).cat(*drafts, dim=1).cast(dtypes.int32))
+    out = tok.reshape(1, k+1).cat(*drafts, dim=1).cast(dtypes.int32)
+    return self._spec_out.assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
 
   def _spec_call(self, mtp_pos:int, j:int, par:int, temperature:Tensor):
     """a step of speculative decoding (forward_spec, its jit)"""
@@ -1142,17 +1149,17 @@ class Transformer:
 
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
-    k, host = self.config.spec_drafts, self._spec_host
+    k, host, host_out = self.config.spec_drafts, self._spec_host, self._spec_host_out
     def launch(mtp_pos:int, j:int, par:int) -> bool:
       if mtp_pos + j + k + 1 >= self.max_context: return False
-      host[k+1:3*k+2] = array.array('i', [-1] * (2*k+1))
+      host_out[:] = array.array('i', [-1] * (2*k+1))
       self._spec_call(mtp_pos, j, par, temperature)
       return True
     # the first step catches up on the last prompt token's position only (j=0), its hidden state is row 0 (parity 0)
     host[0], mtp_pos, j, par = tokens[-1], len(tokens) - 1, 0, 1
     launched = launch(mtp_pos, j, par)
     while launched:
-      while min(out:=host[k+1:3*k+2].tolist()) < 0: pass
+      while min(out:=host_out.tolist()) < 0: pass
       sampled, drafts = out[:k+1], out[k+1:]
       j, pos = next((i for i in range(k) if drafts[i] != sampled[i]), k), mtp_pos + j
       host[0:k+1] = array.array('i', sampled)

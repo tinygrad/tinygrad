@@ -227,6 +227,11 @@ def _q8_quantize_wide(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in
   token_g8, lane = UOp.range(tokens*(groups//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = token_g8//(groups//8), (token_g8 % (groups//8))*8 + lane//4, lane % 4
   values = [x.reshape(tokens, in_features)[token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  stores = _q8_wide_stores(values, q, scale, xsum, sq[0] if sq else None, token, group, sub)
+  return UOp.group(*stores).end(token_g8, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
+
+def _q8_wide_stores(values:list[UOp], q:UOp, scale:UOp, xsum:UOp, sq:UOp|None, token:UOp, group:UOp, sub:UOp) -> list[UOp]:
+  # a lane's 8 neighboring values of a group of 32 (four lanes a group, sub the lane of the four): their words, scale, sums (and squares)
   mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
   for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
   d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
@@ -236,29 +241,38 @@ def _q8_quantize_wide(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in
   qs = qs + _lane_xor(qs, 1)
   stores:list[UOp] = [q[token, group, sub*2 + w].store(words[w]) for w in range(2)]
   stores += [scale[token, group.valid(sub.eq(0))].store(d), xsum[token, group, (sub//2).valid((sub%2).eq(0))].store(qs)]
-  if sq:
+  if sq is not None:
     sqs = [v*v for v in values]
     sqs = [a + _lane_xor(a, 2) for a in sqs]  # 16 apart: the lane two over
     sqs = [a + _lane_xor(a, 1) for a in sqs]  # 8 apart
     for k in (4, 2, 1): sqs = [sqs[i] + sqs[i ^ k] for i in range(8)]
-    stores.append(sq[0][token, group.valid(sub.eq(0))].store(sqs[0]))
-  return UOp.group(*stores).end(token_g8, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
+    stores.append(sq[token, group.valid(sub.eq(0))].store(sqs[0]))
+  return stores
 
 def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:bool=False) -> tuple[Tensor, ...]:
   """
   int8 groups of 32 with their scales and sums (and optionally sums of squares). an input shared by several layers is quantized once.
   NOTE: the cache holds graphs, the model clears it after building one (q8_quantize_cache_clear)
   """
+  if (ret:=_q8_cache.get(key:=_q8_key(x, tokens, in_features, sumsq, split))) is None: ret = _q8_cache[key] = _q8_quantize(*key)
+  return ret
+
+def _q8_key(x:Tensor, tokens:int, in_features:int, sumsq:bool, split:bool) -> tuple:
   # (keyed by the rows: the views of an input are quantized once)
   u = x.uop
   if not split and x.shape[-1] == in_features and prod(x.shape) == tokens*in_features:
     while u.op is Ops.RESHAPE: u = u.src[0]
     u = u.reshape((tokens, in_features))
-  return _q8_quantize(u, tokens, in_features, sumsq, split)
+  return (u, tokens, in_features, sumsq, split)
 
-def q8_quantize_cache_clear(): _q8_quantize.cache_clear()
+_q8_cache:dict[tuple, tuple[Tensor, ...]] = {}
 
-@functools.lru_cache(maxsize=32)
+def q8_quantize_known(x:Tensor, tokens:int, in_features:int, sumsq:bool, outs:tuple[Tensor, ...]):
+  """the quantization of x is outs (the kernel that made x made it too)"""
+  _q8_cache[_q8_key(x, tokens, in_features, sumsq, False)] = outs
+
+def q8_quantize_cache_clear(): _q8_cache.clear()
+
 def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool, split:bool) -> tuple[Tensor, ...]:
   x, groups = Tensor(x_uop), in_features//Q8_GROUP_SIZE
   # split: the rows are split over the devices, so are the outputs, every device quantizes its rows
@@ -1707,7 +1721,7 @@ def _hc_pre_kernel(coef:UOp, hn:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, xs:UO
   return UOp.group(st_coef, *st_h).end(token, wave, lane).sink(arg=KernelInfo(name="hc_pre", opts_to_apply=()))
 
 def hc_pre(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, xs:Tensor, norm_w:Tensor, count:int, iters:int, eps:float, norm_eps:float,
-           h_eps:float, features:int, split:bool=False) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+           h_eps:float, features:int, split:bool=False, raw:bool=False) -> tuple[Tensor, ...]:
   """
   hc_coeffs, then the mix of the (rows, count, D) streams weighed by pre and its rms norm (weight norm_w, eps h_eps): pre, post, comb and the
   normed mix (rows, D), the sublayer's input
@@ -1720,7 +1734,45 @@ def hc_pre(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, xs:Tensor, norm_w:T
   coef, hn = Tensor.custom_kernel(coef, hn, mix.float().reshape(rows, -1).contiguous(), sq, base.contiguous(), scale.contiguous(),
                                   xs.reshape(rows, count, D).contiguous(), norm_w.contiguous(), fxn=fxn)[:2]
   coef = coef.reshape(*mix.shape[:-1], -1)
+  # raw: the coefficients as they are (pre, post, comb) and the normed mix
+  if raw: return coef, hn.reshape(*mix.shape[:-1], D)
   return coef[..., :count], coef[..., count:2*count], coef[..., 2*count:].reshape(*mix.shape[:-1], count, count), hn.reshape(*mix.shape[:-1], D)
+
+@functools.cache
+def _hc_post_quant_kernel(xs_new:UOp, q:UOp, scale:UOp, xsum:UOp, sq:UOp, out:UOp, coef:UOp, xs:UOp, count:int) -> UOp:
+  # the streams after a sublayer, xs_new = out*post + comb^T @ xs (the sum in the order of the generic kernel), and their quantization as
+  # _q8_quantize_wide's (a lane 8 neighboring values of a stream, the same code)
+  T, D = cast(tuple[int, int], out.shape)
+  G = D // 32
+  token, st, g8, lane = (UOp.range(T, 0, AxisType.GLOBAL), UOp.range(count, 1, AxisType.GLOBAL), UOp.range(G // 8, 2, AxisType.GLOBAL),
+                         UOp.range(32, -1, AxisType.WARP))
+  chunk, sub = g8*8 + lane//4, lane % 4
+  ds = [chunk*32 + sub*8 + i for i in range(8)]
+  values = []
+  for d in ds:
+    v = out[token, d].load() * coef[token, count + st].load()
+    for j in range(count): v = v + coef[token, 2*count + j*count + st].load() * xs[token, j, d].load()
+    values.append(v)
+  stores = [xs_new[token, st, d].store(v) for d, v in zip(ds, values)]
+  stores += _q8_wide_stores(values, q, scale, xsum, sq, token, st * G + chunk, sub)
+  return UOp.group(*stores).end(token, st, g8, lane).sink(arg=KernelInfo(name="hc_post_quant", opts_to_apply=()))
+
+def hc_post_quant(out:Tensor, coef:Tensor, xs:Tensor, count:int) -> Tensor:
+  """
+  a few tokens (B=1): the streams (B, T, count, D) after a sublayer's output out (B, T, D) (post and comb of coef), their quantization (with
+  the sums of squares) is q8_quantize's of them (the next hyper connection's)
+  """
+  B, T, D = out.shape
+  rows, G = int(B*T), count*int(D)//32
+  xs_new = Tensor.empty(rows, count, D, dtype=dtypes.float32, device=out.device)
+  q = Tensor.empty(rows, G, 8, dtype=dtypes.uint32, device=out.device)
+  scale, sq = (Tensor.empty(rows, G, dtype=dtypes.float32, device=out.device) for _ in range(2))
+  xsum = Tensor.empty(rows, G, 2, dtype=dtypes.float32, device=out.device)
+  outs = Tensor.custom_kernel(xs_new, q, scale, xsum, sq, out.reshape(rows, D).contiguous(), coef.reshape(rows, -1).contiguous(),
+                              xs.reshape(rows, count, D).contiguous(), fxn=functools.partial(_hc_post_quant_kernel, count=count))
+  ret = outs[0].reshape(B, T, count, D)
+  q8_quantize_known(ret.flatten(2), rows, count*int(D), True, (outs[1], outs[2], outs[3], outs[4]))
+  return ret
 
 # ******** tiny dense fp16 gemv ********
 
