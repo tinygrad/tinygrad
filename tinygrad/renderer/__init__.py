@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable, cast
 from dataclasses import dataclass, replace
-from tinygrad.helpers import prod, Target, EMULATED_DTYPES, dedup
+from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.renderer.tc import TensorCore
@@ -29,7 +29,6 @@ class Estimates:
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
     uops = list(sink.toposort(enter_calls=False))
-    specials = tuple(u for u in uops if u.op is Ops.SPECIAL)
 
     def idx_alu(uops:list[UOp]):
       excluded: set[UOp] = set()
@@ -46,19 +45,19 @@ class Estimates:
     # computes estimates within a given caller scope, inline calls get resolved recursively
     def process_body(u:UOp, caller_mult:sint, bindings:dict[UOp,UOp]={}):
       nonlocal flops, lds, mem
-      uops = u.toposort(enter_calls=False)
+      uops = list(u.toposort(enter_calls=False))
       excluded = idx_alu(uops) if ignore_indexing else set()
       for u in uops:
-        mult = mults(tuple(bindings.get(r.src[0],r.src[0]) for r in u.ranges)) * caller_mult
+        mult = mults(tuple(r.substitute(bindings) for r in u.ranges)) * caller_mult
         if u.op in {Ops.LOAD, Ops.STORE}:
           buf = bindings.get(u.buf_uop, u.buf_uop).without_after
           if buf.op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
             accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mult
             mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
         if u.op is Ops.CALL:
-          bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
+          child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
-          process_body(u.body, mult, bindings)
+          process_body(u.body, mult, child_bindings)
         elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
           lds += u.max_numel() * u.dtype.itemsize * mult
         elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:

@@ -100,13 +100,25 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     expected_ops = 4 * N ** 3 * 2
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
-class TestUOpsStats(unittest.TestCase):
+class TestuOpsStatsInlineCall(unittest.TestCase):
   def test_inline_call(self):
     buf = UOp.param(0, dtypes.int32, 4)
     p0 = buf.param_like(0)
     body = p0[0].store(UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU) + p0[0].load())
     out = body.sink().call(buf, UOp.const(5, dtypes.int32), name="test_call").sink(arg=KernelInfo(optimized=True))
     self.assertEqual(flops_mem(out), (1, 8))
+
+  def test_inline_range_bound(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0 = buf.param_like(0)
+    n = UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+    i = UOp.range(n + 1, 0, dtype=dtypes.int32)
+    body = p0[i].store(i).end(i).sink()
+    for value in (0, 3):
+      with self.subTest(value=value):
+        out = body.call(buf, UOp.const(value, dtypes.int32), name="bound_expr").sink()
+        est = Estimates.from_uops(out)
+        self.assertEqual((est.ops, est.lds, est.mem), (1, 4*(value+1), 4*(value+1)))
 
   def test_multiple_inline_call_sites(self):
     buf = UOp.param(0, dtypes.int32, 4)
@@ -138,6 +150,7 @@ class TestUOpsStats(unittest.TestCase):
     out = outer.call(buf, i, name="outer_cal").end(i).sink(arg=KernelInfo(optimized=True))
     self.assertEqual(flops_mem(out), (8, 32))
 
+class TestUOpsStats(unittest.TestCase):
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)
     prg = to_program(buf.index(1).store(5).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
