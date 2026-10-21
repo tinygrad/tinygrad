@@ -6,6 +6,8 @@ env:
   ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  INFLUXDB_HOST: ${{ secrets.INFLUXDB_HOST }}
+  INFLUXDB_TOKEN: ${{ secrets.INFLUXDB_TOKEN }}
 
 on:
   push:
@@ -81,7 +83,7 @@ jobs:
 
   llmbenchmark:
     name: Benchmark ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +91,7 @@ jobs:
         model: ['llama3.2:3b-f16', 'qwen3.8:27b', 'olmoe']
         # qwen3.8:27b doesn't fit on mac
         exclude: [{ dev: 'METAL', model: 'qwen3.8:27b' }, { dev: 'AMD', model: 'olmoe' }, { dev: 'NV', model: 'olmoe' }]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -99,14 +101,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe -a nvidia nvidia_uvm
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -123,7 +123,7 @@ jobs:
 
   cifarbenchmark:
     name: HLB-CIFAR10 (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -138,14 +138,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe -a nvidia nvidia_uvm
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -170,7 +168,7 @@ jobs:
 
   mlperfbenchmark:
     name: MLPerf (${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -185,18 +183,16 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe -a nvidia nvidia_uvm
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
-        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+        ln -s /datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -211,7 +207,7 @@ jobs:
 
   sdbenchmark:
     name: Stable Diffusion (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -226,14 +222,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe -a nvidia nvidia_uvm
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -255,11 +249,11 @@ jobs:
 
   multigpubenchmark:
     name: Multi-GPU Benchmarks (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'AMD' && '4x7900xtx' || '4x4090' }}"
     strategy:
       fail-fast: false
       matrix:
-        dev: ['AMD', 'NV']
+        dev: ['AMD'] # ['AMD', 'NV']
     timeout-minutes: 20
     defaults:
       run:
@@ -273,17 +267,13 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
-    - name: Setup (NV)
-      if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+        AM_RESET=1 python3 -c 'from tinygrad import Device; [Device[f"AMD:{i}"] for i in range(4)]'
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
         mkdir -p extra/datasets
-        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
-        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+        ln -s /weights/LLaMA-3 weights/LLaMA-3
+        ln -s /datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -293,21 +283,24 @@ jobs:
       run: python3 test/external/process_replay/reset.py
     - name: Run LLaMA-3 8B on 4 GPUs with BEAM
       run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
-    - name: Run full CIFAR training steps w 6 GPUS
-      run: time BENCHMARK_LOG=cifar_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
+    - name: Run full CIFAR training steps w 4 GPUS
+      run: time BENCHMARK_LOG=cifar_multigpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=525 BS=1024 GPUS=4 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run MLPerf resnet eval on training data
-      run: time BENCHMARK_LOG=resnet_eval MODEL=resnet python3 examples/mlperf/model_eval.py
-    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: BENCHMARK_LOG=resnet_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py
-    - name: Run 10 MLPerf Bert training steps (6 gpu)
+      run: time BENCHMARK_LOG=resnet_eval BS=512 GPUS=4 MODEL=resnet python3 examples/mlperf/model_eval.py
+    - name: Run 10 MLPerf ResNet50 training steps (4 gpu)
+      run: BENCHMARK_LOG=resnet_10steps_multigpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1024 GPUS=4 MODEL=resnet python3 examples/mlperf/model_train.py
+    - name: Run 10 MLPerf Bert training steps (4 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+      run: BENCHMARK_LOG=bert_10steps_multigpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=48 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Test benchmark allreduce
+      if: ${{ matrix.dev == 'NV' }}
+      run: GPUS=4 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
   tests:
     name: Tests (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    runs-on: "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && '7900xtx' || '4090' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -322,14 +315,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
-    - name: Setup (AMD)
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+      run: sudo modprobe -a nvidia nvidia_uvm
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -388,9 +379,6 @@ jobs:
       run: IGNORE_BEAM_CACHE=1 CCACHE=0 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Train MNIST
       run: time TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
-    - name: Test benchmark allreduce
-      if: ${{ matrix.dev == 'NV' }}
-      run: python test/external/external_benchmark_multitensor_allreduce.py
     # TODO: HEVC decode timing test
     # - name: HEVC Decode Benchmark
     #   if: ${{ matrix.dev == 'NV' }}
@@ -613,16 +601,3 @@ jobs:
         trap - EXIT
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
-
-  llvmspeed:
-    name: LLVM Speed
-    runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 10
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Speed Test
-      run: DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py
-    - name: Speed Test (BEAM=2)
-      run: IGNORE_BEAM_CACHE=1 BEAM=2 DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py

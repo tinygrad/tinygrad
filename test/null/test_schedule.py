@@ -725,7 +725,8 @@ class TestSchedule(unittest.TestCase):
         uops = sink.toposort()
         loop_accs = {cmp.src[0].buf_uop for u in uops if u.op is Ops.BACKEDGE for cmp in u.src[2].toposort()
           if cmp.op is Ops.CMPLT and cmp.src[0].op is Ops.LOAD}
-        reduce_kernels += any(u.op is Ops.STORE and u.addrspace is AddrSpace.REG and u.ranges and u.src[0].buf_uop not in loop_accs for u in uops)
+        # a reduce kernel is identified by a STORE into a REG buffer (STORE has void dtype, check the addrspace of its target)
+        reduce_kernels += any(u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
       self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):

@@ -9,7 +9,7 @@ from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
   kept, onetime = [], []
@@ -21,11 +21,6 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-def _copy_input(u:UOp) -> UOp:
-  if u.on_disk(): raise JitError("cannot make an independent copy of a written DISK input")
-  run_linear(UOp(Ops.LINEAR, src=((new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype)).store_call(u),)))
-  return new
-
 @rewrite_group(lambda linear,held_bufs,input_uops,input_vars,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int]) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
@@ -35,7 +30,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:d
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
-  linear = linear.substitute({u: u.rtag("scratch") for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}, walk=True)
+  scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
+  linear = linear.substitute(scratch, walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear
@@ -56,9 +52,7 @@ class CapturedJit(Generic[ReturnType]):
   _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
-
-  @functools.cached_property
-  def linear(self) -> UOp: return link_linear(self._linear, allow_cache=False) # do not cache jit
+  _linears: dict[tuple[UOp, ...], tuple[UOp, dict[UOp, UOp]]] = field(default_factory=dict)  # aliased inputs -> (linked linear with copies, staging)
 
   def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 
@@ -70,17 +64,20 @@ class CapturedJit(Generic[ReturnType]):
     return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    concrete = tuple(_copy_input(u) if u in self._jit_bufs else u for u in input_uops)
-    if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
-    run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
+    # aliased inputs
+    if (aliased:=tuple(u for u in input_uops if u in self._jit_bufs)) not in self._linears:
+      if any(u.on_disk() for u in aliased): raise JitError("cannot make an independent copy of a written DISK input")
+      staging = {u: UOp.new_buffer(u.device, u.max_numel(), u.dtype) for u in aliased}
+      copies = compile_linear(UOp(Ops.LINEAR, src=tuple(s.store_call(u) for u,s in staging.items())))
+      self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src), use_rt=False), staging)
+
+    linear, staging = self._linears[aliased]
+    if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
+    run_linear(linear, var_vals, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
-  def free_intermediates(self):
-    bufs = [u.arg.buffer for u in self._jit_bufs if u.tag == "scratch"]
-    if not (freed:=[b for b in flatten(b.bufs if isinstance(b, MultiBuffer) else [b] for b in bufs) if b.is_allocated()]): return
-    for b in freed: b.deallocate()
-    self.__dict__.pop("linear", None) # should be relinked
+  def free_intermediates(self): self._linears.clear()
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]

@@ -3,11 +3,11 @@ from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.codegen import to_program
 from tinygrad.device import Device
-from tinygrad.dtype import Invalid, AddrSpace, dtypes
-from tinygrad.helpers import Context, getenv, dedup, to_mv
+from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.helpers import Context, DEV, dedup, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
-from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
+from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
 
 # this is meant to replace the old emulator
 @uopfunc
@@ -44,10 +44,6 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int
   return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32))
                              for i,v in dict(initial).items()))
 
-def pc_index(idx:int) -> UPat:
-  reg, null = UPat.const(idx).cast(), UPat.const(124).cast()
-  return UPat.any(reg, reg.ne(null).where(reg, UPat.const(Invalid)))
-
 def move_const_idxs(call:UOp) -> UOp|None:
   idxs = dedup(u.src[1] for u in call.body.toposort() if u.op is Ops.INDEX and u.src[0].op is Ops.PARAM and u.src[0].arg.name == "vmem"
                and u.src[1].op is Ops.CONST)
@@ -56,17 +52,13 @@ def move_const_idxs(call:UOp) -> UOp|None:
   return call.replace(src=(call.body.substitute(rep, walk=True), *call.src[1:], *idxs))
 
 pm_asm_call = PatternMatcher([
-  # remove PC from CALL body
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.PARAM, name="buf").index(UPat.any(pc_index(PC_LO_IDX), pc_index(PC_HI_IDX))),), allow_any_len=True),
-   lambda buf: UOp(Ops.NOOP) if buf.arg.name == "sgpr" else None),
   # move CONST outside CALL body
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), move_const_idxs),
 ])
 
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
-         user_data_count:int=0, backend:str|None=None, name="") -> UOp:
-  backend = getenv("ASM_CALL_BACKEND", "CPU") if backend is None else backend
+         user_data_count:int=0, name="") -> UOp:
   # decode
   view = to_mv(lib, lib_sz)
   insts = amd_decode(view, arch)
@@ -110,7 +102,8 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=inst_addr)
       sink = _get_handler(inst)(inst, ctx)
       *_, canonical_name = _canonical_info(inst, ctx, view[off:])
-      bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
+      deps = UOp.group(sink, ctx.branch_cond) if ctx.branch_cond is not None else sink
+      bufs = sorted((u for u in deps.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
       args = [lib_addr+off if b is inst_addr else afters.get(b, b.after(loop) if loop is not None else b) for b in bufs]
       if ctx.branch_cond is not None and loop_path is not None:
         branch_cond = ctx.branch_cond.substitute(dict(zip(bufs, args)), walk=True)
@@ -126,5 +119,5 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
     end = UOp.group(*afters.values()).end(wave)
   sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu {name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
-  with Context(CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    return to_program(sink, Device[backend].renderer)
+  with Context(DEV=DEV.target('CPU', renderer='LLVM'), CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+    return to_program(sink, Device['CPU'].renderer)
