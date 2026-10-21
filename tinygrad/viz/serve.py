@@ -165,7 +165,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
-                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
+                    "ref":ref, "addrspace":addrspace_color}
   return graph
 
 def _reconstruct(data:VizData, a:int) -> UOp:
@@ -554,12 +554,9 @@ def get_elf_section(lib:bytes, name:str):
 def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
 
 def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
-  from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
-  code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
   addr_table:dict[int, Inst] = {}
   offset, view = 0, memoryview(buf)
   while offset < len(buf):
-    if code_end is not None and view[offset:offset+len(code_end)] == code_end: break
     remaining = view[offset:]
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)

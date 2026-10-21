@@ -19,7 +19,6 @@ class Register:
 class IselContext:
   def __init__(self, sink:UOp):
     self.reg_n = itertools.count()
-    self.alloc_n = itertools.count(max((u.arg.slot for u in sink.toposort() if u.op is Ops.ALLOC), default=-1)+1)
     params = sorted([u for u in sink.toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
     self.arg_offsets = {u: o for u, (o, _) in zip(params, TinyELF.iter_sig(tuple((None, u.addrspace, u.dtype, ()) for u in params)))}
 
@@ -27,14 +26,17 @@ class IselContext:
     cons = cons if isinstance(cons, tuple) else (cons,)
     return Register(f"v{next(self.reg_n)}", 0, cons, size or cons[0].size)
 
+# the registers an INS defines follow its opcode and dtype in its arg
+def regs(u:UOp) -> tuple[Register, ...]: return u.arg[2:] if u.op is Ops.INS else ()
+def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp: return u.replace(arg=u.arg[:2]+r)
+
 def rdef(u:UOp):
-  if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return rdef(u.src[0])
-  return u.tag[0] if isinstance(u.tag, tuple) else u.tag
+  if u.op in {Ops.AFTER, Ops.BITCAST}: return rdef(u.src[0])
+  return r[0] if (r:=regs(u)) else None
 
 class LinearContext:
   def __init__(self, ren:ISARenderer):
     self.ren, self.stack_size = ren, 0
-    self.loop_label: dict[UOp, str] = {}
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
   def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
 

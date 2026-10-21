@@ -291,11 +291,9 @@ class TestViz(unittest.TestCase):
 
 # VIZ displays nested graph_rewrites in a tree view
 
-def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
-leaf = TrackedPatternMatcher([(UPat(Ops.PARAM, name="x"), leaf_rewrite)])
+leaf = TrackedPatternMatcher([(UPat(Ops.PARAM, name="x"), lambda x: x.const_like(0))])
 
 def branch_rewrite(x:UOp, y:UOp):
-  if x.tag is not None: return
   x2 = graph_rewrite(x, leaf, name="leaf_left")
   y2 = graph_rewrite(y, leaf, name="leaf_right")
   return x2 * y2
@@ -904,7 +902,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
-    self.assertEqual(len(cfg["blocks"]), 2)
+    self.assertEqual(len(cfg["blocks"]), 3)
 
   def test_repeat(self):
     k = Kernel()
@@ -952,7 +950,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     ret = self.get_cfg("diamond", k)
     cfg = ret["data"]
-    self.assertEqual(len(cfg["blocks"]), 5)
+    self.assertEqual(len(cfg["blocks"]), 6)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
@@ -962,7 +960,7 @@ class TestCfg(unittest.TestCase):
     self.assertEqual(len(references["r0"]), 2)
     insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
-    end_block = [" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1]]
+    end_block = next(b for b in cfg["blocks"].values() if cfg["pc_tokens"][b[-1]][0]["st"] == "s_endpgm")
     self.assertEqual(len(end_block), 1)
 
   def test_loop(self):
@@ -1110,7 +1108,7 @@ class TestCfg(unittest.TestCase):
     k.label("loop")
     k.emit(s_branch(), target="cmp")
     ret = self.get_cfg("endpgm", k)
-    self.assertEqual(len(ret["data"]["blocks"]), 5)
+    self.assertEqual(len(ret["data"]["blocks"]), 6)
     # the endpgm block has no path out
     endpc = next(pc for pc,s in ret["data"]["pc_tokens"].items() if s[0]["st"].startswith("s_endpgm"))
     self.assertEqual(len(ret["data"]["paths"][endpc]), 0)
@@ -1251,7 +1249,7 @@ class TestCLI(unittest.TestCase):
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
-    self.assertEqual(len(codegen_count), 4)
+    self.assertEqual(len(codegen_count), 3)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
 
