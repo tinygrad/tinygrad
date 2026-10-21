@@ -198,6 +198,8 @@ stack_pointer = reg(dtypes.uint64, RSP)
 args_pointer = reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
+# a register buffer is its own virtual register, named by its identity
+def regbuf_reg(x:UOp) -> Register: return Register(f"b{x.key.hex()}", 0, *((XMM, 16) if x.dtype in dtypes.floats else (WGPR, x.dtype.itemsize)))
 # a value moved into a register constrained to cons
 def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp: return x.ins(X86Ops.MOV, ctx.vreg(cons, x.dtype.itemsize), src=(x,))
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
@@ -298,9 +300,9 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   # already allocated vregs
   if regs(x) and regs(x)[0]._cons: return None
-  defs = []
-  if x.op in {Ops.BUFFER, Ops.ALLOC} and x.addrspace is not AddrSpace.REG: defs = [ctx.vreg(WGPR, 8)]
-  elif regs(x): defs = [ctx.vreg(regs(x), x.dtype.itemsize)]
+  # a register buffer is a REG, a stack buffer becomes the LEA of its address before regalloc
+  if x.op in {Ops.BUFFER, Ops.ALLOC}: return reg(x.dtype, regbuf_reg(x)) if x.addrspace is AddrSpace.REG else None
+  if regs(x): defs = [ctx.vreg(regs(x), x.dtype.itemsize)]
   elif x.dtype in dtypes.floats or x.op is Ops.INS and x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR, x.dtype.itemsize)]
   # TODO: add this once the scheduler can track register pressure
@@ -422,8 +424,8 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
-    buf.ins(copy_op(val.dtype), rdef(buf), src=(val.after(buf),))
-    if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) and isinstance(rdef(buf), Register) and rdef(buf)._cons else None),
+    buf.ins(copy_op(val.dtype), regbuf_reg(buf.without_after), src=(val.after(buf),))
+    if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) else None),
   (UPat.var("a").load().named("x"), lambda ctx,a,x:
     x.ins(copy_op(x.dtype), src=(buf,)) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
@@ -458,7 +460,8 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
-  nx = UOp(Ops.INS, fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), (X86Ops.LEA, x.dtype, *regs(x)))
+  nx = UOp(Ops.INS, fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))),
+           (X86Ops.LEA, x.dtype, Register(f"s{ctx.stack_size}", 0, WGPR, 8)))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer, nx]
 
