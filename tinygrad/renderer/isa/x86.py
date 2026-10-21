@@ -422,7 +422,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
   (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
-    buf.ins(copy_op(val.dtype), regbuf_reg(buf.without_after), src=(val.after(buf),))
+    UOp(Ops.STACK).after(buf.ins(copy_op(val.dtype), regbuf_reg(buf.without_after), src=(val.after(buf),)))
     if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) else None),
   (UPat.var("a").load().named("x"), lambda ctx,a,x:
     x.ins(copy_op(x.dtype), src=(buf,)) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
