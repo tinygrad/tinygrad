@@ -19,7 +19,7 @@ def make_encoder():
   from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
   from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
   from tinygrad.runtime.autogen.amd.cdna import ins as irc
-  import re
+  import math, re
   from tinygrad.helpers import getenv
   SIMD_PARITY = getenv("SQTT_SIMD_PARITY", 0)  # which SIMD of the pair gets wave 0: the dispatcher's round robin carries over
 
@@ -75,7 +75,7 @@ def make_encoder():
   # VALU: issue -> exec 8 (9 shifts/fma, 6 no register read), result +5, per-wave queue of 13
   VALU_EXEC_LAT, VALU_EXEC_LAT_SLOW, VALU_EXEC_LAT_NOREAD, VALU_DEP_LAT, VALU_QUEUE = 8, 9, 6, 5, 13
   WMMA_LAT, WMMA_INFLIGHT = 34, 6  # a WMMA holds the pipe 34 cycles; issue stalls with 6 in flight
-  VALU_AFTER_LDS_WAIT = 2  # VALU right after a wait blocked on LDS executes 2 earlier
+  VALU_AFTER_LDS_WAIT = 7  # a VALU right after a wait blocked on LDS executes at most 7 after its issue
   TRANS_OCC, TRANS_DEP_LAT = 4, 10  # transcendental execs at least 4 apart, result +10
   # SALU and branches: exec +4, dependent +2, branch waits for its SCC/VCC producer, taken +10 (+20 into another line)
   SALU_EXEC_LAT, SALU_DEP_LAT, BRANCH_AFTER_SALU, BRANCH_TAKEN, BRANCH_NOT_TAKEN, BRANCH_NEW_LINE = 4, 2, 5, 10, 3, 20
@@ -85,8 +85,8 @@ def make_encoder():
   MEM_AFTER_EXEC, SMEM_AFTER_SALU, IMM_AFTER_MEM, WAITCNT_FREE_PENALTY, BARRIER_RELEASE = 9, 9, 3, 4, 12
   # LDS: one server, accept +3 (+8 for a store racing another wave's on the same SIMD), 8 queued per SIMD
   LDS_ACCEPT, LDS_ACCEPT_LATE, LDS_RET, LDS_QUEUE = 3, 8, 28, 8
-  # load return per width: (extra latency, cycles on the return path)
-  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (4, 6)}
+  # load return per width: (extra latency, cycles on the return path; b128 moves 512 B in 16/3 cycles)
+  LDS_RET_WIDE = {"32": (0, 1), "64": (4, 4), "96": (4, 5), "128": (6, 16 / 3)}
   # DRAM: rough, not exact targets
   SMEM_LAT, VMEM_LOAD_LAT, STORE_ACK = 880, 785, 325
   _SLOW_VALU = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV|FMA|LSHL_OR|LSHL_ADD)_')
@@ -165,7 +165,7 @@ def make_encoder():
     simd, slot = {w: 2 * ((rank[w] + SIMD_PARITY) % 2) for w in waves}, {w: rank[w] // 2 for w in waves}
     st = {w: dict(i=0, ready=rank[w] + FETCH_LAT, blocked=False, valu_exec=None, salu_issue=None, salu_exec=None, mem_issue=None, reg_ready={},
                   reg_issue={}, lgkm=[], vm=[], vs=[], arrival=None, lds_wait=0, valu_execs=[], valu_issues=[],
-                  early_valu=False, last_mem=None, lds_dst=set(),
+                  early_valu=False, last_mem=None, lds_dst=set(), valu_sread={},
                   wmma_done=[], wmma_ready={}, vsgpr_exec={}, pend=[], last_issue=0, salu_gate=False,
                   last_cls=None) for w in waves}
     valu_free, trans_free, unit, port_free = {0: 0, 2: 0}, {0: 0, 2: 0}, dict(lds=0), {}
@@ -200,7 +200,7 @@ def make_encoder():
         else:  # loads return their data one after another per SIMD
           extra, beat = LDS_RET_WIDE[r[4]]
           ret_free[simd[r[1]]] = done = max(t + LDS_RET + extra, ret_free[simd[r[1]]] + beat)
-          st[r[1]]["lgkm"].append(done)
+          st[r[1]]["lgkm"].append(math.ceil(done))
         st[r[1]]["lds_wait"] -= 1
     for w in waves: put(w, WAVESTART, simd=simd[w], wgp=0, wave=slot[w], id7=rank[w])
 
@@ -220,6 +220,8 @@ def make_encoder():
         need = max(need, s["valu_exec"] + MEM_AFTER_EXEC)
       if cls == "BR" and "CBRANCH" in _name(inst) and "EXEC" not in _name(inst) and s["salu_exec"] is not None:
         need = max(need, s["salu_exec"] + BRANCH_AFTER_SALU)  # waits for its SCC/VCC producer
+      if cls == "SALU":  # overwriting an SGPR that an issued VALU has not read yet waits for that VALU's exec
+        need = max([need] + [s["valu_sread"][r] for r in writes if r in s["valu_sread"]])
       if cls in ("SALU", "SMEM", "BR"):  # an SGPR or VCC written by a VALU stalls the scalar reader until exec + 9
         need = max([need] + [s["vsgpr_exec"][r] + VALU_TO_SCALAR for r in reads | ({"s106"} if "VCC" in _name(inst) else set())
                              if r in s["vsgpr_exec"]])
@@ -268,7 +270,7 @@ def make_encoder():
         if primary: put(cycle + hold, IMMEDIATE, wave=sl)
       elif cls == "VALU":
         lat = VALU_EXEC_LAT_NOREAD if not reads else VALU_EXEC_LAT_SLOW if _SLOW_VALU.search(_name(inst)) else VALU_EXEC_LAT
-        if s["early_valu"] and not reads & s["lds_dst"]: lat = max(VALU_EXEC_LAT_NOREAD, lat - VALU_AFTER_LDS_WAIT)
+        if s["early_valu"] and not reads & s["lds_dst"]: lat = min(lat, VALU_AFTER_LDS_WAIT)
         s["early_valu"] = False
         base = cycle + lat
         wmma = _name(inst).startswith("V_WMMA")
@@ -284,6 +286,8 @@ def make_encoder():
           valu_free[simd[w]], s["valu_exec"] = ex + 1, ex
           s["wmma_done"].append(ex)
         s["valu_execs"].append(ex)
+        for r in reads:
+          if r[0] == "s": s["valu_sread"][r] = ex
         for r in writes | ({"s106"} if re.search(r"V_CMP|V_ADD_CO|V_SUB_CO", _name(inst)) else set()):
           if r[0] == "s": s["vsgpr_exec"][r] = ex
         s["valu_issues"].append(cycle)
