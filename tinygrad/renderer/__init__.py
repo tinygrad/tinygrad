@@ -47,8 +47,10 @@ class Estimates:
       nonlocal flops, lds, mem
       uops = list(u.toposort(enter_calls=False))
       excluded = idx_alu(uops) if ignore_indexing else set()
+      rcache: dict[tuple[UOp,...], tuple[UOp,...]] = {}
       for u in uops:
-        mult = mults(tuple(r.substitute(bindings) for r in u.ranges)) * caller_mult
+        if (rngs:=tuple(u.ranges)) not in rcache: rcache[rngs] = tuple(r.substitute(bindings) for r in rngs)
+        mult = mults(rcache[rngs]) * caller_mult
         if u.op in {Ops.LOAD, Ops.STORE}:
           buf = bindings.get(u.buf_uop, u.buf_uop).without_after
           if buf.op is Ops.PARAM: # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
