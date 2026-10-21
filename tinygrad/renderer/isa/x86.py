@@ -54,7 +54,6 @@ class X86Ops(FastEnum):
   RET = auto()
 
 class X86GroupOp:
-  Copy = {X86Ops.MOV, X86Ops.CMOVB, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.CMOVL}
   # X86Ops whose first src is also the destination
   TwoAddress = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
                 X86Ops.SUB, X86Ops.SUBi, X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi,
@@ -671,7 +670,6 @@ class X86LinearContext(LinearContext):
   def __init__(self, ren:X86Renderer):
     super().__init__(ren)
     self.lock: UOp|None = None
-    self.stack_allocated = False
 
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
