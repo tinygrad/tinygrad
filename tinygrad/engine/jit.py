@@ -73,7 +73,7 @@ class CapturedJit(Generic[ReturnType]):
       if any(u.on_disk() for u in aliased): raise JitError("cannot make an independent copy of a written DISK input")
       staging = {u: UOp.new_buffer(u.device, u.max_numel(), u.dtype) for u in aliased}
       copies = compile_linear(UOp(Ops.LINEAR, src=tuple(s.store_call(u) for u,s in staging.items())))
-      self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src), use_rt=False), staging)
+      self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src)), staging)
     return self._linears[aliased]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:

@@ -1,10 +1,8 @@
 import struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
-from tinygrad.codegen import to_program
-from tinygrad.device import Device
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc, AxisType
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, DEV, dedup, to_mv
+from tinygrad.helpers import dedup, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
@@ -52,6 +50,7 @@ def move_const_idxs(call:UOp) -> UOp|None:
   return call.replace(src=(call.body.substitute(rep, walk=True), *call.src[1:], *idxs))
 
 pm_asm_call = PatternMatcher([
+  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(arg=(AxisType.LOOP, *r.arg[1:])) if r.axis_type is not AxisType.LOOP else None),
   # move CONST outside CALL body
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), move_const_idxs),
 ])
@@ -111,13 +110,12 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
       call = body.call(*args, name=canonical_name)
       afters.update((b, arg.after(call)) for b, arg in zip(bufs, args) if b is not inst_addr)
+    end = UOp.group(*afters.values())
     if loop is not None:
       assert branch_cond is not None and loop_path in (COND_TAKEN, COND_NOT_TAKEN)
       if loop_path is COND_NOT_TAKEN: branch_cond = branch_cond.logical_not()
-      backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
-      afters = {b:arg.after(backedge) for b,arg in afters.items()}
-    end = UOp.group(*afters.values()).end(wave)
+      end = end.backedge(loop, branch_cond)
+    end = end.end(wave)
   sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu {name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
-  with Context(DEV=DEV.target('CPU', renderer='LLVM'), CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    return to_program(sink, Device['CPU'].renderer)
+  return sink

@@ -182,6 +182,7 @@ class AMDComputeQueue(HWQueue):
     return slot
 
   def prof_stop(self, slot:UOp):
+    self.exec_barrier()
     if self.dev.pmc_enabled: self.pmc_read(slot)
     if self.dev.sqtt_enabled: self.sqtt_stop(slot)
 
@@ -400,6 +401,7 @@ class AMDComputeQueue(HWQueue):
 
     dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
       **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
+    if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
     self.acquire_mem(gli=0, gl2=0)
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
@@ -415,11 +417,11 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *prg.arg.local_size, 0, 0)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
-    # else the next kernel starts right away unless hcq2 adds a kernel_barrier (it depends on this one)
-    if self.dev.prof_enabled or self.dev.sqtt_enabled or getenv("AMD_SERIAL_KERNELS"): self.kernel_barrier()
+    # else the next kernel starts right away unless hcq2 adds an exec_barrier (it depends on this one)
+    if self.dev.prof_enabled or self.dev.sqtt_enabled or getenv("AMD_SERIAL_KERNELS"): self.exec_barrier()
     if self.dev.prof_enabled: self.prof_stop(slot)
 
-  def kernel_barrier(self):
+  def exec_barrier(self):
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
@@ -443,7 +445,6 @@ class AMDComputeQueue(HWQueue):
   def desc(self) -> AMDQueueDesc: return self.dev.compute_queue_n(int(self.queue.split(":")[1]))  # COMPUTE:i
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
-  def kernel_barrier(self): pass # the aql packets have the barrier bit set
   def __init__(self, submit):
     super().__init__(submit)
     self.cmd_addr = UOp.variable("cmdbuf", 0, 2**48, dtypes.uint64) # the packets point into the cmdbuf, its address binds at submit
@@ -461,6 +462,8 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def signal(self, signal:UOp, value:UOp):
     self.close_run(len(self.blob)) # close pm4, so we can sync xccs. without that wait-signal can race
     super().signal(signal, value)
+
+  def exec_barrier(self): pass
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
@@ -843,7 +846,7 @@ class AMDDevice(Compiled):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
     self.is_vf = self.is_am() and self.iface.dev_impl.is_vf
-    self.can_recover, self.rtalloc_size = self.is_am() and not self.is_vf, (4 if self.is_usb else 64)<<20
+    self.can_recover = self.is_am() and not self.is_vf
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target

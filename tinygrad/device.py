@@ -8,10 +8,9 @@ from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZ
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
-  from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
 
@@ -128,9 +127,7 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        if (host:=(strg:=self.get_storage()).host) is not None:
-          for dev in strg.maps: dev.synchronize()
-          host[:] = memoryview(initial_value).cast('B')
+        if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
         else: self.copy_from(Buffer("PYTHON", self.nbytes, initial_value=initial_value))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
@@ -261,27 +258,35 @@ class Allocator(Generic[DeviceType]):
   def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
-    self.cache:dict[tuple[int, BufferSpec|None], list[BufferStorage]] = defaultdict(list)
+    self.cache:dict[tuple[int, BufferSpec|None], list[tuple[BufferStorage, dict[Compiled, int]]]] = defaultdict(list)
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
     if FORKED_COMPILE and self.dev.device.split(":")[0] not in {"CPU", "PYTHON", "NPY"}: raise RuntimeError(f"no allocation on {self.dev.device}")
-    if len(c:=self.cache[(size, options)]): return c.pop()
+
+    # check if old most is free
+    if (c:=self.cache[(size, options)]) and all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
+      return c.pop(0)[0]
+
     spec = options if options is not None else self.default_buffer_spec
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError): self.free_cache()
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
-                                                            f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
+                                                               f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
 
   def free(self, storage:BufferStorage, size:int, options:BufferSpec|None=None):
     spec = options if options is not None else self.default_buffer_spec
-    if LRU and self.lru and not spec.nolru and spec.external_ptr is None: self.cache[(size, options)].append(storage)
-    else: self.do_free(storage, spec)
+    if not LRU or not self.lru or spec.nolru or spec.external_ptr is not None: return self.do_free(storage, spec)
+
+    # add that buf to cache
+    users:list[Compiled] = [self.dev, *storage.maps] if storage.host is not None else []
+    freed_at = {dev:dev.timeline.host.view(fmt='Q')[1] for dev in users if 'timeline' in vars(dev)}
+    self.cache[(size, options)].append((storage, freed_at))
 
   def free_cache(self):
     for (_, options), storages in self.cache.items():
-      for storage in storages: self.do_free(storage, options if options is not None else self.default_buffer_spec)
+      for storage, _ in storages: self.do_free(storage, options if options is not None else self.default_buffer_spec)
       storages.clear()
 
   def do_free(self, storage:BufferStorage, options:BufferSpec):
@@ -377,7 +382,6 @@ class Compiled:
   wait_timeout_ms: float = 30000.0
   sleep_timeout_ms: int|None = None
   can_recover:bool = False
-  rtalloc_size:int = 64<<20 # the pool every per-linear buffer is carved out of
   var_vals: dict[str, int] = {}
 
   # hcq2
@@ -410,15 +414,6 @@ class Compiled:
   def compiler(self) -> Compiler: return self.renderer.compiler
 
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
-
-  @functools.cache
-  def rt_allocator(self, spec:BufferSpec) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
-
-  @functools.cache
-  def rt_buffer(self, spec:BufferSpec) -> Buffer:
-    return Buffer(self.device, self.rt_allocator(spec).size, options=spec, preallocate=True)
-
-  def link_buffer(self, b:UOp) -> Buffer|None: return None
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]

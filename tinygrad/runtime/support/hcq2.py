@@ -251,7 +251,7 @@ def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]:
   # the waits first, then the barrier: what the earlier work wrote (e.g. another device's copy into this one's memory, posted writes over the
   # links) is flushed into this device's memory and its caches invalidated after it's done, not before
-  return [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]] + [ins("barrier")]
+  return [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]] + [ins("memory_barrier")]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   queue_of = [(dev, queue) for _, dev, queue in ctx.batch] # the (device, queue) of each call by tag
@@ -260,6 +260,13 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   tracker = DepsTracker()
   accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
+
+  # add barriers when a call deps on another call of its queue
+  barriers, last_barrier = set[int](), dict[tuple[str, str], int]()
+  for tag, (deps, queue) in enumerate(zip(dep_tags, queue_of)):
+    if any(queue_of[t] == queue and t >= last_barrier.get(queue, 0) for t in deps):
+      barriers.add(tag)
+      last_barrier[queue] = tag
 
   # keep only latest tags to wait for each queue
   call_waits = [{queue_of[t]: t for t in sorted(deps) if queue_of[t] != queue_of[tag]} for tag, deps in enumerate(dep_tags)]
@@ -281,27 +288,13 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
-  # kernels on a queue may overlap: a kernel waits for the earlier ones (kernel_barrier) only if it accesses what they write or writes what
-  # they access. the (writes, accesses) since the last barrier per queue, as byte ranges (buffers in the jit's arena share a base)
-  barriers:set[int] = set()
-  pending:dict[tuple[str, str], tuple[list, list]] = {}
-  for tag, (call, dev, queue) in enumerate(ctx.batch):
-    if not (call.op is Ops.CALL and call.body.op is Ops.PROGRAM): continue
-    bufs = [(base, lane, off, off + b.max_numel() * b.dtype.itemsize) for b in get_call_arg_uops(call) for base, lane, off in [unwrap_lane(b)]]
-    pos = [k for k, a in enumerate(call.src[1:]) if not a.is_variable]
-    writes, (pw, pa) = [bufs[pos.index(i)] for i in get_call_outs_ins(call)[0]], pending.setdefault((dev, queue), ([], []))
-    if any(x[:2] == y[:2] and x[2] < y[3] and y[2] < x[3] for xs, ys in ((pw, bufs), (pa, writes)) for x in xs for y in ys):
-      barriers.add(tag)
-      del pw[:], pa[:]
-    pw.extend(writes)
-    pa.extend(bufs)
-
   def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
+    barrier = [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    # (waits for other queues: then the barrier, see _start_ins)
-    waits = _wait_ins(ctx, call_waits[tag]) + ([ins("barrier")] if call_waits[tag] else [])
-    return [ins("kernel_barrier")] * (tag in barriers) + waits + stamps[:1] + [call] + stamps[1:] + signal
+    # (waits for other queues: then the memory barrier, see _start_ins)
+    waits = _wait_ins(ctx, call_waits[tag]) + ([ins("memory_barrier")] if call_waits[tag] else [])
+    return barrier + waits + stamps[:1] + [call] + stamps[1:] + signal
 
   # closers advance device timelines
   close_cmds = {dev: _wait_ins(ctx, close_waits[dev]) + [ins("store", timeline(dev), timeline_value(dev) + 1)] for dev in ctx.queues}
@@ -380,8 +373,8 @@ class HWQueue:
     # ins
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
      lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
-    (UPat(Ops.CALL, src=(UPat.custom_function("barrier"),)), lambda ctx: ctx.memory_barrier()),
-    (UPat(Ops.CALL, src=(UPat.custom_function("kernel_barrier"),)), lambda ctx: ctx.kernel_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("memory_barrier"),)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("exec_barrier"),)), lambda ctx: ctx.exec_barrier()),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait_eq"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="dst"))), lambda ctx, dst: ctx.timestamp(dst)),
@@ -421,7 +414,7 @@ class HWQueue:
     self.blob += self.blob[start:] * int(r.vmax)
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
-  def kernel_barrier(self): pass # wait for the kernels before. queues that run their kernels one after another have nothing to do
+  def exec_barrier(self): pass # wait for the kernels before. queues that run their kernels one after another have nothing to do
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
@@ -519,19 +512,16 @@ Compiled.pm_link = PatternMatcher([])
 
 @dataclass
 class LinkCtx:
-  inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+  inputs:list[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
   addrs:dict[tuple[UOp, str], int] = field(default_factory=dict) # a buffer's address on a device (the same buffer has many)
 
-def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
+def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
-  dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
+  dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True)
 
-  # a placeholder is named as is, or by the device it's on. the rest are allocated where they live
   owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name)))
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
-  elif (r:=dev.link_buffer(b)) is not None: pass
-  elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
-  else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
+  else: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
 
@@ -601,10 +591,10 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
-@rewrite_group(lambda _,input_uops=None,use_rt=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, use_rt=True) -> UOp: # use_rt: a one-shot link borrows ring slots
+@rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
-  ctx = LinkCtx(input_uops or [], use_rt)
+  ctx = LinkCtx(input_uops or [])
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   return linked
