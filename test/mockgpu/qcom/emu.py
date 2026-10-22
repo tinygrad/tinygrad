@@ -1,4 +1,4 @@
-import ctypes, functools, math
+import functools, math
 from dataclasses import dataclass, replace
 from typing import Callable, cast
 import numpy as np
@@ -477,8 +477,7 @@ def cpu_kernel(body:UOp, name:str) -> Callable[..., None]:
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(UOp.sink(body, arg=KernelInfo(name=name)), Device['CPU'].renderer)
   runtime, keys = get_runtime('CPU', prg), [p.arg.name if p.addrspace is AddrSpace.ALU else p.arg.slot for p in prg.kernel_params]
-  runtime.fxn.argtypes = [ctypes.c_uint64] * len(keys)
-  return lambda *bufs, **vals: runtime.fxn(*[vals[k] if isinstance(k, str) else bufs[k] for k in keys])
+  return lambda *bufs, **vals: runtime(*[vals[k] if isinstance(k, str) else bufs[k] for k in keys])
 
 def blend(active:UOp, new:UOp, old:UOp) -> UOp: # bitwise, since a where becomes a masked store, which is microcoded on x86
   keep = active.cast(new.dtype) * new.dtype.max
