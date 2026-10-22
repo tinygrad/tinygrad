@@ -44,6 +44,9 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
 I8_WMMA_QUANTS = (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
 # formats with a single scale per 32 weights and no offset
 GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K)
+# a Q8_0 linear of a few rows (a multiple of 16) on the int8 tensor cores (its activations quantized), set while batched decoding is traced
+Q8_ROWS_I8:list[bool] = [False]
+
 def _use_i8_wmma(device:str|tuple[str, ...]|None, ggml_type:int) -> bool:
   return bool(getenv("I8_WMMA", 1)) and _wmma_rdna4(device) and (ggml_type in I8_WMMA_QUANTS or getenv("I8_WMMA", 1) == 2)
 
@@ -1060,7 +1063,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
-  if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and _use_i8_wmma(x.device, layer.ggml_type):
+  # (Q8_0 too for the rows of batched decoding, Q8_ROWS_I8: the weights are the time, the int8 tensor cores read them once)
+  few_q8 = Q8_ROWS_I8[0] and layer.ggml_type == Q8_0 and tokens <= 32 and _wmma_rdna4(x.device)
+  if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8):
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
   elif tokens >= 64 and tokens % 16 == 0 and xq is not None and layer.ggml_type in GROUP_SCALE_QUANTS and layer.shard_axis is None and \
@@ -2868,13 +2873,14 @@ KDA_WAVES = 8
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
-                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0) -> UOp:
+                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0) -> UOp:
+  # row0: the tokens are rows row0.. of the inputs (a row of batched decoding: the inputs of all of them, not a copy of its own)
   # R: the rows of a head split over R workgroups (each makes the convolutions, norms and decays of the head), z the outputs before their norm
   # (float, kda_out normalizes them): more workgroups, fewer rows in a row
   # a few tokens (T) of a kda layer, a workgroup per head: the short convolutions of q, k and v (shifting their states), the l2 norms of q and
   # k, the decay and the delta rule update of the head's state token by token, the rms norm of the outputs and their sigmoid gates.
   # the states (S, ...) at a position p are p%S: read at start_pos, the ones after every token written (the others keep the states before)
-  S, T = cast(int, state.shape[0]), cast(int, pq.shape[-2])
+  S, T, N = cast(int, state.shape[0]), cast(int, z.shape[-2]), cast(int, pq.shape[-2])
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else getenv("KDA_MULTI_WAVES", 2)), cast(int, wq.shape[-1])
@@ -2884,7 +2890,8 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   state, z = state.reshape(S*heads, V, K), z.reshape(T, heads*V)
   cq, ck, cv = (x.reshape(S*(conv-1), heads*K) for x in (cq, ck, cv))
   rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
-  pq, pk, pv, gate, alpha = (x.reshape(T, heads*K) for x in (pq, pk, pv, gate, alpha))
+  pq, pk, pv, gate, alpha = (x.reshape(N, heads*K).shrink(((row0, row0+T), None)) for x in (pq, pk, pv, gate, alpha))
+  beta = beta.reshape(N, heads).shrink(((row0, row0+T), None))
   hr, wave, lane = UOp.range(heads*max(R, 1), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   h, chunk = (hr // R, hr % R) if R else (hr, UOp.const(0, dtypes.weakint))
   tid, initial = wave * WARP_SIZE + lane, start_pos.eq(0)
@@ -2913,7 +2920,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   qs = [[y * K**-0.5 for y in l2([lds[t, 0, c].load() for c in cols])] for t in range(T)]
   ks = [l2([lds[t, 1, c].load() for c in cols]) for t in range(T)]
   kq = [dot(ks[t], qs[t]) for t in range(T)]
-  b = [sigmoid(beta.reshape(T, heads)[t, h].load().float()) for t in range(T)]
+  b = [sigmoid(beta[t, h].load().float()) for t in range(T)]
   A = a.reshape(heads)[h].load().float()
   def decay(t:int, c:UOp) -> UOp:
     g = alpha[t, h*K + c].load().float() + dt.reshape(heads*K)[h*K + c].load().float()
@@ -2964,13 +2971,14 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
   return UOp.group(*stores).end(tg, lane).sink(arg=KernelInfo(name="kda_out", opts_to_apply=()))
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
-               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float) -> Tensor:
+               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
   are p%S: the ones of start_pos are read, the ones after every token written (T < S)
   """
   _, B, heads, V, K = state.shape
-  T = projs[0].shape[1]
+  # row: one token, row `row` of the inputs (batched decoding: the inputs of every sequence's row)
+  T = projs[0].shape[1] if row is None else 1
   assert B == 1 and start_pos.uop.is_bound_var
   axis = None if state.uop.axis is None else 2
   # (R: the rows of a head over R workgroups, the outputs normed and quantized by kda_out)
@@ -2981,7 +2989,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps, R).call(*contig)
+  call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps, R, row or 0).call(*contig)
   out = Tensor(contig[0].after(call))
   if not R: return out
   # the norm, the gate and the quantization of the outputs (the output projection's input)
@@ -2993,6 +3001,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   q = Tensor.empty(T, local // 32, 8, dtype=dtypes.uint32, device=state.device)
   scale = Tensor.empty(T, local // 32, dtype=dtypes.float32, device=state.device)
   xsum = Tensor.empty(T, local // 32, 2, dtype=dtypes.float32, device=state.device)
+  if row is not None: gate = gate.shrink((None, (row, row+T), None))
   outs = Tensor.custom_kernel(zh.reshape(T, n), q, scale, xsum, out.reshape(T, n), norm.contiguous(), gate.reshape(T, n).contiguous(),
                               fxn=functools.partial(_kda_out_kernel, eps=eps, heads=local // V))
   zh = outs[0].reshape(1, T, n)

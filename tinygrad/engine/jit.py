@@ -358,7 +358,8 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       if reach[i]:
         for j in recs_srcs[i][1 if out[i].op is Ops.CALL else 0:]: reach[j] = 1
     jit.captured.__dict__["_jit_bufs"] = {out[i] for i in range(lin + 1) if reach[i] and out[i].op is Ops.BUFFER}
-    jit.captured.linked()
+    # (a jit whose memory isn't made yet is linked on its first call)
+    if not getattr(jit, "link_later", False): jit.captured.linked()
     oks[k] = True
     if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

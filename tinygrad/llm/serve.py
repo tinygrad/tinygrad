@@ -1,7 +1,7 @@
 from __future__ import annotations
-import json, pathlib, re, time, typing, uuid
+import json, pathlib, queue, re, socketserver, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
-from tinygrad.helpers import DEBUG, colored, stderr_log
+from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
@@ -94,47 +94,34 @@ class Handler(VizHandler):
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False):
-    model, tok = self.server.model, self.server.tok
+                reasoning:bool=False, log:str=""):
+    tok = self.server.tok
     prompt_tokens = len(ids)
-    cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     out: list[int] = []
-    finish_reason = "stop"
-    st = pt = time.perf_counter()
     dec = tok.stream_decoder()
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
     router = StreamRouter(reasoning, tags)
-    spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
-    def log_stats(interrupted:bool=False):
-      et = time.perf_counter()
-      total = f"total:{et-st:6.2f}s"
-      # speculative decoding: the tokens of a step of the model
-      spec = f"spec:{(t[1]-spec_st[1])/(t[0]-spec_st[0]):4.2f} tok/step  {colored('--', 'BLACK')}  " \
-        if spec_st and (t:=model.spec_stats)[0] > spec_st[0] else ""
-      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  {spec}"
-                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
-    completed = False
+    # the model runs on the server's thread (LLMServer.serve_forever): the request waits there, its tokens come back here
+    req = Request(ids, log, max_tokens, temperature)
+    self.server.waiting.put(req)
     try:
       yield chunk({"role":"assistant", "content":""})
-      for next_id in model.generate(ids, temperature=temperature):
-        if len(out) == 0:
-          stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-        if tok.is_end(next_id): break
+      while (next_id := req.out.get()) is not None:
         out.append(next_id)
         for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)): yield chunk({field:delta})
-        if max_tokens is not None and len(out) >= max_tokens:
-          finish_reason = "length"
-          break
+      if req.error is not None:
+        yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
+        return
+      finish_reason = req.finish_reason
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
       # a call ends at the </tool_call> before the next <tool_call> or the end (as text tags, its arguments can hold the markup)
       call, call_end = re.escape(tags["<tool_call>"]), re.escape(tags["</tool_call>"])
       for m in re.finditer(rf"{call}\s*(.*?)\s*(?:{call_end}(?=\s*(?:{call}|$))|$)", router.buf, re.DOTALL):
         if (parsed := parse_tool_call(m.group(1), tags)) is None:
-          stderr_log(f"failed to parse tool call: {unmark(m.group(1))[:200]}")
+          stderr_log(f"failed to parse tool call: {unmark(m.group(1))[:200]}\n")
           yield chunk({"content":unmark(m.group(0))})  # don't silently drop output the client can't use
         else:
           name, args = parsed
@@ -144,19 +131,15 @@ class Handler(VizHandler):
       if tool_calls:
         yield chunk({"tool_calls":tool_calls})
         if finish_reason == "stop": finish_reason = "tool_calls"
-      completed = True
       yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
       if include_usage:
         yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
                                         "total_tokens": prompt_tokens + len(out)}, **tmpl}
-      log_stats()
-    except GeneratorExit:
-      if not completed: log_stats(interrupted=True)
-      raise
+    finally: req.cancelled = True  # (a client gone: the model stops at its next token)
 
   def do_POST(self):
     request_st = time.perf_counter()
-    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  ")
+    log = f"{self.path}  {colored('--', 'BLACK')}  "
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
@@ -165,9 +148,9 @@ class Handler(VizHandler):
       normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
       ids: list[int] = self.server.tok.encode(rendered)
-      stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
+      log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
-        stderr_log(f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
+        stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
         return self.send_data(json.dumps({"error":{"message":f"prompt has {len(ids)} tokens, but the model context is "
           f"{self.server.model.max_context}", "type":"invalid_request_error", "param":"messages", "code":"context_length_exceeded"}}).encode(),
           status_code=400)
@@ -176,11 +159,12 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+                              reasoning=rendered.rstrip().endswith("<think>"), log=log)
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
         for c in chunks:
+          if "error" in c: return self.send_data(json.dumps(c).encode(), status_code=500)
           if not c["choices"]: continue
           choice = c["choices"][0]
           if (delta := choice.get("delta", {})):
@@ -196,7 +180,150 @@ class Handler(VizHandler):
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
-class LLMServer(TCPServerWithReuse):
+def _close(g:typing.Iterator) -> None:
+  if (close:=getattr(g, "close", None)) is not None: close()  # (a generator: the model stops where it is)
+
+class Request:
+  """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
+  def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float):
+    self.ids, self.log, self.max_tokens, self.temperature = ids, log, max_tokens, temperature
+    self.cancelled, self.finish_reason = False, "stop"
+    self.error: Exception|None = None
+    self.out: queue.Queue[int|None] = queue.Queue()
+    self.generated: list[int] = []
+    self.st, self.pt, self.cache_start, self.steps = time.perf_counter(), 0.0, 0, 0
+    self.pos, self.done = 0, False  # batched decoding: the position of its last token (the next step's input)
+
+class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
+  """
+  requests come in on threads of their own, the model runs on the server's thread: one request alone is decoded as before (speculative
+  decoding, its reply cached for the next turn), many at the same time are batched (Transformer.batch_step): every one has a slot of the
+  model's states, a step gives the next token of all of them. a request that may not fit a slot (prompt + max_tokens) waits for the model
+  alone, one that fills its slot goes on alone (its tokens prefilled again)
+  """
+  daemon_threads = True
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
+    self.waiting: queue.Queue[Request] = queue.Queue()
+    # the slots of batched decoding (none: one request at a time)
+    self.slots = n if isinstance(n:=getattr(model, "batch_slots", lambda: 0)(), int) else 0
     super().__init__(server_address, Handler)
+
+  def serve_forever(self, poll_interval:float=0.5):
+    # the model runs here, not on a thread of its own: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
+    threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
+    self.schedule()
+
+  # ** the requests' tokens and their end
+  def emit(self, req:Request, tok:int) -> bool:
+    """a sampled token of req: sent, or the end. returns whether req goes on"""
+    if not req.generated and not req.pt:
+      req.pt = time.perf_counter()
+      stderr_log(req.log + f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
+                 f"prefill:{(len(req.ids)-req.cache_start)/(req.pt-req.st):5.0f} tok/s\n" if self.verbose_prefill else "")
+    if req.cancelled or self.tok.is_end(tok): return self.finish(req)
+    req.generated.append(tok)
+    req.out.put(tok)
+    if req.max_tokens is not None and len(req.generated) >= req.max_tokens:
+      req.finish_reason = "length"
+      return self.finish(req)
+    return True
+  verbose_prefill = False
+  def finish(self, req:Request, error:Exception|None=None) -> bool:
+    if req.done: return False
+    req.done, req.error = True, error
+    et, n = time.perf_counter(), len(req.generated)
+    total = f"total:{et-req.st:6.2f}s"
+    pre = (len(req.ids) - req.cache_start) / ((req.pt or et) - req.st)
+    spec = f"spec:{n/req.steps:4.2f} tok/step  {colored('--', 'BLACK')}  " if req.steps else ""
+    stderr_log(req.log + f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
+               f"prefill:{pre:5.0f} tok/s  {colored('--', 'BLACK')}  gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  "
+               f"{colored('--', 'BLACK')}  {spec}out:{n:5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if req.cancelled else total}\n")
+    req.out.put(None)
+    return False
+
+  # ** the model
+  def batchable(self, req:Request) -> bool:
+    """req can be decoded in a slot: its prompt and room for a reply fit (a reply that fills the slot goes on alone)"""
+    if not self.slots: return False
+    room = min(1024, req.max_tokens - len(req.generated)) if req.max_tokens is not None else 1024
+    return len(req.ids) + len(req.generated) + room < self.model.batch_ctx()
+
+  def prefill(self, req:Request) -> int:
+    """the prompt (and what req generated, a continuation) through the model: the first sampled token"""
+    ids = req.ids + req.generated
+    req.cache_start = self.model.get_start_pos(ids)
+    g = self.model.generate(list(ids), temperature=req.temperature)
+    try: return next(g)
+    finally: _close(g)
+
+  def run_alone(self, req:Request) -> bool:
+    """req alone on the model: speculative decoding until its end, or until another request comes (it goes on in slot 0: returns True)"""
+    model = self.model
+    ids = req.ids + req.generated
+    req.cache_start = model.get_start_pos(ids)
+    spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
+    g = model.generate(list(ids), temperature=req.temperature)
+    try:
+      for tok in g:
+        if not self.emit(req, tok): return False
+        if not self.waiting.empty() and self.batchable(req):
+          # another request: this one goes on batched (the model's states after its last token's position are the slot's)
+          _close(g)
+          req.pos = len(model._cached_tokens)
+          model.slot_store(0, req.pos)
+          return True
+      return self.finish(req)
+    finally:
+      if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list): req.steps += ss[0] - spec_st[0]
+      _close(g)
+
+  def schedule(self):
+    model, slots = self.model, self.slots
+    active: dict[int, Request] = {}  # the slot of every request decoded batched
+    pending: list[Request] = []  # requests waiting for a slot or for the model alone
+    while True:
+      try:
+        # (a wait of a while at a time: a Ctrl-C stops the server, a lock's wait without a timeout doesn't see it)
+        while not active and not pending:
+          try: pending.append(self.waiting.get(timeout=0.2))
+          except queue.Empty: pass
+        while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
+        pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
+        if not active and pending:
+          # one request (or one that doesn't fit a slot): alone
+          if len(pending) == 1 or not self.batchable(pending[0]):
+            req = pending.pop(0)
+            try:
+              if self.run_alone(req): active[0] = req
+            except Exception as e:
+              traceback.print_exc()
+              self.finish(req, e)
+            continue
+        # new requests into free slots: prefilled, their states copied into the slot
+        for req in [r for r in pending if self.batchable(r)]:
+          if len(active) >= slots: break
+          slot = next(i for i in range(slots) if i not in active)
+          first = self.prefill(req)
+          pending.remove(req)
+          req.pos = len(req.ids) + len(req.generated)
+          model.slot_store(slot, req.pos)
+          if self.emit(req, first): active[slot] = req
+        if not active: continue
+        # a step of every slot up to the last one used (the free ones in between are rows of nothing)
+        rows = [(active[i].generated[-1], active[i].pos, active[i].temperature) if i in active else (0, 0, 0.0) for i in range(max(active)+1)]
+        out = model.batch_step(rows)
+        for i, req in list(active.items()):
+          req.pos += 1
+          req.steps += 1
+          if not self.emit(req, out[i]): del active[i]
+          elif req.pos + 1 >= model.batch_ctx():
+            # its slot is full: it goes on alone (prefilled again), when the model is free
+            del active[i]
+            pending.insert(0, req)
+        # the last one batched, nothing waiting: it goes on alone (prefilled again), speculative decoding is faster than a step of one
+        if len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1): pending.append(active.pop(next(iter(active))))
+      except Exception as e:
+        traceback.print_exc()
+        for req in [*active.values(), *pending]: self.finish(req, e)
+        active, pending = {}, []
