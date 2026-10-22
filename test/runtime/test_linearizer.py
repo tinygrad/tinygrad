@@ -122,7 +122,8 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
-    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
+    # rand, not empty: uninitialized inputs can cancel in the dot product and miss the tolerance
+    x, y = Tensor.rand(64, 64).realize(), Tensor.rand(64, 64).realize()
     r = (x@y).relu()
     opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
