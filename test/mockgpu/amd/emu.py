@@ -1959,7 +1959,8 @@ ASM_CALL = ContextVar("ASM_CALL", 0)
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  if ASM_CALL:
+  # TODO: better way to check for lifted kernels
+  if ASM_CALL and not name.startswith("emu"):
     from test.mockgpu.amd.call import lift
     sink = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
     dev, ren = ('AMD', 'HIP') if ASM_CALL > 1 else ('CPU', 'LLVM')
