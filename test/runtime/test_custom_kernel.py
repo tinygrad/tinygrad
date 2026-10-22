@@ -595,8 +595,8 @@ class TestCustomKernel(unittest.TestCase):
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
-@unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)),
-                     "calls in kernels render on CPU")
+@unittest.skipUnless(Device.DEFAULT in {"CPU", "AMD"} and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)),
+                     "calls in kernels render not implemented in renderer")
 class TestCallInKernel(unittest.TestCase):
   def test_simple(self):
     N = getenv("N", 4)

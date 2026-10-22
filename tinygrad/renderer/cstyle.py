@@ -558,7 +558,7 @@ class HIPRenderer(CStyleLanguage):
            f"{vec} make_{vec}({', '.join([f'{scal} {x}' for x in _nms[:count]])}) {{ return {{ {', '.join(_nms[:count])} }}; }}"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, ockl = [], []
+    prefix, ockl = prefix or [], []
     type_map = {dtypes.bf16: "bf16", dtypes.f32: "f32", dtypes.f16: "f16",
                 **{d: ("_" if self.is_cdna(self.target.arch) else "") + ("fp8_fp8", "bf8_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
     used_dtypes = uops_to_dtypes(uops)
