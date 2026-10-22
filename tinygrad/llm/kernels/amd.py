@@ -360,7 +360,7 @@ def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]|None=Non
   return body.substitute(repl), stores
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
-                   estimates:Estimates|None=None, multi:int=1) -> UOp:
+                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None) -> UOp:
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
   # share the workgroup: they add up their sums in LDS
   # a wave serves 32//lanes outputs with `lanes` lanes each, whichever leaves fewer lanes idle. at most 16 waves in a workgroup: a wave sums
@@ -368,6 +368,8 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   # active(token) -> bool: inactive tokens (experts of other devices) skip their loop and store 0
   # multi: the tokens (all of out's rows) a lane computes for its output, they share its weight loads (a few tokens: the drafts of speculative
   # decoding read the weights once)
+  # bundles (count, store_row): the grid's rows are bundles of `multi` tokens (b*multi+m) that share the weights (the rows of an expert),
+  # active(token) of its first token, a token's output row store_row(token) (-1: none)
   def waste(lanes:int) -> int: return lanes*((group_count+lanes-1)//lanes) - group_count
   lanes = min((l for l in (32, 16, 8) if out_features % (32//l) == 0), key=lambda l: (waste(l), -l))
   outs_per_wave, slots = 32 // lanes, (group_count+lanes-1)//lanes
@@ -376,16 +378,17 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   chunks = (slots + per-1) // per
   rows = math.gcd(out_features // outs_per_wave, getenv("MOE_ROWS", 4) if active is not None else 4)
   while rows > 1 and rows*chunks > (32 if active is not None else 16): rows //= 2
-  assert multi == 1 or (active is None and out.shape[0] == multi), "multi: every row of out, no inactive tokens"
+  assert multi == 1 or bundles is not None or (active is None and out.shape[0] == multi), "multi: every row of out, no inactive tokens"
   # rep: the outputs a lane computes (active rows: a wave reads more than the few hundred bytes of one output of a narrow input)
   rep = getenv("MOE_REP", 2) if active is not None else 1
   while rep > 1 and out_features % (rows*outs_per_wave*rep): rep //= 2
-  row = UOp.range(out.shape[0]//multi*out_features//(rows*outs_per_wave*rep), 0, AxisType.GLOBAL)
+  row = UOp.range((bundles[0] if bundles else out.shape[0]//multi)*out_features//(rows*outs_per_wave*rep), 0, AxisType.GLOBAL)
   wave, chunk, lane = UOp.range(rows, 1, AxisType.LOCAL), UOp.range(chunks, 3, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   sub, which = lane % lanes, lane // lanes
   token_outputs = [((row*rows+wave)*rep + r)*outs_per_wave + which for r in range(rep)]
   outputs = [t % out_features for t in token_outputs]
   tokens = [token_outputs[0] // out_features] if multi == 1 else [UOp.const(t, dtypes.weakint) for t in range(multi)]
+  if bundles: tokens = [token_outputs[0] // out_features * multi + t for t in range(multi)]
   def dot(token:UOp, group:UOp, output:UOp=outputs[0]) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
   if active is None:
@@ -393,10 +396,11 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   else:
     # a data dependent loop: inactive tokens run it 0 times
     s = UOp.range(active(tokens[0]).where(per, 0), 5, AxisType.LOOP)
-    acc = _reg((rep,), 0)
+    acc = _reg((rep*len(tokens),), 0)
     group = sub+(chunk*per+s)*lanes
-    acc = acc.after(UOp.group(*[acc[r].store(acc.after(s)[r].load() + dot(tokens[0], group, outputs[r])) for r in range(rep)]).end(s))
-    totals = [acc[r].load() for r in range(rep)]
+    acc = acc.after(UOp.group(*[acc[t*rep+r].store(acc.after(s)[t*rep+r].load() + dot(tok, group, outputs[r]))
+                                for t, tok in enumerate(tokens) for r in range(rep)]).end(s))
+    totals = [acc[i].load() for i in range(rep*len(tokens))]
   for offset in (16, 8, 4, 2, 1)[(32//lanes).bit_length()-1:]:
     totals = [total + UOp(Ops.CUSTOM, src=(total,), arg=
       (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
@@ -408,6 +412,9 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
               for t in range(len(totals))]
   first = sub.eq(0) & chunk.eq(0)
   if active is None: stores = [out[token, outputs[0].valid(first)].store(total.cast(out.dtype)) for token, total in zip(tokens, totals)]
+  elif bundles:
+    stores = [out[(o:=bundles[1](tok)).maximum(0), outputs[r].valid(first & (o >= 0))].store(totals[t*rep+r].cast(out.dtype))
+              for t, tok in enumerate(tokens) for r in range(rep)]
   else: stores = [out[tokens[0], outputs[r].valid(first)].store(totals[r].cast(out.dtype)) for r in range(rep)]
   if getenv("LIN_NAMES"): name = f"{name}_{out_features}x{group_count*32}_m{multi}"  # (profiling: the shapes)
   return UOp.group(*stores).end(row, wave, chunk, lane).sink(arg=KernelInfo(name=name, opts_to_apply=(), estimates=estimates))
@@ -500,7 +507,8 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type)
 
 def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int, in_features:int, ggml_type:int,
-                       gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_", active:Callable|None=None) -> UOp:
+                       gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_", active:Callable|None=None,
+                       bundle:tuple[int, int, Callable]|None=None) -> UOp:
   # gate(token, output, base) -> base: moves (and predicates) the weight rows, xtoken(token) -> the activation row of an output row
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
@@ -547,6 +555,11 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
     return total * xd[token, group]
+  if bundle is not None:
+    # bundles of rows of an expert (moe_bundles): the rows of a bundle share the weight loads
+    bw = bundle[0]*out_features*in_features
+    return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], active=active, multi=bundle[1],
+                          bundles=(bundle[0], bundle[2]), estimates=Estimates(2*bw*bundle[1], bw*QUANT_SIZES[ggml_type]//256, 0))
   if len(out.shape) == 2 and active is not None:
     # moe on a grid: a row per (token, slot), inactive rows skip their loop. an upper bound estimate
     weights, nbytes = (w:=out.shape[0]*out_features*in_features), w*QUANT_SIZES[ggml_type]//256
@@ -865,7 +878,7 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
   # splits: the inputs are split in that many ranges (workgroups for few outputs), out has the rows of every split (summed after)
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
   rows = group[0].shape[0] if group else out.shape[0] // splits
-  token_tile = _moe_tile(group) if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
+  token_tile = _moe_tile(group) if group else 64 if rows % 64 == 0 else 48 if rows % 48 == 0 else 32 if rows % 32 == 0 else 16
   # outputs past a multiple of 32 (a few rows, e.g. the 24 of a hyper-connection): their tiles read the last row and aren't stored
   real_out, out_features = out_features, round_up(out_features, 32)
   # grouped experts: eight waves share a tile's activations (through LDS)
@@ -970,7 +983,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                                   act:tuple|None=None) -> UOp:
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
-  token_tile = _moe_tile(group) if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
+  token_tile = _moe_tile(group) if group else 64 if out.shape[0] % 64 == 0 else 48 if out.shape[0] % 48 == 0 else 32 if out.shape[0] % 32 == 0 else 16
   # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few), four waves its activations (LDS),
   # eight for grouped experts (a tile's rows are few, the outputs many)
   tiles, waves = (2, 8) if group else next(((t, w) for t, w in ((4, 4), (2, 4), (4, 2), (2, 2)) if out_features % (16*t*w) == 0), (4, 2))
@@ -1247,7 +1260,9 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return UOp(Ops.CUSTOM, src=src,
 _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
 
 @functools.cache
-def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, two_shot:bool=False, gather:bool=False) -> UOp:
+def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, two_shot:bool=False, gather:bool=False,
+                          half:bool=False) -> UOp:
+  # half: two values a word, in half (n is the pairs): what's sent and summed, every device's own too (the same bits everywhere)
   # one shot: every device stores its values into its slot in the mailboxes of all the others and polls its own mailbox for theirs (gather:
   # out (N, n) is all of them). two shot: workgroup g's values go to device g%N (its owner) only, the owner sums them and stores the sums
   # into the mailboxes of the others. the sums add the devices' values in device order on every device: the same bits everywhere.
@@ -1263,9 +1278,16 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 50) * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
   def reg(s:int|UOp, l:UOp) -> UOp: return ((wg*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
-  vals = [x[0, e].load().float() for e in els]
-  def word(v:UOp) -> UOp: return (epoch.cast(dtypes.uint64) << 32) | v.bitcast(dtypes.uint32).cast(dtypes.uint64)
-  def value(w:UOp) -> UOp: return (w & 0xFFFFFFFF).cast(dtypes.uint32).bitcast(dtypes.float32)
+  W = 2 if half else 1  # the values of a word
+  def h(v:UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
+  def unh(b:UOp) -> UOp: return b.cast(dtypes.uint16).bitcast(dtypes.half).float()
+  vals = [[(x[0, e*W + c].load().float().cast(dtypes.half).float() if half else x[0, e].load().float()) for c in range(W)] for e in els]
+  def word(v:list[UOp]) -> UOp:
+    bits = (h(v[0]) | (h(v[1]) << 16)) if half else v[0].bitcast(dtypes.uint32)
+    return (epoch.cast(dtypes.uint64) << 32) | bits.cast(dtypes.uint64)
+  def value(w:UOp) -> list[UOp]:
+    lo = (w & 0xFFFFFFFF).cast(dtypes.uint32)
+    return [unh(lo & 0xFFFF), unh(lo >> 16)] if half else [lo.bitcast(dtypes.float32)]
   def push(stores:list[UOp], after:UOp|None=None) -> UOp:
     # the stores in the l2, the workgroup, the l2 written back to the others
     fenced = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");', dtypes.void, *stores)
@@ -1284,21 +1306,24 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     words = words.after(UOp(Ops.CUSTOM, src=(waiting,), arg=("", dtypes.void)).backedge(loop, waiting))
     return [words[i].load() for i in range(len(slots))]
   def ordered_sum(parts:list[UOp]) -> UOp: return functools.reduce(lambda a,b: a+b, parts)
+  def mine(s:int, v:list[UOp], w:UOp) -> list[UOp]: return [me.eq(s).where(a, b) for a, b in zip(v, value(w))]
   if not two_shot:
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
-    parts = [[me.eq(s).where(v, value(got[s*EP + i])) for s in range(N)] for i, v in enumerate(vals)]
-    if gather: stores = [out[s*n + e].store(p) for e, ps in zip(els, parts) for s, p in enumerate(ps)]
-    else: stores = [out[e].store(ordered_sum(ps)) for e, ps in zip(els, parts)]
+    parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals)]
+    if gather: stores = [out[s*n + e].store(p[0]) for e, ps in zip(els, parts) for s, p in enumerate(ps)]
+    else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
   else:
     owner = (wg % N).cast(dtypes.weakint)
     k_owner, is_owner = (owner - me + N) % N, owner.eq(me)
     sent = push([mb[k][reg(me, l).valid(k_owner.eq(k))].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [is_owner & me.ne(s) for s in range(N) for _ in li])
-    sums = [ordered_sum([me.eq(s).where(v, value(got[s*EP + i])) for s in range(N)]) for i, v in enumerate(vals)]
+    sums = [[ordered_sum([mine(s, v, got[s*EP + i])[c] for s in range(N)]) for c in range(W)] for i, v in enumerate(vals)]
+    # (half: the sums in half on the owner too)
+    if half: sums = [[x.cast(dtypes.half).float() for x in sm] for sm in sums]
     published = push([mb[k][reg(N, l).valid(is_owner)].store(word(sm)) for k in range(1, N) for l, sm in zip(li, sums)], sent)
     got2 = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li])
-    stores = [out[e].store(is_owner.where(sm, value(g))) for e, sm, g in zip(els, sums, got2)]
+    stores = [out[e*W + c].store(is_owner.where(sm[c], value(g)[c])) for e, sm, g in zip(els, sums, got2) for c in range(W)]
   # the next epoch, once every thread of the workgroup read the counter
   done = counter.after(UOp.group(*stores).barrier())[wg.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
   return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name="p2p_allgather" if gather else "p2p_allreduce", opts_to_apply=()))
@@ -1480,6 +1505,12 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
   n = prod(x.shape[1:])
+  if isinstance(x.device, tuple) and isinstance(n, int) and prod(x.shape[1:-1]) > 4 and n % 2 == 0 and getenv("P2P_AR_HALF", 1) and \
+     (shape:=p2p_ar_shape(n // 2)) is not None and (p2p:=p2p_allreduce(x.device)):
+    # many rows (batched decoding): in half, two values a word (the copies would sum them in half too). the same bits on every device
+    out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
+    fxn = functools.partial(_p2p_allreduce_kernel, N=len(x.device), n=n//2, T=shape[0], EP=shape[1], two_shot=True, half=True)
+    return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and (shape:=p2p_ar_shape(n)) is not None and (p2p:=p2p_allreduce(x.device)):
     # the devices write to each other's memory (two shot from P2P_AR_TWO_SHOT values: fewer bytes over the links)
     out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
@@ -1490,7 +1521,12 @@ def partial_sum(x:Tensor) -> Tensor:
     # many elements (the tokens of speculative decoding): every device sums a part (fewer reads over the links, a second wait)
     fxn = functools.partial(_host_allreduce_kernel, N=len(x.device), n=n, scatter=n >= getenv("HOST_AR_SCATTER", 8192))
     return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), comm.mbox, comm.counter, fxn=fxn)[0].reshape(x.shape[1:])
-  if prod(x.shape[1:-1]) > 1 and getenv("ALLREDUCE_HALF", 1): return x.half().sum(0, dtype=dtypes.half).float()
+  if prod(x.shape[1:-1]) > 1 and getenv("ALLREDUCE_HALF", 1):
+    if isinstance(x.device, tuple) and isinstance(n, int) and n <= getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and x.uop.axis == 0:
+      # every device's half partial copied to the others (as the naive allreduce), summed in float in device order: the same bits everywhere
+      h = x.half().contiguous()
+      return functools.reduce(lambda a,b: a + b, [h[i].to(x.device).float() for i in range(x.shape[0])])
+    return x.half().sum(0, dtype=dtypes.half).float()
   return x.sum(0)
 
 # ******** mixture of experts: the selected experts of each token ********
@@ -1600,6 +1636,73 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, first:
   def xtoken(row:UOp) -> UOp: return row if x_slots == slots else row // slots
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_", active=local)
 
+def _moe_bundled_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow:UOp, *grids:UOp,
+                        out_features:int, in_features:int, ggml_type:int, slots:int, x_slots:int, M:int) -> UOp:
+  # the bundles of moe_bundles: a bundle's M rows (selections) of an expert read its weights once, a row is stored to its selection's row
+  expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
+  def gate(token:UOp, output:UOp, base:UOp) -> UOp: return base + bexp[token // M].load().cast(dtypes.weakint).maximum(0) * expert_words
+  def xtoken(token:UOp) -> UOp: return brow[token].load().cast(dtypes.weakint).maximum(0) // (1 if x_slots == slots else slots)
+  def active(token:UOp) -> UOp: return bexp[token // M].load() >= 0
+  def store_row(token:UOp) -> UOp: return brow[token].load().cast(dtypes.weakint)
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_bundled_", active=active,
+                            bundle=(int(bexp.shape[0]), M, store_row))
+
+@functools.cache
+def _moe_bundle_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:int) -> UOp:
+  """
+  the selections (sel: the expert of every (token, slot) row, first the device's first) in bundles of at most M rows of an expert: bexp the
+  expert of every bundle, brow the M rows of every bundle (both filled with -1 before). a workgroup, a thread the experts tid+256*m: it counts
+  their rows, the bundles before them (a sum over the counts in LDS), then puts their rows in their bundles in order
+  """
+  N, THREADS = cast(int, sel.shape[0]), 256
+  per = (experts + THREADS - 1) // THREADS
+  tid = UOp.range(THREADS, 0, AxisType.LOCAL)
+  es = [tid + THREADS*m for m in range(per)]
+  def ireg(dep:UOp|None=None) -> UOp:
+    r = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+    return r.after((r if dep is None else r.after(dep))[0].store(UOp.const(0, dtypes.int32)))
+  # the local experts of the selections in LDS (the loops read them there)
+  staged = UOp.alloc((N,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  idx = [tid + THREADS*q for q in range((N + THREADS - 1) // THREADS)]
+  staged = staged.after(UOp.group(*(staged[i.valid(i < N)].store(sel[i.minimum(N-1)].load() - first[0].load()) for i in idx)).barrier())
+  def expert_of(i:UOp) -> UOp: return staged[i].load()
+  # the rows of every expert of the thread
+  counts = []
+  for e in es:
+    c, i = ireg(), UOp.range(N, next(UOp.unique_num), AxisType.LOOP)
+    c = c.after(c[0].store(c.after(i)[0].load() + expert_of(i).eq(e).cast(dtypes.int32)).end(i))
+    counts.append(c[0].load())
+  nb = [(c + (M-1)) // M for c in counts]
+  lds = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL).after(staged)
+  lds = lds.after(UOp.group(*(lds[e].store(n) for e, n in zip(es, nb))).barrier())
+  stores = []
+  for e, n in zip(es, nb):
+    # the bundles before the expert's
+    a, j = ireg(), UOp.range(experts, next(UOp.unique_num), AxisType.LOOP)
+    a = a.after(a[0].store(a.after(j)[0].load() + (j < e).where(lds[j].load(), UOp.const(0, dtypes.int32))).end(j))
+    start = a[0].load().cast(dtypes.weakint)
+    ok = e < experts
+    # its rows, in order
+    r, i = ireg(start), UOp.range(N, next(UOp.unique_num), AxisType.LOOP)
+    cur, hit = r.after(i)[0].load(), expert_of(i).eq(e) & ok
+    put = brow[(start*M + cur.cast(dtypes.weakint)).valid(hit)].store(i.cast(dtypes.int32))
+    stores.append(r.after(put)[0].store(cur + hit.cast(dtypes.int32)).end(i))
+    # its bundles' expert
+    b = UOp.range((N + M - 1) // M, next(UOp.unique_num), AxisType.LOOP)
+    stores.append(bexp[(start + b).valid(ok & (b < n.cast(dtypes.weakint)))].store(e.cast(dtypes.int32)).end(b))
+  return UOp.group(*stores).end(tid).sink(arg=KernelInfo(name="moe_bundle", opts_to_apply=()))
+
+def moe_bundles(sel:Tensor, first:Tensor, experts:int, M:int, N:int) -> tuple[Tensor, Tensor]:
+  """the N selections sel of every device in bundles of at most M rows of an expert (_moe_bundle_kernel): (bexp, brow) of every device"""
+  NB = (N + M - 1) // M + min(experts, N)
+  devs = sel.device
+  def filled(n:int) -> Tensor:
+    shape, axis = ((len(devs)*n,), 0) if isinstance(devs, tuple) else ((n,), None)
+    return Tensor.empty(*shape, dtype=dtypes.int32, device=devs, axis=axis).full_like(-1).contiguous()
+  bexp, brow = Tensor.custom_kernel(filled(NB), filled(NB*M), sel.cast(dtypes.int32).reshape(-1).contiguous(), first,
+                                    fxn=functools.partial(_moe_bundle_kernel, experts=experts, M=M))[:2]
+  return bexp, brow
+
 def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, first:Tensor) -> Tensor:
   """
   weight: packed (experts, out, in) local to each device, x: (..., x_slots, in), sel: (B, T, slots) expert ids, first: the first expert of a device.
@@ -1611,6 +1714,20 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   devices = len(weight.device) if isinstance(weight.device, tuple) else 1
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   xq = q8_quantize(x, tokens*x_slots, in_features)
+  if (M:=MOE_BUNDLE) and tokens >= MOE_BUNDLE_MIN:
+    # many rows (batched decoding): the rows of an expert in bundles of M, a bundle reads the expert's weights once
+    # (the gate and up rows' bundles are the down rows' too: the same selections)
+    key = (sel.uop, first.uop, experts, M)
+    if (bundles:=_bundle_cache.get(key)) is None:
+      if len(_bundle_cache) > 256: _bundle_cache.clear()
+      bundles = _bundle_cache[key] = moe_bundles(sel, first, experts, M, tokens*int(slots))
+    bexp, brow = bundles
+    out = Tensor.empty(devices*tokens*slots, out_features, dtype=dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
+    out = out.zeros_like().contiguous()
+    fxn = functools.partial(_moe_bundled_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, slots=int(slots),
+                            x_slots=x_slots, M=M)
+    result = Tensor.custom_kernel(out, weight, *xq, bexp, brow, *extra, fxn=fxn)[0]
+    return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
   # a grid over the (token, slot) rows, or a workgroup loops over the slots of a token
   grid = getenv("MOE_GRID", 1)
   out = Tensor.empty((devices*tokens*slots, out_features) if grid else (devices*tokens, slots, out_features), dtype=dtypes.float32,
@@ -1620,6 +1737,9 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   result = Tensor.custom_kernel(out, weight, *xq, sel.cast(dtypes.int32).flatten(), first, *extra, fxn=fxn)[0]
   return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
 
+_bundle_cache:dict[tuple, tuple[Tensor, Tensor]] = {}
+# batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
+MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 40)
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
 def _moe_tile(group:tuple[UOp, ...]) -> int:
   """the rows of a tile of grouped experts (moe_route): its rows (entries) over its tiles"""
@@ -2877,26 +2997,35 @@ KDA_WAVES = 8
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
-                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0) -> UOp:
+                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0, G:int=1,
+                       positions:UOp|None=None, S:int=0) -> UOp:
   # row0: the tokens are rows row0.. of the inputs (a row of batched decoding: the inputs of all of them, not a copy of its own)
+  # G: groups (batched decoding: a sequence each, its tokens the rows g*T.., its states the S of g*S.. in the states, its start position the
+  # g-th of positions)
   # R: the rows of a head split over R workgroups (each makes the convolutions, norms and decays of the head), z the outputs before their norm
   # (float, kda_out normalizes them): more workgroups, fewer rows in a row
   # a few tokens (T) of a kda layer, a workgroup per head: the short convolutions of q, k and v (shifting their states), the l2 norms of q and
   # k, the decay and the delta rule update of the head's state token by token, the rms norm of the outputs and their sigmoid gates.
   # the states (S, ...) at a position p are p%S: read at start_pos, the ones after every token written (the others keep the states before)
-  S, T, N = cast(int, state.shape[0]), cast(int, z.shape[-2]), cast(int, pq.shape[-2])
+  # (S: the states of a group, the state buffer can hold more groups than the call's)
+  S, T, N = S or cast(int, state.shape[0]), cast(int, z.shape[-2]) // G, cast(int, pq.shape[-2])
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else getenv("KDA_MULTI_WAVES", 2)), cast(int, wq.shape[-1])
   if R: W = getenv("KDA_SPLIT_WAVES", 8)
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
   assert T < S, "the states of the T tokens and the one before"
-  state, z = state.reshape(S*heads, V, K), z.reshape(T, heads*V)
-  cq, ck, cv = (x.reshape(S*(conv-1), heads*K) for x in (cq, ck, cv))
+  state, z = state.reshape(-1, V, K), z.reshape(G*T, heads*V)
+  cq, ck, cv = (x.reshape(-1, heads*K) for x in (cq, ck, cv))
+  pq, pk, pv, gate, alpha = (x.reshape(N, heads*K) for x in (pq, pk, pv, gate, alpha))
+  beta = beta.reshape(N, heads)
+  ghr, wave, lane = UOp.range(G*heads*max(R, 1), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  grp, hr = (ghr // (heads*max(R, 1)), ghr % (heads*max(R, 1))) if G > 1 else (UOp.const(0, dtypes.weakint), ghr)
+  if positions is not None: start_pos = positions[grp].load().cast(dtypes.weakint)
   rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
-  pq, pk, pv, gate, alpha = (x.reshape(N, heads*K).shrink(((row0, row0+T), None)) for x in (pq, pk, pv, gate, alpha))
-  beta = beta.reshape(N, heads).shrink(((row0, row0+T), None))
-  hr, wave, lane = UOp.range(heads*max(R, 1), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  sbase, prow = grp*S, [grp*T + row0 + t for t in range(T)]  # (the group's states and the rows of its tokens)
+  qrows, krows, vrows, gate_rows, alpha_rows, beta_rows = ([x[r] for r in prow] for x in (pq, pk, pv, gate, alpha, beta))
+  hr = ghr if G == 1 else hr
   h, chunk = (hr // R, hr % R) if R else (hr, UOp.const(0, dtypes.weakint))
   tid, initial = wave * WARP_SIZE + lane, start_pos.eq(0)
   def silu(x:UOp) -> UOp: return x / ((-x * LOG2E).exp2() + 1)
@@ -2905,14 +3034,14 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   lds = UOp.alloc((T, 3, K), dtypes.float, addrspace=AddrSpace.LOCAL)
   ch, active = h * K + tid % K, tid < K
   stores = []
-  for i, (cs, p, w) in enumerate(((cq, pq, wq), (ck, pk, wk), (cv, pv, wv))):
-    inputs = [initial.where(0, cs[rp*(conv-1) + j, ch].load().float()) for j in range(conv-1)] + [p[t, ch].load().float() for t in range(T)]
+  for i, (cs, p, w) in enumerate(((cq, qrows, wq), (ck, krows, wk), (cv, vrows, wv))):
+    inputs = [initial.where(0, cs[(sbase+rp)*(conv-1) + j, ch].load().float()) for j in range(conv-1)] + [p[t][ch].load().float() for t in range(T)]
     weights = [w[ch, j].load().float() for j in range(conv)]
     for t in range(T):
       window = inputs[t:t+conv]
       out = silu(sum((weights[j] * window[j] for j in range(1, conv)), weights[0] * window[0]))
-      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[wps[t]*(conv-1) + j, ch.valid(active & chunk.eq(0))].store(window[j+1].cast(cs.dtype))
-                                                            for j in range(conv-1)]
+      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[(sbase+wps[t])*(conv-1) + j, ch.valid(active & chunk.eq(0))].store(
+                   window[j+1].cast(cs.dtype)) for j in range(conv-1)]
   lds = lds.after(UOp.group(*stores).barrier())
   # every wave: q and k of the head (key column lane + 32*i), l2 normalized, the decay of every column
   cols = [lane + 32*i for i in range(K // 32)]
@@ -2924,10 +3053,10 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   qs = [[y * K**-0.5 for y in l2([lds[t, 0, c].load() for c in cols])] for t in range(T)]
   ks = [l2([lds[t, 1, c].load() for c in cols]) for t in range(T)]
   kq = [dot(ks[t], qs[t]) for t in range(T)]
-  b = [sigmoid(beta[t, h].load().float()) for t in range(T)]
+  b = [sigmoid(beta_rows[t][h].load().float()) for t in range(T)]
   A = a.reshape(heads)[h].load().float()
   def decay(t:int, c:UOp) -> UOp:
-    g = alpha[t, h*K + c].load().float() + dt.reshape(heads*K)[h*K + c].load().float()
+    g = alpha_rows[t][h*K + c].load().float() + dt.reshape(heads*K)[h*K + c].load().float()
     if lb is None: return ((g.maximum(0) + ((-g.abs() * LOG2E).exp2() + 1).log2() * (1/LOG2E)) * A * LOG2E).exp2()
     return (sigmoid(g * -A) * lb * LOG2E).exp2()
   decays = [[decay(t, c) for c in cols] for t in range(T)]
@@ -2937,15 +3066,15 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   ostores, sstores = [], []
   for j in range(rows_per_wave):
     r = (chunk * W + wave) * rows_per_wave + j
-    row = [initial.where(0, state[rp*heads + h, r, c].load().float()) for c in cols]
+    row = [initial.where(0, state[(sbase+rp)*heads + h, r, c].load().float()) for c in cols]
     for t in range(T):
       decayed = [x * d for x, d in zip(row, decays[t])]
       sk, sq = dot(decayed, ks[t]), dot(decayed, qs[t])
       delta = (lds[t, 2, r].load() - sk) * b[t]
       row = [x + delta * kk for x, kk in zip(decayed, ks[t])]
-      sstores += [state[wps[t]*heads + h, r, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
-      ostores.append((z.reshape(T, heads*V)[t, (h*V + r).valid(lane.eq(0))] if R else lds_o[t, r.valid(lane.eq(0))]).store(sq + delta * kq[t]))
-  if R: return UOp.group(*ostores, *sstores).end(hr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+      sstores += [state[(sbase+wps[t])*heads + h, r, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
+      ostores.append((z[grp*T + t, (h*V + r).valid(lane.eq(0))] if R else lds_o[t, r.valid(lane.eq(0))]).store(sq + delta * kq[t]))
+  if R: return UOp.group(*ostores, *sstores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
   lds_o = lds_o.after(UOp.group(*ostores).barrier())
   # rms norm of the head's outputs, gated
   zs = []
@@ -2953,9 +3082,9 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     o = [lds_o[t, c].load() for c in cols]
     rinv = (warp_reduce(functools.reduce(lambda s,y: s + y*y, o[1:], o[0]*o[0]), full_wave=True) * (1/V) + eps).sqrt().reciprocal()
     r = tid % V
-    out = lds_o[t, r].load() * rinv * norm[r].load().float() * sigmoid(gate[t, h*V + r].load().float())
-    zs.append(z[t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
-  return UOp.group(*zs, *sstores).end(hr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+    out = lds_o[t, r].load() * rinv * norm[r].load().float() * sigmoid(gate_rows[t][h*V + r].load().float())
+    zs.append(z[grp*T + t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
+  return UOp.group(*zs, *sstores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
 
 @functools.cache
 def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp, eps:float, heads:int) -> UOp:
@@ -2975,7 +3104,8 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
   return UOp.group(*stores).end(tg, lane).sink(arg=KernelInfo(name="kda_out", opts_to_apply=()))
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
-               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1) -> Tensor:
+               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
+               positions:Tensor|None=None, groups:int=1, S:int=0) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
   are p%S: the ones of start_pos are read, the ones after every token written (T < S)
@@ -2984,22 +3114,26 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   # row: `rows` tokens, rows row.. of the inputs (batched decoding: the inputs of every sequence's rows)
   T = projs[0].shape[1] if row is None else rows
   assert B == 1, "a sequence"  # (start_pos: a bound variable, or an expression of some)
+  # groups (batched decoding): a sequence each, its states the S of g*S.. of the states (of every slot), its start the g-th of positions
+  G = groups
   axis = None if state.uop.axis is None else 2
   # (R: the rows of a head over R workgroups, the outputs normed and quantized by kda_out)
   R = r if (r:=getenv("KDA_SPLIT", 4)) and V % (r * getenv("KDA_SPLIT_WAVES", 8)) == 0 and V % 32 == 0 else 0
-  z = Tensor.empty(1, T, heads*V, dtype=dtypes.float if R else dtypes.half, device=state.device, axis=axis)
+  z = Tensor.empty(1, G*T, heads*V, dtype=dtypes.float if R else dtypes.half, device=state.device, axis=axis)
   # the states are written in place
   inplace = tuple(Tensor(s.uop.after(start_pos.uop)) for s in (state, *conv_states))
-  srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm)
+  srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm) + ((positions,) if positions is not None else ())
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _kda_decode_kernel(*params, cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0).call(*contig)
+  pos_param = params[-1] if positions is not None else None
+  call = _kda_decode_kernel(*(params[:-1] if positions is not None else params), cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
+                            pos_param, S).call(*contig)
   out = Tensor(contig[0].after(call))
   if not R: return out
   # the norm, the gate and the quantization of the outputs (the output projection's input)
   n = int(heads*V)  # (heads of every device)
   local = n // len(cast(tuple, state.device)) if axis is not None else n
-  T = int(T)
+  T = int(G*T)
   zh = Tensor.empty(1, T, n, dtype=dtypes.half, device=state.device, axis=axis)
   # (as _q8_quantize's of an input split on its features: every device its groups, a tensor of their shape)
   q = Tensor.empty(T, local // 32, 8, dtype=dtypes.uint32, device=state.device)

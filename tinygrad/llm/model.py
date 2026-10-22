@@ -277,6 +277,10 @@ MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 48)
 # sequence) in the state slot g: (pos, rows) of every group
 _batch_rows:list[list[tuple[UOp, int]]|None] = [None]
 
+def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|None) -> Tensor:
+  """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
+  return Tensor.stack(*[Tensor(p) for p, _ in groups]).cast(dtypes.int32).contiguous().to(device).contiguous()
+
 def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None) -> tuple[Tensor, list[Tensor]]:
   """
   n slots of a state like `like` (of shape, or like's) in one buffer of every device, made but not allocated (a jit captured before its
@@ -1010,6 +1014,13 @@ class GatedDeltaNetBlock(FFNBlock):
     projs, gate = [self.attn_q(x), self.attn_k(x), self.attn_v(x)], self.ssm_g_b(self.ssm_g_a(x))
     alpha, beta = self.ssm_f_b(self.ssm_f_a(x)), self.ssm_beta(x)
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
+    # groups of the same size: a kernel for all of them (their states in the pools, their positions in a tensor)
+    if len({T for _, T in groups}) == 1 and getenv("KDA_GROUPS", 1):
+      S, T = int(self.slot_rec[0].shape[0]), groups[0][1]
+      z = kda_decode(self.pool_rec, self.pool_conv, projs, weights, gate, alpha, beta, self.ssm_dt["bias"], self.ssm_a,
+                     unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
+                     positions=_group_positions(groups, self.pool_rec.device), groups=len(groups), S=S)
+      return self.ssm_out(z)
     # (every row's kernel reads its row of the inputs)
     starts = list(itertools.accumulate((t for _, t in groups), initial=0))
     zs = [kda_decode(self.slot_rec[g], self.slot_conv[g], projs, weights, gate, alpha, beta, self.ssm_dt["bias"], self.ssm_a,

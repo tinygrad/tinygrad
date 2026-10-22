@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, queue, re, socketserver, threading, time, traceback, typing, uuid
+import json, pathlib, queue, re, select, socket, socketserver, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -108,7 +108,7 @@ class Handler(VizHandler):
     self.server.waiting.put(req)
     try:
       yield chunk({"role":"assistant", "content":""})
-      while (next_id := req.out.get()) is not None:
+      while (next_id := Handler.next_token(self, req)) is not None:
         out.append(next_id)
         for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)): yield chunk({field:delta})
       if req.error is not None:
@@ -136,6 +136,20 @@ class Handler(VizHandler):
         yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
                                         "total_tokens": prompt_tokens + len(out)}, **tmpl}
     finally: req.cancelled = True  # (a client gone: the model stops at its next token)
+
+  def client_gone(self) -> bool:
+    """the client closed the connection (a non streaming request writes only at its end: the model would decode for nobody)"""
+    try:
+      readable, _, _ = select.select([self.connection], [], [], 0)
+      return bool(readable) and not self.connection.recv(1, socket.MSG_PEEK)
+    except (OSError, ValueError, TypeError): return False
+  def next_token(self, req:Request) -> int|None:
+    while True:
+      try: return req.out.get(timeout=1.0)
+      except queue.Empty:
+        if Handler.client_gone(self):
+          req.cancelled = True
+          return None
 
   def do_POST(self):
     request_st = time.perf_counter()
@@ -201,19 +215,21 @@ class Request:
     self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
 
 class BatchStats:
-  """batched decoding's status line, every few seconds while it runs: the requests in flight, the tokens a second, the steps"""
+  """batched decoding's status line every few seconds while it runs: the requests decoding and waiting now, the tokens generated a second and
+  the steps (the batch's) and prefills (of the requests that joined it) since the last line"""
   def __init__(self, every:float=5.0):
     self.every, self.st = every, time.perf_counter()
     self.reset()
-  def reset(self): self.steps, self.running, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0, 0.0, 0, 0.0
+  def reset(self): self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0.0, 0, 0.0
   def step(self, running:int, waiting:int):
     if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
-      stderr_log(f"batch  {colored('--', 'BLACK')}  running:{self.running/self.steps:5.1f}  waiting:{waiting:3d}  {colored('--', 'BLACK')}  "
-                 f"gen:{self.tokens/dt:5.0f} tok/s  {colored('--', 'BLACK')}  steps:{self.steps:4d}  step:{self.step_time/self.steps*1e3:5.1f} ms  "
-                 f"{colored('--', 'BLACK')}  prefills:{self.prefills:3d} {self.prefill_time:5.2f}s\n")
+      sep = colored('--', 'BLACK')
+      stderr_log(f"batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  {self.tokens/dt:5.0f} tok/s generated  {sep}  "
+                 f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s)  "
+                 f"{sep}  in the last {dt:.0f}s\n")
       self.st = time.perf_counter()
       self.reset()
-    self.steps, self.running = self.steps + 1, self.running + running
+    self.steps += 1
 
 class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   """
@@ -223,6 +239,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   alone, one that fills its slot goes on alone (its tokens prefilled again)
   """
   daemon_threads = True
+  request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     self.waiting: queue.Queue[Request] = queue.Queue()
