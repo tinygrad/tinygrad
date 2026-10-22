@@ -197,8 +197,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
    lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 and dtypes.is_float(x.dtype) else None),
   # unpack a uint64 packed from two uint32 (threefry)
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y', dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
-  (((UPat.var('x', dtypes.uint32).cast(dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
-   lambda x: x.cast(dtypes.uint64)),
+  (((UPat.var('x', dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
+   lambda x: x.cast(dtypes.uint32).cast(dtypes.uint64)),
   # ** simple where folding **
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),

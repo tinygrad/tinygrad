@@ -3,7 +3,7 @@ from dataclasses import replace
 from typing import Any
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
-from tinygrad.uop import Ops
+from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.render import render_uir
@@ -67,7 +67,7 @@ def parse_ssa(text:str) -> UOp:
       name, argstr = argstr[1:end], argstr[end+1:].strip()
     srcs = [parse_tok(t) for t in _src_tok.findall(srcstr)]
     arg: Any = None
-    if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: arg = _parse_paramarg(argstr, name)
+    if op in GroupOp.Defines: arg = _parse_paramarg(argstr, name)
     elif op is Ops.RANGE:
       t, *ids = argstr.split()
       arg = (AxisType[t], *map(int, ids))
