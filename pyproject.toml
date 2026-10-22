@@ -59,10 +59,10 @@ tinygrad = ["py.typed"]
 # triton = ["triton-nightly>=2.1.0.dev20231014192330"]
 linting = [
   "pylint",
-  "mypy==1.19.1",
+  "mypy==2.4.0",
   "typing-extensions",
   "pre-commit",
-  "ruff==0.14.10",
+  "ruff==0.17.1",
   "numpy",
   "typeguard",
 ]
@@ -76,7 +76,7 @@ testing_minimal = [
   "pytest-xdist",
   "pytest-split",
   "hypothesis>=6.148.9",
-  "z3-solver<4.15.4",  # 4.15.4 has a segfault when creating many z3.Context()
+  "z3-solver",
 ]
 testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai", "gguf>=0.18", "capstone"]
 testing = [
