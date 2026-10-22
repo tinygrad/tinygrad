@@ -462,8 +462,7 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
   if DEBUG >= 7: ctx.compiler.disassemble(lib)
-  deps = compile_calls(ctx, prg.src[1]) if ctx.separate_calls else ()
-  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib, src=deps),))
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib, src=compile_calls(ctx, prg.src[1])),))
 
 def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
   deps = []

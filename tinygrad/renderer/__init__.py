@@ -61,7 +61,6 @@ class Estimates:
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
-  separate_calls = False
   def render_function(self, body:UOp) -> str: raise NotImplementedError
 
   target: Target

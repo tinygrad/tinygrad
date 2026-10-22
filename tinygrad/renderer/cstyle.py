@@ -288,8 +288,6 @@ class CStyleLanguage(Renderer):
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
 class ClangRenderer(CStyleLanguage):
-  separate_calls = True
-
   def _call_declarations(self, uops:list[UOp]) -> list[str]:
     self.fn_names = {b:f"__tinygrad_call_{i}" for i,b in
                      enumerate(dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR))}
@@ -299,7 +297,6 @@ class ClangRenderer(CStyleLanguage):
             *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
 
   def render(self, uops:list[UOp]) -> str:
-    if not self.separate_calls: return super().render(uops)
     prefix = self._call_declarations(uops)
     return self.render_kernel(*self._render(uops), uops, prefix)
 

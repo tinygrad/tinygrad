@@ -230,7 +230,6 @@ class LLVMRenderer(Renderer):
     return tuple(local_args), self._render_fn(name, args, kernel, prefix, args_struct)
 
 class CPULLVMRenderer(LLVMRenderer):
-  separate_calls = True
   has_local = False
   global_max = (1, 0, 0)
   abi = None
