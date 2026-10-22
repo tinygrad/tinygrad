@@ -37,51 +37,27 @@ class TLSFAllocator:
 
     # self.blocks is more like a linked list, where each entry is a contiguous block.
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
-    if size > 0: self._insert_block(0, size)
+    if size > 0: self._set_free(0, size, True)
 
-  @functools.cache # pylint: disable=method-cache-max-size-none
-  def lv1(self, size): return size.bit_length()
+  def lv(self, size:int) -> tuple[int, int]: return (l1:=size.bit_length()), (size - (1 << (l1 - 1))) >> max(0, l1 - self.l2_cnt)
 
-  @functools.cache # pylint: disable=method-cache-max-size-none
-  def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
-
-  def _insert_block(self, start:int, size:int, prev:int|None=None):
-    if prev is None: prev = self.blocks[start][2]
-    self.storage[self.lv1(size)][self.lv2(size)].append(start)
-    self.lv1_entries[self.lv1(size)] += 1
-    self.blocks[start] = (size, start + size, prev, True)
-    return self
-
-  def _remove_block(self, start:int, size:int, prev:int|None=None):
-    if prev is None: prev = self.blocks[start][2]
-    self.storage[self.lv1(size)][self.lv2(size)].remove(start)
-    self.lv1_entries[self.lv1(size)] -= 1
-    self.blocks[start] = (size, start + size, prev, False)
+  def _set_free(self, start:int, size:int, free:bool):
+    # Free blocks are kept in the bucket of their size, allocated ones are not.
+    l1, l2 = self.lv(size)
+    if free: self.storage[l1][l2].append(start)
+    else: self.storage[l1][l2].remove(start)
+    self.lv1_entries[l1] += 1 if free else -1
+    self.blocks[start] = (size, start + size, self.blocks[start][2], free)
     return self
 
   def _split_block(self, start:int, size:int, new_size:int):
-    nxt = self.blocks[start][1]
-    assert self.blocks[start][3], "block must be free"
-    self._remove_block(start, size)._insert_block(start, new_size)._insert_block(start + new_size, size - new_size, prev=start)
+    # Splits an allocated block into two allocated blocks, the caller gives the unused one back with _set_free.
+    _, nxt, prev, is_free = self.blocks[start]
+    assert not is_free, "block must be allocated"
+    self.blocks[start] = (new_size, start + new_size, prev, False)
+    self.blocks[start + new_size] = (size - new_size, nxt, start, False)
     if nxt in self.blocks: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start + new_size, self.blocks[nxt][3])
     return self
-
-  def _merge_right(self, start:int):
-    size, nxt, _, is_free = self.blocks[start]
-    assert is_free, "block must be free"
-
-    while is_free and nxt in self.blocks:
-      if (blk:=self.blocks[nxt])[3] is False: break
-      self._remove_block(start, size)._remove_block(nxt, blk[0])._insert_block(start, size:=size + blk[0])
-      assert self.blocks[start][1] == blk[1]
-      _, nxt, _, _ = self.blocks.pop(nxt)
-
-    if nxt in self.blocks: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start, self.blocks[nxt][3])
-
-  def _merge_block(self, start:int):
-    # Go left while blocks are free. Then merge all them right.
-    while (x:=self.blocks[start][2]) is not None and self.blocks[x][3] is True: start = x
-    self._merge_right(start)
 
   def alloc(self, req_size:int, align:int=1) -> int:
     req_size = max(self.block_size, req_size) # at least block size.
@@ -91,28 +67,44 @@ class TLSFAllocator:
     size = round_up(size, (1 << size.bit_length() - self.l2_cnt))
 
     # Search for the smallest block that can fit the requested size. Start with its bucket and go up until any block is found.
-    for l1 in range(self.lv1(size), len(self.storage)):
+    size_l1, size_l2 = self.lv(size)
+    for l1 in range(size_l1, len(self.storage)):
       if self.lv1_entries[l1] == 0: continue
-      for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
+      for l2 in range(size_l2 if l1 == size_l1 else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
-          # Block start address.
+          # Block start address. Take the whole block, the unused parts are given back below.
           start = self.storage[l1][l2][0]
           nsize = self.blocks[start][0]
           assert nsize >= size, "block must be larger"
+          self._set_free(start, nsize, False)
 
-          # If request contains alignment, split the block into two parts.
+          # If request contains alignment, give back the unaligned head.
           if (new_start:=round_up(start, align)) != start:
-            self._split_block(start, nsize, new_start - start)
-            start, nsize = new_start, self.blocks[new_start][0]
+            head_size = new_start - start
+            self._split_block(start, nsize, head_size)._set_free(start, head_size, True)
+            start, nsize = new_start, nsize - head_size
 
-          # If the block is larger than the requested size, split it into two parts.
-          if nsize > req_size: self._split_block(start, nsize, req_size)
-          self._remove_block(start, req_size) # Mark the block as allocated.
+          # If the block is larger than the requested size, give back the tail.
+          if nsize > req_size: self._split_block(start, nsize, req_size)._set_free(start + req_size, nsize - req_size, True)
           return start + self.base
     raise MemoryError(f"Can't allocate {req_size} bytes")
 
   def free(self, start:int):
-    self._insert_block(start - self.base, self.blocks[start - self.base][0])._merge_block(start - self.base)
+    start -= self.base
+    size, nxt, prev, _ = self.blocks[start]
+
+    # Merge with the free neighbors. There is at most one on each side, since free blocks are always merged.
+    if nxt in self.blocks and self.blocks[nxt][3]:
+      self._set_free(nxt, nxt_size:=self.blocks[nxt][0], False)
+      del self.blocks[nxt]
+      size, nxt = size + nxt_size, nxt + nxt_size
+    if prev is not None and self.blocks[prev][3]:
+      self._set_free(prev, prev_size:=self.blocks[prev][0], False)
+      del self.blocks[start]
+      start, size = prev, size + prev_size
+
+    if nxt in self.blocks: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start, self.blocks[nxt][3])
+    self._set_free(start, size, True)
 
 # Memory Management
 

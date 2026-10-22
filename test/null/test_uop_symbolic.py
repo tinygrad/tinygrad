@@ -480,6 +480,10 @@ class TestSymbolic(unittest.TestCase):
     x = UOp.variable("x", 0, 10)
     self.assertIs(graph_rewrite((x+1)+2, symbolic_simple), x+3)
 
+  def test_unpack_uint64_high(self):
+    x, y = UOp.variable("x", 0, 2**32-1, dtypes.uint64), UOp.variable("y", 0, 2**32-1, dtypes.uint32)
+    self.assertIs(graph_rewrite((((x<<32) | y.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32), symbolic_simple), x.cast(dtypes.uint32))
+
   def test_masked_shr_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
@@ -495,6 +499,11 @@ class TestSymbolic(unittest.TestCase):
   def test_masked_idiv_fold_committed_mask(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) // 4, 0, 63, "(x//4)")
+
+  def test_signed_const_wraps(self):
+    c = UOp.const(2**31, dtypes.int32)
+    self.assertEqual(c.val, -2**31)
+    self.assertIs((UOp.const(1, dtypes.int32) < c).simplify().arg, False)
 
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
