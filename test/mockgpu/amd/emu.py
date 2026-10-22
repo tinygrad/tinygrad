@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar
+from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar, getenv
 from tinygrad.engine.realize import get_runtime, run_linear
 from tinygrad.codegen import to_program
 
@@ -938,6 +938,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
                    irc.VOP1 | irc.VOP1_DPP16 | irc.VOP2 | irc.VOP2_DPP16, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name in ('V_READFIRSTLANE_B32_E32', 'V_PERMLANE64_B32_E32'): return ctx.compile_lane_pcode(inst.op, inst)
+  if op_name in ('V_NOP_E32', 'V_PIPEFLUSH_E32'): return UOp.sink(*ctx.inc_pc())  # no pcode, nothing to compute
   # v_accvgpr_mov_b32: ACCVGPR[vdst] = ACCVGPR[src0] (VOP1 encoding, no pcode)
   if 'ACCVGPR_MOV' in op_name:
     lane, exec_mask = ctx.range(), ctx.rexec()
@@ -1852,6 +1853,16 @@ if hasattr(ir4.SOP1Op, 'S_BARRIER_SIGNAL'): _BARRIER_SOP1_OPS.add(ir4.SOP1Op.S_B
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
   ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
 
+def _lane_state(st: "WaveState", inst: Inst) -> tuple[int, int]:
+  """(EXEC mask, LDS bank conflict degree): distinct dword addresses per bank of 32, over active lanes, for DS ops."""
+  exec_mask = st._sgpr_mv[EXEC_LO.offset] | (st._sgpr_mv[EXEC_LO.offset + 1] << 32 if st.wave_size == 64 else 0)
+  if not isinstance(inst, (ir3.DS, ir4.DS)) or not hasattr(inst, 'addr') or re.search(r'_B(64|96|128)$', inst.op.name): return exec_mask, 1
+  base, off = inst.addr.offset - 256, getattr(inst, 'offset0', 0) | (getattr(inst, 'offset1', 0) << 8)
+  banks: dict[int, set[int]] = {}
+  for lane in range(st.wave_size):
+    if exec_mask >> lane & 1: banks.setdefault((a := (st._vgpr_mv[base * st.wave_size + lane] + off) >> 2) % 32, set()).add(a)
+  return exec_mask, max((len(x) for x in banks.values()), default=1)
+
 def _decode_at(pc: int, arch: str):
   """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
@@ -2003,7 +2014,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
     return program[pc]
 
-  def _run_workgroup(gidx: int, gidy: int, gidz: int, tracing: bool):
+  def _run_workgroup(gidx: int, gidy: int, gidz: int, tracing: int|None):  # tracing: wave id base, None = not traced
     """Initialize all wavefronts for one workgroup and execute them with barrier synchronization.
     Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves."""
     waves: list[tuple[WaveState, list]] = []
@@ -2021,26 +2032,27 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           pc = st.pc
           if pc == ENDPGM_PC:
             done[wi] = True
-            if tracing: sqtt_finish(wi)
+            if tracing is not None: sqtt_finish(tracing + wi)
             break
           fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
           if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
+          lanes = _lane_state(st, inst) if tracing is not None else (0, 1)  # read before the instruction overwrites its address
           fxn((ctypes.c_uint64 * len(globals_list))(*[c_bufs[g] for g in globals_list]))
-          if tracing:
+          if tracing is not None:
             inst_op = inst.op.value if hasattr(inst, 'op') else 0
-            sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
+            sqtt_emit(tracing + wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, pc - lib,
+                      *lanes)
           if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
         else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
       # All waves have either hit barrier or endpgm — release barrier waves for next round
     raise RuntimeError("exceeded 10M total scheduling rounds")
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
-  # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
-  tracing = bool(PROFILE)
+  # Trace the first SQTT_TRACE_WGS workgroups as co-resident on the traced CU (wave id = workgroup * 64 + wave); later ones run untraced
+  trace_wgs = getenv("SQTT_TRACE_WGS", 1) if PROFILE else 0
   with _MXCSRContext():
-    for gidz, gidy, gidx in itertools.product(range(gz), range(gy), range(gx)):
-      _run_workgroup(gidx, gidy, gidz, tracing)
-      tracing = False  # only trace the first workgroup
+    for i, (gidz, gidy, gidx) in enumerate(itertools.product(range(gz), range(gy), range(gx))):
+      _run_workgroup(gidx, gidy, gidz, i * 64 if i < trace_wgs else None)
       if lds_size > 0: ctypes.memset(lds_buf._buf, 0, max(lds_size, 4))  # reset LDS for next workgroup
 
   if PROFILE: sqtt_traces.append(sqtt_finalize())
