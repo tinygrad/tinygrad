@@ -485,12 +485,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, tracked=False):
+  def simplify(self):
     if self.op is Ops.CONST: return self
     if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src)) for s in self.src): return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
-    with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
+    with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType:
     if (ret := self.simplify()).op is Ops.CAST and ret.src[0].op is Ops.CONST: return ret.dtype.const(ret.src[0].val)
@@ -527,9 +527,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
-  def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
+  def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
-    return UOp(Ops.STACK).after(*[x for x in srcs if x is not None], **kwargs)
+    return UOp(Ops.STACK).after(*[x for x in srcs if x is not None])
   @property
   def body(self) -> UOp:
     """the body of a CALL: the program, copy or function reference being called (its first src)"""
@@ -582,12 +582,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
-  def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
+  def store(self, src:UOp|ConstType, gate:UOp|None=None):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
-    return UOp(Ops.STORE, src=srcs, **kwargs)
+    return UOp(Ops.STORE, src=srcs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def backedge(self, loop:UOp, cond:UOp): return UOp(Ops.BACKEDGE, src=(self, loop, cond))
-  def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
+  def after(self, *src:UOp): return UOp(Ops.AFTER, src=(self,)+src) if len(src) else self
   @property
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
@@ -611,8 +611,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
-  def range(end:sint, axis_id, axis_type=AxisType.WEAK, *, dtype=dtypes.weakint, **kwargs):
-    return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),), arg=(axis_type, axis_id), **kwargs)
+  def range(end:sint, axis_id, axis_type=AxisType.WEAK, *, dtype=dtypes.weakint):
+    return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),), arg=(axis_type, axis_id))
   @staticmethod
   def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(AxisType.WEAK, axis_id))
   @staticmethod
@@ -808,8 +808,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   unique_num = itertools.count(0)
 
   def getaddr(self, device=None) -> UOp:
-    if self.without_after.op not in {Ops.BUFFER, Ops.ALLOC, Ops.SHRINK, Ops.BITCAST, Ops.BINARY,
-                                    Ops.MSTACK, Ops.MSELECT, Ops.PARAM, Ops.LINEAR}: return self
+    if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
     return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
   def device_range_src(device:str|tuple[str, ...]|None) -> tuple[UOp, ...]:
@@ -904,7 +903,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and s.op not in GroupOp.Defines|{Ops.STAGE, Ops.MSTACK}: s = s.src[0]
     return s
 
   def contiguous_view(self) -> tuple[UOp, int]|None:
@@ -1183,20 +1182,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod
-  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None):
+  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp.param(slot, dtype, prod(shape), device=device)
+      ret = UOp.param(slot, dtype, prod(shape))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
-      assert device is None, "LOCAL and REG placeholders cannot have a device"
       ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
-  def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
+  def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.max_shard_shape, self.dtype, slot, addrspace)
+    return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
@@ -1205,14 +1203,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # TODO: this should replace placeholder
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
-            multiple_of:int|None=None, name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
+            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
     src[0] stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
     a symbolic shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     shape = (shape,) if isinstance(shape, (int, UOp)) else shape or ()
     ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),),
-              arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, device, volatile))
+              arg=ParamArg(slot, dtype, vmin_vmax, None, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
@@ -1247,7 +1245,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
-                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None,
+                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False,
                         output_pos:tuple[int, ...]|None=None) -> tuple[UOp, ...]:
     """call a body producing the given values, returning the outputs. the body stores into output PARAMs, and the
     outputs are ALLOCs passed as extra inputs to the call (you AFTER on them like normal buffers).
@@ -1280,7 +1278,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     for p, r in zip(pos, rets): args[p] = r
     it = iter(x.contiguous() if precompile else x for x in srcs)
     call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
-                     precompile_backward=precompile_backward, aux=aux)
+                     precompile_backward=precompile_backward)
     return tuple(r.after(call) for r in rets)
 
   # one-line convenience for the single-output case: self is the value
