@@ -22,11 +22,11 @@ HIPIFY = dict(CUdevice=hip.hipDevice_t, CUcontext=hip.hipCtx_t, CUstream=hip.hip
 if DEV.target("HIP").interface == "MOCK": import test.mockgpu.hip.hip  # noqa: F401  # pylint: disable=unused-import
 
 def hipify(cufn:Any, *cuargs:UOp):
-    if (fn:=HIPIFY.get(cufn.__name__)) is None: return None
-    args = list(cuargs)
-    if fn is hip.hipMemcpyAsync: args.insert(3, UOp.const(hip.hipMemcpyDefault, dtypes.int))
-    if fn is hip.hipStreamWaitValue64: args.append(UOp.const((1<<64)-1, dtypes.uint64))
-    return ccall(fn, *args)
+  if (fn:=HIPIFY.get(cufn.__name__)) is None: return None
+  args = list(cuargs)
+  if fn is hip.hipMemcpyAsync: args.insert(3, UOp.const(hip.hipMemcpyDefault, dtypes.int))
+  if fn is hip.hipStreamWaitValue64: args.append(UOp.const((1<<64)-1, dtypes.uint64))
+  return ccall(fn, *args)
 
 def hip_submit(s:UOp)->UOp: return cuda_submit(s, hipify)
 
