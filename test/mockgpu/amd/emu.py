@@ -1962,7 +1962,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   if ASM_CALL:
     from test.mockgpu.amd.call import lift
     sink = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
-    dev, ren = 'CPU', 'LLVM'
+    dev, ren = ('AMD', 'HIP') if ASM_CALL > 1 else ('CPU', 'LLVM')
     with Context(DEV=DEV.target(dev, renderer=ren), CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
       prg = to_program(sink, Device[dev].renderer)
     vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
