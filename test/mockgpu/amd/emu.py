@@ -1531,10 +1531,29 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
+def _compile_ds_read_tr_b16(inst: irc.DS, ctx: _Ctx) -> UOp:
+  """CDNA4 DS_READ_B64_TR_B16: each lane reads 4 16-bit elements, then each group of 16 lanes transposes the 4x16 tile it read.
+  Lane 4*r+c reads row r, columns 4*c..4*c+3. Lane j gets column j: element r comes from lane 4*r+j//4, element j%4 of its 8 bytes."""
+  exec_mask, use_acc = ctx.rexec(), bool(_iattr(inst, 'acc'))
+  addr_reg, vdst_reg = ctx.inst_field(type(inst).addr), ctx.inst_field(type(inst).vdst)
+  offset = (ctx.inst_field(type(inst).offset1) << _c(8)) | ctx.inst_field(type(inst).offset0)
+  def rd16(lane: int, elem: int) -> UOp:
+    addr = ctx.rvgpr_dyn(addr_reg, _c(lane)) + offset + _c(2 * elem)
+    return (ctx.lds.index(addr >> _c(2)).load() >> ((addr & _c(2)) << _c(3))) & _c(0xFFFF)
+  vals: list[UOp] = []
+  for lane in range(ctx.wave_size):
+    base, j = lane & ~15, lane & 15
+    for d in range(2): vals.append(rd16(base + 4*(2*d) + j//4, j%4) | (rd16(base + 4*(2*d+1) + j//4, j%4) << _c(16)))
+  # Snapshot every source before writing: the destination and address registers may be identical.
+  reads = UOp(Ops.STACK, src=tuple(vals))
+  wgpr = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
+  return UOp.sink(*(wgpr(vdst_reg + _c(i % 2), _c(i // 2), v, exec_mask, after=reads) for i, v in enumerate(vals)), *ctx.inc_pc())
+
 def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  if op_name == 'DS_READ_B64_TR_B16': return _compile_ds_read_tr_b16(inst, ctx)
   pcode = get_pcode(inst.op)
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
