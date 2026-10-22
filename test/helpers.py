@@ -1,6 +1,6 @@
-import os, sys, time, struct, functools, unittest
+import os, sys, gc, time, struct, functools, unittest, contextlib
 from dataclasses import replace
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.device import Buffer
@@ -65,6 +65,13 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print(call.src[0])
     raise KernelCountException(allowed, kernel_cnt)
   return linear, var_vals
+
+@contextlib.contextmanager
+def measure_mem() -> Iterator[Callable[[], int]]:
+  Device.default.synchronize()
+  gc.collect()
+  base = GlobalCounters.mem_used
+  yield lambda: (gc.collect(), GlobalCounters.mem_used - base)[1]
 
 def assert_kernel_count(expected:int):
   got = GlobalCounters.kernel_count

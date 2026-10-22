@@ -276,8 +276,7 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
   return linear
 
-def link_linear(linear:UOp, input_uops:list[UOp]|None=None, use_rt=True) -> UOp:
-  return hcq_link(linear, input_uops=input_uops, use_rt=use_rt)
+def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_link(linear, input_uops=input_uops)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
@@ -289,7 +288,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), use_rt=False)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False))
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.device], 'invalidate_caches'): dev.invalidate_caches()
