@@ -28,7 +28,7 @@ QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5
 
 def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp) else v
 
-DECODE_MULTI = getenv("DECODE_MULTI", 4)  # up to that many tokens of a decode linear share its weight loads
+DECODE_MULTI = getenv("DECODE_MULTI", 24)  # up to that many tokens of a decode linear share its weight loads
 
 @functools.cache
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
@@ -625,7 +625,7 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   estimates, expert_base = None, UOp.const(0, dtypes.weakint)
   if group:
     rows, tiles = group
-    assert token_tile == MOE_TILE, "grouped experts have tiles of MOE_TILE rows"
+    assert token_tile == _moe_tile(group), "grouped experts have tiles of the routing's rows"
     expert = tiles[token_block].load()
     # a tile without an expert skips its loop: no estimate from the data dependent loop
     group_rng = UOp.range((expert >= 0).where(in_features // Q8_GROUP_SIZE, 0), 4, AxisType.LOOP)
@@ -682,7 +682,7 @@ def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *group:UOp, out_features
                                expert_words:int=0, x_div:int=0, act:tuple|None=None) -> UOp:
   token_tile, output_tiles = (64, 1 if out_features <= 1024 else 2) if out.shape[0] % 64 == 0 else \
     (32 if out.shape[0] % 32 == 0 else 16, 2)
-  if group: token_tile = MOE_TILE
+  if group: token_tile = _moe_tile(group)
   if act is not None: output_tiles = 2
   layout = _wmma_layout(out, out_features, token_tile, output_tiles, group)
   word_indices = (layout[5], layout[5]+2) if rdna4 else tuple(range(4))
@@ -701,7 +701,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, ou
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else 64 if out.shape[0] % 64 == 0 and \
     out_features <= 6144 else 128 if out.shape[0] % 128 == 0 else \
     32 if out.shape[0] % 32 == 0 else 16
-  if group: token_tile = MOE_TILE
+  if group: token_tile = _moe_tile(group)
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
   if act is not None: output_tiles = 2
   # grouped experts: eight waves share a tile's activations (through LDS)
@@ -781,7 +781,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
   # waves of 2 output tiles (act: the gate and up of 16 columns) by the tile's 4 token tiles. the tile's activations of a block are in LDS
   grid_src, (rows, tiles) = (srcs[0] if ggml_type == IQ3_S else None), srcs[-2:]
-  TOK, WAVES, OT = MOE_TILE, 8, 2
+  TOK, WAVES, OT = _moe_tile((rows, tiles)), 8, 2
   TT, OUTB, blocks = TOK // 16, WAVES * OT * 16, in_features // 256
   type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
   output_words = in_features * type_words // GGML_BLOCK_SIZE
@@ -865,7 +865,7 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
   # splits: the inputs are split in that many ranges (workgroups for few outputs), out has the rows of every split (summed after)
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
   rows = group[0].shape[0] if group else out.shape[0] // splits
-  token_tile = MOE_TILE if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
+  token_tile = _moe_tile(group) if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
   # outputs past a multiple of 32 (a few rows, e.g. the 24 of a hyper-connection): their tiles read the last row and aren't stored
   real_out, out_features = out_features, round_up(out_features, 32)
   # grouped experts: eight waves share a tile's activations (through LDS)
@@ -970,7 +970,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                                   act:tuple|None=None) -> UOp:
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
-  token_tile = MOE_TILE if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
+  token_tile = _moe_tile(group) if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
   # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few), four waves its activations (LDS),
   # eight for grouped experts (a tile's rows are few, the outputs many)
   tiles, waves = (2, 8) if group else next(((t, w) for t, w in ((4, 4), (2, 4), (4, 2), (2, 2)) if out_features % (16*t*w) == 0), (4, 2))
@@ -1064,7 +1064,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
   # (Q8_0 too for the rows of batched decoding, Q8_ROWS_I8: the weights are the time, the int8 tensor cores read them once)
-  few_q8 = Q8_ROWS_I8[0] and layer.ggml_type == Q8_0 and tokens <= 32 and _wmma_rdna4(x.device)
+  few_q8 = Q8_ROWS_I8[0] and layer.ggml_type == Q8_0 and tokens <= 64 and _wmma_rdna4(x.device)
   if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8):
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
     srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
@@ -1621,6 +1621,9 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
 
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
+def _moe_tile(group:tuple[UOp, ...]) -> int:
+  """the rows of a tile of grouped experts (moe_route): its rows (entries) over its tiles"""
+  return int(group[0].shape[0]) // int(group[1].shape[0])
 
 def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entries:Tensor, tiles:Tensor, slots:int=0, selections:int=0,
                        act:tuple[float, float, float]|None=None, out_dtype=dtypes.float32, sorted_out:bool=False) -> Tensor:
@@ -1705,22 +1708,23 @@ def _scatter_rows_kernel(out:UOp, pos:UOp) -> UOp:
   p = pos[i].load()
   return out[p.valid(p >= 0)].store(i.cast(dtypes.int32)).end(i).sink(arg=KernelInfo(name="scatter_rows", opts_to_apply=()))
 
-def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+def moe_route(sel:Tensor, first:Tensor, experts:int, tile:int=MOE_TILE) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   """
   sorts the (token, slot) selections of sel (B, T, k) by local expert, each expert's rows padded to whole tiles.
   returns valid (..., B*T*k) if a selection is an expert of this device, entries (..., R) the selection of each row (-1: padding)
-  tiles (..., R/MOE_TILE) the local expert of each tile (-1: none) and pos (..., B*T*k) the row of each selection (-1: not local).
+  tiles (..., R/tile) the local expert of each tile (-1: none) and pos (..., B*T*k) the row of each selection (-1: not local). a few tokens
+  (batched decoding) have few rows an expert: small tiles (an expert's weights decoded once for its rows, few padding rows computed)
   first: the first expert of each device, a leading device axis if sharded
   """
   k, N = sel.shape[-1], int(prod(sel.shape[-3:]))  # sel can have a leading device axis
-  tokens, R = N // k, round_up(N + (MOE_TILE-1)*experts, MOE_TILE)
+  tokens, R = N // k, round_up(N + (tile-1)*experts, tile)
   e = sel.reshape(-1, tokens, k).cast(dtypes.int32) - first.reshape(-1, 1, 1)
   valid = (e >= 0) & (e < experts)
   onehot = (e.unsqueeze(-1) == Tensor.arange(experts, dtype=dtypes.int32)) & valid.unsqueeze(-1)  # (n, tokens, k, experts)
   # a token selects an expert at most once: the rank of a selection is the count of earlier tokens of its expert
   per_token = onehot.sum(2, dtype=dtypes.int32)  # (n, tokens, experts)
   earlier = exclusive_cumsum(per_token) if tokens % 64 == 0 and amd_custom_kernels_supported(sel.device) else per_token.cumsum(1) - per_token
-  padded = (per_token.sum(1) + MOE_TILE-1) // MOE_TILE * MOE_TILE
+  padded = (per_token.sum(1) + tile-1) // tile * tile
   offsets = padded.cumsum(-1) - padded
   pos = valid.where(onehot.where((offsets.unsqueeze(1) + earlier).unsqueeze(2), 0).sum(-1), -1).reshape(-1, N)
   # the selection of every sorted row: a scatter of the positions into rows of -1 (padding)
@@ -1728,7 +1732,7 @@ def moe_route(sel:Tensor, first:Tensor, experts:int) -> tuple[Tensor, Tensor, Te
   entries = Tensor.full((n, R), -1, dtype=dtypes.int32)
   entries = (entries.shard(first.device, 0) if isinstance(first.device, tuple) else entries.to(first.device)).contiguous()
   entries = Tensor.custom_kernel(entries.reshape(-1), pos.cast(dtypes.int32).reshape(-1).contiguous(), fxn=_scatter_rows_kernel)[0].reshape(n, R)
-  start = Tensor.arange(R // MOE_TILE, dtype=dtypes.int32) * MOE_TILE
+  start = Tensor.arange(R // tile, dtype=dtypes.int32) * tile
   inside = (offsets.unsqueeze(1) <= start.unsqueeze(-1)) & (start.unsqueeze(-1) < (offsets + padded).unsqueeze(1))
   tiles = inside.where(Tensor.arange(experts, dtype=dtypes.int32) + 1, 0).sum(-1) - 1
   return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32), pos.cast(dtypes.int32)
@@ -2971,15 +2975,15 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
   return UOp.group(*stores).end(tg, lane).sink(arg=KernelInfo(name="kda_out", opts_to_apply=()))
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
-               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None) -> Tensor:
+               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
   are p%S: the ones of start_pos are read, the ones after every token written (T < S)
   """
   _, B, heads, V, K = state.shape
-  # row: one token, row `row` of the inputs (batched decoding: the inputs of every sequence's row)
-  T = projs[0].shape[1] if row is None else 1
-  assert B == 1 and start_pos.uop.is_bound_var
+  # row: `rows` tokens, rows row.. of the inputs (batched decoding: the inputs of every sequence's rows)
+  T = projs[0].shape[1] if row is None else rows
+  assert B == 1, "a sequence"  # (start_pos: a bound variable, or an expression of some)
   axis = None if state.uop.axis is None else 2
   # (R: the rows of a head over R workgroups, the outputs normed and quantized by kda_out)
   R = r if (r:=getenv("KDA_SPLIT", 4)) and V % (r * getenv("KDA_SPLIT_WAVES", 8)) == 0 and V % 32 == 0 else 0
@@ -2989,7 +2993,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _kda_decode_kernel(*params, start_pos.uop.unbound(), lb, eps, R, row or 0).call(*contig)
+  call = _kda_decode_kernel(*params, cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0).call(*contig)
   out = Tensor(contig[0].after(call))
   if not R: return out
   # the norm, the gate and the quantization of the outputs (the output projection's input)

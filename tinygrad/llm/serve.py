@@ -193,6 +193,27 @@ class Request:
     self.generated: list[int] = []
     self.st, self.pt, self.cache_start, self.steps = time.perf_counter(), 0.0, 0, 0
     self.pos, self.done = 0, False  # batched decoding: the position of its last token (the next step's input)
+    # batched speculative decoding: the last step's sampled tokens, the position the MTP layer catches up from, the drafts accepted, the parity
+    self.y:list[int] = []
+    self.mtp, self.j, self.par = 0, 0, 1
+  def spec_start(self, first:int, pos:int, k:int):
+    """the slot's state after a prefill (or the model alone): the token at pos is the next step's input"""
+    self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
+
+class BatchStats:
+  """batched decoding's status line, every few seconds while it runs: the requests in flight, the tokens a second, the steps"""
+  def __init__(self, every:float=5.0):
+    self.every, self.st = every, time.perf_counter()
+    self.reset()
+  def reset(self): self.steps, self.running, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0, 0.0, 0, 0.0
+  def step(self, running:int, waiting:int):
+    if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
+      stderr_log(f"batch  {colored('--', 'BLACK')}  running:{self.running/self.steps:5.1f}  waiting:{waiting:3d}  {colored('--', 'BLACK')}  "
+                 f"gen:{self.tokens/dt:5.0f} tok/s  {colored('--', 'BLACK')}  steps:{self.steps:4d}  step:{self.step_time/self.steps*1e3:5.1f} ms  "
+                 f"{colored('--', 'BLACK')}  prefills:{self.prefills:3d} {self.prefill_time:5.2f}s\n")
+      self.st = time.perf_counter()
+      self.reset()
+    self.steps, self.running = self.steps + 1, self.running + running
 
 class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   """
@@ -205,8 +226,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     self.waiting: queue.Queue[Request] = queue.Queue()
+    self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
+    self.stats = BatchStats()
     # the slots of batched decoding (none: one request at a time)
     self.slots = n if isinstance(n:=getattr(model, "batch_slots", lambda: 0)(), int) else 0
+    # batched decoding is speculative (the drafts of every sequence verified in the step) when the model drafts
+    self.spec = k if self.slots and isinstance(k:=getattr(getattr(model, "config", None), "spec_drafts", 0), int) else 0
     super().__init__(server_address, Handler)
 
   def serve_forever(self, poll_interval:float=0.5):
@@ -224,6 +249,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if req.cancelled or self.tok.is_end(tok): return self.finish(req)
     req.generated.append(tok)
     req.out.put(tok)
+    self.stats.tokens += 1
     if req.max_tokens is not None and len(req.generated) >= req.max_tokens:
       req.finish_reason = "length"
       return self.finish(req)
@@ -236,7 +262,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     total = f"total:{et-req.st:6.2f}s"
     pre = (len(req.ids) - req.cache_start) / ((req.pt or et) - req.st)
     spec = f"spec:{n/req.steps:4.2f} tok/step  {colored('--', 'BLACK')}  " if req.steps else ""
-    stderr_log(req.log + f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
+    stderr_log(req.log + f"reqs:{self.inflight:3d}  {colored('--', 'BLACK')}  "
+               f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
                f"prefill:{pre:5.0f} tok/s  {colored('--', 'BLACK')}  gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  "
                f"{colored('--', 'BLACK')}  {spec}out:{n:5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if req.cancelled else total}\n")
     req.out.put(None)
@@ -271,7 +298,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # another request: this one goes on batched (the model's states after its last token's position are the slot's)
           _close(g)
           req.pos = len(model._cached_tokens)
-          model.slot_store(0, req.pos)
+          model.slot_store(0, req.pos, getattr(model, "_spec_row", 0))
+          req.spec_start(req.generated[-1], req.pos, self.spec)
           return True
       return self.finish(req)
     finally:
@@ -279,7 +307,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       _close(g)
 
   def schedule(self):
-    model, slots = self.model, self.slots
+    model, slots, k = self.model, self.slots, self.spec
     active: dict[int, Request] = {}  # the slot of every request decoded batched
     pending: list[Request] = []  # requests waiting for a slot or for the model alone
     while True:
@@ -290,6 +318,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           except queue.Empty: pass
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
+        self.inflight = len(active) + len(pending)
         if not active and pending:
           # one request (or one that doesn't fit a slot): alone
           if len(pending) == 1 or not self.batchable(pending[0]):
@@ -304,25 +333,54 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         for req in [r for r in pending if self.batchable(r)]:
           if len(active) >= slots: break
           slot = next(i for i in range(slots) if i not in active)
+          _p0 = time.perf_counter()
           first = self.prefill(req)
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
           pending.remove(req)
           req.pos = len(req.ids) + len(req.generated)
           model.slot_store(slot, req.pos)
+          req.spec_start(first, req.pos, k)
           if self.emit(req, first): active[slot] = req
         if not active: continue
+        self.stats.step(len(active), len(pending) + self.waiting.qsize())
+        _t0 = time.perf_counter()
         # a step of every slot up to the last one used (the free ones in between are rows of nothing)
-        rows = [(active[i].generated[-1], active[i].pos, active[i].temperature) if i in active else (0, 0, 0.0) for i in range(max(active)+1)]
-        out = model.batch_step(rows)
+        self.inflight = len(active) + len(pending) + self.waiting.qsize()
+        if k:
+          spec = model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, active[i].temperature) if i in active else
+                                        ([0]*(k+1), 0, 0, 1, 0.0) for i in range(max(active)+1)])
+        else: out = model.batch_step([(active[i].generated[-1], active[i].pos, active[i].temperature) if i in active else (0, 0, 0.0)
+                                      for i in range(max(active)+1)])
+        self.stats.step_time += time.perf_counter() - _t0
         for i, req in list(active.items()):
-          req.pos += 1
           req.steps += 1
-          if not self.emit(req, out[i]): del active[i]
-          elif req.pos + 1 >= model.batch_ctx():
+          if k:
+            # the drafts accepted: up to the first that isn't the sampled token, the sampled tokens after them (see Transformer._spec_steps)
+            sampled, drafts = spec[i]
+            j = next((t for t in range(k) if drafts[t] != sampled[t]), k)
+            start = req.mtp + req.j
+            req.y, req.mtp, req.j, req.par, req.pos = sampled, start + 1, j, 1 - req.par, start + j + 1
+            if not all(self.emit(req, t) for t in sampled[:j+1]):
+              del active[i]
+              continue
+          else:
+            req.pos += 1
+            if not self.emit(req, out[i]):
+              del active[i]
+              continue
+          if req.pos + k + 2 >= model.batch_ctx():
             # its slot is full: it goes on alone (prefilled again), when the model is free
             del active[i]
             pending.insert(0, req)
-        # the last one batched, nothing waiting: it goes on alone (prefilled again), speculative decoding is faster than a step of one
-        if len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1): pending.append(active.pop(next(iter(active))))
+        # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
+        while active and (hi:=max(active)) >= len(active) and next(m for m in model.BATCH_SIZES if m >= hi+1) > \
+                         next(m for m in model.BATCH_SIZES if m >= len(active)):
+          lo = next(i for i in range(slots) if i not in active)
+          model.slot_move(hi, lo)
+          active[lo] = active.pop(hi)
+        # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster
+        if not k and len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1):
+          pending.append(active.pop(next(iter(active))))
       except Exception as e:
         traceback.print_exc()
         for req in [*active.values(), *pending]: self.finish(req, e)
