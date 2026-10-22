@@ -110,12 +110,12 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
       body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)})
       call = body.call(*args, name=canonical_name)
       afters.update((b, arg.after(call)) for b, arg in zip(bufs, args) if b is not inst_addr)
+    end = UOp.group(*afters.values())
     if loop is not None:
       assert branch_cond is not None and loop_path in (COND_TAKEN, COND_NOT_TAKEN)
       if loop_path is COND_NOT_TAKEN: branch_cond = branch_cond.logical_not()
-      backedge = UOp.sink(*afters.values()).backedge(loop, branch_cond)
-      afters = {b:arg.after(backedge) for b,arg in afters.items()}
-    end = UOp.group(*afters.values()).end(wave)
+      end = end.backedge(loop, branch_cond)
+    end = end.end(wave)
   sink = UOp.sink(end.end(wg), arg=KernelInfo(name=f"emu {name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", bottom_up=True, enter_calls=True)
   return sink
