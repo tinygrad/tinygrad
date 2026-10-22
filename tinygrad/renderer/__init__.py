@@ -13,7 +13,6 @@ def with_storage(x:UOp, dt:DType) -> UOp:
   if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
-
 @dataclass(frozen=True)
 class Estimates:
   # number of FLOPS used in the Kernel
@@ -26,7 +25,7 @@ class Estimates:
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
   def from_uops(sink:UOp, ignore_indexing=False) -> Estimates:
-
+    # fresh cache
     @functools.cache
     def mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if not
@@ -77,7 +76,7 @@ class Estimates:
     uops = list(sink.toposort(enter_calls=False))
     special_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
     flops,lds,mem = process_body(uops, special_mult)
-    del process_body # flush cache
+    del process_body # flush closure cache
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
