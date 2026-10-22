@@ -237,7 +237,7 @@ def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
   return [ins("wait", ctx.queue_signal(d, q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in waits.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]:
-  return [ins("barrier")] + [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+  return [ins("memory_barrier")] + [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   queue_of = [(dev, queue) for _, dev, queue in ctx.batch] # the (device, queue) of each call by tag
@@ -246,6 +246,13 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   tracker = DepsTracker()
   accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
+
+  # add barriers when a call deps on another call of its queue
+  barriers, last_barrier = set[int](), dict[tuple[str, str], int]()
+  for tag, (deps, queue) in enumerate(zip(dep_tags, queue_of)):
+    if any(queue_of[t] == queue and t >= last_barrier.get(queue, 0) for t in deps):
+      barriers.add(tag)
+      last_barrier[queue] = tag
 
   # keep only latest tags to wait for each queue
   call_waits = [{queue_of[t]: t for t in sorted(deps) if queue_of[t] != queue_of[tag]} for tag, deps in enumerate(dep_tags)]
@@ -268,9 +275,10 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
   def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
+    barrier = [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    return _wait_ins(ctx, call_waits[tag]) + stamps[:1] + [call] + stamps[1:] + signal
+    return barrier + _wait_ins(ctx, call_waits[tag]) + stamps[:1] + [call] + stamps[1:] + signal
 
   # closers advance device timelines
   close_cmds = {dev: _wait_ins(ctx, close_waits[dev]) + [ins("store", timeline(dev), timeline_value(dev) + 1)] for dev in ctx.queues}
@@ -341,7 +349,8 @@ class HWQueue:
     # ins
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
      lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
-    (UPat(Ops.CALL, src=(UPat.custom_function("barrier"),)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("memory_barrier"),)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("exec_barrier"),)), lambda ctx: ctx.exec_barrier()),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait_eq"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="dst"))), lambda ctx, dst: ctx.timestamp(dst)),
@@ -381,6 +390,7 @@ class HWQueue:
     self.blob += self.blob[start:] * int(r.vmax)
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
+  def exec_barrier(self): pass
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
