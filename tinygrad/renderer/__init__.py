@@ -6,7 +6,6 @@ from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMa
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.renderer.tc import TensorCore
 from tinygrad.device import Compiler
-import functools
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
 def with_storage(x:UOp, dt:DType) -> UOp:
