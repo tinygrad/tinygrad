@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
+from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
@@ -298,29 +298,6 @@ class Tensor(RandMixin):
     assert fmt is not None, f"no fmt dtype for {self.dtype}"
     assert fmt != "e" or sys.version_info >= (3, 12)
     return buf.as_memoryview().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
-
-  # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
-  def tolist(self) -> PyConst|list[Any]:
-    """
-    Returns the value of this tensor as a nested list.
-    Returns single value for const tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4])
-    print(t.tolist())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor(5)
-    print(t.tolist())
-    ```
-    """
-    # TODO: remove half once minimum python supports it
-    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
-    if 0 in self.shape:
-      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
-      return _tolist(self.shape)
-    return self.data().tolist()
 
   def numpy(self) -> 'numpy.ndarray':
     """
