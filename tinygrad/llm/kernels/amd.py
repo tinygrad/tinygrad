@@ -873,12 +873,15 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
 
 @functools.cache
 def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int,
-                                 expert_words:int=0, x_div:int=0, act:tuple|None=None, splits:int=1) -> UOp:
+                                 expert_words:int=0, x_div:int=0, act:tuple|None=None, splits:int=1, kwaves:int=1) -> UOp:
   # RDNA4 int8 WMMA on q8 activations: the weights are their packed bytes, the scales apply per 16 inputs (see _wmma_scale), like the decode.
   # splits: the inputs are split in that many ranges (workgroups for few outputs), out has the rows of every split (summed after)
+  # kwaves: the inputs split over that many waves of a workgroup too (a few rows: more waves read the weights), summed in LDS
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
   rows = group[0].shape[0] if group else out.shape[0] // splits
-  token_tile = _moe_tile(group) if group else 64 if rows % 64 == 0 else 48 if rows % 48 == 0 else 32 if rows % 32 == 0 else 16
+  token_tile = _moe_tile(group) if group else 64 if rows % 64 == 0 else 32 if rows % 32 == 0 else 16
+  # (the inputs split over waves: a tile of all the rows of batched decoding, the weights read once)
+  if not group and kwaves > 1 and rows % 48 == 0: token_tile = 48
   # outputs past a multiple of 32 (a few rows, e.g. the 24 of a hyper-connection): their tiles read the last row and aren't stored
   real_out, out_features = out_features, round_up(out_features, 32)
   # grouped experts: eight waves share a tile's activations (through LDS)
@@ -909,9 +912,10 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
       def xrow(r:UOp) -> UOp: return (e:=entries[r].load()).valid(e >= 0) // x_div
     elif x_div == -1: store_rows = tuple(tuple(t.valid(entries[t].load() >= 0) for t in tile_tokens) for tile_tokens in tokens)
     else: store_rows = tuple(tuple((e:=entries[t].load()).valid(e >= 0) for t in tile_tokens) for tile_tokens in tokens)
-  else: group_rng = UOp.range(n_groups // splits, 4, AxisType.LOOP)
+  else: group_rng = UOp.range(n_groups // (splits*kwaves), 4, AxisType.LOOP)
   split = UOp.range(splits, 5, AxisType.GLOBAL)
-  g = group_rng + split * (n_groups // splits)
+  kw = UOp.range(kwaves, 6, AxisType.LOCAL) if kwaves > 1 else UOp.const(0, dtypes.weakint)
+  g = group_rng + (split*kwaves + kw) * (n_groups // (splits*kwaves))
   block, subgroup = g // 8, g % 8
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in tokens] for _ in outputs]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
@@ -970,11 +974,22 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     update, prefetch = _prefetched(update, group_rng, n_groups - 1, (raw, xq, xd, xs))
     update = UOp.group(update, *prefetch)
   update = update.end(group_rng)
+  def acc(o:int, t:int, j:int) -> UOp: return accs[o][t].after(update)[j].load()
+  first = UOp.const(True, dtypes.bool)
+  if kwaves > 1:
+    # the waves' sums of their inputs through LDS, added in wave order by the first
+    n = len(outputs)*len(tokens)*8
+    lds = UOp.alloc((kwaves, output_waves, WARP_SIZE, n), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    lds = lds.after(UOp.group(*(lds[kw, wave, lane, (o*len(tokens)+t)*8+j].store(acc(o, t, j))
+                                for o in range(len(outputs)) for t in range(len(tokens)) for j in range(8))).barrier())
+    def acc(o:int, t:int, j:int) -> UOp:
+      return functools.reduce(lambda a,b: a+b, [lds[k, wave, lane, (o*len(tokens)+t)*8+j].load() for k in range(kwaves)])
+    first = kw.eq(0)
   if act is not None: stores = _act_stores(out, outputs, store_rows, accs, update, act)
-  else: stores = [out[row + split * rows, output.valid(output < real_out) if real_out != out_features else output].store(
-                    accs[o][t].after(update)[j].load().cast(out.dtype))
+  else: stores = [out[row + split * rows, (output.valid(first & (output < real_out)) if real_out != out_features else output.valid(first))].store(
+                    acc(o, t, j).cast(out.dtype))
                   for o, output in enumerate(stored) for t, tile_rows in enumerate(store_rows) for j, row in enumerate(tile_rows)]
-  return UOp.group(*stores).end(token_block, output_block, split, lane, wave).sink(
+  return UOp.group(*stores).end(token_block, output_block, split, lane, wave, *([kw] if kwaves > 1 else [])).sink(
     arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_i8_wmma", opts_to_apply=(), estimates=estimates))
 
 @functools.cache
@@ -983,7 +998,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                                   act:tuple|None=None) -> UOp:
   # srcs: the iq grid if the format has one, then the expert group (rows, tiles) if grouped
   grids, group = (srcs[:1], srcs[1:]) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ((), srcs)
-  token_tile = _moe_tile(group) if group else 64 if out.shape[0] % 64 == 0 else 48 if out.shape[0] % 48 == 0 else 32 if out.shape[0] % 32 == 0 else 16
+  token_tile = _moe_tile(group) if group else 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
   # four output tiles of a wave share its token fragments (two: grouped experts, a tile's rows are few), four waves its activations (LDS),
   # eight for grouped experts (a tile's rows are few, the outputs many)
   tiles, waves = (2, 8) if group else next(((t, w) for t, w in ((4, 4), (2, 4), (4, 2), (2, 2)) if out_features % (16*t*w) == 0), (4, 2))
@@ -1079,7 +1094,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (Q8_0 too for the rows of batched decoding, Q8_ROWS_I8: the weights are the time, the int8 tensor cores read them once)
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type == Q8_0 and tokens <= 64 and _wmma_rdna4(x.device)
   if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8):
-    fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type)
+    # (a few rows: the inputs split over the waves of a workgroup, more of them read the weights)
+    kwaves = next((k for k in (getenv("I8_KWAVES", 2), 1) if few_q8 and (in_features // Q8_GROUP_SIZE) % k == 0), 1)
+    fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, kwaves=kwaves)
     srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
   elif tokens >= 64 and tokens % 16 == 0 and xq is not None and layer.ggml_type in GROUP_SCALE_QUANTS and layer.shard_axis is None and \
        _wmma_rdna4(x.device) and (not split or (isinstance(x.device, tuple) and (tokens // len(x.device)) % 16 == 0 and getenv("I8_SPLIT", 1))):
