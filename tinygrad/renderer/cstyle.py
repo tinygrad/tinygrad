@@ -560,53 +560,53 @@ class HIPRenderer(CStyleLanguage):
            f"{vec} make_{vec}({', '.join([f'{scal} {x}' for x in _nms[:count]])}) {{ return {{ {', '.join(_nms[:count])} }}; }}"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, ockl = prefix or [], []
+    defines, ockl = [], []
     type_map = {dtypes.bf16: "bf16", dtypes.f32: "f32", dtypes.f16: "f16",
                 **{d: ("_" if self.is_cdna(self.target.arch) else "") + ("fp8_fp8", "bf8_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
     used_dtypes = uops_to_dtypes(uops)
     if any(u.op is Ops.CAST and u.src[0].op is Ops.CONST and not math.isfinite(u.src[0].val) for u in uops):
-      prefix += ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))"]
+      defines += ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))"]
     if any(u.op is Ops.SPECIAL for u in uops):
-      prefix.append("typedef long unsigned int size_t;")
+      defines.append("typedef long unsigned int size_t;")
       ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", self.render_dtype(dt), self.render_dtype(dt), ocml_ops[op][1])
       for op, dt in dedup((u.op, u.dtype) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
-    if any(dt == dtypes.half for dt, _ in used_dtypes): prefix.append("#define half _Float16")
+    if any(dt == dtypes.half for dt, _ in used_dtypes): defines.append("#define half _Float16")
     if any(dt in dtypes.fp8s for dt, _ in used_dtypes):
-      prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
+      defines += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
     if any((u.op is Ops.CAST and u.dtype in dtypes.fp8s and u.src[0].dtype == dtypes.float) or
            (u.op is Ops.CAST and u.src[0].op is Ops.CONST and u.dtype in dtypes.fp8s) for u in uops):
       fp8_max = amd_fp8s(self.target.arch)[0].max
-      prefix.append(f"""static inline __attribute__((device)) unsigned char f32_to_fp8(float v, int is_bf8) {{
+      defines.append(f"""static inline __attribute__((device)) unsigned char f32_to_fp8(float v, int is_bf8) {{
   v = (((*(unsigned*)&v)&0x7F800000)!=0x7F800000)?__builtin_amdgcn_fmed3f(v,is_bf8?57344.0f:{fp8_max}f,is_bf8?-57344.0f:-{fp8_max}f) : v;
   return (unsigned char)(is_bf8?__builtin_amdgcn_cvt_pk_bf8_f32(v,v,0,false):__builtin_amdgcn_cvt_pk_fp8_f32(v,v,0,false));\n}}""")
-    prefix += [f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml]
-    prefix += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if count > 1]
+    defines += [f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml]
+    defines += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if count > 1]
 
     for name, (N, M, K), dtype_in, dtype_out, _ in wmma_args(uops): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if self.is_cdna(self.target.arch):
         if (N, M, K) == (16, 16, 16): type_map[dtypes.bf16] = 'bf16_1k'
         elif (N, M, K) == (16, 16, 32): type_map = {**type_map, dtypes.bf16: "_bf16", dtypes.f16: "_f16"}
         elif (N, M, K) == (16, 16, 128): type_map = {**type_map, dtypes.fp8e4m3: "_f8f6f4", dtypes.fp8e5m2: "_f8f6f4"}
-        prefix.append(f"#define __{name} __builtin_amdgcn_mfma_{'scale_' if K == 128 else ''}f32_{N}x{M}x{K}{type_map[dtype_in]}")
+        defines.append(f"#define __{name} __builtin_amdgcn_mfma_{'scale_' if K == 128 else ''}f32_{N}x{M}x{K}{type_map[dtype_in]}")
       elif dtype_out == dtypes.int32:
         # RDNA4 uses 8 int8 values per lane in 2 VGPRs, RDNA3 uses 16 in 4 VGPRs
         num_regs = 2 if (is_rdna4:=self.tensor_cores == tc.amd_rdna4) else 4
-        prefix.append(f"typedef int wmma_int{num_regs} __attribute__((ext_vector_type({num_regs})));\n"+
+        defines.append(f"typedef int wmma_int{num_regs} __attribute__((ext_vector_type({num_regs})));\n"+
           f"static inline __attribute__((device)) int8 __{name}"+f"""(signed_char{num_regs*4} a, signed_char{num_regs*4} b, int8 c) {{
   return __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32{'_gfx12' if is_rdna4 else ''}(true, __builtin_bit_cast(wmma_int{num_regs}, a),
     true, __builtin_bit_cast(wmma_int{num_regs}, b), c, false);\n}}""")
       # #define __WMMA_16_16_16_f16_f16 __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
       elif self.tensor_cores == tc.amd_rdna4:
-        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
+        defines.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
       elif dtype_out == dtypes.float:
-        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_in == dtypes.half else 'bf16'}_w32")
-      else: prefix.append(f"static inline __attribute__((device)) half8 __{name}"+"""(half16 a, half16 b, half8 c) {
+        defines.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_in == dtypes.half else 'bf16'}_w32")
+      else: defines.append(f"static inline __attribute__((device)) half8 __{name}"+"""(half16 a, half16 b, half8 c) {
   half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, defines + (prefix or []))
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s or d in amd_fp8s(self.target.arch)}
 
