@@ -1786,16 +1786,40 @@ def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int
   al = [x.reshape(-1, D) for x in _lanes(add)] if add is not None else None
   got:dict[tuple[int, int], Tensor] = {}
   final:list[UOp] = []
+  split = bool(getenv("MOE_RS_SPLIT", 1))
+  prev:dict[int, Tensor] = {}
   for step in range(1, n+1):
     for j in range(n):
       t = (j - step) % n
       adds = ([Tensor(al[j])] if al is not None else []) + ([got[(t, j)]] if step > 1 else [])
+      add_rows = ((t*size,) if al is not None else ()) + ((0,) if step > 1 else ())
       out = Tensor.empty(size, D, dtype=dtypes.half if step < n else dtypes.float32, device=devs[j])
-      y = Tensor.custom_kernel(out, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]), *adds, fxn=functools.partial(_moe_combine_kernel, k=k,
-                               by_selection=True, row0=t*size, add_rows=((t*size,) if al is not None else ()) + ((0,) if step > 1 else ())))[0]
+      if split:
+        # the weighted sum of its rows doesn't wait for the ring (the step adds it to what came, as the kernel does: the same values)
+        # (after the step before's add on the device: the queue alternates them, a sum runs while the copy before it is on its way)
+        buf = Tensor.empty(size, D, dtype=dtypes.float32, device=devs[j])
+        if j in prev: buf = Tensor(buf.uop.after(prev[j].uop))
+        local = Tensor.custom_kernel(buf, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]),
+                                     fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=True, row0=t*size))[0]
+        y = prev[j] = Tensor.custom_kernel(out, local, *adds, fxn=functools.partial(_add_rows_kernel, add_rows=add_rows))[0]
+      else:
+        y = Tensor.custom_kernel(out, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]), *adds, fxn=functools.partial(_moe_combine_kernel, k=k,
+                                 by_selection=True, row0=t*size, add_rows=add_rows))[0]
       if step < n: got[(t, (j+1) % n)] = y.to(devs[(j+1) % n])
       else: final.append(y.reshape(1, size, D).uop)
   return Tensor(UOp.mstack(*final).unshard(1))
+
+def _add_rows_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -> UOp:
+  # y = acc + (the sum of the adds, each from its row), in float: the end of _moe_combine_kernel on its sum
+  T, D = cast(tuple[int, int], y.shape)
+  threads = 256
+  per = D // threads
+  t, th = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(threads, 1, AxisType.LOCAL)
+  def plus(c:int) -> UOp:
+    return functools.reduce(lambda a, b: a + b, [a[t + add_rows[i], th * per + c].load().float() for i, a in enumerate(add)],
+                            UOp.const(0, dtypes.float))
+  return UOp.group(*[y[t, th * per + c].store((acc[t, th * per + c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
+    arg=KernelInfo(name="moe_combine_add", opts_to_apply=()))
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********
 
