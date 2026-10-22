@@ -1,6 +1,6 @@
 import struct
 from tinygrad.renderer import tc
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, call_bodies
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
@@ -245,8 +245,7 @@ class CPULLVMRenderer(LLVMRenderer):
     return self._render_module(list(body.src), name="__tinygrad_entry")
 
   def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
-    self.fn_names = {b:f"@__tinygrad_call_{i}" for i,b in
-                     enumerate(dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR))}
+    self.fn_names = {b:f"@__tinygrad_call_{i}" for i,b in enumerate(call_bodies(uops))}
     k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct)
     return "\n".join((*k[0], k[1], self._render_footer(uops)))
 

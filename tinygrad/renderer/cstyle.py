@@ -6,7 +6,7 @@ from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str,
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, call_bodies
 
 base_rewrite = PatternMatcher([
   # local/reg buffers
@@ -289,8 +289,7 @@ class CStyleLanguage(Renderer):
 
 class ClangRenderer(CStyleLanguage):
   def _call_declarations(self, uops:list[UOp]) -> list[str]:
-    self.fn_names = {b:f"__tinygrad_call_{i}" for i,b in
-                     enumerate(dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR))}
+    self.fn_names = {b:f"__tinygrad_call_{i}" for i,b in enumerate(call_bodies(uops))}
     return [*(f"extern void {name}(" + ', '.join(self.param_type(p) for p in sorted((u for u in b.src if u.op is Ops.PARAM),
                                                                                key=lambda p:p.arg.slot)) + ");"
               for b,name in self.fn_names.items()),

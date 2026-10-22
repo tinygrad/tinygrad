@@ -59,13 +59,11 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
   for sh, c_rels in rel + rela:
     if sections[sh.header.sh_info].name == ".eh_frame": continue
     target_image_off = sections[sh.header.sh_info].header.sh_addr
-    rels = [(r.r_offset, getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info), getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
-             getattr(r, "r_addend", 0)) for r in c_rels]
-    for roff, idx, rtype, raddend in rels:
-      name, sym = symtab[idx]
+    for r in c_rels:
+      name, sym = symtab[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)]
       value = (((symbols or {}).get(name) or link_sym(name, link_libs or [])) if sym.st_shndx == 0
                else sections[sym.st_shndx].header.sh_addr + sym.st_value)
-      relocs.append((target_image_off + roff, value, rtype, raddend))
+      relocs.append((target_image_off + r.r_offset, value, getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info), getattr(r, "r_addend", 0)))
 
   return memoryview(image), sections, relocs
 

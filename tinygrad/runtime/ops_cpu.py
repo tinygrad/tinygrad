@@ -21,7 +21,6 @@ class CPUProgram(Program['CPUDevice']):
                                                                  symbols={f"__tinygrad_call_{i}":lib.entry for i,lib in enumerate(self.libraries)})
 
   def __init__(self, dev:CPUDevice, obj:TinyELF, libraries:tuple[CPUProgram, ...]|None=None):
-    self.obj = obj
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
     self.lvp = obj.target.renderer == "LVP"
     self.exports:dict[int, int] = {}

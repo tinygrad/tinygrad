@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UP
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
-from tinygrad.renderer import Renderer, Estimates
+from tinygrad.renderer import Renderer, Estimates, call_bodies
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -466,7 +466,7 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
 
 def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
   deps = []
-  for body in dict.fromkeys(u.body for u in linear.src if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
+  for body in call_bodies(linear.src):
     key = ("function", *to_program_key(body, ctx))
     if (obj:=to_program_cache.get(key)) is None:
       to_program_cache[key] = obj = do_compile_function(ctx, body)
