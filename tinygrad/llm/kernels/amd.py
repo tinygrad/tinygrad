@@ -1365,6 +1365,7 @@ def _per_device(x:Tensor) -> UOp:
   assert u.op is Ops.AFTER and u.src[0].op is Ops.UNSHARD, f"not a split kernel output: {u.op}"
   return u.src[0].src[0].after(*u.src[1:])
 
+@functools.cache
 def _cast_kernel(out:UOp, x:UOp) -> UOp:
   o, s = out.flatten(), x.flatten()
   i = UOp.range(o.shape[0], 0)
@@ -1672,6 +1673,7 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, first:
   def xtoken(row:UOp) -> UOp: return row if x_slots == slots else row // slots
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_", active=local)
 
+@functools.cache
 def _moe_bundled_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow:UOp, *grids:UOp,
                         out_features:int, in_features:int, ggml_type:int, slots:int, x_slots:int, M:int) -> UOp:
   # the bundles of moe_bundles: a bundle's M rows (selections) of an expert read its weights once, a row is stored to its selection's row
@@ -1974,6 +1976,7 @@ def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int
       else: final.append(y.reshape(1, size, D).uop)
   return Tensor(UOp.mstack(*final).unshard(1))
 
+@functools.cache
 def _add_rows_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -> UOp:
   # y = acc + (the sum of the adds, each from its row), in float: the end of _moe_combine_kernel on its sum
   T, D = cast(tuple[int, int], y.shape)
@@ -2429,7 +2432,20 @@ def _mla_flash_wmma_kernel(out:UOp, q:UOp, cache:UOp, *mask:UOp, tokens:int, q_s
   return UOp.group(*stores).end(blk, wave, lane).sink(arg=KernelInfo(name="mla_flash_wmma", opts_to_apply=()))
 
 @functools.cache
-def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp) -> UOp:
+def _grouped_rows_kernel(buf:UOp, rows:UOp, positions:UOp, stride:int) -> UOp:
+  # the rows (G*T, D) of G sequences (T each) at their positions.. into their stride rows of buf
+  R, D, G = cast(int, rows.shape[0]), cast(int, rows.shape[1]), cast(int, positions.shape[0])
+  t, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
+  g = t // (R // G)
+  row = g * stride + (positions[g].load().cast(dtypes.weakint) + t % (R // G)).minimum(stride-1)
+  return buf[row, d].store(rows[t, d].load().cast(buf.dtype)).end(t, d).sink(arg=KernelInfo(name="grouped_rows", opts_to_apply=()))
+
+def grouped_rows(buf:Tensor, rows:Tensor, positions:Tensor, stride:int) -> Tensor:
+  """writes rows (G*T, D) of G sequences (T each, the first at positions[g]) into their stride rows of buf (G*stride, D): buf after"""
+  return Tensor.custom_kernel(buf, rows.contiguous(), positions, fxn=functools.partial(_grouped_rows_kernel, stride=stride))[0]
+
+@functools.cache
+def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0) -> UOp:
   # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
   # they share the keys. 4 waves own a quarter of the latent dims each: they sum their partial scores through LDS, then update their quarter of
   # the output with P (via LDS). keys past valid_len aren't seen (padding rows of a chunk past its tokens: the cache isn't written there)
@@ -2442,6 +2458,11 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half = lane % 16, lane // 16
   dbase = wave * DW
+  # grouped (positions): the tokens of G sequences (T//G each, the first at positions[g]), a sequence's keys stride rows of the cache
+  off = UOp.const(0, dtypes.weakint)
+  if grouped:
+    g = tok // (T // cast(int, grouped[0].shape[0]))
+    valid_len, off = grouped[0][g].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]), g * stride
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
   qfrag = [UOp.stack(*(q[tok*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
   count = index[tok, n_max].load().cast(dtypes.weakint).minimum(n_max)
@@ -2449,7 +2470,7 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   def key_at(j) -> tuple[UOp, UOp]:
     i = n_tile * 16 + j
     key = index[tok, i.minimum(n_max-1)].load().cast(dtypes.weakint)
-    return key.maximum(0).minimum(N-1), (i < count) & (key < valid_len)
+    return off + key.maximum(0).minimum((stride or N)-1), (i < count) & (key < valid_len)
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   s_acc = zero8
@@ -2501,7 +2522,7 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*D*4)
   return UOp.group(*stores).end(tok, wave, lane).sink(arg=KernelInfo(name="mla_sparse_wmma", opts_to_apply=(), estimates=est))
 
-def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp) -> Tensor:
+def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None) -> Tensor:
   """
   the attention of the (B=1, H, T, D) queries on the shared latent cache (1, 1, 1, N, D), every token on the keys of its list (T, n_max+1)
   (pool_index_rows): (1, H, T, D). the heads (at most 16) of a token are the rows of a workgroup
@@ -2513,10 +2534,12 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
   assert B == 1 and hl <= 16 and D % 64 == 0
   rows = q.reshape(n, hl, T, D).pad((None, (0, 16 - hl), None, None)).permute(0, 2, 1, 3).half().reshape(n*T*16, D).contiguous()
   out = Tensor.empty(n*T*16, D, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
-  vl = _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len, dtypes.weakint)
+  vl = cast(UOp, _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len or 0, dtypes.weakint))
   if isinstance(valid_len, UOp): index = Tensor(index.uop.after(valid_len))
-  out = Tensor.custom_kernel(out, rows, cache.reshape(cache.shape[-2], D), index,
-                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl))[0]
+  # grouped (positions, stride): the tokens of G sequences (T//G each, the first at positions[g]), a sequence's keys stride rows of the cache
+  extra, stride = ((grouped[0],), int(grouped[1])) if grouped is not None else ((), 0)
+  out = Tensor.custom_kernel(out, rows, cache.reshape(-1, D), index, *extra,
+                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
 
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
@@ -2819,11 +2842,20 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), fxn=fxn)[0]
 
 @functools.cache
-def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, start_pos:UOp, T:UOp) -> UOp:
+def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos:UOp, T:UOp, stride:int=0, R:int=0) -> UOp:
   # the pooled key of every pool with a token of this call: the softmax of the gates (+ape) over the pool's tokens weighs their keys. the
   # tokens before start_pos in the first pool come from the ring (the last tokens), the others from kg (T rows of key and gate)
+  # grouped (positions): G sequences (batched decoding), kg their rows (rows//G each, the first at positions[g]), their pools stride rows of pk
+  # each, their rings R rows of ring each
   P, D = cast(tuple[int, int], pk.shape)
-  kpool, R, rows = cast(int, ape.shape[0]), cast(int, ring.shape[0]), cast(int, kg.shape[0])
+  kpool, rows = cast(int, ape.shape[0]), cast(int, kg.shape[0])
+  off, ring_off, kg_off, ends = UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), []
+  if grouped:
+    g = UOp.range(G:=cast(int, grouped[0].shape[0]), 2, AxisType.GLOBAL)
+    rows, P = rows // G, stride
+    start_pos, T, ends = grouped[0][g].load().cast(dtypes.weakint), UOp.const(rows, dtypes.weakint), [g]
+    off, ring_off, kg_off = g*stride, g*R, g*rows
+  else: R = cast(int, ring.shape[0])
   j, d = UOp.range(rows // kpool + 1, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
   first, end = start_pos // kpool, start_pos + T
   pool = first + j
@@ -2834,34 +2866,52 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, start_pos:UOp, T:UOp) -
     old, new = pos < start_pos, (pos >= start_pos) & (pos < end)
     src = (pos - start_pos).maximum(0).minimum(rows-1)
     for i, lst in ((0, keys), (1, gates)):
-      lst.append(old.where(ring[pos % R, i, d].load().float(), new.where(kg[src, i, d].load().float(), UOp.const(0, dtypes.float))))
+      new_value = new.where(kg[kg_off + src, i, d].load().float(), UOp.const(0, dtypes.float))
+      lst.append(old.where(ring[ring_off + pos % R, i, d].load().float(), new_value))
   logits = [g + ape[s, d].load().float() for s, g in enumerate(gates)]
   mx = functools.reduce(UOp.maximum, logits)
   ws = [((l - mx) * LOG2E).exp2() for l in logits]
   pooled = functools.reduce(lambda a, b: a + b, (w * k for w, k in zip(ws, keys))) / functools.reduce(lambda a, b: a + b, ws)
   ok = (pool * kpool < end) & (pool < P)
-  return pk[pool.valid(ok).minimum(P-1), d].store(pooled.cast(pk.dtype)).end(j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
+  row = (off + pool.minimum(P-1)).valid(ok) if grouped else pool.valid(ok).minimum(P-1)
+  return pk[row, d].store(pooled.cast(pk.dtype)).end(*ends, j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
 
 @functools.cache
-def _pool_ring_kernel(ring:UOp, kg:UOp, start_pos:UOp, T:UOp) -> UOp:
+def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:int=0) -> UOp:
   # the last R tokens to the ring (the token at p in p%R): the first pool of the next call needs the ones before it, it can start at any
-  # position of the last R-kpool+1 (the drafts of speculative decoding that weren't accepted are taken back)
-  R, _, D = cast(tuple[int, int, int], ring.shape)
-  rows = cast(int, kg.shape[0])
+  # position of the last R-kpool+1 (the drafts of speculative decoding that weren't accepted are taken back). grouped (positions): G
+  # sequences, their rings R rows each, their rows of kg rows//G each
+  _, _, D = cast(tuple[int, int, int], ring.shape)
+  rows, off, kg_off, ends = cast(int, kg.shape[0]), UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), []
+  if grouped:
+    g = UOp.range(G:=cast(int, grouped[0].shape[0]), 3, AxisType.GLOBAL)
+    rows = rows // G
+    start_pos, T, off, kg_off, ends = grouped[0][g].load().cast(dtypes.weakint), UOp.const(rows, dtypes.weakint), g*R, g*rows, [g]
+  else: R = cast(int, ring.shape[0])
   r, i, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(2, 1, AxisType.GLOBAL), UOp.range(D, 2, AxisType.LOCAL)
   end = start_pos + T
   pos = end - R + r
   ok = pos >= start_pos
-  return ring[((end + r) % R).valid(ok), i, d].store(kg[(pos - start_pos).maximum(0).minimum(rows-1), i, d].load().cast(ring.dtype)).end(r, i, d) \
-    .sink(arg=KernelInfo(name="pool_ring", opts_to_apply=()))
+  value = kg[kg_off + (pos - start_pos).maximum(0).minimum(rows-1), i, d].load().cast(ring.dtype)
+  row = (off + (end + r) % R).valid(ok) if grouped else ((end + r) % R).valid(ok)
+  return ring[row, i, d].store(value).end(*ends, r, i, d).sink(arg=KernelInfo(name="pool_ring", opts_to_apply=()))
 
-def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:int|UOp) -> Tensor:
+def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp|None, T:int|UOp, grouped:tuple|None=None) -> Tensor:
   """
   updates the (P, D) pooled key cache with the pools of the T tokens at start_pos (kg: their (rows, 2, D) keys and gates, rows >= T), the ring
   (R, 2, D) holds the last R tokens (R >= 2*kpool: the next call can start at most kpool positions before the end). returns the cache after
-  the update
+  the update. grouped (positions, stride, R): G sequences (batched decoding, kg rows//G each, the first at positions[g]), their pools stride
+  rows of pk each, their rings R rows of ring each
   """
-  ints = [_unbind(x) if isinstance(x, UOp) else UOp.const(x, dtypes.weakint) for x in (start_pos, T)]
+  if grouped is not None:
+    positions, stride, R = grouped
+    zero = UOp.const(0, dtypes.weakint)
+    pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), positions,
+                              fxn=functools.partial(_pool_keys_kernel, start_pos=zero, T=zero, stride=stride, R=R))[0]
+    ring = Tensor.custom_kernel(Tensor(ring.uop.after(pk.uop)), kg.contiguous(), positions,
+                                fxn=functools.partial(_pool_ring_kernel, start_pos=zero, T=zero, R=R))[0]
+    return Tensor(pk.uop.after(ring.uop))
+  ints = [_unbind(x) if isinstance(x, UOp) else UOp.const(x or 0, dtypes.weakint) for x in (start_pos, T)]
   pk, ring = (Tensor(x.uop.after(*(v for v in (start_pos, T) if isinstance(v, UOp)))) for x in (pk, ring))
   pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), fxn=functools.partial(_pool_keys_kernel, start_pos=ints[0], T=ints[1]))[0]
   ring = Tensor(ring.uop.after(pk.uop))
@@ -2869,18 +2919,24 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:in
   return Tensor(pk.uop.after(ring.uop))
 
 @functools.cache
-def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=2) -> UOp:
+def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=2, stride:int=0, kpool:int=0) -> UOp:
   # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
   # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max. a few queries: q (T, H, D), w (T, H), out (T, P),
   # the waves of every query
+  # grouped (positions): the queries of S sequences (T//S each, the first at positions[s]), a sequence's pools stride rows of k, its pools its own
   T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
   H, D = cast(tuple[int, int], q.shape[-2:])
-  P = cast(int, k.shape[0])
+  P = stride or cast(int, k.shape[0])
   G = min(256, P // (16*NP))
   q, w, out = q.reshape(T, H, D), w.reshape(T, H), out.reshape(T, P)
   gr, lane = UOp.range(T*G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   row, g = gr // G, gr % G
   q, w, out = q[row], w[row], out[row]
+  koff = UOp.const(0, dtypes.weakint)
+  if grouped:
+    seq = row // (T // cast(int, grouped[0].shape[0]))
+    pools = (grouped[0][seq].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]) + kpool - 1) // kpool
+    koff = seq * stride
   col, half = lane % 16, lane // 16
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 1, AxisType.LOOP)
@@ -2893,7 +2949,7 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:in
     wt = [w[ht*16 + half*8 + e].load() for e in range(8)]
     for n in range(NP):
       s = zero8
-      for kk in range(D // 16): s = UOp.wmma(qfrags[kk], UOp.stack(*(k[p0 + n*16 + col, kk*16 + j].load() for j in ks)), s, *WMMA_ARG)
+      for kk in range(D // 16): s = UOp.wmma(qfrags[kk], UOp.stack(*(k[koff + p0 + n*16 + col, kk*16 + j].load() for j in ks)), s, *WMMA_ARG)
       s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
       s_reg = s_reg.after(s_reg.store(s))
       totals[n] = totals[n] + functools.reduce(lambda a, e: a + s_reg[e].load().maximum(0) * wt[e], range(1, 8), s_reg[0].load().maximum(0) * wt[0])
@@ -2918,7 +2974,7 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
   return x
 
 @functools.cache
-def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0) -> UOp:
+def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0) -> UOp:
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
   # of every chunk c of THREADS pools. the
   # key of the k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in
@@ -2930,6 +2986,11 @@ def _pool_index_kernel(index:UOp, scores:UOp, q_start:UOp, pools:UOp, k:int, kpo
   assert W == WARP_SIZE, "a scan of a chunk's waves is a wave"
   row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   t, q, index = wave * WARP_SIZE + lane, q_start + row, index.shrink(((row0, row0 + rows), None))
+  if grouped:
+    # (positions): the rows of G sequences (rows//G each, the first at positions[g])
+    Tg = rows // cast(int, grouped[0].shape[0])
+    start = grouped[0][row // Tg].load().cast(dtypes.weakint)
+    q, pools = start + row % Tg, (start + Tg + kpool - 1) // kpool
   npc = ((pools + THREADS - 1) // THREADS).minimum(per)
   def key(c:UOp) -> UOp:
     # the order preserving key of a complete pool before the query, 0 (the lowest) for the others
@@ -3019,8 +3080,19 @@ def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UO
                                 fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
   return pool_index_rows(scores.reshape(1, P), q_start, pools, top, kpool).reshape(-1)
 
-def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
-  """indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists"""
+def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, pools:int|UOp|None, top:int, kpool:int,
+                              grouped:tuple|None=None) -> Tensor:
+  """
+  indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists. grouped (positions, stride):
+  the queries of G sequences (T//G each, the first at positions[g]), a sequence's pooled keys stride rows of k
+  """
+  if grouped is not None:
+    (positions, stride), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
+    scores = Tensor.custom_kernel(Tensor.empty(T, stride, dtype=dtypes.float32, device=q.device), q.half().contiguous(), k, w.float().contiguous(),
+                                  positions, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool))[0]
+    out = Tensor.empty(T, top*kpool + kpool + 1, dtype=dtypes.int32, device=q.device)
+    return Tensor.custom_kernel(out, scores, positions, fxn=functools.partial(_pool_index_kernel, q_start=zero, pools=zero, k=top, kpool=kpool))[0]
+  assert q_start is not None and pools is not None
   T, P = int(q.shape[0]), int(k.shape[0])
   scores = Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
@@ -3182,6 +3254,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   q8_quantize_known(zh, T, local, False, (outs[1], outs[2], outs[3]))
   return zh
 
+@functools.cache
 def _kda_conv_kernel(q:UOp, k:UOp, v:UOp, kq:UOp, sq:UOp, sk:UOp, sv:UOp, pq:UOp, pk:UOp, pv:UOp, cq:UOp, ck:UOp, cv:UOp, taps:int,
                      qscale:float) -> UOp:
   """

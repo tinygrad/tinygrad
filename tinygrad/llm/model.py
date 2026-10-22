@@ -10,7 +10,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, indexer_decode_index_rows, Q8_ROWS_I8, \
-  MOE_TILE, \
+  MOE_TILE, grouped_rows, \
   mla_bmm
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
@@ -938,24 +938,14 @@ class MLATransformerBlock(FFNBlock):
       kg = idx.k_norm(idx.attn_k(x)).stack(idx.compressor_gate(x), dim=2)[0]
       iq = idx.attn_q_b(q_lora).reshape(Tq, ic.n_heads, ic.head_dim)
       iw = (idx.proj(x) * (ic.n_heads * ic.head_dim)**-0.5)[0]
-    scale, outs, r = 1.0/self.config.head_dim**0.5, [], 0
-    for g, (pos, T) in enumerate(groups):
-      cache = self.slot_k[g]
-      N = int(cache.shape[2])
-      cache = Tensor(cache.uop.after(cache[:, :, pos:pos+T, :].uop.store(k_store[:, :, r:r+T].cast(cache.dtype).uop)))
-      picks = None
-      if idx is not None:
-        pk = pool_keys(idx.slot_pk[g], idx.slot_ring[g], kg[r:r+T].half(), idx.compressor_ape["weight"], pos, T)
-        pools, top = (pos + T + ic.kpool - 1) // ic.kpool, ic.top_k // ic.kpool
-        picks = indexer_decode_index(iq[r], pk, iw[r], pos, pools, top, ic.kpool) if T == 1 else \
-          indexer_decode_index_rows(iq[r:r+T], pk, iw[r:r+T], pos, pools, top, ic.kpool)
-      latent = cache.reshape(1, *cache.shape)
-      if T == 1: outs.append(flash_attention_decode(q[:, :, r:r+1].half(), latent, pos+1, N, shared=True, scale=scale, index=picks))
-      else:
-        assert picks is not None, "a few tokens of a sequence: the sparse attention of the indexer"
-        outs.append(flash_attention_mla_sparse(q[:, :, r:r+T], latent, picks, scale, pos+T))
-      r += T
-    attn = outs[0].cat(*outs[1:], dim=2)[..., :self.config.kv_lora_rank]
+    # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor
+    assert idx is not None and len({T for _, T in groups}) == 1, "batched decoding: the sparse attention of the indexer, groups of the same rows"
+    scale, positions = 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
+    ctx, D, P, R = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1]), int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
+    cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx)
+    pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R))
+    picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P))
+    attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx))[..., :self.config.kv_lora_rank]
     attn = mla_bmm(attn, self.attn_v_b["weight"])
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
 
@@ -1428,21 +1418,29 @@ class Transformer:
   def _slot_move_copy(self, src:UOp, dst:UOp):
     def rows(t:Tensor, start:UOp, n:int) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
     Tensor.realize(*[rows(p, dst*n, n).assign(rows(p, src*n, n).contiguous()) for p, n in self._slot_pools()])
+  def _slot_jits(self):
+    if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True)
+    if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True)
+  def _slot_move_vars(self, src:int, dst:int) -> tuple[UOp, ...]:
+    v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
+    return v("slot_src").bind(src), v("slot_dst").bind(dst)
+  def _slot_store_vars(self, i:int, length:int, hrow:int) -> tuple[UOp, ...]:
+    S = self.config.spec_drafts + 2
+    rp = UOp.variable("slot_rp", 0, self.config.rewind).bind(length % (self.config.rewind + 1))
+    return (UOp.variable("slot", 0, self.batch_slots()-1).bind(i), rp, UOp.variable("slot_wp", 0, S-1).bind(length % S),
+            UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
+
   def slot_move(self, src:int, dst:int):
     """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
-    if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True)
-    v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
-    self._slot_move_jit(v("slot_src").bind(src), v("slot_dst").bind(dst))
+    self._slot_jits()
+    self._slot_move_jit(*self._slot_move_vars(src, dst))
 
   def slot_store(self, i:int, length:int, hrow:int=0):
     """the states of the sequence just prefilled (or decoded) by the model, of `length` tokens, into slot i (hrow: the row of _spec_h)"""
     self._init_slots()
-    if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True)
+    self._slot_jits()
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
-    rp = UOp.variable("slot_rp", 0, self.config.rewind).bind(length % (self.config.rewind + 1))
-    S = self.config.spec_drafts + 2
-    self._slot_jit(UOp.variable("slot", 0, self.batch_slots()-1).bind(i), rp, UOp.variable("slot_wp", 0, S-1).bind(length % S),
-                   UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
+    self._slot_jit(*self._slot_store_vars(i, length, hrow))
 
   def forward_batch(self, *positions:UOp) -> Tensor:
     """a step of batched decoding: row i the sequence of slot i at positions[i], its token in _batch_in, its temperature in _batch_temp"""
@@ -1881,6 +1879,11 @@ class Transformer:
         jit = self._bspec_jit(m) if self.config.spec_drafts else self._batch_jit(m)
         if m <= slots: calls.append((jit, step(m)))
         jit.link_later = True
+      # (and the copies into a slot and between two)
+      self._slot_jits()
+      calls += [(self._slot_jit, lambda: self._slot_jit(*self._slot_store_vars(0, 1, 0)))]
+      if slots > 1: calls += [(self._slot_move_jit, lambda: self._slot_move_jit(*self._slot_move_vars(1, 0)))]
+      for j in (self._slot_jit, self._slot_move_jit): setattr(j, "link_later", True)
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile():
       # (the jits of the computations left run after: they're compiled meanwhile)
