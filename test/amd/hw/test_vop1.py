@@ -1691,5 +1691,33 @@ class TestCvtFrexpRegressions(unittest.TestCase):
       self.assertEqual(st.vgpr[0][2] & 0xFFFFFFFF, 0, f"f64 bits=0x{hi:08x}{lo:08x}")
 
 
+class TestMovrel(unittest.TestCase):
+  """V_MOVREL*: register-indexed moves, the VGPR number is offset by M0."""
+  def _regs(self): return [v_mov_b32_e32(v[i], 100 + i) for i in range(2, 8)]
+
+  def test_v_movrels_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 3), v_movrels_b32_e32(v[0], v[2])], n_lanes=4)
+    for lane in range(4): self.assertEqual(st.vgpr[lane][0], 105)
+
+  def test_v_movreld_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 2), v_movreld_b32_e32(v[2], 7)], n_lanes=4)
+    for lane in range(4): self.assertEqual((st.vgpr[lane][2], st.vgpr[lane][4]), (102, 7))
+
+  def test_v_movrelsd_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 1), v_movrelsd_b32_e32(v[2], v[5])], n_lanes=4)
+    for lane in range(4): self.assertEqual((st.vgpr[lane][2], st.vgpr[lane][3]), (102, 106))
+
+  def test_v_movrelsd_2_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, (2 << 16) | 1), v_movrelsd_2_b32_e32(v[2], v[5])], n_lanes=4)
+    for lane in range(4): self.assertEqual((st.vgpr[lane][4], st.vgpr[lane][5]), (106, 105))
+
+  def test_v_movrels_b32_e64(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 3), v_movrels_b32_e64(v[0], v[2])], n_lanes=4)
+    for lane in range(4): self.assertEqual(st.vgpr[lane][0], 105)
+
+  def test_v_movreld_b32_e64(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 2), v_movreld_b32_e64(v[2], v[7])], n_lanes=4)
+    for lane in range(4): self.assertEqual((st.vgpr[lane][2], st.vgpr[lane][4]), (102, 107))
+
 if __name__ == '__main__':
   unittest.main()

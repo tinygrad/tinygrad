@@ -642,6 +642,17 @@ class Parser:
         index = self.parse()
         self.eat('RBRACKET')
         return self.funcs[name](index)
+      if name == 'SGPR' and self.at('LBRACKET'):
+        self.eat('LBRACKET')
+        idx = _to_u32(self.parse()).cast(dtypes.int)
+        self.eat('RBRACKET')
+        dt = DTYPES.get(self.eat('IDENT').val, dtypes.uint32) if self.try_eat('DOT') else dtypes.uint32
+        sgpr = self.vars.get('_sgpr')
+        if sgpr is None: return _u32(0)
+        lo = sgpr.index(idx).load()
+        if dt.itemsize != 8: return lo.bitcast(dt) if dt.itemsize == 4 else lo.cast(dt)
+        hi = sgpr.index(idx + _const(dtypes.int, 1)).load().cast(dtypes.uint64)
+        return (lo.cast(dtypes.uint64) | (hi << _const(dtypes.uint64, 32))).bitcast(dt)
       if name == 'VGPR' and self.at('LBRACKET'):
         self.eat('LBRACKET')
         lane = self.parse()
@@ -1139,6 +1150,16 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         elif compound_op == '&=': rhs = old & rhs
         elif compound_op == '^=': rhs = old ^ rhs
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
+      i += 1
+      continue
+
+    # SGPR assignment: SGPR[addr].type = value
+    if first == 'sgpr' and toks[1].type == 'LBRACKET':
+      j, idx_toks = _match_bracket(toks, 1)
+      if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
+      if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+      if assigns is not None:
+        assigns.append((f'SGPR[{_tok_str(idx_toks)}]', (_to_u32(parse_tokens(idx_toks, env, funcs)), parse_tokens(toks[j:], env, funcs))))
       i += 1
       continue
 

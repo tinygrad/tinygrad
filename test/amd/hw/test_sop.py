@@ -766,6 +766,30 @@ class TestNullRegister(unittest.TestCase):
     self.assertEqual(st.scc, 0)
 
 
+class TestMovrelScalar(unittest.TestCase):
+  """S_MOVREL*: register-indexed SGPR moves, the SGPR number is offset by M0."""
+  def _regs(self): return [s_mov_b32(s[i], 100 + i) for i in range(4, 12)]
+
+  def test_s_movrels_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 3), s_movrels_b32(s[0], s[4])], n_lanes=1)
+    self.assertEqual(st.sgpr[0], 107)
+
+  def test_s_movrels_b64(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 2), s_movrels_b64(s[0:1], s[4:5])], n_lanes=1)
+    self.assertEqual((st.sgpr[0], st.sgpr[1]), (106, 107))
+
+  def test_s_movreld_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 3), s_movreld_b32(s[4], 7)], n_lanes=1)
+    self.assertEqual((st.sgpr[4], st.sgpr[7]), (104, 7))
+
+  def test_s_movreld_b64(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, 2), s_movreld_b64(s[4:5], s[10:11])], n_lanes=1)
+    self.assertEqual([st.sgpr[i] for i in range(4, 8)], [104, 105, 110, 111])
+
+  def test_s_movrelsd_2_b32(self):
+    st = run_program([*self._regs(), s_mov_b32(M0, (2 << 16) | 1), s_movrelsd_2_b32(s[4], s[8])], n_lanes=1)
+    self.assertEqual((st.sgpr[6], st.sgpr[8]), (109, 108))
+
 class Test64BitSOP1InlineConstants(unittest.TestCase):
   """Tests for 64-bit SOP1 instructions with inline constants.
 

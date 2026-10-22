@@ -66,7 +66,7 @@ from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
-from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
+from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, M0, ttmp, Inst
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
 from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, _bitreverse, _countbits
@@ -536,6 +536,12 @@ class _Ctx:
           lo, hi = _split64(val)
           stores.extend([self.wsgpr_dyn(sdst_reg, lo), self.wsgpr_dyn(sdst_reg + _c(1), hi)])
         else: stores.append(self.wsgpr_dyn(sdst_reg, _val_to_u32(val)))
+      elif dest.startswith('SGPR['):  # s_movreld: SGPR[addr] = value
+        idx = val[0].cast(dtypes.int)
+        if val[1].dtype.itemsize == 8:
+          lo, hi = _split64(val[1])
+          stores.extend([self.wsgpr_dyn(idx, lo), self.wsgpr_dyn(idx + _c(1), hi)])
+        else: stores.append(self.wsgpr_dyn(idx, _val_to_u32(val[1])))
       elif dest.startswith('SCC'): stores.append(self.wsgpr_dyn(_c(SCC.offset), _to_u32(val)))
       elif dest.startswith('EXEC'):
         if self.wave_size > 32 and val.dtype in (dtypes.uint64, dtypes.int64):
@@ -619,6 +625,8 @@ class _Ctx:
         new_val = _set_bits(self.vgpr.index(val[0]).load(), _val_to_bits(val[1]), hi_bit - lo_bit + 1, lo_bit).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane) & _to_bool(val[4]) if len(val) > 4 else _lane_active(exec_mask, lane)
         lane_stores.append(self.vgpr.index(val[0].valid(active)).store(new_val))
+      elif dest.startswith('VGPR['):  # v_movreld: VGPR[laneId][addr] = value
+        lane_stores.append(self.vgpr.index(val[0].valid(_lane_active(exec_mask, lane))).store(_val_to_u32(val[1])))
       elif 'D0' in dest and '[laneId]' in dest: continue  # per-lane mask bits are written via VCC/EXEC assigns instead
       elif dest.startswith('D0'):
         if (dest_suffix := re.match(r'D0\.(\w+)', dest)) is not None:
@@ -745,6 +753,8 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     sdst_off = ctx.inst_field(type(inst).sdst)
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
+    if 'MOVREL' in _op_name(inst):  # s_movrel*: raw SGPR numbers, offset by M0
+      srcs.update(SRC0=ssrc0_off, DST=sdst_off, M0=ctx.rsgpr_dyn(_c(M0.offset)), _sgpr=ctx.sgpr)
     dst_off, dst_size = sdst_off, bits['d'] // 32
   elif isinstance(inst, (ir3.SOP2, ir4.SOP2, irc.SOP2)):
     sdst_off = ctx.inst_field(type(inst).sdst)
@@ -958,6 +968,8 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
     s0, src0_off = _load_vsrc0(ctx, inst, lane, bits, literal, is_f64, is_float, d0)
     srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0, 'OPSEL': _c(0)}
+    if 'MOVREL' in op_name and src0_off is not None:  # v_movrel*: raw VGPR numbers, offset by M0
+      srcs.update(SRC0=src0_off - _c(256), DST=vdst_reg, M0=ctx.rsgpr_dyn(_c(M0.offset)))
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and not isinstance(inst, irc.VOP2) and (vsrc1_reg >= _c(128))
@@ -1105,6 +1117,8 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
+  if 'MOVREL' in op_name:  # v_movrel*_e64: raw VGPR numbers, offset by M0
+    srcs.update(SRC0=ctx.inst_field(type(inst).src0) - _c(256), DST=vdst_reg, M0=ctx.rsgpr_dyn(_c(M0.offset)))
   opsel_dst_hi = bool(opsel & 0b1000) and bits['d'] == 16
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=opsel_dst_hi, clmp=_iattr(inst, 'clmp'))
 
