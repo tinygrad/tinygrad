@@ -153,6 +153,9 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.TRUNC, dtypes.float, (-math.inf,)), -math.inf)
     self.assertTrue(math.isnan(exec_alu(Ops.TRUNC, dtypes.float, (math.nan,))))
 
+  def test_trunc_neg_zero(self):
+    self.assertEqual(repr(exec_alu(Ops.TRUNC, dtypes.float, (-0.5,))), "-0.0")
+
   def test_invalid_poison(self):
     # Invalid poisons any binary op regardless of result dtype: a comparison must not fold to a boolean
     self.assertIs(exec_alu(Ops.CMPLT, dtypes.bool, (Invalid, 1)), Invalid)

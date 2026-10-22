@@ -621,8 +621,9 @@ class QCOMCLRenderer(OpenCLRenderer):
 
   # QCOM compiler is flaky with half
   def supported_dtypes(self):
-    return {d for d in Renderer.supported_dtypes(self)
-            if (d != dtypes.float16 or (bool(IMAGE) and bool(FLOAT16))) and d not in dtypes.fp8s+(dtypes.bfloat16,dtypes.double)}
+    unsupported = {*dtypes.fp8s, dtypes.bfloat16, dtypes.double, dtypes.long, dtypes.ulong}
+    if not (IMAGE and FLOAT16): unsupported.add(dtypes.half)
+    return Renderer.supported_dtypes(self) - unsupported
 
   # QCOM's load vectorizer emits invalid IR for vectorized bool loads ("Range types must match load type"), type bool buffers as uchar
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):

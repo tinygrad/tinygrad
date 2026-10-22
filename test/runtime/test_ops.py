@@ -479,6 +479,7 @@ class TestOps(TensorTestCase):
     helper_test_op([], lambda: torch.tensor(1)+0.5, lambda: Tensor(1)+0.5, forward_only=True)
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y)
     helper_test_op([(), ()], lambda x,y: x+y)
+    helper_test_op([], lambda: torch.tensor([5])+8, lambda: Tensor([5], dtype=dtypes.int64)+8, forward_only=True)
   def test_add3(self):
     helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: x+y+z)
   def test_broadcasted_add(self):
