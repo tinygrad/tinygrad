@@ -1519,15 +1519,25 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   # the lowest index of the max
   return vals.eq(vals.max(0, keepdim=True)).where(idxs, n).min(0).reshape(B, 1)
 
+def _p2p_half_sum(x:Tensor) -> Tensor:
+  """the sum over the leading device axis of x (devices, rows, D) by the p2p allreduce in half (see partial_sum)"""
+  n, devs = int(prod(x.shape[1:])), cast(tuple[str, ...], x.device)
+  shape, p2p = p2p_ar_shape(n // 2), p2p_allreduce(devs)
+  assert shape is not None and p2p is not None
+  out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//2, T=shape[0], EP=shape[1], two_shot=True, half=True)
+  return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
+
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
   n = prod(x.shape[1:])
-  if isinstance(x.device, tuple) and isinstance(n, int) and prod(x.shape[1:-1]) > 4 and n % 2 == 0 and getenv("P2P_AR_HALF", 1) and \
-     (shape:=p2p_ar_shape(n // 2)) is not None and (p2p:=p2p_allreduce(x.device)):
-    # many rows (batched decoding): in half, two values a word (the copies would sum them in half too). the same bits on every device
-    out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
-    fxn = functools.partial(_p2p_allreduce_kernel, N=len(x.device), n=n//2, T=shape[0], EP=shape[1], two_shot=True, half=True)
-    return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
+  if isinstance(x.device, tuple) and isinstance(n, int) and (rows:=prod(x.shape[1:-1])) > 4 and getenv("P2P_AR_HALF", 1) and \
+     (parts:=next((p for p in (1, 2, 4) if rows % p == 0 and n % (2*p) == 0 and p2p_ar_shape(n // (2*p)) is not None), 0)) and \
+     p2p_allreduce(x.device):
+    # many rows (batched decoding): in half, two values a word (the copies would sum them in half too). the same bits on every device. rows
+    # that don't fit the mailbox in parts, an allreduce each (one of more workgroups than the devices run at once waits on the ones that don't)
+    xr = x.float().reshape(x.shape[0], rows, x.shape[-1])
+    return Tensor.cat(*[_p2p_half_sum(xr[:, i*(rows//parts):(i+1)*(rows//parts)]) for i in range(parts)]).reshape(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and (shape:=p2p_ar_shape(n)) is not None and (p2p:=p2p_allreduce(x.device)):
     # the devices write to each other's memory (two shot from P2P_AR_TWO_SHOT values: fewer bytes over the links)
     out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
