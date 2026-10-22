@@ -1279,8 +1279,9 @@ _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYST
 
 @functools.cache
 def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, two_shot:bool=False, gather:bool=False,
-                          half:bool=False) -> UOp:
-  # half: two values a word, in half (n is the pairs): what's sent and summed, every device's own too (the same bits everywhere)
+                          half:bool=False, triple:bool=False) -> UOp:
+  # half: two values a word, in half (n is the pairs): what's sent and summed, every device's own too (the same bits everywhere). triple: three
+  # (n is the triples), the low 16 bits of the epoch in the word's top 16 (only the calls before and after it share the mailbox)
   # one shot: every device stores its values into its slot in the mailboxes of all the others and polls its own mailbox for theirs (gather:
   # out (N, n) is all of them). two shot: workgroup g's values go to device g%N (its owner) only, the owner sums them and stores the sums
   # into the mailboxes of the others. the sums add the devices' values in device order on every device: the same bits everywhere.
@@ -1296,16 +1297,22 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 50) * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
   def reg(s:int|UOp, l:UOp) -> UOp: return ((wg*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
-  W = 2 if half else 1  # the values of a word
+  W = 3 if triple else 2 if half else 1  # the values of a word
+  assert not triple or half, "three values a word are in half"
   def h(v:UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
   def unh(b:UOp) -> UOp: return b.cast(dtypes.uint16).bitcast(dtypes.half).float()
   vals = [[(x[0, e*W + c].load().float().cast(dtypes.half).float() if half else x[0, e].load().float()) for c in range(W)] for e in els]
   def word(v:list[UOp]) -> UOp:
+    if triple: return functools.reduce(lambda a,b: a | b, [h(x).cast(dtypes.uint64) << (16*c) for c, x in enumerate(v)]) | \
+                      ((epoch & 0xFFFF).cast(dtypes.uint64) << 48)
     bits = (h(v[0]) | (h(v[1]) << 16)) if half else v[0].bitcast(dtypes.uint32)
     return (epoch.cast(dtypes.uint64) << 32) | bits.cast(dtypes.uint64)
   def value(w:UOp) -> list[UOp]:
+    if triple: return [unh(((w >> (16*c)) & 0xFFFF).cast(dtypes.uint32)) for c in range(3)]
     lo = (w & 0xFFFFFFFF).cast(dtypes.uint32)
     return [unh(lo & 0xFFFF), unh(lo >> 16)] if half else [lo.bitcast(dtypes.float32)]
+  def fresh(g:UOp) -> UOp:
+    return ((g >> 48).cast(dtypes.uint32) & 0xFFFF).eq(epoch & 0xFFFF) if triple else (g >> 32).cast(dtypes.uint32).eq(epoch)
   def push(stores:list[UOp], after:UOp|None=None) -> UOp:
     # the stores in the l2, the workgroup, the l2 written back to the others
     fenced = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");', dtypes.void, *stores)
@@ -1319,7 +1326,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     words = UOp.alloc((len(slots),), dtypes.uint64, addrspace=AddrSpace.REG)
     loaded = words.after(loop).store(UOp.stack(*(_sys(_ATOMIC_LOAD, dtypes.uint64, mb[0].after(loop)[s]) for s in slots)))
     got = [words.after(loaded)[i].load() for i in range(len(slots))]
-    stale = functools.reduce(lambda a,b: a | b, [w & (g >> 32).cast(dtypes.uint32).ne(epoch) for g, w in zip(got, waits)])
+    stale = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(got, waits)])
     waiting = stale & (_sys("__builtin_readsteadycounter()", dtypes.uint64, stale) < deadline)
     words = words.after(UOp(Ops.CUSTOM, src=(waiting,), arg=("", dtypes.void)).backedge(loop, waiting))
     return [words[i].load() for i in range(len(slots))]
@@ -1520,25 +1527,26 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   # the lowest index of the max
   return vals.eq(vals.max(0, keepdim=True)).where(idxs, n).min(0).reshape(B, 1)
 
-def _p2p_half_sum(x:Tensor) -> Tensor:
-  """the sum over the leading device axis of x (devices, rows, D) by the p2p allreduce in half (see partial_sum)"""
+P2P_AR_PART = getenv("P2P_AR_PART", 32768)  # the words of a part of a batched rows' allreduce (more in parts of fewer workgroups are faster)
+def _p2p_half_sum(x:Tensor, W:int) -> Tensor:
+  """the sum over the leading device axis of x (devices, rows, D) by the p2p allreduce in half, W values a word (see partial_sum)"""
   n, devs = int(prod(x.shape[1:])), cast(tuple[str, ...], x.device)
-  shape, p2p = p2p_ar_shape(n // 2), p2p_allreduce(devs)
+  shape, p2p = p2p_ar_shape(n // W), p2p_allreduce(devs)
   assert shape is not None and p2p is not None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
-  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//2, T=shape[0], EP=shape[1], two_shot=True, half=True)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//W, T=shape[0], EP=shape[1], two_shot=True, half=True, triple=W == 3)
   return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
 
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
   n = prod(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and (rows:=prod(x.shape[1:-1])) > 4 and getenv("P2P_AR_HALF", 1) and \
-     (parts:=next((p for p in (1, 2, 4) if rows % p == 0 and n % (2*p) == 0 and p2p_ar_shape(n // (2*p)) is not None), 0)) and \
-     p2p_allreduce(x.device):
-    # many rows (batched decoding): in half, two values a word (the copies would sum them in half too). the same bits on every device. rows
+     (pw:=next(((p, w) for cap in (P2P_AR_PART, P2P_AR_MAXG*P2P_AR_MAXW) for p in (1, 2, 4) for w in (3, 2) if rows % p == 0 and
+                n % (w*p) == 0 and n // (w*p) <= cap and p2p_ar_shape(n // (w*p)) is not None), None)) and p2p_allreduce(x.device):
+    # many rows (batched decoding): in half, three values a word (or two) (the copies would sum them in half too). the same bits on every device. rows
     # that don't fit the mailbox in parts, an allreduce each (one of more workgroups than the devices run at once waits on the ones that don't)
-    xr = x.float().reshape(x.shape[0], rows, x.shape[-1])
-    return Tensor.cat(*[_p2p_half_sum(xr[:, i*(rows//parts):(i+1)*(rows//parts)]) for i in range(parts)]).reshape(x.shape[1:])
+    xr, (parts, W) = x.float().reshape(x.shape[0], rows, x.shape[-1]), pw
+    return Tensor.cat(*[_p2p_half_sum(xr[:, i*(rows//parts):(i+1)*(rows//parts)], W) for i in range(parts)]).reshape(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and (shape:=p2p_ar_shape(n)) is not None and (p2p:=p2p_allreduce(x.device)):
     # the devices write to each other's memory (two shot from P2P_AR_TWO_SHOT values: fewer bytes over the links)
     out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
