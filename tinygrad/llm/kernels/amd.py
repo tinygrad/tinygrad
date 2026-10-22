@@ -120,7 +120,7 @@ class ExpertWeights:
   ggml_type:int|None = None
   use_custom_quant = True
   def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
-    self.num_experts, self.in_features = num_experts, in_features
+    self.in_features = in_features
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
     if bias: self.bias = Tensor.zeros(num_experts, out_features)
   def set_quantized(self):
@@ -292,12 +292,12 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, o
 
 def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int, in_features:int, ggml_type:int,
                        gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_") -> UOp:
-  # gate(token, output, base) -> base: moves the weight rows, xtoken(token) -> the activation row of an output row
+  # gate(token, base) -> base: moves the weight rows, xtoken(token) -> the activation row of an output row
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
     if ggml_type in SMALL_BLOCK_QUANTS: base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[ggml_type]
-    if gate is not None: base = gate(token, output, base)
+    if gate is not None: base = gate(token, base)
     if xtoken is not None: token = xtoken(token)
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
@@ -344,7 +344,7 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids
                        out_features:int, in_features:int, ggml_type:int, x_share:int) -> UOp:
   # out rows are (token, slot): the slot's expert reads its weight rows, x_share slots share an activation row
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
-  def gate(row:UOp, output:UOp, base:UOp) -> UOp: return base + sel[row].maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
+  def gate(row:UOp, base:UOp) -> UOp: return base + sel[row].maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
   def xtoken(row:UOp) -> UOp: return row // x_share
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_")
 
