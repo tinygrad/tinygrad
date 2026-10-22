@@ -675,10 +675,6 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(*ctx.wpc(UOp.const(0xFFFFFFFFFFFFFFFF, dtypes.uint64)))
-  # S_BARRIER: advance PC past the barrier instruction. The execution loop detects barriers before executing and handles synchronization.
-  if inst.op in _BARRIER_OPS: return UOp.sink(*ctx.inc_pc())
-  # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
-  if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink(*ctx.inc_pc())
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
@@ -692,8 +688,6 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   return UOp.sink(*ctx.inc_pc())
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
-  # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  if '_INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
   sbase = ctx.inst_field(type(inst).sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
@@ -750,8 +744,6 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
       result = (hw_val >> offset) & mask
       return UOp.sink(ctx.wsgpr_dyn(sdst_off, result), *ctx.inc_pc())
   elif isinstance(inst, (ir3.SOP1, ir4.SOP1, irc.SOP1)):
-    # S_BARRIER_SIGNAL: no-op in emulator, barrier sync handled by execution loop
-    if isinstance(inst, ir4.SOP1) and inst.op in _BARRIER_SOP1_OPS: return UOp.sink(*ctx.inc_pc())
     sdst_off = ctx.inst_field(type(inst).sdst)
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
