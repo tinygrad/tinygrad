@@ -25,11 +25,11 @@ class Estimates:
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
   def from_uops(sink:UOp, ignore_indexing=False) -> Estimates:
-    # fresh cache
+    # locally cached, computes compile time symbolic range multipliers
     @functools.cache
     def mults(ranges:tuple[UOp,...]) -> sint:
-      mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if not
-        (any(u.addrspace is not AddrSpace.ALU for u in r.src[0].without_after.backward_slice_with_self) or r.dtype is dtypes.void)])
+      mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if r.dtype != dtypes.void and
+        not any(u.addrspace is not AddrSpace.ALU for u in r.src[0].without_after.backward_slice_with_self)])
       return mult.substitute({x:x.const_like(0) for x in mult.toposort() if x.op is Ops.SPECIAL}) if isinstance(mult, UOp) else mult
 
     # computes estimates within a given caller scope, inline calls get resolved recursively
@@ -55,14 +55,15 @@ class Estimates:
             accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mult
             mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
         if u.op is Ops.CALL:
+          # bindings allow all nested callee arguments to be used as context to resolve
+          # RANGE/memory ops without re-computing outer ALU estimates
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
-          inline = process_body(u.body, mult, child_bindings) # noqa: F821
-
-          for (buf,op),accessed in inline[2].items():
+          child_flops, child_lds, child_mem = process_body(u.body, mult, child_bindings) # noqa: F821
+          for (buf,op),accessed in child_mem.items():
             mem[(buf,op)] = smin(mem.get((buf,op),0) + accessed, buf.max_numel() * buf.dtype.itemsize)
-          flops += inline[0]
-          lds += inline[1]
+          flops += child_flops
+          lds += child_lds
         elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
           lds += u.max_numel() * u.dtype.itemsize * mult
         elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
