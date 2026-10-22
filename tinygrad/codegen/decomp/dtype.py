@@ -110,25 +110,19 @@ def f2f(v, fr:DType, to:DType, sat=True):
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
   elif fe >= te and fm > tm:
-    v = f2f_clamp(v.bitcast(fr), to, sat).bitcast(f2f_dt[fr])
     sign, nosign = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1)
-    norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
-    underflow = (shr(v, fm) & (shl(1, fe) - 1)) < (1 + fb - tb)
-    nan_mantissa = (shl(1, tm) - 1) if to == dtypes.fp8e4m3 else (shr(nosign, fm - tm) & (shl(1, tm) - 1))
-    nan = (sign | nan_mantissa | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
-    is_nan = (shr(v, fm) & (shl(1, fe) - 1)).eq(shl(1, fe) - 1)
-    if to in dtypes.fp8_fnuz: return is_nan.where(shl(1, ts - 1), underflow.where(0, sign.cast(f2f_dt[to]) | norm))
-    return is_nan.where(nan, sign.cast(f2f_dt[to]) | underflow.where(0, norm))
+    # denormals are zero, but within half a denormal ulp of the smallest normal rounds up to it
+    min_norm = shl(1 + fb - tb, fm)
+    underflow = nosign < max(min_norm - shl(1, fm - tm), shl(1, fm))
+    norm = rne(nosign.maximum(min_norm), fm - tm) - shl(fb - tb, tm)
+    # top is one past the largest finite, inf or the nan of formats without inf
+    top = 0x7f if to == dtypes.fp8e4m3 else 0x80 if to in dtypes.fp8_fnuz else shl(shl(1, te) - 1, tm)
+    norm = norm.minimum(top - (sat and to in dtypes.fp8s))
+    inf, nan = shl(shl(1, fe) - 1, fm), top | (shl(1, tm) - 1 if to in dtypes.fp8s else shl(1, tm - 1))
+    # fnuz has one nan and no -0
+    if to in dtypes.fp8_fnuz: return (nosign >= inf).where(top, underflow.where(0, sign | norm)).cast(f2f_dt[to])
+    return (sign | (nosign > inf).where(nan, nosign.eq(inf).where(top, underflow.where(0, norm)))).cast(f2f_dt[to])
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
-
-def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
-  e, m = dtypes.finfo(dt)
-  if dt in dtypes.fp8_fnuz: max_exp, max_man = (1 << e) - 1, (1 << m) - 1
-  else: max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
-  mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
-  sat = mx if dt in dtypes.fp8s and sat else val.const_like(float('inf'))
-  # FIXME: CMPLT of nan is undefined
-  return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
 @dataclass(frozen=True)
 class FloatDecompCtx:
@@ -187,7 +181,7 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
   (UPat(Ops.BITCAST, src=(UPat.var("x"),), name="bc"), lambda ctx,bc,x:
    f2f(x.bitcast(f2f_dt[ctx.fr]), ctx.fr, ctx.to) if bc.dtype == ctx.fr else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
-   f2f_clamp(val.cast(ctx.to), ctx.fr) if x.dtype == ctx.fr else None),
+   f2f(f2f(val.cast(ctx.to).bitcast(f2f_dt[ctx.to]), ctx.to, ctx.fr), ctx.fr, ctx.to) if x.dtype == ctx.fr else None),
   (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, dtypes.floats, name="x"), lambda ctx,x:
    x.replace(src=tuple(s.cast(ctx.to) if s.dtype == ctx.fr else s for s in x.src)) if x.dtype == ctx.fr else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
