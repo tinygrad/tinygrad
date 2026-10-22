@@ -496,6 +496,11 @@ class TestSymbolic(unittest.TestCase):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) // 4, 0, 63, "(x//4)")
 
+  def test_signed_const_wraps(self):
+    c = UOp.const(2**31, dtypes.int32)
+    self.assertEqual(c.val, -2**31)
+    self.assertIs((UOp.const(1, dtypes.int32) < c).simplify().arg, False)
+
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
     c = a<10
