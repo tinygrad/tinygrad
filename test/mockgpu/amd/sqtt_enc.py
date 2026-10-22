@@ -48,7 +48,7 @@ def make_encoder():
   # VALU sub-classification patterns
   _VALUT_4_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
   _VALUB_2_RE = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV)_(B|I)64')
-  _VALUB_4_RE = re.compile(r'V_MAD_(U|I)64')
+  _VALUB_4_RE = re.compile(r'V_MAD_(U|I)64|V_MUL_(LO_U32|HI_U32|HI_I32)$')  # 32-bit integer multiplies trace as VALUB_4 on gfx1100
   _VALUB_16_RE = re.compile(r'V_\w+_F64')
 
   def _valu_op(op_name: str) -> InstOp|None:

@@ -40,6 +40,13 @@ class TestSQTTEncoder(unittest.TestCase):
     # no INST packets for regular VALU
     self.assertEqual(len([p for p in packets if isinstance(p, INST)]), 0)
 
+  def test_int32_mul_emits_valub_4(self):
+    """32-bit integer multiplies trace as VALUB_4 on gfx1100 (measured on a 7900 XTX); the 24-bit and 16-bit ones stay VALUINST."""
+    blob = _run_kernel([v_mul_lo_u32(v[0], v[1], v[2]), v_mul_hi_u32(v[0], v[1], v[2]), v_mul_hi_i32(v[0], v[1], v[2]),
+                        v_mul_u32_u24_e32(v[0], v[1], v[2]), v_mul_hi_u32_u24_e32(v[0], v[1], v[2]), v_mul_lo_u16(v[0], v[1], v[2]), s_endpgm()])
+    kinds = [p.op if isinstance(p, INST) else "VALUINST" for p in decode(blob) if isinstance(p, (INST, VALUINST))]
+    self.assertEqual(kinds, [InstOp.VALUB_4] * 3 + ["VALUINST"] * 3)
+
   def test_waitcnt_emits_immediate(self):
     """s_waitcnt and s_nop emit IMMEDIATE packets."""
     blob = _run_kernel([s_nop(simm16=0), s_waitcnt(simm16=0), s_endpgm()])
