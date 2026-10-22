@@ -31,7 +31,7 @@ def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint3
 def _to_bool(v): return v if v.dtype == dtypes.bool else v.ne(_const(v.dtype, 0))
 def _cast_to(v, dt):
   if v.dtype == dt: return v
-  if dt == dtypes.half: return v.cast(dtypes.uint16).bitcast(dtypes.half)
+  if dt == dtypes.half: return v.cast(dt) if dtypes.is_float(v.dtype) else v.cast(dtypes.uint16).bitcast(dtypes.half)
   return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
 
 # Float bit extraction - returns (bits, exp_mask, mant_mask, quiet_bit, exp_shift) based on float type
@@ -821,7 +821,7 @@ class Parser:
             ('BF',16): dtypes.bfloat16,
             ('B',32): dtypes.uint32, ('B',64): dtypes.uint64}.get((type_char, bits), dtypes.uint64 if bits > 32 else dtypes.uint32)
       if type_char == 'F' and inner.dtype in (dtypes.uint32, dtypes.uint64, dtypes.ulong, dtypes.int, dtypes.int64):
-        if inner.dtype.itemsize != dt.itemsize: inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
+        if inner.dtype.itemsize != dt.itemsize: inner = inner.cast({2: dtypes.uint16, 4: dtypes.uint32}.get(dt.itemsize, dtypes.uint64))
         return inner.bitcast(dt)
       return inner.cast(dt)
     if self.at('IDENT'):

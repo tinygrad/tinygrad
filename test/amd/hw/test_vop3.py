@@ -551,6 +551,22 @@ class TestDivFixup(unittest.TestCase):
     self.assertEqual(st.vgpr[0][3], 0x80000000, "1/-inf should be -0")
 
 
+class TestDivFixupF16(unittest.TestCase):
+  """V_DIV_FIXUP_F16 special cases, f16 bit patterns: S0 = quotient, S1 = denominator, S2 = numerator."""
+  def _fixup(self, s0, s1, s2):
+    st = run_program([v_mov_b32_e32(v[0], s0), v_mov_b32_e32(v[1], s1), v_mov_b32_e32(v[2], s2),
+                      v_div_fixup_f16(v[3], v[0], v[1], v[2])], n_lanes=1)
+    return st.vgpr[0][3] & 0xFFFF
+
+  def test_normal(self): self.assertEqual(self._fixup(0x4200, 0x4000, 0x4600), 0x4200)  # 6/2 -> quotient 3
+  @unittest.expectedFailure  # hw keeps 0xFE00; constant folding of the NaN bitcast drops the sign (0x7E00)
+  def test_zero_div_zero(self): self.assertEqual(self._fixup(0x4200, 0x0000, 0x0000), 0xFE00)
+  @unittest.expectedFailure  # hw keeps 0xFE00; constant folding of the NaN bitcast drops the sign (0x7E00)
+  def test_inf_div_inf(self): self.assertEqual(self._fixup(0x4200, 0x7C00, 0x7C00), 0xFE00)
+  def test_x_div_zero(self): self.assertEqual(self._fixup(0x4200, 0x0000, 0xC400), 0xFC00)  # -4/+0 -> -inf
+  def test_x_div_inf(self): self.assertEqual(self._fixup(0x4200, 0x7C00, 0x4400), 0x0000)  # 4/inf -> +0
+  def test_nan_numerator(self): self.assertEqual(self._fixup(0x4200, 0x4000, 0x7E01), 0x7E01)
+
 class TestAlignbit(unittest.TestCase):
   """Tests for V_ALIGNBIT_B32."""
 
