@@ -484,7 +484,6 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
 
   owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name)))
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
-  elif (r:=dev.link_buffer(b)) is not None: pass
   else: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)

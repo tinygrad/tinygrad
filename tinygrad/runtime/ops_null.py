@@ -50,7 +50,8 @@ class NullProgram(Program['NullDevice']):
     if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
 
 class NullAllocator(HostAllocator):
-  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: return BufferStorage(next(va))
+  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: # the host code writes the host-visible ones
+    return super()._alloc(size, options) if options.host or options.cpu_access else BufferStorage(next(va))
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
@@ -74,4 +75,3 @@ class NullDevice(Compiled):
 
   # its memory is fake: every placeholder on it gets host memory
   def host_buffer(self, n:int) -> Buffer: return Buffer(self.device, n, opaque=memoryview(bytearray(n)), options=BufferSpec(external_ptr=1))
-  def link_buffer(self, b:UOp) -> Buffer: return self.host_buffer(b.max_numel() * b.dtype.itemsize)
