@@ -15,6 +15,7 @@ class TestMov(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 42),
       v_mov_b32_e32(v[0], s[0]),
+      v_nop_e32()
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][0], 42)
@@ -54,7 +55,6 @@ class TestMov(unittest.TestCase):
     result_lo = st.vgpr[0][0] & 0xFFFF
     self.assertEqual(result_lo, 0x1234, f"Expected lo=0x1234, got 0x{result_lo:04x}")
     self.assertEqual(result_hi, 0xBEEF, f"Expected hi=0xBEEF (preserved), got 0x{result_hi:04x}")
-
 
 class TestTrigonometry(unittest.TestCase):
   """Tests for trigonometric instructions."""
