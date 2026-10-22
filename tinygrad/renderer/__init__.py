@@ -35,8 +35,7 @@ class Estimates:
 
       # traverse in reverse order to greedily ignore indexing ALU if necessary
       for u in reversed(uops):
-        # compute multiplicity of op over compile time bounded RANGEs and hardware axis,
-        # scaled by caller multiplier and resolved with caller arg bindings
+        # compute multiplicity of op over compile time over RANGEs and CALL context
         if (rngs:=tuple(u.ranges)) not in multcache:
           resolved = tuple(r.substitute(bindings) for r in rngs)
           bnds = [cast(sint, r.src[0].without_after.ssimplify()) for r in resolved if r.dtype != dtypes.void and
@@ -51,8 +50,7 @@ class Estimates:
         if ignore_indexing and u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
         elif u.op is Ops.CALL and enter_calls:
-          # substitute body PARAMs for their bound arguments which themselves may be dependent on the current caller scope
-          # dont resolve the whole body because the argument ALU will get double counted, and its unecessary
+          # pass bindings instead of resolving whole body because the bound ALU shouldnt get double counted, and its unecessary
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.backward_slice if p.op is Ops.PARAM and p.arg.slot >= 0}
           child_flops, child_lds, child_mem = estimates_from_body(u.body, mult, child_bindings)
