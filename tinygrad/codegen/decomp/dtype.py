@@ -164,7 +164,7 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
   (l2i_pair(UPat(Ops.CAST, src=(UPat.var('a'),), name='x')), lambda p,a,x:
    UOp(Ops.STACK, src=l2i(x.op, x.dtype, a)) if a.dtype not in l2i_dt else None),
   # a cast between long dtypes reinterprets the words, a bare const src commits at the long dtype
-  (l2i_pair(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='x')), lambda p,x:
+  (l2i_pair(UPat(GroupOp.Elementwise, name='x')), lambda p,x:
    UOp(Ops.STACK, src=l2i(Ops.BITCAST if x.op is Ops.CAST else x.op, p.dtype, *l2i_words(*commit_weak_consts(x, x.dtype).src)))),
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name='s'), UPat.cvar('w'))), lambda s,w: s.src[w.arg]),
 ])
