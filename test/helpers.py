@@ -68,7 +68,8 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
 
 @contextlib.contextmanager
 def measure_mem() -> Iterator[Callable[[], int]]: # used(): the bytes the block left allocated, after the first run made the device's state
-  Tensor.ones(1).contiguous().realize(); Device.default.synchronize(); gc.collect() # noqa: E702
+  Device.default.synchronize()
+  gc.collect()
   base = GlobalCounters.mem_used
   yield lambda: (gc.collect(), GlobalCounters.mem_used - base)[1]
 

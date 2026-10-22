@@ -85,10 +85,10 @@ class TestHCQ2Schedule(unittest.TestCase):
       def f(a): return (a * 2 + 1).contiguous().realize()
       for _ in range(3): out = f(x)
       self.assertEqual(out.to("CPU").tolist(), [2.0 * i + 1] * 1024)
-    step(1) # warms the programs and templates
+    for i in (1,2): step(i) # warms the programs and templates
     gc.collect()
     used = GlobalCounters.mem_used
-    for i in range(2, 5): step(i)
+    for i in range(3, 6): step(i)
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used, used)
 

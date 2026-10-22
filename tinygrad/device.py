@@ -274,7 +274,7 @@ class Allocator(Generic[DeviceType]):
 
     # add that buf to cache
     users:list[Compiled] = [self.dev, *storage.maps] if storage.host is not None else []
-    freed_at = {dev:dev.timeline.host.view(fmt='Q')[1] for dev in users if 'timeline' in vars(dev)} # without a timeline nothing was submitted
+    freed_at = {dev:dev.timeline.host.view(fmt='Q')[1] for dev in users if 'timeline' in vars(dev)}
     self.cache[(size, options)].append((storage, freed_at))
 
   def free_cache(self):

@@ -22,7 +22,7 @@ class CPUProgram(Program['CPUDevice']):
     self.lvp = obj.target.renderer == "LVP"
     if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
     else:
-      self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True)) # code, not tensor memory: kept out of mem_used
+      self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True))
       loaded = self._load(obj.lib, self.buf.buf)
       unwrap(self.buf.host)[:len(loaded)] = loaded
 
