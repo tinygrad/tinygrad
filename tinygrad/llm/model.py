@@ -10,7 +10,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, indexer_decode_index_rows, Q8_ROWS_I8, \
-  MOE_TILE, paged_rows, paged_copy, page_move, \
+  MOE_TILE, \
   mla_bmm
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
@@ -276,10 +276,6 @@ MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 48)
 # batched decoding (Transformer.forward_batch): the rows are groups of a sequence each, group g (its rows the tokens at positions pos.. of the
 # sequence) in the state slot g: (pos, rows) of every group
 _batch_rows:list[list[tuple[UOp, int]]|None] = [None]
-# batched decoding's caches (latent keys, the indexer's pooled keys) are pages of PAGE_ROWS positions of the model's own cache or of an extra
-# buffer: every sequence has a table of its pages (Transformer.slot_grow), a step's tables (slots, pages) are _page_table's
-PAGE_ROWS = getenv("PAGE_ROWS", 256)
-_page_table:list[Tensor|None] = [None]
 
 def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|None) -> Tensor:
   """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
@@ -302,18 +298,6 @@ def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None) -> tuple
     (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [x.view(size * item, i * size * item) for x in b.bufs]
     return mb
   return tensor(base, n), [tensor(UOp.from_buffer(view(i), like.dtype, devs), 1) for i in range(n)]
-
-def _aliased(rows:int, total:int, D:int, dtype:DType, device:str|tuple[str, ...]|None, zero:bool=False) -> tuple[Tensor, Tensor]:
-  """a buffer of (total, D) on every device, allocated now (zeroed if zero): the tensor of its first rows and of all of it (the same memory)"""
-  devs = cast(str|tuple[str, ...], unwrap(device))
-  base = UOp.new_buffer(devs, total * D, dtype)
-  bufs = b.bufs if isinstance(b:=base.buffer, MultiBuffer) else [b]
-  for x in bufs: x.ensure_allocated()
-  views = [x.view(rows * D * dtype.itemsize, 0).ensure_allocated() for x in bufs]
-  if isinstance(devs, tuple): (first:=MultiBuffer.__new__(MultiBuffer)).bufs = views
-  ret = Tensor(UOp.from_buffer(first if isinstance(devs, tuple) else views[0], dtype, devs)).reshape(rows, D), Tensor(base).reshape(total, D)
-  if zero: ret[1].assign(Tensor.zeros(total, D, dtype=dtype, device=devs)).realize()
-  return ret
 
 def _unallocated(*sizes:int|UOp, dtype:DType, device:str|tuple[str, ...]|None, axis:int|None=None) -> Tensor:
   """a tensor whose buffer is made but not allocated: a jit captured before its memory is (it holds it, not an intermediate of its own)"""
@@ -771,9 +755,9 @@ class TransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
 
 class Indexer:
-  extra_rows = 0
-  pk_all:Tensor  # batched decoding: cache_pk and the extra pages after it, the ring of every slot and all (MLATransformerBlock._init_slots)
+  pool_pk:Tensor  # batched decoding: the caches of every slot, and of all of them (MLATransformerBlock._init_slots)
   pool_ring:Tensor
+  slot_pk:list[Tensor]
   slot_ring:list[Tensor]
   def __init__(self, config:TransformerConfig):
     self.idx, self.max_context, self.rewind = (idx:=unwrap(config.indexer)), config.max_context, config.rewind
@@ -790,11 +774,8 @@ class Indexer:
       idx.head_dim % 16 == 0 and max_pools % 64 == 0 and bool(getenv("INDEXER_SPARSE", 1))
     # the pooled keys, a call pools its tokens' pools only. the sparse path keeps them in half and the tokens of the last incomplete pool in a
     # ring (the last tokens: the next call can start before the end, see pool_keys), the other one every token's key and gate
-    if self.sparse and (X:=getattr(self, "extra_rows", 0)):
-      # (batched decoding's pages after them, one buffer: see MLATransformerBlock._init_state)
-      self.cache_pk, self.pk_all = _aliased(max_pools, max_pools + X // idx.kpool, idx.head_dim, dtypes.half, x.device, zero=True)
-    else: self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, idx.head_dim,
-                                       dtype=dtypes.half if self.sparse else dtypes.float32, device=x.device).contiguous()
+    self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, idx.head_dim,
+                                 dtype=dtypes.half if self.sparse else dtypes.float32, device=x.device).contiguous()
     ring = round_up(max(2*idx.kpool, self.rewind + idx.kpool - 1), idx.kpool)
     if self.sparse: self.ring = Tensor.zeros(ring, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
     else: self.cache_kg = Tensor.zeros(x.shape[0], max_pools*idx.kpool, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
@@ -855,7 +836,6 @@ class Indexer:
 
 
 class MLATransformerBlock(FFNBlock):
-  extra_rows = 0  # the rows of batched decoding's pages after the cache (Transformer._init_states)
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
@@ -959,28 +939,34 @@ class MLATransformerBlock(FFNBlock):
       iq = idx.attn_q_b(q_lora).reshape(Tq, ic.n_heads, ic.head_dim)
       iw = (idx.proj(x) * (ic.n_heads * ic.head_dim)**-0.5)[0]
     scale, outs, r = 1.0/self.config.head_dim**0.5, [], 0
-    # the caches of the sequences: their pages (the tables of the step) of the model's cache and the extra ones after it
-    tbl = _page_table[0]
-    assert idx is not None and tbl is not None, "batched decoding: the sparse attention of the indexer, paged caches"
-    cache, pk, PG, PP = self.cache_all, idx.pk_all, PAGE_ROWS, PAGE_ROWS // ic.kpool
     for g, (pos, T) in enumerate(groups):
-      cache = paged_rows(cache, k_store[0, 0, r:r+T], tbl, pos, g, PG)
-      pk = pool_keys(pk, idx.slot_ring[g], kg[r:r+T].half(), idx.compressor_ape["weight"], pos, T, paged=(tbl, g, PP))
-      pools, top = (pos + T + ic.kpool - 1) // ic.kpool, ic.top_k // ic.kpool
-      picks = indexer_decode_index_rows(iq[r:r+T], pk, iw[r:r+T], pos, pools, top, ic.kpool, paged=(tbl, g, PP))
-      outs.append(flash_attention_mla_sparse(q[:, :, r:r+T], cache, picks, scale, pos+T, paged=(tbl, g, PG)))
+      cache = self.slot_k[g]
+      N = int(cache.shape[2])
+      cache = Tensor(cache.uop.after(cache[:, :, pos:pos+T, :].uop.store(k_store[:, :, r:r+T].cast(cache.dtype).uop)))
+      picks = None
+      if idx is not None:
+        pk = pool_keys(idx.slot_pk[g], idx.slot_ring[g], kg[r:r+T].half(), idx.compressor_ape["weight"], pos, T)
+        pools, top = (pos + T + ic.kpool - 1) // ic.kpool, ic.top_k // ic.kpool
+        picks = indexer_decode_index(iq[r], pk, iw[r], pos, pools, top, ic.kpool) if T == 1 else \
+          indexer_decode_index_rows(iq[r:r+T], pk, iw[r:r+T], pos, pools, top, ic.kpool)
+      latent = cache.reshape(1, *cache.shape)
+      if T == 1: outs.append(flash_attention_decode(q[:, :, r:r+1].half(), latent, pos+1, N, shared=True, scale=scale, index=picks))
+      else:
+        assert picks is not None, "a few tokens of a sequence: the sparse attention of the indexer"
+        outs.append(flash_attention_mla_sparse(q[:, :, r:r+T], latent, picks, scale, pos+T))
       r += T
     attn = outs[0].cat(*outs[1:], dim=2)[..., :self.config.kv_lora_rank]
     attn = mla_bmm(attn, self.attn_v_b["weight"])
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
 
-  def _init_slots(self, n:int, pages:int):
-    """the states of n sequences of batched decoding: their caches are pages of cache_all (see _init_state), the ring of every slot"""
-    if getattr(self, "_slots_made", False): return
-    idx = self.indexer
-    assert idx is not None and idx.sparse and hasattr(self, "cache_all"), "paged caches: the sparse indexer, the extra pages"
-    idx.pool_ring, idx.slot_ring = _slot_pool(n, idx.ring)
-    self._slots_made = True
+  def _init_slots(self, n:int, ctx:int):
+    """the caches of n sequences of batched decoding of at most ctx tokens (one slot each)"""
+    if len(getattr(self, "slot_k", [])) >= n: return
+    self.pool_k, self.slot_k = _slot_pool(n, self.cache_k, (1, 1, ctx, self.cache_k.shape[-1]))
+    if (idx:=self.indexer) is not None:
+      pools = round_up(ctx, idx.idx.kpool) // idx.idx.kpool
+      idx.pool_pk, idx.slot_pk = _slot_pool(n, idx.cache_pk, (pools, idx.cache_pk.shape[-1]))
+      idx.pool_ring, idx.slot_ring = _slot_pool(n, idx.ring)
 
   def _attn_mask(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor|None:  # (1, 1, Tq, start_pos+T), None: all visible
     if self.indexer and self.config.max_context > self.indexer.idx.top_k:
@@ -989,15 +975,9 @@ class MLATransformerBlock(FFNBlock):
     return Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) if resolve(T != 1) else None
 
   def _init_state(self, x:Tensor):
-    if not hasattr(self, "cache_k") and (X:=getattr(self, "extra_rows", 0)) and x.shape[0] == 1:
-      # batched decoding's pages after the model's cache, one buffer (cache_all): the model's cache is a view of its first rows
-      D = self.config.kv_lora_rank + self.config.rope_dim
-      main, self.cache_all = _aliased(self.config.max_context, self.config.max_context + X, D, dtypes.half, x.device)
-      self.cache_k = main.reshape(1, 1, self.config.max_context, D)
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, dtype=dtypes.half,
                                   device=x.device)
-    if not hasattr(self, "freqs_cis"):
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
     if self.indexer: self.indexer._init_state(x)
@@ -1375,10 +1355,7 @@ class Transformer:
   BATCH_SIZES = (1, 2, 4, 8, 16)
   def batch_slots(self) -> int:
     return min(getenv("BATCH_SLOTS", 16), max(self.BATCH_SIZES)) if self.has_recurrent_block and self.config.kv_lora_rank > 0 else 0
-  def batch_ctx(self) -> int: return self.max_context  # (paged caches: a sequence grows to the model's context if there are pages)
-  def batch_pages(self) -> int:
-    """the extra pages of batched decoding (besides the ones of the model's own cache): the memory of BATCH_CTX tokens a slot by default"""
-    return getenv("BATCH_PAGES", self.batch_slots() * getenv("BATCH_CTX", 2048) // PAGE_ROWS)
+  def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
 
   def _init_slots(self, alloc:bool=True):
     """the slots of batched decoding (alloc: their memory too, else when the jits using them are linked: after the peak of loading)"""
@@ -1386,18 +1363,8 @@ class Transformer:
     # (made once: the jits captured use them)
     if not hasattr(self, "_batch_in"):
       self._init_states()
-      for b in self._slot_blocks(): b._init_slots(n, self.batch_pages())
+      for b in self._slot_blocks(): b._init_slots(n, self.batch_ctx())
       devs = cast(str|tuple[str, ...], self.token_embd.weight.device)
-      # the page tables (host memory, a step copies them to the devices), the free pages: the model's cache's then the extra ones
-      self._main_pages, self._table_pages = self.max_context // PAGE_ROWS, (self.max_context + PAGE_ROWS - 1) // PAGE_ROWS
-      self._page_host, self._page_t = _host_ints(devs, n * self._table_pages)
-      # (the last page is the free slots' scratch: the rows of nothing of a step are written there)
-      self._scratch_page = self._main_pages + self.batch_pages() - 1
-      self._page_host[:] = array.array('i', [self._scratch_page] * (n * self._table_pages))
-      self._page_dev = Tensor.zeros(n, self._table_pages, dtype=dtypes.int32, device=devs).contiguous().realize()
-      self._free_pages = set(range(self._main_pages + self.batch_pages() - 1))
-      self._slot_pages = [cast(list[int], []) for _ in range(n)]
-      self._main_reserved = 0  # the model's cache's first pages the model uses itself (a prefill): not a slot's
       if (k:=self.config.spec_drafts):
         # speculative decoding: the hidden states of every slot's last verified tokens, the tokens of a step's groups (k+1 each) and its
         # outputs (the k+1 sampled tokens and the k drafts of every group)
@@ -1421,7 +1388,7 @@ class Transformer:
     for blk in self._slot_blocks():
       if isinstance(blk, GatedDeltaNetBlock): todo += [blk.pool_rec, *blk.pool_conv]
       if isinstance(blk, MLATransformerBlock):
-        todo += [blk.indexer.pool_ring] if blk.indexer is not None else []
+        todo += [blk.pool_k] + ([blk.indexer.pool_pk, blk.indexer.pool_ring] if blk.indexer is not None else [])
     for t in todo:
       for u in t.uop.toposort():
         if u.op is Ops.BUFFER:
@@ -1429,10 +1396,7 @@ class Transformer:
     self._slots_ready = True
 
   def _slot_blocks(self) -> list[FFNBlock]: return self.blk + ([self.mtp] if self.config.spec_drafts else [])
-  def _tables(self) -> Tensor:
-    """the page tables on the devices (a copy of the host's, every step)"""
-    return self._page_dev.assign(self._page_t.reshape(self.batch_slots(), self._table_pages))
-  def _slot_copy(self, slot:UOp, rp:UOp, wp:UOp, hrow:UOp, pages:UOp):
+  def _slot_copy(self, slot:UOp, rp:UOp, wp:UOp, hrow:UOp):
     """
     the states of the model at the end of its tokens (the recurrent ones in rp) into a slot (its recurrent ones in wp): in the pools.
     speculative decoding: the hidden state of the last token (row hrow of _spec_h) is the slot's row 0
@@ -1444,11 +1408,12 @@ class Transformer:
       if isinstance(b, GatedDeltaNetBlock):
         S = int(b.slot_rec[0].shape[0])
         copies += [rows(d, slot*S + wp).assign(rows(c, rp)) for d, c in zip([b.pool_rec, *b.pool_conv], [b.recurrent_state, *b.conv_states])]
-      if isinstance(b, MLATransformerBlock) and (idx:=b.indexer) is not None:
-        # the pages of the model's cache into the slot's (the same page: nothing), the ring
-        tbl, R = self._tables(), int(idx.slot_ring[0].shape[0])
-        copies += [paged_copy(b.cache_all, tbl, slot, pages, PAGE_ROWS), paged_copy(idx.pk_all, tbl, slot, pages, PAGE_ROWS // idx.idx.kpool),
-                   rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
+      if isinstance(b, MLATransformerBlock):
+        ctx = int(b.slot_k[0].shape[2])
+        copies.append(rows(b.pool_k, slot).assign(b.cache_k[:, :, :ctx]))
+        if (idx:=b.indexer) is not None:
+          P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
+          copies += [rows(idx.pool_pk, slot*P, P).assign(idx.cache_pk[:P]), rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
     Tensor.realize(*copies)
 
   def _slot_pools(self) -> list[tuple[Tensor, int]]:
@@ -1456,110 +1421,40 @@ class Transformer:
     pools:list[tuple[Tensor, int]] = [(self.pool_spec_h, int(self.slot_spec_h[0].shape[0]))] if hasattr(self, "pool_spec_h") else []
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock): pools += [(p, int(b.slot_rec[0].shape[0])) for p in [b.pool_rec, *b.pool_conv]]
-      if isinstance(b, MLATransformerBlock) and (idx:=b.indexer) is not None: pools.append((idx.pool_ring, int(idx.slot_ring[0].shape[0])))
+      if isinstance(b, MLATransformerBlock):
+        pools.append((b.pool_k, 1))
+        if (idx:=b.indexer) is not None: pools += [(idx.pool_pk, int(idx.slot_pk[0].shape[0])), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
     return pools
   def _slot_move_copy(self, src:UOp, dst:UOp):
     def rows(t:Tensor, start:UOp, n:int) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
     Tensor.realize(*[rows(p, dst*n, n).assign(rows(p, src*n, n).contiguous()) for p, n in self._slot_pools()])
   def slot_move(self, src:int, dst:int):
-    """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows): its pages are dst's"""
+    """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
     if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True)
-    self.slot_release(dst)
-    self._slot_pages[dst], self._slot_pages[src] = self._slot_pages[src], []
-    self._write_table(dst)
-    # (src's rows go to the scratch page: a free slot's rows of a step write there, not into dst's pages)
-    self.slot_release(src)
     v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
     self._slot_move_jit(v("slot_src").bind(src), v("slot_dst").bind(dst))
 
-  # ** the pages of the slots (host side)
-  def _write_table(self, i:int):
-    T, pages = self._table_pages, self._slot_pages[i]
-    self._page_host[i*T:i*T+len(pages)] = array.array('i', pages)
-  def _take_page(self) -> int|None:
-    # the extra pages first, then the model's cache's from its end (not the ones the model uses): its cached prompt ends before the page
-    if extra:=[p for p in self._free_pages if p >= self._main_pages]: p = min(extra)
-    elif main:=[p for p in self._free_pages if p >= self._main_reserved]:
-      p = max(main)
-      if len(self._cached_tokens) > p * PAGE_ROWS: self._cached_tokens, self._ckpt_tokens = [], []
-    else: return None
-    self._free_pages.discard(p)
-    return p
-  def pages_free(self) -> int:
-    """the positions a slot can still get (a long prompt's own: its pages of the model's cache, see slot_store)"""
-    return PAGE_ROWS * len(self._free_pages)
-  def slot_grow(self, i:int, tokens:int) -> bool:
-    """slot i holds `tokens` positions (pages taken if it needs more): False if there aren't enough free (it keeps what it has)"""
-    need, pages = min((tokens + PAGE_ROWS - 1) // PAGE_ROWS, self._table_pages), self._slot_pages[i]
-    if need - len(pages) > sum(1 for p in self._free_pages if p >= self._main_reserved): return False
-    while len(pages) < need: pages.append(unwrap(self._take_page()))
-    self._write_table(i)
-    return True
-  def slot_release(self, i:int):
-    """the pages of slot i are free (its sequence is done, or goes on elsewhere)"""
-    self._free_pages.update(self._slot_pages[i])
-    self._slot_pages[i] = []
-    self._page_host[i*self._table_pages:(i+1)*self._table_pages] = array.array('i', [self._scratch_page] * self._table_pages)
-  def reserve_main(self, tokens:int) -> bool:
-    """
-    the model uses its cache up to `tokens` (a prefill): the slots' pages there move to other pages (the devices idle). False if there are not
-    enough free pages (nothing moves)
-    """
-    need = min((tokens + PAGE_ROWS - 1) // PAGE_ROWS, self._main_pages)
-    held = [(i, j) for i, ps in enumerate(self._slot_pages) for j, p in enumerate(ps) if p < need]
-    if len(held) > sum(1 for p in self._free_pages if p >= need): return False
-    self._main_reserved = need
-    if not held: return True
-    if not hasattr(self, "_page_move_jit"): self._page_move_jit = TinyJit(self._page_move_copy, capture_first=True)
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
-    v = functools.partial(UOp.variable, min_val=0, max_val=self._main_pages + self.batch_pages() - 1)
-    for i, j in held:
-      src, dst = self._slot_pages[i][j], unwrap(self._take_page())
-      self._page_move_jit(v("page_src").bind(src), v("page_dst").bind(dst))
-      self._free_pages.add(src)
-      self._slot_pages[i][j] = dst
-      self._write_table(i)
-    return True
-  def _page_move_copy(self, src:UOp, dst:UOp):
-    moves:list[Tensor] = []
-    for b in self._slot_blocks():
-      if isinstance(b, MLATransformerBlock) and (idx:=b.indexer) is not None:
-        moves += [page_move(b.cache_all, src, dst, PAGE_ROWS), page_move(idx.pk_all, src, dst, PAGE_ROWS // idx.idx.kpool)]
-    Tensor.realize(*moves)
-
   def slot_store(self, i:int, length:int, hrow:int=0):
-    """
-    the states of the sequence just prefilled (or decoded) by the model, of `length` tokens, into slot i (hrow: the row of _spec_h): its caches
-    into the slot's pages (taken here, slot_grow: the model's cache's first pages are reserved (reserve_main))
-    """
+    """the states of the sequence just prefilled (or decoded) by the model, of `length` tokens, into slot i (hrow: the row of _spec_h)"""
     self._init_slots()
-    self.slot_release(i)
-    n = min((length + PAGE_ROWS - 1) // PAGE_ROWS, self._main_pages)
-    if n >= getenv("PAGE_IN_PLACE", 16) and all(p in self._free_pages for p in range(n)):
-      # a long one keeps its pages of the model's cache (no copy, no second copy's memory): a prefill after it moves the ones it needs
-      self._free_pages.difference_update(range(n))
-      self._slot_pages[i] = list(range(n))
-    else: self._main_reserved = max(self._main_reserved, n)
-    if not self.slot_grow(i, length + 2*self.config.spec_drafts + 2): raise RuntimeError(f"no pages for a sequence of {length} tokens")
     if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True)
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
     rp = UOp.variable("slot_rp", 0, self.config.rewind).bind(length % (self.config.rewind + 1))
     S = self.config.spec_drafts + 2
     self._slot_jit(UOp.variable("slot", 0, self.batch_slots()-1).bind(i), rp, UOp.variable("slot_wp", 0, S-1).bind(length % S),
-                   UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow),
-                   UOp.variable("slot_pages", 1, self._table_pages).bind(max(1, (length + PAGE_ROWS - 1) // PAGE_ROWS)))
+                   UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
 
   def forward_batch(self, *positions:UOp) -> Tensor:
     """a step of batched decoding: row i the sequence of slot i at positions[i], its token in _batch_in, its temperature in _batch_temp"""
     n, devs = len(positions), self.token_embd.weight.device
-    _batch_rows[0], Q8_ROWS_I8[0], _page_table[0] = [(p, 1) for p in positions], bool(getenv("BATCH_I8", 1)), self._tables()
+    _batch_rows[0], Q8_ROWS_I8[0] = [(p, 1) for p in positions], bool(getenv("BATCH_I8", 1))
     try:
       x = self.token_embd(self._batch_in[:, :n].to(devs)).float()  # (1, n, D)
       if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
       for block in self.blk: x = block(x, 0)
       if hc is not None: x = x.mean(2)
       tok = self._sample(self.output_norm(x)[0].float(), self._batch_temp[:n].reshape(n, 1), self._batch_in.device)
-    finally: _batch_rows[0], Q8_ROWS_I8[0], _page_table[0] = None, False, None
+    finally: _batch_rows[0], Q8_ROWS_I8[0] = None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(1, n).cast(dtypes.int32)
     return self._batch_out[:, :n].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
@@ -1578,9 +1473,6 @@ class Transformer:
     m = next(s for s in self.BATCH_SIZES if s >= n)
     assert m <= self.batch_slots(), f"{n} rows, {self.batch_slots()} slots"
     # (the rows past n are the free slots' at position 0: what they write is overwritten when a sequence takes the slot)
-    # (the slots of sequences hold pages: they grow to the step's positions. a free slot's rows go to the scratch page)
-    for i, (_, pos, _) in enumerate(rows):
-      if self._slot_pages[i] and not self.slot_grow(i, pos + 1): raise RuntimeError(f"no pages for slot {i} at {pos}")
     rows = rows + [(0, 0, 0.0)] * (m - n)
     for i, (tok, _, temp) in enumerate(rows): self._batch_host_in[i], self._batch_host_temp[i] = tok, temp
     self._batch_host_out[:m] = array.array('i', [-1] * m)
@@ -1602,7 +1494,7 @@ class Transformer:
     k, n, devs = self.config.spec_drafts, len(seqs) // 3, self.token_embd.weight.device
     groups = [(seqs[3*g], seqs[3*g+1], seqs[3*g+2]) for g in range(n)]
     y = self._bspec_in[:, :n*(k+1)]
-    Q8_ROWS_I8[0], _page_table[0] = bool(getenv("BATCH_I8", 1)), self._tables()
+    Q8_ROWS_I8[0] = bool(getenv("BATCH_I8", 1))
     try:
       # the MTP layer on the last step's tokens with their hidden states (the rows of the other parity), the row j of every group
       last = Tensor.cat(*[self.slot_spec_h[g].shrink((((1-par)*(k+1), (2-par)*(k+1)), None)) for g, (_, _, par) in enumerate(groups)])
@@ -1628,7 +1520,7 @@ class Transformer:
                         for g, (_, _, par) in enumerate(groups)])
       temps = self._batch_temp[:n].reshape(n, 1).expand(n, k+1).reshape(n*(k+1), 1)
       tok = self._sample(hn, temps, y.device)
-    finally: _batch_rows[0], Q8_ROWS_I8[0], _page_table[0] = None, False, None
+    finally: _batch_rows[0], Q8_ROWS_I8[0] = None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(n, k+1).cat(*[d.reshape(n, 1) for d in drafts], dim=1).reshape(1, n*(2*k+1)).cast(dtypes.int32)
     return self._bspec_out[:, :n*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
@@ -1638,7 +1530,7 @@ class Transformer:
     if m not in self._bspec_jits: self._bspec_jits[m] = TinyJit(self.forward_batch_spec, capture_first=True, scratch=self._scratch)
     return self._bspec_jits[m]
   def _bspec_vars(self, seqs:list[tuple[int, int, int]]) -> list[UOp]:
-    k, ctx = self.config.spec_drafts, self.batch_ctx()  # (the model's context: paged caches)
+    k, ctx = self.config.spec_drafts, self.batch_ctx()
     return [v for g, (mp, j, par) in enumerate(seqs) for v in (UOp.variable(f"bspec_mtp{g}", 0, ctx-1).bind(mp),
             UOp.variable(f"bspec_j{g}", 0, k).bind(j), UOp.variable(f"bspec_par{g}", 0, 1).bind(par))]
 
@@ -1652,9 +1544,6 @@ class Transformer:
     m = next(s for s in self.BATCH_SIZES if s >= n)
     assert m <= self.batch_slots(), f"{n} sequences, {self.batch_slots()} slots"
     # (the groups past n are the free slots' at position 0: what they write is overwritten when a sequence takes the slot)
-    for g, (_, mp, _, _, _) in enumerate(seqs):
-      # (a step writes the positions mp.. and start_pos.. of a sequence, start_pos <= mp+k)
-      if self._slot_pages[g] and not self.slot_grow(g, mp + 2*k + 2): raise RuntimeError(f"no pages for slot {g} at {mp}")
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
     for g, (y, _, _, _, temp) in enumerate(seqs):
       self._bspec_host_in[g*(k+1):(g+1)*(k+1)] = array.array('i', y)
@@ -1678,10 +1567,6 @@ class Transformer:
     x = Tensor.empty(1, 1, self.config.dim, device=devs)
     holders:list = []
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
-      # (the extra pages of batched decoding: in one buffer with the caches, allocated with them)
-      if isinstance(b, MLATransformerBlock) and self.batch_slots():
-        b.extra_rows = self.batch_pages() * PAGE_ROWS
-        if b.indexer is not None: b.indexer.extra_rows = b.extra_rows
       b._init_state(x)
       holders += [b] + ([idx] if (idx:=getattr(b, "indexer", None)) is not None else [])
     def lazy(v) -> list[Tensor]:

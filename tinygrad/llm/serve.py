@@ -288,14 +288,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
 
   # ** the model
   def batchable(self, req:Request) -> bool:
-    """
-    req can be decoded in a slot: there are free pages for its prompt and some of its reply (a slot takes pages as it grows, a reply that
-    finds none goes on alone)
-    """
+    """req can be decoded in a slot: its prompt and room for a reply fit (a reply that fills the slot goes on alone)"""
     if not self.slots: return False
     room = min(1024, req.max_tokens - len(req.generated)) if req.max_tokens is not None else 1024
-    need = len(req.ids) + len(req.generated) + room
-    return need < self.model.batch_ctx() and need <= self.model.pages_free()
+    return len(req.ids) + len(req.generated) + room < self.model.batch_ctx()
 
   def prefill(self, req:Request) -> int:
     """the prompt (and what req generated, a continuation) through the model: the first sampled token"""
@@ -355,8 +351,6 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if len(active) >= slots: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
-          # (no free pages for its prompt now: it waits)
-          if not model.reserve_main(len(req.ids) + len(req.generated) + 1): break
           first = self.prefill(req)
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
           pending.remove(req)
@@ -385,18 +379,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             req.y, req.mtp, req.j, req.par, req.pos = sampled, start + 1, j, 1 - req.par, start + j + 1
             if not all(self.emit(req, t) for t in sampled[:j+1]):
               del active[i]
-              model.slot_release(i)
               continue
           else:
             req.pos += 1
             if not self.emit(req, out[i]):
               del active[i]
-              model.slot_release(i)
               continue
-          if not model.slot_grow(i, req.mtp + 2*k + 2 if k else req.pos + 1):
-            # no pages for its next tokens: it goes on alone (prefilled again), when the model is free
+          if req.pos + k + 2 >= model.batch_ctx():
+            # its slot is full: it goes on alone (prefilled again), when the model is free
             del active[i]
-            model.slot_release(i)
             pending.insert(0, req)
         # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
         while active and (hi:=max(active)) >= len(active) and next(m for m in model.BATCH_SIZES if m >= hi+1) > \
@@ -406,10 +397,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           active[lo] = active.pop(hi)
         # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster
         if not k and len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1):
-          pending.append(active.pop(i:=next(iter(active))))
-          model.slot_release(i)
+          pending.append(active.pop(next(iter(active))))
       except Exception as e:
         traceback.print_exc()
         for req in [*active.values(), *pending]: self.finish(req, e)
-        for i in active: model.slot_release(i)
         active, pending = {}, []
