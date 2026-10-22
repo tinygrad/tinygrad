@@ -14,5 +14,43 @@ class TestCDNADSSwizzle(unittest.TestCase):
         out = run_cdna_lanes([cdna.ds_swizzle_b32(vdst=cdna.v[2], addr=cdna.v[255], offset0=offset & 255, offset1=offset >> 8), cdna.s_waitcnt(0)])
         self.assertEqual(out[:8], src)
 
+class TestCDNADSReadTr(unittest.TestCase):
+  def _run_tr_b16(self, offset: int = 0, acc: int = 0) -> list[list[int]]:
+    # lane l writes the 16-bit values 4l..4l+3 to LDS[8l], then reads its own address back with the transpose
+    code = [cdna.v_lshlrev_b32_e32(cdna.v[0], 3, cdna.v[255]),
+            cdna.v_lshlrev_b32_e32(cdna.v[1], 2, cdna.v[255]),
+            cdna.v_add_u32_e32(cdna.v[6], 1, cdna.v[1]), cdna.v_lshl_or_b32(cdna.v[4], cdna.v[6], 16, cdna.v[1]),
+            cdna.v_add_u32_e32(cdna.v[6], 2, cdna.v[1]), cdna.v_add_u32_e32(cdna.v[7], 3, cdna.v[1]),
+            cdna.v_lshl_or_b32(cdna.v[5], cdna.v[7], 16, cdna.v[6]),
+            cdna.ds_write_b64(addr=cdna.v[0], data0=cdna.v[4:5], offset0=offset & 255, offset1=offset >> 8), cdna.s_waitcnt(0),
+            cdna.ds_read_b64_tr_b16(vdst=cdna.v[2:3], addr=cdna.v[0], offset0=offset & 255, offset1=offset >> 8, acc=acc), cdna.s_waitcnt(0)]
+    # with acc, the result lands in a[2:3]
+    if acc: code += [cdna.v_accvgpr_read(cdna.v[2], cdna.v[2]), cdna.v_accvgpr_read(cdna.v[3], cdna.v[3])]
+    return [run_cdna_lanes(code, out_reg=r) for r in (2, 3)]
+
+  def _expected(self) -> list[list[int]]:
+    # each group of 16 lanes read a 4x16 tile of 16-bit values (lane 4r+c holds row r, columns 4c..4c+3), lane j gets column j
+    elem = lambda l, r: 4 * ((l & ~15) + 4 * r + (l & 15) // 4) + (l & 15) % 4  # noqa: E731
+    return [[elem(l, 2*d) | (elem(l, 2*d+1) << 16) for l in range(64)] for d in range(2)]
+
+  def test_read_b64_tr_b16(self): self.assertEqual(self._run_tr_b16(), self._expected())
+  def test_read_b64_tr_b16_offset(self): self.assertEqual(self._run_tr_b16(offset=0x108), self._expected())
+  def test_read_b64_tr_b16_acc(self): self.assertEqual(self._run_tr_b16(acc=1), self._expected())
+
+class TestCDNADSLoadReturn(unittest.TestCase):
+  def test_next_read_uses_old_address(self):
+    # LDS[4l] = 4(l^1). A ds_read writes its destination when the data returns, so a read issued before s_waitcnt still sees the old address
+    out = run_cdna_lanes([cdna.v_lshlrev_b32_e32(cdna.v[0], 2, cdna.v[255]), cdna.v_xor_b32_e32(cdna.v[1], 4, cdna.v[0]),
+                          cdna.ds_write_b32(addr=cdna.v[0], data0=cdna.v[1]), cdna.s_waitcnt(0),
+                          cdna.ds_read_b32(vdst=cdna.v[0], addr=cdna.v[0]), cdna.ds_read_b32(vdst=cdna.v[2], addr=cdna.v[0]), cdna.s_waitcnt(0)])
+    self.assertEqual(out, [4*(l^1) for l in range(64)])
+
+  def test_waitcnt_returns_data(self):
+    out = run_cdna_lanes([cdna.v_lshlrev_b32_e32(cdna.v[0], 2, cdna.v[255]), cdna.v_xor_b32_e32(cdna.v[1], 4, cdna.v[0]),
+                          cdna.ds_write_b32(addr=cdna.v[0], data0=cdna.v[1]), cdna.s_waitcnt(0),
+                          cdna.ds_read_b32(vdst=cdna.v[0], addr=cdna.v[0]), cdna.s_waitcnt(0),
+                          cdna.ds_read_b32(vdst=cdna.v[2], addr=cdna.v[0]), cdna.s_waitcnt(0)])
+    self.assertEqual(out, [4*l for l in range(64)])
+
 if __name__ == "__main__":
   unittest.main()
