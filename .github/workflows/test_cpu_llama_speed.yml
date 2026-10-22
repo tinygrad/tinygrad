@@ -1,0 +1,38 @@
+name: CPU Llama 1B Speed
+
+# Compares a single token TinyLlama-1.1B forward pass against a hand written torch reference.
+# Report only by default. Set ASSERT_FASTER=1 to turn it into a hard gate.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  llama_cpu_speed:
+    name: Llama 1B CPU speed vs torch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: llama_cpu
+          deps: testing
+          llvm: 'true'
+      - name: tinygrad LLVM backend vs torch
+        env:
+          DEV: CPU:LLVM
+          MAX_BUFFER_SIZE: 0
+        run: python -m pytest test/external/external_test_speed_llama_cpu.py -v -s
+      - name: tinygrad clang backend vs torch (reference)
+        if: always()
+        env:
+          DEV: CPU
+          MAX_BUFFER_SIZE: 0
+        run: python -m pytest test/external/external_test_speed_llama_cpu.py -v -s
