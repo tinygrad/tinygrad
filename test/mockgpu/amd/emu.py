@@ -56,7 +56,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar
-from tinygrad.engine.realize import get_runtime
+from tinygrad.engine.realize import get_runtime, run_linear
 from tinygrad.codegen import to_program
 
 from tinygrad.renderer.amd import decode_inst
@@ -1967,7 +1967,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       prg = to_program(sink, Device[dev].renderer)
     vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_runtime(dev, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
+      vmem_buf = UOp.from_buffer(Buffer(dev, 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.uint32)
+      args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
+      for p in prg.kernel_params:
+        if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(vals[p.arg.name])
+      run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)))
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
