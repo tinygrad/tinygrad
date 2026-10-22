@@ -128,7 +128,7 @@ class CLDevice(Compiled):
 
   def count(self) -> int: return len(unwrap(self.device_ids))
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
-    check(cl.clFinish(self.queue)) # then resolve the ran stamps: [event, 0], the two around a kernel's start slot
-    for s, i in [(s, i) for b, st in self.prof_ents for s in [b.host.view(fmt='Q')] for i in (st - 1, st + 1) if s[i]]:
+    check(cl.clFinish(self.queue))
+    for s, i in [(s, i) for b, st in self.prof_ents for s in [b.host.view(fmt='Q')] for i in (st - 1, st + 1) if s[i]]: # [event, 0]
       check(cl.clGetEventProfilingInfo(ev:=ctypes.cast(s[i], cl.cl_event), cl.CL_PROFILING_COMMAND_END, 8, s.addr + i * 8 + 8, None))
       s[i] = (check(cl.clReleaseEvent(ev)), 0)[1]

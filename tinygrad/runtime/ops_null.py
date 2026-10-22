@@ -50,7 +50,7 @@ class NullProgram(Program['NullDevice']):
     if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
 
 class NullAllocator(HostAllocator):
-  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: # the host code writes the host-visible ones
+  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage:
     return super()._alloc(size, options) if options.host or options.cpu_access else BufferStorage(next(va))
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")

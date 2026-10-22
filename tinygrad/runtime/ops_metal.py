@@ -270,8 +270,8 @@ class MetalDevice(Compiled):
     if not wait(self.event, value, int(self.wait_timeout_ms)): raise RuntimeError(f"{self.device} signal wait timed out")
 
   def synchronize(self, timeout:int|None=None):
-    for slots, start in [(buf.host.view(fmt='Q'), start) for buf, start in self.prof_ents]: # a ran stamp: [command buffer, 0] until read
-      if slots[start] and not slots[start + 2]:
+    for slots, start in [(buf.host.view(fmt='Q'), start) for buf, start in self.prof_ents]:
+      if slots[start] and not slots[start + 2]: # [command buffer, 0]
         (cb:=metal.MTLCommandBuffer(slots[start])).waitUntilCompleted()
         slots[start], slots[start + 2] = int(cb.GPUStartTime() * 1e9), int(cb.GPUEndTime() * 1e9)
 
