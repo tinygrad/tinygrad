@@ -57,7 +57,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, labelX:0, className:"overlay"});
   let callCount = 0;
-  for (const [k, {label, src, ref, color, tag, exclude, addrspace}] of Object.entries(graph)) {
+  for (const [k, {label, src, ref, color, exclude, addrspace}] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let dims, source, lang;
     if (label.startsWith("SOURCE\n")) {
@@ -79,7 +79,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
     const collapsePorts = callNode ? [0] : programNode ? [0, 1] : null;
     if (callNode) callCount++;
     g.setNode(k, {...dims, label, labelX:0, ref, id:k, color, callNode, collapsePorts, exclude, addrspace, source, lang,
-      className:label.startsWith("REWRITE_ERROR") ? "err" : null, tag:tag?.length > 8 ? tag.substring(0, 8) : tag});
+      className:label.startsWith("REWRITE_ERROR") ? "err" : null});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;

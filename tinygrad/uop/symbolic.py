@@ -253,7 +253,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
-  (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.weakint) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # y*(x+c) -> y*x + y*c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
@@ -297,7 +296,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # *** rules from symbolic ***
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val)),
-  (UPat.var("x", dtypes.weakint)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.cvar("c"), lambda x,c: -c<x if c.val != x.dtype.min else None),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
   ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range
