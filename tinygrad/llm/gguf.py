@@ -1,4 +1,4 @@
-import functools, io, pathlib, re, struct
+import weakref, functools, io, pathlib, re, struct
 from typing import Any, Callable, cast
 
 from tinygrad.tensor import Tensor
@@ -26,6 +26,13 @@ _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                10:(256,84), 11:(256,110), 12:(256,144), 13:(256,176), 14:(256,210),
                16:(256,66), 17:(256,74), 18:(256,98), 19:(256,50), 20:(32,18), 21:(256,110), 22:(256,82), 23:(256,136),
                29:(256,56), 39:(32,17), 41:(128,18)}
+
+# the dequantized weights the loader made: the expression (its storage views unwrapped) -> (ggml type, the packed bytes). the quantized
+# kernels use the packed bytes (find_packed) without making the expression again to match it
+decoded_weights:weakref.WeakKeyDictionary[UOp, tuple[int, UOp]] = weakref.WeakKeyDictionary()
+def _remember_decoded(decoded:Tensor, typ:int, packed:UOp):
+  from tinygrad.llm.kernels.amd import unwrap_storage_views
+  decoded_weights[unwrap_storage_views(decoded.uop)] = (typ, packed)
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
@@ -694,6 +701,7 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
   def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
     if name in shapes: shape = shapes[name]
     decoded = ggml_data_to_tensor(packed[name].flatten(), prod(shape), typ)
+    _remember_decoded(decoded, typ, packed[name].uop)
     if (axis:=0 if name in shapes else shard_map.get(name)) is None: return decoded.reshape(shape)
     local = decoded.reshape(n, *shape[:axis], shape[axis]//n, *shape[axis+1:])
     return local.permute(*range(1, axis+1), 0, *range(axis+1, local.ndim)).reshape(shape)

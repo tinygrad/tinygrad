@@ -276,6 +276,15 @@ def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tu
   (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + aliases
   return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(mb, dtype, devs))
 
+def _open_devices(devices:tuple[str, ...]):
+  """the devices opened at the same time (most of opening one is waiting for it): the first alone (what they share is made once)"""
+  import threading
+  if len(devices) < 2: return
+  Device[devices[0]]
+  threads = [threading.Thread(target=Device.__getitem__, args=(d,), daemon=True) for d in devices[1:]]
+  for t in threads: t.start()
+  for t in threads: t.join()
+
 def _read_ahead(entries:dict):
   """
   the files of the entries read into memory in the background: a thread a file, in order (the disk's fastest: 6.8 GB/s on the 990 pro,
@@ -1286,6 +1295,7 @@ class Transformer:
           sizes[name] = round_up(shape[axis], shard*unit)
       pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
+    _open_devices(devices)
     # gate and up experts of the same format load as one (fuse_gate_up)
     fuse = {g: u for g in units_map if g.endswith("ffn_gate_exps.weight") and (u:=g.replace("gate", "up")) in units_map and
             entries[g][2] == entries[u][2] and getenv("FUSE_GATE_UP", 1)}
@@ -1386,7 +1396,7 @@ class Transformer:
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
       spec_drafts=getenv("SPEC_DRAFTS", 2) if mtp else 0)
-    model = Transformer(config)
+    with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
     # gate experts loaded with the up rows (fused): one weight of twice the rows
     for name, b in [(f"blk.{i}", b) for i, b in enumerate(model.blk)] + ([("mtp", model.mtp)] if mtp else []):
       if (g:=state_dict.get(f"{name}.ffn_gate_exps.weight")) is not None and f"{name}.ffn_up_exps.weight" not in state_dict and \
@@ -1517,11 +1527,20 @@ class Transformer:
     if not (states:=self._recurrent_states()): return
     # only the slot of the prompt's end of a slotted state (a variable: the same kernels for every prompt)
     slot = UOp.variable("ckpt_slot", 0, self.config.rewind).bind(len(tokens if save else self._ckpt_tokens) % (self.config.rewind + 1))
-    views = [s.shrink(((slot, slot+1),) + (None,)*(s.ndim-1)) if slotted else s for s, slotted in states]
-    if not hasattr(self, "_ckpt"): self._ckpt = [v.clone().realize() for v in views]
+    if not hasattr(self, "_ckpt"):
+      self._ckpt = [v.clone().realize() for v in self._ckpt_views(states, slot)]
+      # (a jit each: a request saves one, they're launched, not scheduled and linked every time)
+      self._ckpt_jits = {sv: TinyJit(functools.partial(self._ckpt_copy, sv), capture_first=True) for sv in (True, False)}
+    self._ckpt_jits[save](slot)
+    if save: self._ckpt_tokens = tokens[:]
+
+  @staticmethod
+  def _ckpt_views(states:list[tuple[Tensor, bool]], slot:UOp) -> list[Tensor]:
+    return [s.shrink(((slot, slot+1),) + (None,)*(s.ndim-1)) if slotted else s for s, slotted in states]
+  def _ckpt_copy(self, save:bool, slot:UOp):
+    views = self._ckpt_views(self._recurrent_states(), slot)
     pairs = zip(self._ckpt, views) if save else zip(views, self._ckpt)
     Tensor.realize(*[dst.assign(src) for dst, src in pairs])
-    if save: self._ckpt_tokens = tokens[:]
 
   def _reuse(self, tokens:list[int]) -> tuple[int, bool]:
     # recurrent state can't be partially reused after divergence: the cached prefix if the tokens extend it, else the checkpoint's (restored)

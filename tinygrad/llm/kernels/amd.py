@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, math
+import contextlib, functools, math
 from dataclasses import replace
 from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
@@ -73,30 +73,40 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 
 # ******** quant linear: q8-activation kernels over packed ggml weights ********
 
+def unwrap_storage_views(u:UOp) -> UOp:
+  # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
+  # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
+  # a permute keeps the order if the axes not of size 1 on a device stay sorted (gguf_shard moves the devices)
+  while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)) or \
+    (u.op is Ops.PERMUTE and (kept:=[a for a in u.marg if u.src[0].shard_shape[a] != 1]) == sorted(kept)):
+    u = u.src[0]
+  return u
+
+def _known_decoded(u:UOp) -> tuple[int, UOp]|None:
+  from tinygrad.llm.gguf import decoded_weights
+  return decoded_weights.get(unwrap_storage_views(u))
+
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is exactly the dequantization of packed ggml weights, rows of in_features"""
   if in_features % Q8_GROUP_SIZE: return None
   packed_sizes = {typ: decoded.numel() // 256 * type_size for typ,type_size in QUANT_SIZES.items()
                   if (in_features % GGML_BLOCK_SIZE == 0 or typ in SMALL_BLOCK_QUANTS) and decoded.numel() % 256 == 0}
   packed_sizes.update({typ: decoded.numel() // 32 * hw * 2 for typ,hw in SMALL_BLOCK_QUANTS.items()})
-  graph = decoded.uop.toposort()
-  raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
-              prod(u.shape) in packed_sizes.values()), None)
-  if raw is None: return None
-  # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
-  # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
-  # a permute keeps the order if the axes not of size 1 on a device stay sorted (gguf_shard moves the devices)
-  def unwrapped(u:UOp) -> UOp:
-    while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)) or \
-      (u.op is Ops.PERMUTE and (kept:=[a for a in u.marg if u.src[0].shard_shape[a] != 1]) == sorted(kept)):
-      u = u.src[0]
-    return u
-  # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
-  for ggml_type, size in packed_sizes.items():
-    if size != prod(raw.shape): continue
-    expected = ggml_data_to_tensor(Tensor(raw).flatten(), int(decoded.numel()), ggml_type)
-    if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
-  else: return None
+  # the loader's dequantizations (gguf.decoded_weight) are known: no graph to build and match
+  raw:UOp|None
+  if (known:=_known_decoded(decoded.uop)) is not None and prod(known[1].shape) == packed_sizes.get(known[0]):
+    ggml_type, raw = known
+  else:
+    graph = decoded.uop.toposort()
+    raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
+                prod(u.shape) in packed_sizes.values()), None)
+    if raw is None: return None
+    # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
+    for ggml_type, size in packed_sizes.items():
+      if size != prod(raw.shape): continue
+      expected = ggml_data_to_tensor(Tensor(raw).flatten(), int(decoded.numel()), ggml_type)
+      if unwrap_storage_views(decoded.uop).key == unwrap_storage_views(expected.uop).key: break
+    else: return None
   # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
   word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
   raw_offset = raw.contiguous_view_offset()
@@ -107,9 +117,20 @@ class Linear(nn.Linear):
   ggml_type:int|None = None
   use_custom_quant = True
   shard_axis:int|None = None
+  _empty_init = False
   def __init__(self, in_features:int, out_features:int, bias=True):
-    super().__init__(in_features, out_features, bias)
+    if Linear._empty_init:
+      # (weights that are loaded after: no random initialization, its graph is most of the time to make a big model)
+      self.weight, self.bias = Tensor.empty(out_features, in_features), Tensor.empty(out_features) if bias else None
+    else: super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
+  @staticmethod
+  @contextlib.contextmanager
+  def empty_init():
+    """the Linears made in it have empty weights (to be loaded)"""
+    old, Linear._empty_init = Linear._empty_init, True
+    try: yield
+    finally: Linear._empty_init = old
   def set_quantized(self, decoded:Tensor):
     if (found:=find_packed(decoded, self.in_features)) is None: return
     self.ggml_type, self.weight = found
@@ -192,21 +213,30 @@ def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp) -> UOp:
   return _half(header) * (scale.cast(dtypes.int32)-32).float()
 
 _tables:dict[tuple, Tensor] = {}
-def _table(key:tuple, make:Callable[[], Tensor]) -> Tensor:
+def _table(key:tuple, device:str|tuple[str, ...]|None, values:tuple[int, ...], dtype:DType) -> Tensor:
   """
-  a constant table, a buffer made once (not a kernel in every jit that reads it: tables_ready makes them before the jits capture). made while
-  the devices can't be used (a function's capture) it's its kernel in that graph, not kept
+  a constant table, a buffer made once (not a kernel in every jit that reads it: tables_ready makes them before the jits capture), copied from
+  host memory (no kernel to compile). made while the devices can't be used (a function's capture) it's its kernel in that graph, not kept
   """
   if (t:=_tables.get(key)) is not None: return t
   from tinygrad.helpers import ALLOW_DEVICE_USAGE
-  if not ALLOW_DEVICE_USAGE: return make()
-  t = _tables[key] = make().realize()
+  if not ALLOW_DEVICE_USAGE: return Tensor.const(values, dtype).to(device, force=True).contiguous()
+  # (its bytes copied into a buffer on every device: no schedule, nothing to link)
+  import struct
+  from tinygrad.device import Buffer, MultiBuffer
+  data = struct.pack(f"<{len(values)}{dtype.fmt}", *values)
+  devs = device if isinstance(device, tuple) else (Device.canonicalize(device),)
+  bufs = [Buffer(d, len(data), initial_value=data) for d in devs]
+  if isinstance(device, tuple): (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = bufs
+  t = _tables[key] = Tensor(UOp.from_buffer(mb if isinstance(device, tuple) else bufs[0], dtype, device if isinstance(device, tuple) else devs[0]))
   return t
 
 def iq4_half_lut(device:str|tuple[str, ...]|None) -> Tensor:
   from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
-  return _table(("iq4_half_lut", device), lambda: Tensor.const(tuple(x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i],
-    kvalues_iq4nl[j])), dtypes.float16).to(device, force=True).bitcast(dtypes.uint32).contiguous())
+  import struct
+  # (the half pairs as uint32 words)
+  words = tuple(int.from_bytes(struct.pack("<ee", kvalues_iq4nl[i], kvalues_iq4nl[j]), "little") for j in range(16) for i in range(16))
+  return _table(("iq4_half_lut", device), device, words, dtypes.uint32)
 
 @functools.cache
 def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in_features:int) -> UOp:
@@ -404,8 +434,7 @@ def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
   grid, words = {IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2),
                  IQ3_XXS: (ggml.iq3xxs_grid, 1), IQ3_S: (ggml.iq3s_grid, 1)}[ggml_type]
-  return _table(("iq_grid", device, ggml_type), lambda: Tensor.const(tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(words)),
-                                                                 dtypes.uint32).to(device, force=True).contiguous())
+  return _table(("iq_grid", device, ggml_type), device, tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(words)), dtypes.uint32)
 
 def tables_ready(device:str|tuple[str, ...]):
   """the constant tables of the kernels, made (outside a jit: its runs read them)"""
@@ -1176,8 +1205,8 @@ class P2PAllreduce:
     N = len(devs)
     nbytes = P2P_AR_MAXG * 2*(N+1)*P2P_AR_MAXW * 8
     with Context(ALLOW_DEVICE_USAGE=1):
-      own = [Buffer(d, nbytes).ensure_allocated() for d in devs]
-      for b in own: Tensor(UOp.from_buffer(b, dtypes.uint8, b.device)).assign(Tensor.zeros(nbytes, dtype=dtypes.uint8, device=b.device)).realize()
+      # (zeroed from host memory: no kernel to compile. a word the last process left could have an epoch this one waits for)
+      own = [Buffer(d, nbytes, initial_value=bytes(nbytes)) for d in devs]
       def alias(b:Buffer, d:str) -> Buffer:
         return Buffer(d, nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
       # mailbox k of device d is the one of device (d+k)%N (0: its own)

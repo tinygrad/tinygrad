@@ -432,7 +432,8 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
   dwords = [(UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.u32).index(r).load() + 4 * k, (w >> 32 * k).cast(dtypes.u32))
             for w, (at, r) in looped.items() for k in range(w.dtype.itemsize // 4)]
   patches = [(o, w) for o, w in hq.patches if w not in looped] + dwords
-  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
+  # (one walk of all the patches: they share most of their graphs. the order is the one of walking them one by one)
+  nested = dedup([g.src[0] for g in UOp.sink(*[w for _, w in patches]).toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
   bufs = []
@@ -513,7 +514,9 @@ Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
-class LinkCtx: inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx:
+  inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+  addrs:dict[tuple[UOp, str], int] = field(default_factory=dict) # a buffer's address on a device (the same buffer has many)
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
@@ -530,8 +533,13 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
 
 def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   if unwrap_lane(buf:=(v:=unwrap_view(g.src[0]))[0])[0].op is not Ops.BUFFER: return None # input address, resolved per run
-  ctx.refs.append(buf) # add to refs
-  return UOp.const(cast(Buffer, buf.buffer).view(g.src[0].nbytes(), v[1]).get_buf(to_tuple(g.arg)[0]), dtypes.u64)
+  dev = to_tuple(g.arg)[0]
+  if (addr:=ctx.addrs.get((buf, dev))) is None:
+    ctx.refs.append(buf) # add to refs
+    # (the address a view of it has there, as Buffer.get_storage makes it: no view to make for every address)
+    b = cast(Buffer, buf.buffer)
+    addr = ctx.addrs[(buf, dev)] = Device[cdev:=Device.canonicalize(dev)].allocator._offset(b.base.get_buf(cdev), b.nbytes, b.offset)
+  return UOp.const(addr + v[1], dtypes.u64)
 
 def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   base, off = unwrap_view(buf)
@@ -540,6 +548,15 @@ def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   return UOp(Ops.NOOP)
 
 def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
+  # words of one dtype: the host memory cast to it, assigned by item (not a pack and a slice per word)
+  if len({w.dtype for w in ws.src}) == 1 and (dt:=ws.src[0].dtype).fmt is not None:
+    base, off = unwrap_view(buf)
+    if off % dt.itemsize == 0:
+      mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
+      words = mv[off:off + (len(mv) - off) // dt.itemsize * dt.itemsize].cast(dt.fmt)
+      tr = truncate[dt]
+      for o, w in zip(offs.src, ws.src): words[o.val] = tr(w.val)
+      return UOp(Ops.NOOP)
   return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
 
 pm_resolve_link = PatternMatcher([

@@ -156,9 +156,12 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lower_sink_to_linear),
 ])
 
+_same_devices:weakref.WeakSet[UOp] = weakref.WeakSet()  # (the asts checked: hash consed, a kernel's is checked once)
 def assert_all_same_devices(ast:UOp):
+  if ast in _same_devices: return
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
+  _same_devices.add(ast)
 
 def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not dst.on_disk(): return None

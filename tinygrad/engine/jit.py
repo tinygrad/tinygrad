@@ -337,17 +337,27 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
   oks, left = [False] * len(children), set(range(len(children)))
   while left:
     with got: got.wait_for(lambda: any(len(msgs[k]) >= 2 or msgs[k][-1] == b"" for k in left))
-    k = next(k for k in left if len(msgs[k]) >= 2 or msgs[k][-1] == b"")
+    # (the first to have come: one done long ago isn't left behind ones that just came)
+    k = min((k for k in left if len(msgs[k]) >= 2 or msgs[k][-1] == b""), key=lambda k: arrived[k][-1] if arrived[k] else 0)
     left.discard(k)
     if os.waitpid(children[k][0], 0)[1] != 0 or len(msgs[k]) < 2 or not msgs[k][1]: continue
     jit = calls[k][0]
     arenas, recs, rest = pickle.loads(msgs[k][1])
     arena_at = {i: (jit.scratch or {})[key] for key, (i, _) in arenas.items()}
     out:list[UOp] = []
+    recs_srcs:list[tuple[int, ...]] = []
     for i, (op, src, arg) in enumerate(_Unpickler(recs, reg, out).load()):
       out.append(arena_at[i] if i in arena_at else UOp(op, tuple(out[j] for j in src), arg))
+      recs_srcs.append(src)
     ret, lin, names, info = _Unpickler(rest, reg, out).load()
     jit.captured, jit.cnt = CapturedJit(ret, out[lin], names, info), 2
+    # its buffers (_jit_bufs: the BUFFERs a toposort of the linear has, not in call bodies) from the records: no walk of the graph on its first call
+    reach = bytearray(len(out))
+    reach[lin] = 1
+    for i in range(lin, -1, -1):
+      if reach[i]:
+        for j in recs_srcs[i][1 if out[i].op is Ops.CALL else 0:]: reach[j] = 1
+    jit.captured.__dict__["_jit_bufs"] = {out[i] for i in range(lin + 1) if reach[i] and out[i].op is Ops.BUFFER}
     jit.captured.linked()
     oks[k] = True
     if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s")

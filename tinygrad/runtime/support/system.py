@@ -285,18 +285,22 @@ class PCIDevice:
     if self.iommu: System.dma_unmap(paddr, size)
 
   @functools.cache
-  def bar_iova(self, bar:int) -> tuple[int, MMIOInterface, set[int]]:
-    """behind the iommu: the io address range of the bar for the peers, its mapping and the chunks of it mapped (bar_iova_map)"""
-    size = self.bar_info(bar)[1]
-    return System.iova_bars.alloc(size, 1 << 30), self.map_bar(bar, size=size), set()
+  def bar_iova(self, bar:int) -> tuple[int, set[int]]:
+    """behind the iommu: the io address range of the bar for the peers and the chunks of it mapped (bar_iova_map)"""
+    return System.iova_bars.alloc(self.bar_info(bar)[1], 1 << 30), set()
 
   def bar_iova_map(self, bar:int, off:int, size:int) -> int:
-    """the io address of the bar's bytes off.. for the peers: the chunks (1GB) they're in are mapped once (the iommu takes ~70ms per GB)"""
-    iova, mmio, mapped = self.bar_iova(bar)
-    for c in range(off >> 30, (off + max(size, 1) - 1 >> 30) + 1):
+    """
+    the io address of the bar's bytes off.. for the peers: the chunks (64MB) they're in are mapped once (the iommu takes ~70ms per GB: a small
+    buffer maps a chunk of its size, not a GB)
+    """
+    iova, mapped = self.bar_iova(bar)
+    sh = 26
+    for c in range(off >> sh, (off + max(size, 1) - 1 >> sh) + 1):
       if c not in mapped:
-        n = min(1 << 30, self.bar_info(bar)[1] - (c << 30))
-        System.dma_map(mmio.addr + (c << 30), n, iova + (c << 30))
+        # (the chunk mapped into the process for the iommu to pin: not the whole bar, its mapping costs with its size)
+        n = min(1 << sh, self.bar_info(bar)[1] - (c << sh))
+        System.dma_map(self.map_bar(bar, off=c << sh, size=n).addr, n, iova + (c << sh))
         mapped.add(c)
     return iova + off
 
