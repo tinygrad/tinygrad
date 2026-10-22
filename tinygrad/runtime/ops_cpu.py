@@ -63,14 +63,6 @@ class CPUProgram(Program['CPUDevice']):
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
 
 class CPUDevice(Compiled):
-  def load_library(self, obj:TinyELF, loaded:dict[int, CPUProgram]) -> CPUProgram:
-    if id(obj) not in loaded:
-      deps = tuple(self.load_library(lib, loaded) for lib in obj.libraries)
-      key = (obj.lib, deps)
-      if key not in self.libraries: self.libraries[key] = CPUProgram(self, obj, deps)
-      loaded[id(obj)] = self.libraries[key]
-    return loaded[id(obj)]
-
   @property
   def has_copy_queue(self) -> bool: return False
 
@@ -86,3 +78,11 @@ class CPUDevice(Compiled):
   def synchronize(self, timeout:int|None=None):
     if self.remote is not None: self.remote.rpc(RemoteCmd.PING)
     super().synchronize(timeout)
+
+  def load_library(self, obj:TinyELF, loaded:dict[int, CPUProgram]) -> CPUProgram:
+    if id(obj) not in loaded:
+      deps = tuple(self.load_library(lib, loaded) for lib in obj.libraries)
+      key = (obj.lib, deps)
+      if key not in self.libraries: self.libraries[key] = CPUProgram(self, obj, deps)
+      loaded[id(obj)] = self.libraries[key]
+    return loaded[id(obj)]
