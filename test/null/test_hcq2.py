@@ -214,7 +214,7 @@ class TestHCQ2Link(unittest.TestCase):
     hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0", deps=())
     lowered = lower_hcq(var.after(hcq2.encode_cmdbuf(hq, device="CPU")).index(0).store(var.index(0).load() + 1))
     self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
-    linked = hcq2.hcq_link(lower_and_compile(lowered), use_rt=False)
+    linked = hcq2.hcq_link(lower_and_compile(lowered))
     args = zip(lowered.src[0].without_after.src[1:], linked.src[0].without_after.src[1:])
     cmdbuf = next(b.buffer for p, b in args if p.without_after.arg.name == "cmdbuf_copy_0")
     for step in range(3):

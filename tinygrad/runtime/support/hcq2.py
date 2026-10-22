@@ -476,9 +476,9 @@ Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
-class LinkCtx: inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx: inputs:list[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
-def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
+def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # the link owns the linear's buffers, the fenced lru reuses a one-shot's after the run
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
   dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
 
@@ -486,8 +486,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
   owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name)))
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
   elif (r:=dev.link_buffer(b)) is not None: pass
-  elif not ctx.use_rt: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
-  else: r = dev.rt_buffer(spec).view(b.nbytes(), dev.rt_allocator(spec).alloc(max(b.nbytes(), 1), alignment=256)).ensure_allocated()
+  else: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
 
@@ -543,10 +542,10 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
-@rewrite_group(lambda _,input_uops=None,use_rt=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, use_rt=True) -> UOp: # use_rt: a one-shot link borrows ring slots
+@rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
-  ctx = LinkCtx(input_uops or [], use_rt)
+  ctx = LinkCtx(input_uops or [])
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   return linked
