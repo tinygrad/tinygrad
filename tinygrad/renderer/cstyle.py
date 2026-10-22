@@ -145,6 +145,7 @@ class CStyleLanguage(Renderer):
     dtypes.f32: "float", dtypes.f64: "double"}
   infinity: str = "INFINITY"
   nan: str = "NAN"
+  fn_prefix: str = ""
   code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIPROCAL: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
@@ -282,7 +283,7 @@ class CStyleLanguage(Renderer):
       self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)
       params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
-      prefix.append(f"static inline void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
+      prefix.append(f"static inline {self.fn_prefix} void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
       call_bodies.extend(body.src)
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
@@ -506,6 +507,7 @@ class HIPRenderer(CStyleLanguage):
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+  fn_prefix = "__attribute__((device))"
 
   @staticmethod
   def is_cdna(arch): return arch in {"gfx942", "gfx950"}
