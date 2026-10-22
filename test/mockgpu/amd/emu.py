@@ -1521,10 +1521,29 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
+def _compile_ds_read_tr_b16(inst: irc.DS, ctx: _Ctx) -> UOp:
+  """CDNA4 DS_READ_B64_TR_B16: each lane reads 4 16-bit elements, then each group of 16 lanes transposes the 4x16 tile it read.
+  Lane 4*r+c reads row r, columns 4*c..4*c+3. Lane j gets column j: element r comes from lane 4*r+j//4, element j%4 of its 8 bytes."""
+  exec_mask, use_acc = ctx.rexec(), bool(_iattr(inst, 'acc'))
+  addr_reg, vdst_reg = ctx.inst_field(type(inst).addr), ctx.inst_field(type(inst).vdst)
+  offset = (ctx.inst_field(type(inst).offset1) << _c(8)) | ctx.inst_field(type(inst).offset0)
+  def rd16(lane: int, elem: int) -> UOp:
+    addr = ctx.rvgpr_dyn(addr_reg, _c(lane)) + offset + _c(2 * elem)
+    return (ctx.lds.index(addr >> _c(2)).load() >> ((addr & _c(2)) << _c(3))) & _c(0xFFFF)
+  vals: list[UOp] = []
+  for lane in range(ctx.wave_size):
+    base, j = lane & ~15, lane & 15
+    for d in range(2): vals.append(rd16(base + 4*(2*d) + j//4, j%4) | (rd16(base + 4*(2*d+1) + j//4, j%4) << _c(16)))
+  # Snapshot every source before writing: the destination and address registers may be identical.
+  reads = UOp(Ops.STACK, src=tuple(vals))
+  wgpr = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
+  return UOp.sink(*(wgpr(vdst_reg + _c(i % 2), _c(i // 2), v, exec_mask, after=reads) for i, v in enumerate(vals)), *ctx.inc_pc())
+
 def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  if op_name == 'DS_READ_B64_TR_B16' and isinstance(inst, irc.DS): return _compile_ds_read_tr_b16(inst, ctx)
   pcode = get_pcode(inst.op)
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
@@ -1983,6 +2002,24 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   if PROFILE:
     sqtt_emit, sqtt_finish, sqtt_finalize = _make_sqtt_encoder()
 
+  # CDNA: a DS load writes its VGPRs when the data returns, so a later instruction issued before s_waitcnt lgkmcnt still reads the
+  # old value (hand written kernels reuse the destination of one ds_read as the address of the next). pc -> (buffer idx, byte offset, nbytes)
+  ds_defer: dict[int, tuple[int, int, int]|None] = {}
+  def _ds_defer(pc: int, inst: Inst) -> tuple[int, int, int]|None:
+    if pc not in ds_defer:
+      ds_defer[pc] = None
+      if arch == "cdna" and isinstance(inst, irc.DS) and (n:=inst.op_regs.get('vdst')) is not None:
+        ds_defer[pc] = (5 if _iattr(inst, 'acc') else 1, (inst.vdst.offset - 256) * wave_size * 4, n * wave_size * 4)
+    return ds_defer[pc]
+  def _lgkm_wait(inst: Inst) -> int|None:
+    if arch != "cdna" or not isinstance(inst, irc.SOPP): return None
+    if inst.op is irc.SOPPOp.S_WAITCNT: return (inst.simm16 >> 8) & 0xF
+    return 0 if inst.op in _BARRIER_OPS else None
+  def _commit(pending: list[tuple[int, bytes]], keep: int = 0):
+    while len(pending) > keep:
+      addr, data = pending.pop(0)
+      ctypes.memmove(addr, data, len(data))
+
   def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, Inst]:
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
@@ -2004,6 +2041,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       scratch_base = scratch_buf._buf + (wave_start // wave_size) * scratch_size * wave_size if scratch_buf else 0
       waves.append((st, [st.sgpr_buf._buf, st.vgpr_buf._buf, vmem_buf._buf, lds_buf._buf, scratch_base if scratch_buf else 0, st.accvgpr_buf._buf]))
     done = [False] * len(waves)
+    pending: list[list[tuple[int, bytes]]] = [[] for _ in waves]  # DS load results not yet written back, oldest first
     for _ in range(10_000_000):
       if all(done): return
       for wi, (st, c_bufs) in enumerate(waves):
@@ -2012,12 +2050,20 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         for _ in range(1_000_000):
           pc = st.pc
           if pc == ENDPGM_PC:
+            _commit(pending[wi])
             done[wi] = True
             if tracing: sqtt_finish(wi)
             break
           fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
           if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
+          if (keep:=_lgkm_wait(inst)) is not None: _commit(pending[wi], keep)
+          if (dfr:=_ds_defer(pc, inst)) is not None:
+            daddr = c_bufs[dfr[0]] + dfr[1]
+            before = ctypes.string_at(daddr, dfr[2])
           fxn((ctypes.c_uint64 * len(globals_list))(*[c_bufs[g] for g in globals_list]))
+          if dfr is not None:
+            pending[wi].append((daddr, ctypes.string_at(daddr, dfr[2])))
+            ctypes.memmove(daddr, before, dfr[2])
           if tracing:
             inst_op = inst.op.value if hasattr(inst, 'op') else 0
             sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
