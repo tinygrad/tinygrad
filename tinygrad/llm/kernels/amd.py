@@ -288,13 +288,14 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
 
 @functools.cache
 def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
-                         out_features:int, in_features:int, ggml_type:int, sel:UOp|None=None, expert_words:int=0, x_share:int=1) -> UOp:
+                         out_features:int, in_features:int, ggml_type:int, sel:UOp|None=None, x_share:int=1) -> UOp:
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
     if ggml_type in SMALL_BLOCK_QUANTS: base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[ggml_type]
     if sel is not None:
-      base += sel[token].load().cast(dtypes.weakint).maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
+      expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
+      base += sel[token].maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
       token = token // x_share
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
@@ -338,13 +339,12 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
 
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
                        out_features:int, in_features:int, ggml_type:int, x_share:int) -> UOp:
-  expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
   return _quant_decode_kernel(out, raw, xq, xd, xs, *grids, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
-                              sel=sel, expert_words=expert_words, x_share=x_share)
+                              sel=sel, x_share=x_share)
 
 def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
-  B, T, slots = cast(tuple[int, int, int], sel.shape[-3:])
-  in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2])
+  B, T, slots = cast(tuple[int, int, int], sel.shape[-3:]) # sel: (B, T, k), weight: (E, O, I)
+  in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2]) # gate/up: (B, T, 1, D), down: (B, T, k, H)
   assert x_slots in (1, slots), f"x has {x_slots} rows per token, expected 1 or {slots}"
   local_out, global_out, ggml_type = int(layer.weight.uop.max_shard_shape[1]), int(layer.weight.shape[1]), unwrap(layer.ggml_type)
   xq, xd, xs = q8_quantize(x.contiguous(), B*T*x_slots, in_features)
