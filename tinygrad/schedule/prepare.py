@@ -98,14 +98,16 @@ def store_hazard_boundary(s:UOp):
 
 def fix_store_hazard(target:UOp, src:UOp):
   base = target.base
+  dest = {u.op for u in target.toposort(gate=lambda u: u is not base)}
   # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} if any(u.op is Ops.SHRINK for u in target.toposort(gate=lambda u: u is not base)) else set())
+  unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} & dest)
   view = target
   while view.op is Ops.RESHAPE: view = view.src[0]
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=store_hazard_boundary):
     reaches_base[s] = any(c is base or reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe and not (s is view and s.op is Ops.SHRINK): return target.store(src.contiguous())
+  if Ops.PERMUTE in dest and (src is base or reaches_base.get(src)): return target.store(stage_to_anon_store(src, src))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
