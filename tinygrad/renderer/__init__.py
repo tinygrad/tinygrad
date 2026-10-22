@@ -40,6 +40,8 @@ class Estimates:
           bnds = [cast(sint, r.src[0].without_after.ssimplify()) for r in resolved if r.dtype != dtypes.void and
             not any(u.addrspace is not AddrSpace.ALU for u in r.src[0].without_after.backward_slice_with_self)]
           local_mult = prod(bnds)
+          if isinstance(local_mult, UOp):
+            local_mult = local_mult.substitute({x:x.const_like(0) for x in local_mult.toposort() if x.op is Ops.SPECIAL})
           multcache[rngs] = local_mult * caller_mult
         mult = multcache[rngs]
 
