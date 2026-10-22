@@ -10,10 +10,33 @@ class TestParseToolCall(unittest.TestCase):
   def test_argument_newlines(self):
     for value in ("", "text", " text ", "\n", "\nfirst\nsecond\n\n", "\r\nfirst\r\nsecond\r\n\r\n"):
       for newline in ("\n", "\r\n"):
+        # GLM's values are exact (its template renders them as they are), the XML format puts them on their own lines
         self.assertEqual(parse_tool_call(f"write<arg_key>content</arg_key><arg_value>{newline}{value}{newline}</arg_value>"),
-                         ("write", {"content":value}))
+                         ("write", {"content":newline+value+newline}))
         self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
                          ("write", {"content":value}))
+
+  def test_glm_markup_in_values(self):
+    # a value (code, a tool call in a string) can hold the format's own markup
+    code = "parse_tool_call('write<arg_key>content</arg_key><arg_value>hi</arg_value>')"
+    call = f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value><arg_key>timeout</arg_key><arg_value>30</arg_value>"
+    self.assertEqual(parse_tool_call(call), ("bash", {"command":code, "timeout":30}))
+    self.assertEqual(parse_tool_call(f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value>"), ("bash", {"command":code}))
+
+  def test_special_token_markup(self):
+    # tags that are special tokens decode to sentinels: the same text in a value is literal
+    from tinygrad.llm.serve import markup_tags
+    tags, sentinels = markup_tags({tag: 1000+i for i, tag in enumerate(("<tool_call>", "</tool_call>", "<arg_key>", "</arg_key>", "<arg_value>",
+                                                                        "</arg_value>"))})
+    self.assertEqual(len(sentinels), 6)
+    code = "x = '</arg_value><arg_key>k</arg_key><arg_value>v</arg_value></tool_call>'"
+    call = f"bash{tags['<arg_key>']}command{tags['</arg_key>']}{tags['<arg_value>']}{code}{tags['</arg_value>']}"
+    self.assertEqual(parse_tool_call(call, tags), ("bash", {"command":code}))
+    router, out = StreamRouter(tags=tags), []
+    for piece in ("prose about `<tool_call>` tags ", tags["<tool_call>"], call, tags["</tool_call>"]): out += list(router.route(piece))
+    out += list(router.route("", final=True))
+    self.assertEqual("".join(d for f, d in out if f == "content"), "prose about `<tool_call>` tags ")
+    self.assertTrue(router.buf.startswith(tags["<tool_call>"]))
 
   def test_json_arguments(self):
     for value in ('"text"', '42', 'true', 'null', '[1, "two"]', '{"nested":{"ok":true}}'):
@@ -25,7 +48,7 @@ class TestParseToolCall(unittest.TestCase):
     for separator in ("", "\n"):
       call = separator.join(("write", "<arg_key>path</arg_key>", "<arg_value>out.txt</arg_value>",
                              "<arg_key>content</arg_key>", "<arg_value>\nhello\n</arg_value>"))
-      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"hello"}))
+      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"\nhello\n"}))
 
   def test_glm_no_arguments(self):
     self.assertEqual(parse_tool_call("tools.ping-v1"), ("tools.ping-v1", {}))
@@ -309,7 +332,8 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual("".join(c.choices[0].delta.content or "" for c in chunks if c.choices), "before")
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([tc.function.name for tc in calls], ["read", "read"])
-    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"b"}])
+    # GLM's values are exact
+    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"\nb\n"}])
     self.assertEqual([tc.index for tc in calls], [0, 1])
     self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
 
@@ -354,7 +378,7 @@ class TestTransformerGenerate(unittest.TestCase):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0], [0]])
+    self.assertEqual(calls, [[0]])
 
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools
+import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools, signal, threading
 import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
@@ -52,8 +52,6 @@ MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "M
 def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
 class _System:
-  vfio:FileIOInterface|None = None
-  iova = TLSFAllocator(12 << 40, base=4 << 40, block_size=0x1000)
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
     if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
       os.system(cmd:=f"sudo sh -c 'echo {value} > {path}'")
@@ -70,6 +68,40 @@ class _System:
     self.write_sysfs("/proc/sys/vm/compact_unevictable_allowed", "0", "Failed to disable migration of locked pages")
     return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
+  @functools.cached_property
+  def vfio(self) -> FileIOInterface|None:
+    # the container of the devices behind the iommu: they share one io address space (host memory and the bars of the others)
+    try:
+      if not FileIOInterface.exists("/sys/module/vfio_pci"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
+      vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
+      return vfio_fd if vfio.VFIO_CHECK_EXTENSION(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) else None
+    except OSError: return None
+
+  # io addresses (the ones devices use behind the iommu): host memory from 2TB, the bars of the devices from 8TB. below 16TB, the most the
+  # gpus address (44 bits), above the ranges the iommu reserves (the msi window, the ht hole below 1TB)
+  IOVA_HOST, IOVA_BARS, IOVA_END = 2 << 40, 8 << 40, 16 << 40
+  @functools.cached_property
+  def iova_alloc(self) -> TLSFAllocator: return TLSFAllocator(self.IOVA_BARS - self.IOVA_HOST, base=self.IOVA_HOST, block_size=0x1000)
+  @functools.cached_property
+  def iova_bars(self) -> BumpAllocator: return BumpAllocator(self.IOVA_END - self.IOVA_BARS, base=self.IOVA_BARS, wrap=False)
+
+  def dma_map(self, vaddr:int, size:int, iova:int|None=None) -> int:
+    """maps (and pins) host memory or a bar mapping at vaddr for the devices in the vfio container, returns its io address"""
+    assert self.vfio is not None
+    if iova is None: iova = self.iova_alloc.alloc(size, (2 << 20) if size >= (2 << 20) else 0x1000)
+    vfio.VFIO_IOMMU_MAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_map(argsz=ctypes.sizeof(vfio.struct_vfio_iommu_type1_dma_map),
+      flags=vfio.VFIO_DMA_MAP_FLAG_READ|vfio.VFIO_DMA_MAP_FLAG_WRITE, vaddr=vaddr, iova=iova, size=size))
+    return iova
+
+  def dma_unmap(self, iova:int, size:int):
+    assert self.vfio is not None
+    vfio.VFIO_IOMMU_UNMAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_unmap(argsz=ctypes.sizeof(vfio.struct_vfio_iommu_type1_dma_unmap),
+      iova=iova, size=size))
+    if self.IOVA_HOST <= iova < self.IOVA_BARS: self.iova_alloc.free(iova)
+
+  @functools.cached_property
+  def host_maps(self) -> dict[tuple[int, int], list[int]]: return {}  # (vaddr, size) -> [io address, references]
+
   @functools.cache
   def reserve_va(self, va_start, va_size):
     # cached, runs only once per range. used to not collide with other mappings.
@@ -80,26 +112,27 @@ class _System:
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
-  def vfio_map(self, vaddr:int, size:int, align:int=1) -> int:
-    iova = self.iova.alloc(size, align)
-    flags = vfio.VFIO_DMA_MAP_FLAG_READ | vfio.VFIO_DMA_MAP_FLAG_WRITE
-    vfio.VFIO_IOMMU_MAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_map(argsz=32, flags=flags, vaddr=vaddr, iova=iova, size=size))
-    return iova
-
-  def vfio_unmap(self, iova:int, size:int):
-    vfio.VFIO_IOMMU_UNMAP_DMA(self.vfio, vfio.struct_vfio_iommu_type1_dma_unmap(argsz=24, iova=iova, size=size))
-    self.iova.free(iova)
-
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
-    if self.vfio is not None: return list(range(iova:=self.vfio_map(vaddr, size), iova + size, mmap.PAGESIZE))
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, iommu:bool=False) -> tuple[MMIOInterface, list[int]]:
+    # the addresses of its pages for the devices: physical, or behind the iommu an io address range
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
-    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-    return MMIOInterface(va, size), self.system_paddrs(va, round_up(size, mmap.PAGESIZE))
+    if iommu and not contiguous and size >= (2 << 20) and (not vaddr or vaddr % (2 << 20) == 0):
+      # behind the iommu the pages are pinned by it: private huge pages (17x faster to populate than shared small ones)
+      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|flags, 0)
+      libc.madvise(va, size, libc.MADV_HUGEPAGE)
+      libc.madvise(va, size, libc.MADV_POPULATE_WRITE)
+      System.lock_memory(va, size)
+    else:
+      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
+    # the devices' memory isn't a forked process's (not copied for it, it can't touch it)
+    libc.madvise(va, size, libc.MADV_DONTFORK)
+    if not iommu: return MMIOInterface(va, size), self.system_paddrs(va, round_up(size, mmap.PAGESIZE))
+    iova = self.dma_map(va, size:=round_up(size, mmap.PAGESIZE))
+    return MMIOInterface(va, size), [iova + i for i in range(0, size, mmap.PAGESIZE)]
 
   def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []
@@ -217,12 +250,19 @@ class PCIDevice:
     for fn in range(1, 8):
       if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
-    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group") and FileIOInterface(f"{grp}/type").read().strip() != "identity":
-      if not FileIOInterface.exists("/sys/module/vfio_pci"): raise RuntimeError("IOMMU is on: run `sudo modprobe vfio-pci disable_idle_d3=1`")
+    # behind an iommu the device is driven through vfio: its dma goes through the container's io addresses (host memory, the others' bars)
+    self.iommu = bool(getenv("VFIO", int(FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group")))) and System.vfio is not None
+    if self.iommu and (vfio_fd:=System.vfio) is not None:
+      # vfio resets the device when the process closes it: it must be idle by then (a reset with transactions in flight floods the root port with
+      # errors). a terminated process exits normally, the devices are finalized (their queues stopped) first
+      for sig in (signal.SIGTERM, signal.SIGHUP):
+        if threading.current_thread() is threading.main_thread() and signal.getsignal(sig) is signal.SIG_DFL:
+          signal.signal(sig, lambda signum, _: sys.exit(128 + signum))
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
-      vfio_fd = System.vfio = System.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-      self.vfio_group = FileIOInterface(f"/dev/vfio/{FileIOInterface.readlink(grp).split('/')[-1]}", os.O_RDWR)
+      iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+
+      self.vfio_group = FileIOInterface(f"/dev/vfio/{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(vfio_fd.fd))
 
       with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
@@ -240,7 +280,29 @@ class PCIDevice:
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
-    return System.alloc_sysmem(size, vaddr, contiguous)
+    return System.alloc_sysmem(size, vaddr, contiguous, iommu=self.iommu)
+  def dma_free(self, paddr:int, size:int):
+    if self.iommu: System.dma_unmap(paddr, size)
+
+  @functools.cache
+  def bar_iova(self, bar:int) -> tuple[int, set[int]]:
+    """behind the iommu: the io address range of the bar for the peers and the chunks of it mapped (bar_iova_map)"""
+    return System.iova_bars.alloc(self.bar_info(bar)[1], 1 << 30), set()
+
+  def bar_iova_map(self, bar:int, off:int, size:int) -> int:
+    """
+    the io address of the bar's bytes off.. for the peers: the chunks (64MB) they're in are mapped once (the iommu takes ~70ms per GB: a small
+    buffer maps a chunk of its size, not a GB)
+    """
+    iova, mapped = self.bar_iova(bar)
+    sh = 26
+    for c in range(off >> sh, (off + max(size, 1) - 1 >> sh) + 1):
+      if c not in mapped:
+        # (the chunk mapped into the process for the iommu to pin: not the whole bar, its mapping costs with its size)
+        n = min(1 << sh, self.bar_info(bar)[1] - (c << sh))
+        System.dma_map(self.map_bar(bar, off=c << sh, size=n).addr, n, iova + (c << sh))
+        mapped.add(c)
+    return iova + off
 
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
@@ -255,9 +317,7 @@ class PCIDevice:
   @functools.cache
   def bar_info(self, bar_idx:int) -> tuple[int, int]:
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
-    addr, sz = int(s, 16), int(e, 16) - int(s, 16) + 1
-    if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.map_bar(bar_idx, size=sz).addr, sz, sz)
-    return addr, sz
+    return (int(s, 16), int(e, 16) - int(s, 16) + 1)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
@@ -317,7 +377,9 @@ class PCIIfaceBase:
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = self.pci_dev.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
-      mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], aspace=AddrSpace.SYS, snooped=True, uncached=True)
+      # behind the iommu the io addresses are contiguous: one range (big pages)
+      ranges = [(paddrs[0], size)] if getattr(self.pci_dev, "iommu", False) else [(paddr, 0x1000) for paddr in paddrs]
+      mapping = self.dev_impl.mm.map_range(vaddr, size, ranges, aspace=AddrSpace.SYS, snooped=True, uncached=True)
       return BufferStorage(vaddr, PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), memview)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access, zero=zero)
@@ -326,25 +388,38 @@ class PCIIfaceBase:
 
   def free(self, storage:BufferStorage):
     if storage.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(storage.meta.mapping)
-    elif hasattr(self.pci_dev, "vfio_dev"): System.vfio_unmap(storage.meta.hMemory, storage.meta.mapping.size)
+    elif self.remote is None: self.pci_dev.dma_free(storage.meta.hMemory, storage.meta.mapping.size)
     if storage.meta.has_cpu_mapping and self.remote is None: FileIOInterface.munmap(storage.buf, storage.meta.mapping.size)
 
   def unmap(self, mapping:BufferStorage):
     self.dev_impl.mm.unmap_range(*mapping.meta[:2])
-    if mapping.meta[2] is not None: System.vfio_unmap(mapping.meta[2], mapping.meta[1])
+    # host memory behind the iommu: its io address range is released by the last device that maps it
+    if len(mapping.meta) > 2:
+      (m:=System.host_maps[key:=mapping.meta[2]])[1] -= 1
+      if m[1] == 0: System.dma_unmap(m[0], key[1]), System.host_maps.pop(key)
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
-    return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
+    # the peers reach the vram through its bar: its bus address, or behind the iommu the io address it's mapped at
+    if getattr(self.pci_dev, "iommu", False): return [(self.pci_dev.bar_iova_map(self.vram_bar, p, sz), sz) for p, sz in paddrs], AddrSpace.SYS
+    base = self.pci_dev.bar_info(self.vram_bar)[0]
+    return [(p + base, sz) for p, sz in paddrs], AddrSpace.SYS
 
   def map(self, b:Buffer) -> BufferStorage:
-    if (host:=b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}):
+    host_key = None
+    if b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       if self.dev.host != Device[b.device].host: raise RuntimeError(f"host memory is not on the node of {self.dev.device}")
       if b._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       lo, size = b._buf, round_up(b.nbytes, 0x1000)
       if not self.dev_impl.mm.va_base <= lo < lo + size <= self.dev_impl.mm.va_base + (1 << self.dev_impl.mm.va_bits):
         raise RuntimeError(f"Host address {lo:#x} is outside the GPU virtual address range")
-      if self.remote is None: System.lock_memory(lo, size)
-      paddrs = [(x, 0x1000) for x in (b.meta if self.remote is not None else System.system_paddrs(lo, size))]
+      if getattr(self.pci_dev, "iommu", False):
+        # one io address range for every device that maps it (they share the container)
+        if (m:=System.host_maps.get(host_key:=(lo, size))) is None: m = System.host_maps[host_key] = [System.dma_map(lo, size), 0]
+        m[1] += 1
+        paddrs = [(m[0], size)]  # (contiguous: big pages)
+      else:
+        if self.remote is None: System.lock_memory(lo, size)
+        paddrs = [(x, 0x1000) for x in (b.meta if self.remote is not None else System.system_paddrs(lo, size))]
       aspace, snooped, uncached = AddrSpace.SYS, True, True
       if b.options.cpu_access: lo = self.dev_impl.mm.alloc_vaddr(size) # nv semaphores only reach 40 bits
     elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase) and ifa.peer_group == self.peer_group:
@@ -355,7 +430,7 @@ class PCIIfaceBase:
     else: raise RuntimeError(f"map failed: {b.device} -> {self.dev.device}")
 
     self.dev_impl.mm.map_range(lo, size, paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
-    return BufferStorage(lo, (lo, size, paddrs[0][0] if host and hasattr(self.pci_dev, "vfio_dev") else None))
+    return BufferStorage(lo, (lo, size, host_key) if host_key is not None else (lo, size))
 
 # *** Remote PCI: memory and program execution on extra/remote/serve.py
 

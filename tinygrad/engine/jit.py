@@ -1,11 +1,11 @@
-from typing import TypeVar, Generic, Callable, Any, overload
-import functools
+from typing import TypeVar, Generic, Callable, Any, Sequence, overload
+import functools, os, io, pickle, itertools, threading, warnings, time, weakref
 from tinygrad.tensor import Tensor, all_tensors
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
+from tinygrad.dtype import DType, dtypes
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -21,17 +21,21 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-@rewrite_group(lambda linear,held_bufs,input_uops,input_vars,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int]) -> UOp:
+@rewrite_group(lambda linear,held_bufs,input_uops,input_vars,scratch=None,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int], scratch:dict|None=None) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
-  linear = memory_plan_rewrite(linear, held_bufs)
-  scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
-  linear = linear.substitute(scratch, walk=True)
+  linear = memory_plan_rewrite(linear, held_bufs, scratch)
+  if _forked_capture and scratch is not None and _forked_capture[0].scratch is scratch: _forked_capture[2](scratch)
+  # the intermediates are allocated when the jit is linked (freed by free_intermediates), a shared scratch isn't
+  shared = set(scratch.values()) if scratch is not None else set()
+  allocs = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort()
+            if u.op is Ops.BUFFER and u not in held_bufs and u not in shared}
+  linear = linear.substitute(allocs, walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear
@@ -63,21 +67,33 @@ class CapturedJit(Generic[ReturnType]):
   def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
     return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
 
-  def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    # aliased inputs
-    if (aliased:=tuple(u for u in input_uops if u in self._jit_bufs)) not in self._linears:
+  def linked(self, aliased:tuple[UOp, ...]=()) -> tuple[UOp, dict[UOp, UOp]]:
+    """the linked linear (and the staging of the aliased inputs) for these aliased inputs"""
+    if aliased not in self._linears:
       if any(u.on_disk() for u in aliased): raise JitError("cannot make an independent copy of a written DISK input")
       staging = {u: UOp.new_buffer(u.device, u.max_numel(), u.dtype) for u in aliased}
       copies = compile_linear(UOp(Ops.LINEAR, src=tuple(s.store_call(u) for u,s in staging.items())))
       self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src), use_rt=False), staging)
+    return self._linears[aliased]
 
-    linear, staging = self._linears[aliased]
+  def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
+    # aliased inputs
+    linear, staging = self.linked(tuple(u for u in input_uops if u in self._jit_bufs))
     if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
     run_linear(linear, var_vals, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
-  def free_intermediates(self): self._linears.clear()
+  def free_intermediates(self):
+    self._linears.clear()
+    _launch_args.clear()  # (the relinked calls can be the same: their buffers are allocated again)
+
+_input_infos:weakref.WeakKeyDictionary[UOp, tuple] = weakref.WeakKeyDictionary()
+def _input_info(u:UOp) -> tuple[UOp, dict[Variable, int], DType, str|tuple[str, ...]]:
+  # the view of an input without its buffer, its bound variables, dtype and device: the same for every call with it (not kept alive by it)
+  if (ret:=_input_infos.get(u)) is None:
+    ret = _input_infos[u] = (*u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all(), u.dtype, u.device)
+  return ret
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -93,19 +109,22 @@ def _prepare_jit_inputs(args, kwargs):
   # collect buffer UOps (including MultiBuffer)
   input_buf_uops: list[UOp] = [u.base for u in input_uops if u.base.realized is not None]
   if len(set(input_buf_uops)) != len(input_buf_uops): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
+  inputs = [_input_info(u) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
   return input_buf_uops, var_vals, names, expected_input_info
 
 class _TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, capture_first=False,
+               scratch:dict|None=None):
+    # capture_first: capture on the first call, no eager call first (the one time setup of the function is done, e.g. by another jit of it)
+    # scratch: the memory of the intermediates, shared by the jits given the same dict (they must never run at the same time)
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
-    self.cnt: int = 2 if self.fxn is None else 0
-    self.prune = prune
+    self.cnt: int = 2 if self.fxn is None else 1 if capture_first else 0
+    self.prune, self.scratch = prune, scratch
 
   def add_linear(self, linear:UOp): self._linears.append(linear)
 
@@ -158,7 +177,8 @@ class _TinyJit(Generic[ReturnType]):
       def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals)
+      linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals, self.scratch)
+      if _forked_capture and _forked_capture[0] is self: _forked_capture[1](ret, linear, names, expected_input_info) # (doesn't return)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
@@ -177,7 +197,168 @@ class _TinyJit(Generic[ReturnType]):
 
 # overload signatures support both @TinyJit and @TinyJit(prune=True) syntax
 @overload
-def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False) -> _TinyJit[ReturnType]: ...
+def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False, capture_first:bool=False, scratch:dict|None=None) -> _TinyJit[ReturnType]: ...
 @overload
-def TinyJit(fxn:None=None, *, prune:bool=False) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
+def TinyJit(fxn:None=None, *, prune:bool=False, capture_first:bool=False,
+            scratch:dict|None=None) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
 def TinyJit(fxn=None, **kwargs): return (lambda f: _TinyJit(f, **kwargs)) if fxn is None else _TinyJit(fxn, **kwargs)
+
+# ******** parallel capture: jits compiled in forked processes ********
+
+_forked_capture:list[Any] = [] # (the jit a forked process captures, what it does with it)
+
+def _prefork_buffers() -> dict[int, Buffer|MultiBuffer]:
+  # the buffers of the uops (and their bases): a forked process refers to them by id, the parent has them at the same ids
+  reg:dict[int, Buffer|MultiBuffer] = {}
+  stack:list[Buffer|MultiBuffer] = [k[2].buffer for k in list(UOpMetaClass.ucache) if k[0] is Ops.BUFFER and k[2].buffer is not None]
+  while stack:
+    if id(x:=stack.pop()) in reg: continue
+    reg[id(x)] = x
+    if isinstance(x, MultiBuffer): stack += x.bufs
+    elif x._base is not None: stack.append(x._base)
+  return reg
+
+class _Pickler(pickle.Pickler):
+  def __init__(self, f, reg:dict[int, Any], idx:dict[UOp, int]|None):
+    super().__init__(f, protocol=pickle.HIGHEST_PROTOCOL)
+    self.reg, self.idx = reg, idx
+  def persistent_id(self, obj):
+    if isinstance(obj, (Buffer, MultiBuffer)) and id(obj) in self.reg: return ("b", id(obj))
+    if self.idx is not None and isinstance(obj, UOp) and obj in self.idx: return ("u", self.idx[obj])
+    if self.idx is not None and isinstance(obj, Tensor): return ("t", self.idx[obj.uop])
+    return None
+
+class _Unpickler(pickle.Unpickler):
+  def __init__(self, data:bytes, reg:dict[int, Any], out:list[UOp]):
+    super().__init__(io.BytesIO(data))
+    self.reg, self.out = reg, out
+  def persistent_load(self, pid):
+    kind, v = pid
+    return self.reg[v] if kind == "b" else self.out[v] if kind == "u" else Tensor(self.out[v])
+
+def _send(wfd:int, data:bytes):
+  # a message: its length, then it
+  view = memoryview(len(data).to_bytes(8, "little") + data)
+  while len(view): view = view[os.write(wfd, view):]
+
+def _send_arenas(wfd:int, scratch:dict):
+  # the sizes of the arenas first (the parent makes the shared ones, it links the jits as they come)
+  _send(wfd, pickle.dumps({k:u.max_numel() for k,u in scratch.items()}))
+  _forked_capture.append("arenas sent")
+
+def _send_capture(wfd:int, reg:dict[int, Any], jit:_TinyJit, ret, linear:UOp, names, info):
+  # the compiled jit as uop records in order (the uops by index: no recursion), the buffers of the parent by id, the arenas by size
+  if "arenas sent" not in _forked_capture: _send_arenas(wfd, {})
+  roots = [linear, *[t.uop for t in get_parameters(ret)], *[u for x in info for u in (x[0], *x[1])], *(jit.scratch or {}).values()]
+  nodes = list(UOp.sink(*roots).toposort(enter_calls=True))[:-1]
+  idx = {u:i for i,u in enumerate(nodes)}
+  arenas = {k:(idx[u], u.max_numel()) for k,u in (jit.scratch or {}).items() if u in idx}
+  recs, rest = io.BytesIO(), io.BytesIO()
+  _Pickler(recs, reg, None).dump([(u.op, tuple(idx[x] for x in u.src), u.arg) for u in nodes])
+  _Pickler(rest, reg, idx).dump((ret, idx[linear], names, info))
+  _send(wfd, pickle.dumps((arenas, recs.getvalue(), rest.getvalue()), protocol=pickle.HIGHEST_PROTOCOL))
+  os.close(wfd)
+  _exit_child(0)
+
+def _exit_child(code:int):
+  from tinygrad.engine import worker
+  worker.terminate_worker_pool()
+  os._exit(code)
+
+def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[], None]|None=None) -> list[bool]:
+  """
+  the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
+  jit is captured and compiled but nothing runs, the parent takes the compiled jit (linked and run on its first call there). the jits share
+  their scratch (the biggest arena of each lane). a jit that can't be captured so is left to capture on its call. returns which were
+  meanwhile: the parent's work while they compile (e.g. the data the jits read, made in the buffers they use)
+  """
+  todo = [k for k, (j, _) in enumerate(calls) if j.cnt == 1 and j.captured is None and j.fxn is not None]
+  if not todo or not hasattr(os, "fork"):
+    if meanwhile is not None: meanwhile()
+    return [False] * len(calls)
+  every, calls = list(calls), [calls[k] for k in todo]
+  st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
+  children:list[tuple[int, int]] = []
+  for i, (jit, call) in enumerate(calls):
+    r, w = os.pipe()
+    with warnings.catch_warnings():
+      warnings.simplefilter("ignore", DeprecationWarning) # (fork with threads: the child runs no other thread's work)
+      pid = os.fork()
+    if pid == 0:
+      os.close(r)
+      import tinygrad.device as device_mod
+      from tinygrad.engine import worker
+      from tinygrad.helpers import PARALLEL
+      device_mod.FORKED_COMPILE, worker.worker_pool = True, None
+      PARALLEL.value = max(1, PARALLEL.value // len(calls))
+      UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)
+      _forked_capture[:] = [jit, functools.partial(_send_capture, w, reg, jit), functools.partial(_send_arenas, w)]
+      try: call()
+      except BaseException:
+        import traceback, sys
+        traceback.print_exc(limit=-4 if DEBUG < 2 else None)
+        sys.stderr.flush()
+      _exit_child(1)
+    os.close(w)
+    children.append((pid, r))
+
+  # read the pipes at once (a child blocks on a full pipe): the arena sizes, then the jit
+  msgs:list[list[bytes]] = [[] for _ in children]
+  arrived:list[list[float]] = [[] for _ in children]
+  got = threading.Condition()
+  def put(k:int, data:bytes):
+    with got:
+      msgs[k].append(data)
+      arrived[k].append(time.perf_counter() - st)
+      got.notify_all()
+  def read(k:int):
+    with os.fdopen(children[k][1], "rb") as f:
+      while len(head:=f.read(8)) == 8: put(k, f.read(int.from_bytes(head, "little")))
+    put(k, b"") # (the end)
+  threads = [threading.Thread(target=read, args=(k,), daemon=True) for k in range(len(children))]
+  for t in threads: t.start()
+  if meanwhile is not None: meanwhile()
+  if DEBUG >= 1: print(f"capture_parallel: the work meanwhile done at {time.perf_counter()-st:.2f}s")
+
+  # the arenas: the biggest of every lane, shared (made before any jit is linked)
+  with got: got.wait_for(lambda: all(len(m) >= 1 for m in msgs))
+  sizes:dict[Any, int] = {}
+  for m in msgs:
+    for k, n in (pickle.loads(m[0]).items() if m[0] else []): sizes[k] = max(sizes.get(k, 0), n)
+  for jit, _ in calls:
+    if jit.scratch is None: continue
+    for k, n in sizes.items():
+      if k not in jit.scratch or jit.scratch[k].max_numel() < n: jit.scratch[k] = UOp.new_buffer(k[0], n, dtypes.int8)
+  # (allocated while the processes compile: the links don't)
+  for b in dedup(u.buffer for jit, _ in calls for u in (jit.scratch or {}).values()):
+    for x in (b.bufs if isinstance(b, MultiBuffer) else [b]): x.ensure_allocated()
+
+  # every jit as it comes: taken and linked
+  oks, left = [False] * len(children), set(range(len(children)))
+  while left:
+    with got: got.wait_for(lambda: any(len(msgs[k]) >= 2 or msgs[k][-1] == b"" for k in left))
+    # (the first to have come: one done long ago isn't left behind ones that just came)
+    k = min((k for k in left if len(msgs[k]) >= 2 or msgs[k][-1] == b""), key=lambda k: arrived[k][-1] if arrived[k] else 0)
+    left.discard(k)
+    if os.waitpid(children[k][0], 0)[1] != 0 or len(msgs[k]) < 2 or not msgs[k][1]: continue
+    jit = calls[k][0]
+    arenas, recs, rest = pickle.loads(msgs[k][1])
+    arena_at = {i: (jit.scratch or {})[key] for key, (i, _) in arenas.items()}
+    out:list[UOp] = []
+    recs_srcs:list[tuple[int, ...]] = []
+    for i, (op, src, arg) in enumerate(_Unpickler(recs, reg, out).load()):
+      out.append(arena_at[i] if i in arena_at else UOp(op, tuple(out[j] for j in src), arg))
+      recs_srcs.append(src)
+    ret, lin, names, info = _Unpickler(rest, reg, out).load()
+    jit.captured, jit.cnt = CapturedJit(ret, out[lin], names, info), 2
+    # its buffers (_jit_bufs: the BUFFERs a toposort of the linear has, not in call bodies) from the records: no walk of the graph on its first call
+    reach = bytearray(len(out))
+    reach[lin] = 1
+    for i in range(lin, -1, -1):
+      if reach[i]:
+        for j in recs_srcs[i][1 if out[i].op is Ops.CALL else 0:]: reach[j] = 1
+    jit.captured.__dict__["_jit_bufs"] = {out[i] for i in range(lin + 1) if reach[i] and out[i].op is Ops.BUFFER}
+    jit.captured.linked()
+    oks[k] = True
+    if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s")
+  return [k in todo and oks[todo.index(k)] for k in range(len(every))]

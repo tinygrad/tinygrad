@@ -372,10 +372,25 @@ class AMDComputeQueue(HWQueue):
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = amd_build_program(self.dev, prg, self.devs)
-
-    prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
+    data = _amd_program_image(prg.src[3].arg, self.dev.target, self.dev.iface.props['lds_size_in_kb'])[0]
     args_addr = self.kernargs(call, prg, data)
+    if self.dev.prof_enabled or self.dev.sqtt_enabled or getenv("AMD_SERIAL_KERNELS"):
+      return self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], args_addr)
+    # the packets of a launch are the program's on the device, but the kernargs address: made once, with a placeholder for it
+    if (tmpl:=self.dev.exec_templates.get(key:=(prg, self.devs))) is None:
+      start, pstart = len(self.blob), len(self.patches)
+      self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], ph:=UOp.variable("_kernargs_addr", 0, 2**62, dtypes.uint64))
+      words = [(cast(int, o) - start, w, ph in w.toposort()) for o, w in self.patches[pstart:]]
+      tmpl = self.dev.exec_templates[key] = (bytes(self.blob[start:]), words, ph)
+      del self.blob[start:], self.patches[pstart:]
+    blob, words, ph = tmpl
+    start = len(self.blob)
+    self.blob += blob
+    def sub(w:UOp) -> UOp: return args_addr if w is ph else w.replace(src=tuple(sub(x) for x in w.src)) if ph in w.backward_slice else w
+    self.patches += [(start + o, sub(w) if has else w) for o, w, has in words]
+
+  def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
+    prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     scratch_addr = UOp.alloc((data.private_segment_size,), dtypes.uint8, 0, device=self.devs[0], name="scratch").getaddr(self.devs)
 
     user_regs:list = []
@@ -400,8 +415,12 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *prg.arg.local_size, 0, 0)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
-    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
+    # else the next kernel starts right away unless hcq2 adds a kernel_barrier (it depends on this one)
+    if self.dev.prof_enabled or self.dev.sqtt_enabled or getenv("AMD_SERIAL_KERNELS"): self.kernel_barrier()
     if self.dev.prof_enabled: self.prof_stop(slot)
+
+  def kernel_barrier(self):
+    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
@@ -419,9 +438,12 @@ class AMDComputeQueue(HWQueue):
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
     ib = UOp.alloc((16,), dtypes.uint8, device=self.dev.host, name=to_name("ib", self.queue))
-    return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.dev.compute_queue))
+    return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self, self.desc()))
+
+  def desc(self) -> AMDQueueDesc: return self.dev.compute_queue_n(int(self.queue.split(":")[1]))  # COMPUTE:i
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
+  def kernel_barrier(self): pass # the aql packets have the barrier bit set
   def __init__(self, submit):
     super().__init__(submit)
     self.cmd_addr = UOp.variable("cmdbuf", 0, 2**48, dtypes.uint64) # the packets point into the cmdbuf, its address binds at submit
@@ -456,7 +478,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
     aql = encode_cmdbuf(self, name="aql", device=self.dev.host)
-    return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self, self.dev.compute_queue), unit=64, doorbell_lag=1)
+    return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self, self.desc()), unit=64, doorbell_lag=1)
 
 # *****************
 # SDMA
@@ -502,10 +524,12 @@ class AMDProgramData:
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int # noqa: E702
 
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
-  data, image = _amd_program_image(dev, prg.src[3].arg)
+  data, image = _amd_program_image(prg.src[3].arg, dev.target, dev.iface.props['lds_size_in_kb'])
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
-def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
+@functools.lru_cache(maxsize=4096)
+def _amd_program_image(lib:bytes, target:tuple, lds_kb:int) -> tuple[AMDProgramData, bytes]:
+  # (a program is launched on every device of every call: its image once)
   image, sections, relocs = elf_loader(lib)
   rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
   for off, sym, typ, addent in relocs:
@@ -513,12 +537,12 @@ def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
     image[off:off+8] = struct.pack('<q', sym - off + addent)
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(
     bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
-  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
+  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (lds_kb*1024)//512:
     raise RuntimeError("Too many resources requested: group_segment_size")
   edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
 
   data = AMDProgramData(desc_offset=rodata, entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
-    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
+    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
     rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3, wave32=bool(desc.kernel_code_properties & 0x400),
     private_segment_size=desc.private_segment_fixed_size,
     group_segment_size=desc.group_segment_fixed_size, kernargs_segment_size=desc.kernarg_size, enable_dispatch_ptr=edp,
@@ -739,7 +763,7 @@ class PCIIface(PCIIfaceBase):
       doorbell_index = self.dev_impl.sdma.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr, gart._buf+wptr, idx)))
     else:
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr,
-        gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
+        gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, 4*idx + (is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), is_aql)))
 
     put_value = Buffer(host:=self.dev.host, 8, initial_value=bytes(8))
     doorbell = Buffer(host, 8, options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
@@ -752,7 +776,7 @@ class PCIIface(PCIIfaceBase):
     else: d.iface.dev_impl.ih.interrupt_handler()
 
     if reset and d.iface.dev_impl.recover(force=True):
-      for q, ip in [(d.compute_queue, d.iface.dev_impl.gfx), *[(q, d.iface.dev_impl.sdma) for q in d.sdma_queues.values()]]:
+      for q, ip in [*[(q, d.iface.dev_impl.gfx) for q in d.compute_queues.values()], *[(q, d.iface.dev_impl.sdma) for q in d.sdma_queues.values()]]:
         for b in (q.put_value, q.read_ptr, q.write_ptr): b.host.view(fmt='Q')[0] = 0
         ip.setup_ring(*q.params)
       for tl in (x.timeline.host.view(fmt='Q') for x in (d, Device[d.host])): tl[0] = tl[1] # the host waits on this device too
@@ -767,6 +791,8 @@ class PCIIface(PCIIfaceBase):
 
   def on_device_hang(self):
     self._collect_interrupts(reset=self.dev.can_recover)
+    # (the device isn't finalized as clean: its next boot quiesces and resets it, see AMDev.fini)
+    self.dev_impl.is_err_state = True
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
@@ -850,7 +876,8 @@ class AMDDevice(Compiled):
     # Scratch setup
     self.max_private_segment_size = 0
     # the ring and its pointers of every queue it can make, made on first use
-    queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
+    queues = {f"COMPUTE:{i}": functools.partial(self.compute_queue_n, i) for i in range(4)} | \
+             {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
     rings = {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
     Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())} | rings
@@ -858,6 +885,7 @@ class AMDDevice(Compiled):
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, PROFILE > 0 and (PMC > 0 or SQTT > 0)
+    self.exec_templates:dict[tuple[UOp, tuple[str, ...]], tuple[bytes, list[tuple[int, UOp, bool]], UOp]] = {} # AMDComputeQueue.exec
     if self.prof_enabled:
       self.iface.require_profile_mode()
       self.prof_slots, self.prof_read = getenv("PROF_SLOTS", 32), 0
@@ -900,8 +928,18 @@ class AMDDevice(Compiled):
              wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
              ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx)
 
+  @property
+  def compute_queue(self) -> AMDQueueDesc: return self.compute_queue_n(0)
+
   @functools.cached_property
-  def compute_queue(self) -> AMDQueueDesc:
+  def compute_queues(self) -> dict[int, AMDQueueDesc]: return {}
+
+  def compute_queue_n(self, idx:int) -> AMDQueueDesc:
+    """compute queue idx (am: on MEC pipe idx, they run concurrently)"""
+    if idx not in self.compute_queues: self.compute_queues[idx] = self._create_compute_queue(idx)
+    return self.compute_queues[idx]
+
+  def _create_compute_queue(self, idx:int) -> AMDQueueDesc:
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, hwreg_size_per_cu = 0x4000, 0x1000
     lds_size_per_cu = self.iface.props["lds_size_in_kb"] << 10 if self.target[:2] == (9,5) else 0x10000
@@ -911,7 +949,17 @@ class AMDDevice(Compiled):
     return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
       (1 << 20) if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
-      debug_memory_size=round_up(self.wave_cnt * 32, 64))
+      debug_memory_size=round_up(self.wave_cnt * 32, 64), idx=idx)
+
+  @functools.cached_property
+  def copy_queues(self) -> int:
+    """the copy queues the device has: am brings up one per sdma engine"""
+    return getattr(self.iface.dev_impl.sdma, "engines", 1) if self.is_am() else 8
+
+  @functools.cached_property
+  def copy_duplex(self) -> bool:
+    """copies into the device can run on a second engine (queue COPY:1), the ones out of it on the first"""
+    return self.is_am() and getattr(self.iface.dev_impl.sdma, "engines", 1) > 1 and bool(getenv("HCQ_COPY_DUPLEX", 1))
 
   @functools.cached_property
   def has_copy_queue(self) -> bool:

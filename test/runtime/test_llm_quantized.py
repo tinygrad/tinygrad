@@ -1,7 +1,8 @@
-import gc, itertools, unittest, weakref
+import itertools, unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid, \
+  _use_i8_wmma
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.helpers import not_support_multi_device
 
@@ -33,6 +34,8 @@ class QuantLinearMixin:
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
         wmma = custom and (32 if symbolic else tokens) % 16 == 0 and out_features % 16 == 0
+        # the int8 tensor cores take the activations quantized as the decode kernels, the fp16 ones in half
+        if wmma and _use_i8_wmma(Device.DEFAULT, ggml_type) and out_features % 32 == 0 and not symbolic: wmma = False
         if wmma: reference_x = x.astype(np.float16).astype(np.float32)
         if custom and not wmma:
           grouped = reference_x.reshape(tokens, -1, 32)
@@ -50,14 +53,12 @@ class QuantLinearMixin:
     self.assertEqual(linear.ggml_type, ggml_type if custom else None)
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
-  def test_quant_tables_not_retained(self):
-    # one _iq_grid table and the iq4 lut cover both table creation paths
+  def test_quant_tables_made_once(self):
+    # one _iq_grid table and the iq4 lut cover both table creation paths: a buffer made once (not a kernel in every jit that reads it)
     for typ in (18, 23):
-      table = (iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)).realize()
-      ref = weakref.ref(table)
-      del table
-      gc.collect()
-      self.assertIsNone(ref())
+      table = iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)
+      self.assertTrue(table.uop.is_realized)
+      self.assertIs(table, iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ))
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_quant_tables_multidevice(self):

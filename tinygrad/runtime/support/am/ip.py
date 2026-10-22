@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import Iterable, Literal
-from tinygrad.helpers import to_mv, data64, data64_le, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
+from tinygrad.helpers import to_mv, data64, data64_le, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, getenv
 from tinygrad.runtime.autogen.am import am, pm4_soc15 as pm4
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
@@ -275,7 +275,9 @@ class AM_SMU(AM_IP):
 class AM_GFX(AM_IP):
   def init_sw(self):
     self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
-    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2 + self.adev.is_vf)]
+    # the pipes of MEC1 that run (a compute queue on each): queues 0 and 1 (pm4, aql) of a pipe, the kiq's after them
+    self.mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2 * self.mec_pipes + self.adev.is_vf)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
@@ -351,14 +353,16 @@ class AM_GFX(AM_IP):
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, kiq_xcc=-1) -> int:
     me, pipe, queue = (2, 1, 0) if (kiq:=kiq_xcc >= 0) else (1, idx // 4, idx % 4)
-    doorbell = am.AMDGPU_DOORBELL_KIQ + kiq_xcc*0x20 if kiq else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
+    assert kiq or (pipe < self.mec_pipes and queue < 2), f"no compute queue {queue} on pipe {pipe}"
+    doorbell = am.AMDGPU_DOORBELL_KIQ + kiq_xcc*0x20 if kiq else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + pipe
+    slot = 2 * self.mec_pipes if kiq else pipe * 2 + queue
 
     for xcc in ([kiq_xcc] if kiq else range(self.xccs if aql else 1)):
       self._grbm_select(me=me, pipe=pipe, queue=queue, inst=xcc)
 
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
-      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[queue + 2*kiq] + 0x1000*xcc),
-        cp_mqd_base_addr_hi=hi32(self.mqd_mc[queue + 2*kiq] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[slot] + 0x1000*xcc),
+        cp_mqd_base_addr_hi=hi32(self.mqd_mc[slot] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
         cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
         cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
@@ -374,7 +378,7 @@ class AM_GFX(AM_IP):
         **({'compute_tg_chunk_size':1, 'compute_current_logic_xcc_id':xcc, 'cp_mqd_stride_size':0x1000} if aql and self.xccs > 1 else {}))
       for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
-      self.adev.vram.view(self.mqd_paddr[queue + 2*kiq] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
+      self.adev.vram.view(self.mqd_paddr[slot] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
@@ -412,7 +416,9 @@ class AM_GFX(AM_IP):
 
   def _enable_mec(self):
     for xcc in range(self.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
+        pipes = {f"mec_pipe{p}_{f}": int(f == "active") for p in range(self.mec_pipes) for f in ("reset", "active")}
+        self.adev.regCP_MEC_RS64_CNTL.update(**pipes, mec_halt=0, inst=xcc)
       else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
     time.sleep(0.05)  # Wait for MEC to be ready
 
@@ -437,10 +443,10 @@ class AM_GFX(AM_IP):
         _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=1, xcc=xcc)
         _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1, xcc=xcc)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
-        _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
+        _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=self.mec_pipes, me=1, xcc=xcc)
 
   def _dequeue_hqds(self):
-    for me, pipe, q in [(1, 0, 0), (1, 0, 1)] + [(2, 1, 0)] * self.adev.is_vf:
+    for me, pipe, q in [(1, p, q) for p in range(self.mec_pipes) for q in (0, 1)] + [(2, 1, 0)] * self.adev.is_vf:
       for xcc in range(self.xccs):
         self._grbm_select(me=me, pipe=pipe, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
@@ -544,11 +550,16 @@ class AM_IH(AM_IP):
       self.adev.is_err_state = True
 
 class AM_SDMA(AM_IP):
-  def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+  def init_sw(self):
+    self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+    # SDMA 7 (RDNA4) has two engines, each with its own queue: a copy on each runs in parallel (a direction each)
+    two = self.adev.ip_ver[am.SDMA0_HWIP] >= (7,0,0) and hasattr(self.adev, "regSDMA1_MCU_CNTL") and getenv("AM_SDMA_ENGINES", 2) > 1
+    self.engines = 2 if two else 1
   def halt_engines(self):
-    if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0): self.adev.reg(f"regSDMA0_{self.sdma_name}_CNTL").update(halt=1)
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
+      for e in range(self.engines): self.adev.reg(f"regSDMA{e}_{self.sdma_name}_CNTL").update(halt=1)
   def init_hw(self):
-    for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else 1):
+    for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else self.engines):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
 
       if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
@@ -570,7 +581,9 @@ class AM_SDMA(AM_IP):
           self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{entry}").write(**{f"bif_doorbell{entry}_range_size_entry": 20,
             f"bif_doorbell{entry}_range_offset_entry": (am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (entry - 1) * 0xA) * 2})
           self.adev.soc.doorbell_enable(port=port, awid=awid, awaddr_31_28_value=awaddr, offset=offset, size=4, aid=aid_id)
-    else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
+    # one range for the doorbells of all the engines (10 64-bit doorbells an engine, as amdgpu's sdma_doorbell_range of 20 dwords)
+    else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2,
+                                        size=4 if self.engines == 1 else 20 * self.engines)
 
   def fini_hw(self):
     for reg, inst in self.sdma_reginst:
@@ -580,14 +593,16 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=0, inst=inst)
 
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
-      self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
+      self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1, **({'soft_reset_sdma1':1} if self.engines > 1 else {}))
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, idx:int) -> int:
-    if self.adev.ip_ver[am.SDMA0_HWIP] >= (5,0,0) and idx > 0: raise RuntimeError(f"am {self.adev.devfmt}: sdma queue {idx} is not available")
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (5,0,0) and idx >= self.engines:
+      raise RuntimeError(f"am {self.adev.devfmt}: sdma queue {idx} is not available")
 
-    pipe, queue = idx // 4, idx % 4
+    # queue idx is the first queue of engine idx (one engine before SDMA 7: queue 0)
+    pipe, queue = (idx // 4, idx % 4) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (idx, 0)
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
     doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
     self.sdma_reginst.append((reg, inst))

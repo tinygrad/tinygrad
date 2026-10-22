@@ -7,7 +7,20 @@ if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
   from tinygrad.llm.model import Transformer
 
-def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
+# the markup of reasoning and tool calls. a model that has a tag as a special token is parsed on the token: the tag decodes to a sentinel (a
+# private use character), the same text written by the model (in prose, in code it writes) stays text
+TAGS = ("<think>", "</think>", "<tool_call>", "</tool_call>", "<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>")
+def markup_tags(special_tokens:dict[str, int]) -> tuple[dict[str, str], dict[int, str]]:
+  """the string of every tag in the decoded output, and the sentinels of the special token ids"""
+  sentinels = {tag: chr(0xE000 + i) for i, tag in enumerate(TAGS) if tag in special_tokens}
+  return {tag: sentinels.get(tag, tag) for tag in TAGS}, {special_tokens[tag]: s for tag, s in sentinels.items()}
+TEXT_TAGS = {tag: tag for tag in TAGS}
+def unmark(s:str) -> str:
+  """the sentinels back to their tags"""
+  for i, tag in enumerate(TAGS): s = s.replace(chr(0xE000 + i), tag)
+  return s
+
+def parse_tool_call(s:str, tags:dict[str, str]=TEXT_TAGS) -> tuple[str, typing.Any]|None:
   s = s.strip()
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
@@ -16,14 +29,18 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
     except (json.JSONDecodeError, KeyError): return None
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
   # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
+  # the XML format puts the value on its own lines (the newlines around it aren't part of it), GLM's is exact: a value is sent back as it was
+  # generated (the next prompt renders it, the model's cache is reused)
+  ak, akc, av, avc = (re.escape(tags[t]) for t in ("<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>"))
   patterns = (
-    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>"),
-    (r"([\w.-]+)\s*((?:<arg_key>[^<]+</arg_key>\s*<arg_value>.*?</arg_value>\s*)*)$", r"<arg_key>([^<]+)</arg_key>\s*<arg_value>(.*?)</arg_value>"))
-  for call_pattern, arg_pattern in patterns:
+    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>", True),
+    # a value ends at the </arg_value> before the next <arg_key> or the end (as text tags, a value can hold the markup: code that parses it)
+    (rf"([\w.-]+)\s*((?:{ak}.+?{akc}\s*{av}.*?{avc}\s*)*)$", rf"{ak}(.+?){akc}\s*{av}(.*?){avc}(?=\s*(?:{ak}|$))", False))
+  for call_pattern, arg_pattern, own_lines in patterns:
     if (fm := re.match(call_pattern, s, re.DOTALL)):
       args = {}
       for pm in re.finditer(arg_pattern, fm.group(2), re.DOTALL):
-        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
+        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2)) if own_lines else pm.group(2)
         try: args[pm.group(1)] = json.loads(value)
         except json.JSONDecodeError: args[pm.group(1)] = value
       return fm.group(1), args
@@ -41,9 +58,9 @@ def normalize_messages(messages:list[dict]) -> None:
     elif isinstance(c := m.get("content"), list) and all(p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
 
 class StreamRouter:
-  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  def __init__(self, reasoning:bool=False):
-    self.buf = ""
+  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse. tags: the string of every tag
+  def __init__(self, reasoning:bool=False, tags:dict[str, str]=TEXT_TAGS):
+    self.buf, self.tags = "", tags
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
     # split buf on the first full tag, holding back a partial tag at the end unless final
@@ -55,18 +72,19 @@ class StreamRouter:
     return emit, False
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
+    think, think_end, call = self.tags["<think>"], self.tags["</think>"], self.tags["<tool_call>"]
     if self.mode == "undecided":  # decide whether the output starts with a think block
-      if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
-      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
+      if not final and len(self.buf) < len(think) and think.startswith(self.buf): return
+      self.mode, self.buf = ("reasoning", self.buf[len(think):]) if self.buf.startswith(think) else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, done = self.split("</think>", final)
-      if emit: yield "reasoning_content", emit
+      emit, done = self.split(think_end, final)
+      if emit: yield "reasoning_content", unmark(emit)
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, found = self.split("<tool_call>", final)
-    if emit: yield "content", emit
-    if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
+    emit, found = self.split(call, final)
+    if emit: yield "content", unmark(emit)
+    if found: self.mode, self.buf = "tool", call + self.buf
 
 class Handler(VizHandler):
   server: LLMServer
@@ -87,11 +105,16 @@ class Handler(VizHandler):
     finish_reason = "stop"
     st = pt = time.perf_counter()
     dec = tok.stream_decoder()
-    router = StreamRouter(reasoning)
+    tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
+    router = StreamRouter(reasoning, tags)
+    spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
     def log_stats(interrupted:bool=False):
       et = time.perf_counter()
       total = f"total:{et-st:6.2f}s"
-      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+      # speculative decoding: the tokens of a step of the model
+      spec = f"spec:{(t[1]-spec_st[1])/(t[0]-spec_st[0]):4.2f} tok/step  {colored('--', 'BLACK')}  " \
+        if spec_st and (t:=model.spec_stats)[0] > spec_st[0] else ""
+      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  {spec}"
                  f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
     completed = False
     try:
@@ -101,20 +124,23 @@ class Handler(VizHandler):
           stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
         if tok.is_end(next_id): break
         out.append(next_id)
-        for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
+        for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)): yield chunk({field:delta})
         if max_tokens is not None and len(out) >= max_tokens:
           finish_reason = "length"
           break
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
-        if (parsed := parse_tool_call(m.group(1))) is None:
-          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
-          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
+      # a call ends at the </tool_call> before the next <tool_call> or the end (as text tags, its arguments can hold the markup)
+      call, call_end = re.escape(tags["<tool_call>"]), re.escape(tags["</tool_call>"])
+      for m in re.finditer(rf"{call}\s*(.*?)\s*(?:{call_end}(?=\s*(?:{call}|$))|$)", router.buf, re.DOTALL):
+        if (parsed := parse_tool_call(m.group(1), tags)) is None:
+          stderr_log(f"failed to parse tool call: {unmark(m.group(1))[:200]}")
+          yield chunk({"content":unmark(m.group(0))})  # don't silently drop output the client can't use
         else:
           name, args = parsed
           tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+                             "function":{"name":name, "arguments":unmark(args) if isinstance(args, str) else
+                                         json.dumps(json.loads(unmark(json.dumps(args, ensure_ascii=False))))}})
       if tool_calls:
         yield chunk({"tool_calls":tool_calls})
         if finish_reason == "stop": finish_reason = "tool_calls"

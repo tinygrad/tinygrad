@@ -16,12 +16,19 @@ def is_implicit_storage(ctx, x:UOp) -> bool:
   # Variables are caller-provided values (slot -1); positional scalar params (slot >= 0) are already captured
   return (x.is_variable and x.arg.slot == -1) or x.op is Ops.BUFFER or (x.op is Ops.ALLOC and x.arg.bind_on_realize and x.arg.slot < ctx[2])
 
+def _slice_flags(ctx, x:UOp) -> tuple[bool, bool]:
+  # (a positional param, implicit storage) in x's graph: memoized in ctx[3], each node once (not a toposort per node)
+  memo:dict[UOp, tuple[bool, bool]] = ctx[3]
+  if x not in memo:
+    for n in x.toposort(gate=lambda n: n not in memo):
+      srcs = [memo[s] for s in n.src_without_body]
+      memo[n] = ((n.op is Ops.PARAM and n.arg.slot >= 0) or any(f[0] for f in srcs), is_implicit_storage(ctx, n) or any(f[1] for f in srcs))
+  return memo[x]
+
 pm_ctx = PatternMatcher([
   # Capture caller-owned storage, not allocations created while tracing this function.
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
-  (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
-   not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
-   any(is_implicit_storage(ctx, b) for b in x.toposort()) else None),
+  (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if _slice_flags(ctx, x) == (False, True) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:
@@ -77,7 +84,7 @@ class _function(Generic[ReturnType]):
 
     # caller-owned storage left in the graph becomes implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret), alloc_start), bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret), alloc_start, {}), bottom_up=True, name="get_implicit_inputs")
     uret = renumber_invalid_outputs(uret)
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:

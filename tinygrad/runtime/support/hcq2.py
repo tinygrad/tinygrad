@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence
-import itertools, ctypes, struct, time
+import itertools, ctypes, struct, time, weakref
 from dataclasses import replace, dataclass, field
 from collections import defaultdict
-from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, DEBUG, VIZ, ALL2ALL, PROFILE
+from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, DEBUG, VIZ, ALL2ALL, PROFILE, getenv
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
-from tinygrad.uop.ops import pm_renumber_slots, CountCtx
+from tinygrad.uop.ops import pm_renumber_slots, CountCtx, CallInfo
 from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
@@ -30,6 +30,10 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
+  # a copy between two devices runs on the one it goes to (pulls): a push's writes into the peer are posted, its completion signal (in host memory)
+  # takes another path and can land first, the peer then reads its memory before all of the copy is in it
+  if call.body.op is Ops.STORE and all_devices_in(dst:=call.src[1].device, HCQ_DEVS - UVM_DEVS) and all_devices_in(runs_on, HCQ_DEVS - UVM_DEVS) and \
+     isinstance(dst, str) and isinstance(runs_on, str) and dst.split(":")[0] == runs_on.split(":")[0] and getenv("HCQ_COPY_PULL", 1): runs_on = dst
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
   return devs
@@ -88,7 +92,11 @@ def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s,
 
 # **** patchers
 
+_link_patch_memo:weakref.WeakKeyDictionary[UOp, bool] = weakref.WeakKeyDictionary()
 def _is_link_patch(w:UOp) -> bool:
+  if (r:=_link_patch_memo.get(w)) is None: r = _link_patch_memo[w] = _is_link_patch_uncached(w)
+  return r
+def _is_link_patch_uncached(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not ((base:=unwrap_lane(w.src[0])[0]).op is Ops.PARAM and base.arg.name != "lt_input") # an input's is runtime
   if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
   if w.op in {Ops.LOAD, Ops.CALL, Ops.PARAM}: return False
@@ -97,8 +105,12 @@ def _is_link_patch(w:UOp) -> bool:
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
-  groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
+  grouped:dict[tuple, list[tuple[int|UOp, UOp]]] = {}
+  for o, w in rows:
+    key = (w.dtype, o % w.dtype.itemsize if isinstance(o, int) else o.vmin % w.dtype.itemsize, _is_link_patch(w),
+           () if isinstance(o, int) else tuple(o.ranges))
+    grouped.setdefault(key, []).append((o, w))
+  groups = list(grouped.items())
 
   # a link patch writes the bare buffer after the blob, a runtime patch writes it after its deps
   dep = [buf.without_after.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
@@ -237,7 +249,9 @@ def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
   return [ins("wait", ctx.queue_signal(d, q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in waits.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]:
-  return [ins("barrier")] + [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+  # the waits first, then the barrier: what the earlier work wrote (e.g. another device's copy into this one's memory, posted writes over the
+  # links) is flushed into this device's memory and its caches invalidated after it's done, not before
+  return [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]] + [ins("barrier")]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   queue_of = [(dev, queue) for _, dev, queue in ctx.batch] # the (device, queue) of each call by tag
@@ -267,10 +281,27 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
+  # kernels on a queue may overlap: a kernel waits for the earlier ones (kernel_barrier) only if it accesses what they write or writes what
+  # they access. the (writes, accesses) since the last barrier per queue, as byte ranges (buffers in the jit's arena share a base)
+  barriers:set[int] = set()
+  pending:dict[tuple[str, str], tuple[list, list]] = {}
+  for tag, (call, dev, queue) in enumerate(ctx.batch):
+    if not (call.op is Ops.CALL and call.body.op is Ops.PROGRAM): continue
+    bufs = [(base, lane, off, off + b.max_numel() * b.dtype.itemsize) for b in get_call_arg_uops(call) for base, lane, off in [unwrap_lane(b)]]
+    pos = [k for k, a in enumerate(call.src[1:]) if not a.is_variable]
+    writes, (pw, pa) = [bufs[pos.index(i)] for i in get_call_outs_ins(call)[0]], pending.setdefault((dev, queue), ([], []))
+    if any(x[:2] == y[:2] and x[2] < y[3] and y[2] < x[3] for xs, ys in ((pw, bufs), (pa, writes)) for x in xs for y in ys):
+      barriers.add(tag)
+      del pw[:], pa[:]
+    pw.extend(writes)
+    pa.extend(bufs)
+
   def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    return _wait_ins(ctx, call_waits[tag]) + stamps[:1] + [call] + stamps[1:] + signal
+    # (waits for other queues: then the barrier, see _start_ins)
+    waits = _wait_ins(ctx, call_waits[tag]) + ([ins("barrier")] if call_waits[tag] else [])
+    return [ins("kernel_barrier")] * (tag in barriers) + waits + stamps[:1] + [call] + stamps[1:] + signal
 
   # closers advance device timelines
   close_cmds = {dev: _wait_ins(ctx, close_waits[dev]) + [ins("store", timeline(dev), timeline_value(dev) + 1)] for dev in ctx.queues}
@@ -301,7 +332,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
-  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, estimates=sum(estimates, start=Estimates()).simplify(),
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, estimates=Estimates.sum(estimates),
                  slots=tuple((d, i) for i, d in enumerate(slots)))
   return sink.call(*slots.values(), aux=info)
 
@@ -310,20 +341,28 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   copies = [c for c in l.src if c.op is Ops.CALL and c.body.op is Ops.STORE]
   ring = sorted({Device.canonicalize(d) for c in copies for b in get_call_arg_uops(c) for d in to_tuple(b.device) if all_devices_in(d, HCQ_DEVS)})
   # TODO: handle max queue amt better
-  num_copy = max(1, min(len(ring), 8 if {d.split(":")[0] for d in ring} == {"AMD"} else 1) if ALL2ALL >= 1 else 1)
+  num_copy = max(1, getenv("HCQ_NUM_SDMA", min(len(ring), 8 if {d.split(":")[0] for d in ring} == {"AMD"} else 1,
+                                                *(getattr(Device[d], "copy_queues", 8) for d in ring))) if ALL2ALL >= 1 else 1)
   copy_of = {(dst, src): (i - j - 1) % len(ring) % num_copy for i, dst in enumerate(ring) for j, src in enumerate(ring)}
 
-  def queue_for(c:UOp) -> str:
-    if c.body.op is Ops.PROGRAM: return "COMPUTE:0"
+  def queue_for(c:UOp, dev:str) -> str:
+    # the kernels of a call tagged with a compute queue run there (the queues wait for each other's dependencies)
+    if c.body.op is Ops.PROGRAM: return c.arg.queue if isinstance(c.arg, CallInfo) and c.arg.queue else "COMPUTE:0"
     if c.body.op is Ops.CUSTOM_FUNCTION: return "ENCDEC:0"
-    return f"COPY:{copy_of.get((c.src[1].device, c.src[2].device), 0)}"
+    # the copies of a call on a copy queue run there
+    if isinstance(c.arg, CallInfo) and c.arg.queue and int(c.arg.queue.split(":")[1]) < getattr(Device[dev], "copy_queues", 1):
+      return "COPY:" + c.arg.queue.split(":")[1]
+    if (c.src[1].device, c.src[2].device) in copy_of: return f"COPY:{copy_of[(c.src[1].device, c.src[2].device)]}"
+    # a device with two copy engines pulls the copies into it on the second (e.g. from host memory), they run with the ones out of it
+    if c.src[1].device == dev != c.src[2].device and getattr(Device[dev], "copy_duplex", False): return "COPY:1"
+    return "COPY:0"
 
   devs = [get_enqueue_devs(c) for c in l.src]
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs), key=lambda e: bool(e[1])):
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
-    batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
+    batches = [[(c, d[0], queue_for(c, d[0])) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
     if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
@@ -342,6 +381,7 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
      lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("barrier"),)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, src=(UPat.custom_function("kernel_barrier"),)), lambda ctx: ctx.kernel_barrier()),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.CALL, src=(UPat.custom_function("wait_eq"), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="dst"))), lambda ctx, dst: ctx.timestamp(dst)),
@@ -381,6 +421,7 @@ class HWQueue:
     self.blob += self.blob[start:] * int(r.vmax)
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
+  def kernel_barrier(self): pass # wait for the kernels before. queues that run their kernels one after another have nothing to do
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
@@ -395,7 +436,8 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
   dwords = [(UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.u32).index(r).load() + 4 * k, (w >> 32 * k).cast(dtypes.u32))
             for w, (at, r) in looped.items() for k in range(w.dtype.itemsize // 4)]
   patches = [(o, w) for o, w in hq.patches if w not in looped] + dwords
-  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
+  # (one walk of all the patches: they share most of their graphs. the order is the one of walking them one by one)
+  nested = dedup([g.src[0] for g in UOp.sink(*[w for _, w in patches]).toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
   bufs = []
@@ -476,7 +518,9 @@ Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
-class LinkCtx: inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx:
+  inputs:list[UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
+  addrs:dict[tuple[UOp, str], int] = field(default_factory=dict) # a buffer's address on a device (the same buffer has many)
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
@@ -493,8 +537,13 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # ctx: a kept link (the jit's) own
 
 def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   if unwrap_lane(buf:=(v:=unwrap_view(g.src[0]))[0])[0].op is not Ops.BUFFER: return None # input address, resolved per run
-  ctx.refs.append(buf) # add to refs
-  return UOp.const(cast(Buffer, buf.buffer).view(g.src[0].nbytes(), v[1]).get_buf(to_tuple(g.arg)[0]), dtypes.u64)
+  dev = to_tuple(g.arg)[0]
+  if (addr:=ctx.addrs.get((buf, dev))) is None:
+    ctx.refs.append(buf) # add to refs
+    # (the address a view of it has there, as Buffer.get_storage makes it: no view to make for every address)
+    b = cast(Buffer, buf.buffer)
+    addr = ctx.addrs[(buf, dev)] = Device[cdev:=Device.canonicalize(dev)].allocator._offset(b.base.get_buf(cdev), b.nbytes, b.offset)
+  return UOp.const(addr + v[1], dtypes.u64)
 
 def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   base, off = unwrap_view(buf)
@@ -503,6 +552,15 @@ def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   return UOp(Ops.NOOP)
 
 def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
+  # words of one dtype: the host memory cast to it, assigned by item (not a pack and a slice per word)
+  if len({w.dtype for w in ws.src}) == 1 and (dt:=ws.src[0].dtype).fmt is not None:
+    base, off = unwrap_view(buf)
+    if off % dt.itemsize == 0:
+      mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
+      words = mv[off:off + (len(mv) - off) // dt.itemsize * dt.itemsize].cast(dt.fmt)
+      tr = truncate[dt]
+      for o, w in zip(offs.src, ws.src): words[o.val] = tr(w.val)
+      return UOp(Ops.NOOP)
   return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
 
 pm_resolve_link = PatternMatcher([

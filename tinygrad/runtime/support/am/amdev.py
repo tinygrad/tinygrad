@@ -64,7 +64,9 @@ class AMFirmware:
     else: self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
 
     # PFP, ME, MEC firmware
-    for (fw_name, fw_cnt) in ([('PFP', 1), ('ME', 1)] if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else []) + [('MEC', 1)]:
+    # the MEC stack of every pipe that runs (AM_GFX.mec_pipes)
+    mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    for (fw_name, fw_cnt) in ([('PFP', 1), ('ME', 1)] if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else []) + [('MEC', mec_pipes)]:
       blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", versioned_header="struct_gfx_firmware_header")
 
       ucode_off = hdr.header.ucode_array_offset_bytes
@@ -142,7 +144,7 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev:
-  Version = 0xA000000D
+  Version = 0xA000000E
 
   def _disable_aspm(self):
     # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
@@ -180,7 +182,10 @@ class AMDev:
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
+    # the boot's version: the MEC firmware is loaded for a number of pipes (AM_MEC_PIPES), a boot for another number is a full one
+    pipes = getenv("AM_MEC_PIPES", 1) if self.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    self.boot_version = AMDev.Version ^ ((pipes - 1) << 16)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == self.boot_version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
@@ -218,7 +223,7 @@ class AMDev:
       self.smu.set_clocks(level=levels[perf])
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
       self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
-      self.reg("regSCRATCH_REG7").write(AMDev.Version)
+      self.reg("regSCRATCH_REG7").write(self.boot_version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
@@ -254,7 +259,14 @@ class AMDev:
     # a VF may only touch the engines inside an access window, take one so the host does not have to FLR the VF later
     if self.is_vf and not self.vf_access:
       with contextlib.suppress(TimeoutError): self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_FINI_ACCESS)
-    for ip in [self.sdma, self.gfx]: ip.fini_hw()
+    # a device in an error state (e.g. hung: its kernels may still run) gets no bus mastering first: it can't reach memory or the peers once
+    # the process is gone (a stray dma to io addresses that are unmapped then floods the root port with errors). the next boot is a full one
+    if self.is_err_state and not self.is_vf:
+      self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
+    for ip in [self.sdma, self.gfx]:
+      try: ip.fini_hw()
+      except Exception:
+        if not self.is_err_state: raise
     if not self.is_vf: self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
     if not self.is_vf: self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.

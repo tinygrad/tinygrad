@@ -169,7 +169,8 @@ def main():
   # load the model
   st = time.perf_counter()
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
-    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
+    # serving: the weights are read while the warmup compiles
+    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard, defer_load=bool(args.serve))
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
@@ -184,7 +185,9 @@ def main():
   if not args.no_chat_template and (ct := tok.chat_template) is not None:
     try:
       import jinja2
-      env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
+      # chat templates are written for the environment of HF apply_chat_template: the newline after a block tag and the whitespace before it
+      # aren't output (a model generates what it was trained on: re-rendered history then matches its tokens, its cache is reused)
+      env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)

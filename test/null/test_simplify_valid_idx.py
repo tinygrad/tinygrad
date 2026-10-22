@@ -68,6 +68,15 @@ class TestValidIdxSimplification(unittest.TestCase):
     base = ((a*8+b+c*128+d*64+1000)%1024)*4
     self.assertTrue(all(uop_given_valid(valid, base+k).src[0] is uop_given_valid(valid, base+0).src[0] for k in range(1, 4)))
 
+  def test_given_valid_not_through_loads(self):
+    # a value loaded after a store: the store runs under its own gate, not this valid, it isn't rewritten
+    from tinygrad.dtype import AddrSpace
+    r = Range(0, 4)
+    tmp = UOp.placeholder((4,), dtypes.int32, slot=0, addrspace=AddrSpace.LOCAL)
+    st = tmp[r.valid(r < 2)].store(r.cast(dtypes.int32))
+    ret = uop_given_valid(r < 1, tmp.after(st.barrier())[0] + r.cast(dtypes.int32))
+    self.assertIn(st, ret.toposort())
+
   def test_bitwise_and_is_not_a_valid(self):
     ridx0 = Range(0, 16)
     self.assertEqual(simplify_valid_idx(UOp.sink((ridx0 & UOp.const(12, dtypes.int)) & ridx0)).src[0].render(), "((i32)(r0)&12&(i32)(r0))")
