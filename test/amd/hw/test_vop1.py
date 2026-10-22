@@ -1691,5 +1691,23 @@ class TestCvtFrexpRegressions(unittest.TestCase):
       self.assertEqual(st.vgpr[0][2] & 0xFFFFFFFF, 0, f"f64 bits=0x{hi:08x}{lo:08x}")
 
 
+class TestF16Exp(unittest.TestCase):
+  """f16 forms of v_exp and v_frexp_mant (the emulator failed to compile both)."""
+  def _run(self, op, x:int) -> int:
+    st = run_program([s_mov_b32(s[0], x), v_mov_b32_e32(v[1], s[0]), op(v[0], v[1])], n_lanes=1)
+    return st.vgpr[0][0] & 0xFFFF
+
+  def test_v_exp_f16(self):
+    for x, want in [(0x4200, 0x4800), (0xBC00, 0x3800), (0x0000, 0x3C00), (0xFC00, 0x0000)]:  # 3->8, -1->0.5, 0->1, -inf->0
+      with self.subTest(x=hex(x)): self.assertEqual(self._run(v_exp_f16_e32, x), want)
+
+  def test_v_frexp_mant_f16(self):
+    for x, want in [(0x4600, 0x3A00), (0xC600, 0xBA00), (0x7C00, 0x7C00), (0x0000, 0x0000)]:  # 6->0.75, -6->-0.75, inf, 0
+      with self.subTest(x=hex(x)): self.assertEqual(self._run(v_frexp_mant_f16_e32, x), want)
+
+  def test_v_frexp_mant_f16_denorm(self):  # f16 denormals are not flushed: they normalize
+    for x, want in [(0x0001, 0x3800), (0x0003, 0x3A00), (0x8200, 0xB800), (0x03FF, 0x3BFE), (0x8000, 0x8000), (0x7E00, 0x7E00)]:
+      with self.subTest(x=hex(x)): self.assertEqual(self._run(v_frexp_mant_f16_e32, x), want)
+
 if __name__ == '__main__':
   unittest.main()

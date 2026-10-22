@@ -280,6 +280,12 @@ def _ldexp(val: UOp, exp: UOp) -> UOp:
 
 def _frexp_mant(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
+  if val.dtype == dtypes.half:  # f16 denormals are not flushed: they normalize like any other value (hardware verified)
+    bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+    mant, sign = bits & _u32(0x3FF), bits & _u32(0x8000)
+    norm = (mant << (_const(dtypes.int, 10) - _msb(mant, 10)).cast(dtypes.uint32)) & _u32(0x3FF)
+    res = (bits & _u32(0x7C00)).ne(_u32(0)).where(mant, norm) | sign | _u32(0x3800)
+    return (bits & _u32(0x7FFF)).eq(_u32(0)).where(sign, res).cast(dtypes.uint16).bitcast(dtypes.half)
   if val.dtype == dtypes.float32:
     bits = val.bitcast(dtypes.uint32)
     # denormal/zero inputs (exponent field == 0) return signed zero on hardware
@@ -364,7 +370,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
   'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
   'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
-  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
+  'pow': lambda a, b: UOp(Ops.EXP2, src=(b if b.dtype in (dtypes.half, dtypes.float32) else b.bitcast(dtypes.float32),)),
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
