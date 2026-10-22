@@ -100,7 +100,7 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     expected_ops = 4 * N ** 3 * 2
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
-class TestuOpsStatsInlineCall(unittest.TestCase):
+class TestUOpsStatsInlineCall(unittest.TestCase):
   def test_inline_call(self):
     buf = UOp.param(0, dtypes.int32, 4)
     p0 = buf.param_like(0)
