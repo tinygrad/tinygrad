@@ -1,9 +1,9 @@
 import unittest, pytest, weakref
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
-from tinygrad.codegen.simplify import pm_reduce_unparented
+from tinygrad.codegen.simplify import pm_reduce_unparented, pm_reduce_collapse
 from test.helpers import full_rewrite, to_uops_list
 
 simple_pm = PatternMatcher([
@@ -19,9 +19,6 @@ class TestTuplize(unittest.TestCase):
     a, b = UOp.const(1), UOp.const(2)
     pairs = [(a, UOp.const(1)), (a, b), (a, a+b), (a+b, b+a), (UOp.sink(a, b), UOp.sink(a, b))]
     for x, y in pairs: self.assertEqual(x.tuplize == y.tuplize, x is y)
-    # tags are not part of the order: tag-only differences order neither way, like value-equal plain tuples
-    self.assertFalse(a.tuplize < a.rtag("tagged").tuplize)
-    self.assertFalse(a.rtag("tagged").tuplize < a.tuplize)
 
   def test_deep_shared_subgraphs(self):
     # long equal prefixes with a difference at the bottom: correct order, and the pathological case for value equality
@@ -31,7 +28,7 @@ class TestTuplize(unittest.TestCase):
     self.assertNotEqual(a.tuplize < b.tuplize, b.tuplize < a.tuplize)
 
   def test_does_not_retain_uops(self):
-    a = UOp.const(1).rtag(object())
+    a = UOp(Ops.NOOP, arg=object())
     ref = weakref.ref(a)
     _ = a.tuplize
     del a
@@ -448,7 +445,6 @@ class TestUOpGraph(unittest.TestCase):
 class TestReduceCollapse(unittest.TestCase):
   def test_multi_range_reduce_add(self):
     """Test that (x + y).reduce(r1, r2) distributes over multiple ranges"""
-    from tinygrad.codegen.simplify import pm_reduce_collapse
     # Create two ranges
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)
@@ -461,6 +457,13 @@ class TestReduceCollapse(unittest.TestCase):
     result = graph_rewrite(red, pm_reduce_collapse, name='test')
     # Should become add of two separate reduces
     self.assertEqual(result.op, Ops.ADD)
+
+  def test_lt_lift_skips_unsigned(self):
+    # x+y<c -> x<c-y and x*y<c -> x<ceil(c/y) only hold when x+y and x*y cannot wrap
+    for dt in (dtypes.int32, dtypes.uint32):
+      x, y, c = [Variable(n, 1, 100, dt) for n in "xyc"]
+      for lt in ((x+y) < c, (x*y) < c):
+        self.assertEqual(graph_rewrite(lt, pm_reduce_collapse) is lt, dt is dtypes.uint32)
 
   def test_bool_reduce_unparented_keeps_dtype(self):
     for op in (Ops.ADD, Ops.MUL):
@@ -533,21 +536,6 @@ class TestConstBufferize(unittest.TestCase):
     self.assertNotEqual(result.op, Ops.STAGE)
     const_vals = [u.val for u in result.toposort() if u.op is Ops.CONST and u.dtype is dtypes.weakfloat]
     self.assertIn(3.14, const_vals)
-
-class TestUOpTags(unittest.TestCase):
-  def test_inc_by_one(self):
-    g = UOp.const(1) + UOp.const(1)
-    assert g.ssimplify() == 2
-    pm_plus_1 = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: UOp.const(x.val+1, x.dtype).rtag(1) if x.tag is None else None)])
-    pm_strip_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
-    g = graph_rewrite(g, pm_plus_1)
-    assert g.ssimplify() == 4
-    g = graph_rewrite(g, pm_plus_1)
-    assert g.ssimplify() == 4
-    g = graph_rewrite(g, pm_strip_tags)
-    assert g.ssimplify() == 4
-    g = graph_rewrite(g, pm_plus_1)
-    assert g.ssimplify() == 6
 
 class TestUOpGetItem(unittest.TestCase):
   def _placeholder(self, shape, dtype=dtypes.half):

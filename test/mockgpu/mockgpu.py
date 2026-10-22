@@ -1,6 +1,7 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple, round_up
 from tinygrad.device import Compiled
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, CustomFunction
 from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.support.hcq2 import HWQueue
@@ -29,21 +30,34 @@ setattr(libc.dll, "mockgpu_ioctl", mockgpu_ioctl)
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
 def hook_doorbells(s:UOp) -> UOp|None:
   hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr("CPU")) for c in s.toposort() if c.op is Ops.CALL
-                for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.tag) and to_tuple(b.device)[0].split(":")[0] in mocked)
+                for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.arg.name) and to_tuple(b.device)[0].split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 def hook_ioctl(f:UOp) -> UOp|None:
   return f.replace(arg=CustomFunction("mockgpu_ioctl", f.arg.dtype)) if f.arg.name == "ioctl" and "QCOM" in mocked else None
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells), (UPat(Ops.CUSTOM_FUNCTION, name="f"), hook_ioctl)])
 
+@ctypes.CFUNCTYPE(None, ctypes.c_uint64)
+def mockgpu_progress(_:int): # compiled spin loops wait on the gpus, which run only when called
+  for d in drivers: d.progress()
+setattr(libc.dll, "mockgpu_progress", mockgpu_progress)
+
+def kick_gpus(body:UOp, loop:UOp, cond:UOp) -> UOp|None: # each iteration of a spin loop runs the gpus
+  kick = UOp.custom_function("mockgpu_progress").call(UOp.const(0, dtypes.uint64).after(body))
+  return None if kick in cond.src else body.backedge(loop, cond.after(kick))
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.BACKEDGE, src=(UPat(name="body"), UPat(name="loop"), UPat(name="cond"))), kick_gpus)])
+
 # this links AMD emulator's kernel back to the original kernel
-def emit_kernel_name(ctx:HWQueue, prg:UOp) -> None:
-  from tinygrad.runtime.ops_amd import AMDComputeQueue
+def emit_kernel_info(ctx:HWQueue, prg:UOp) -> None:
+  from tinygrad.runtime.ops_amd import AMDComputeQueue, _amd_program_image
   if isinstance(ctx, AMDComputeQueue):
+    from tinygrad.viz.serve import get_elf_section
     name = prg.src[0].arg.name.encode() + b"\x00"
-    ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"))
+    text = get_elf_section(prg.src[3].arg, ".text").header
+    text_size = text.sh_addr + text.sh_size - _amd_program_image(ctx.dev, prg.src[3].arg)[0].entry_point_offset
+    ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"), text_size)
 
 HWQueue.q_rewrite = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), allow_any_len=True), emit_kernel_name),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), allow_any_len=True), emit_kernel_info),
 ]) + HWQueue.q_rewrite
 
 original_memoryview = builtins.memoryview

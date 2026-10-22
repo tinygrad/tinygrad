@@ -82,7 +82,7 @@ def jit_cache_count(linear:UOp) -> int:
   return sum(len(call.without_after.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
 
 def assert_jit_cache_len(fxn, expected_len):
-  linear = fxn.captured.linear if fxn.captured is not None else None
+  linear = fxn.captured._linear if fxn.captured is not None else None
   if linear is None or not linear.src:
     if expected_len != 0: raise KernelCountException(expected_len, 0)
     return
