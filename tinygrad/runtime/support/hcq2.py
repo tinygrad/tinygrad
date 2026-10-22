@@ -478,11 +478,10 @@ Compiled.pm_link = PatternMatcher([])
 @dataclass
 class LinkCtx: inputs:list[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
-def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp: # the link owns the linear's buffers, the fenced lru reuses a one-shot's after the run
+def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
-  dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True) # data the device reads, unless the alloc says otherwise
+  dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True)
 
-  # a placeholder is named as is, or by the device it's on. the rest are allocated where they live
   owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name)))
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
   elif (r:=dev.link_buffer(b)) is not None: pass

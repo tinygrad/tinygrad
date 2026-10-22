@@ -67,7 +67,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   return linear, var_vals
 
 @contextlib.contextmanager
-def measure_mem() -> Iterator[Callable[[], int]]: # used(): the bytes the block left allocated, after the first run made the device's state
+def measure_mem() -> Iterator[Callable[[], int]]:
   Device.default.synchronize()
   gc.collect()
   base = GlobalCounters.mem_used
