@@ -56,7 +56,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar
-from tinygrad.engine.realize import get_runtime
+from tinygrad.engine.realize import get_runtime, run_linear
 from tinygrad.codegen import to_program
 
 from tinygrad.renderer.amd import decode_inst
@@ -692,8 +692,6 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   return UOp.sink(*ctx.inc_pc())
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
-  # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  if '_INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
   sbase = ctx.inst_field(type(inst).sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
@@ -705,21 +703,13 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   soffset_val = _c(0).cast(dtypes.uint64)
   if not (isinstance(inst, irc.SMEM) and not inst.soffset_en):
     soffset_val = ctx.rsgpr_dyn(ctx.inst_field(type(inst).soffset)).cast(dtypes.uint64)
-  addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + soffset_val
-  # S_LOAD_(DTYPE) series: B32/DWORD=1, B64/DWORDX2=2, U8=0.25, I8=-0.25, etc.
-  op_name = _op_name(inst)
-  assert (op_name).startswith('S_LOAD_'), f"unexpected SMEM op: {op_name}"
-  part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
-  nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
-  ndwords = max(1, int(abs(nval)))
-  dword_base = addr >> UOp.const(2, dtypes.uint64)
-  vals = [ctx.vmem.index(dword_base + UOp.const(i, dtypes.uint64)) for i in range(ndwords)]
-  if abs(nval) < 1:
-    nbits = int(abs(nval) * 32)
-    byte_off = (addr & UOp.const(3, dtypes.uint64)).cast(dtypes.uint32) * UOp.const(8, dtypes.uint32)
-    extracted = (vals[0] >> byte_off) & UOp.const((1 << nbits) - 1, dtypes.uint32)
-    vals[0] = extracted.cast({8: dtypes.int8, 16: dtypes.int16}[nbits]).cast(dtypes.int32).bitcast(dtypes.uint32) if nval < 0 else extracted
-  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), vals[i]) for i in range(ndwords)]
+  base = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1)))
+  byte_offset = offset.cast(dtypes.uint64) + soffset_val
+  srcs = {'ADDR': base + byte_offset, 'sgpr_base': base, 'offset': byte_offset,
+          'SBASE': base, 'SOFFSET': soffset_val, 'OFFSET': offset, '_vmem': ctx.vmem}
+  funcs = {'CalcScalarGlobalAddr': lambda _base, soffset, offset: base + soffset.cast(dtypes.uint64) + offset.cast(dtypes.uint64)}
+  _, assigns = parse_pcode(get_pcode(inst.op), srcs, funcs)
+  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), val) for i, val in _collect_data_slices(assigns, 'SDATA').items()]
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4.SOPC|ir4.SOPK|irc.SOP1|irc.SOP2|irc.SOPC|irc.SOPK, ctx: _Ctx) -> UOp:
@@ -1969,12 +1959,20 @@ ASM_CALL = ContextVar("ASM_CALL", 0)
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  if ASM_CALL:
+  # TODO: better way to check for lifted kernels
+  if ASM_CALL and not name.startswith("emu"):
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
+    sink = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
+    dev, ren = ('AMD', 'HIP') if ASM_CALL > 1 else ('CPU', 'LLVM')
+    with Context(DEV=DEV.target(dev, renderer=ren), CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+      prg = to_program(sink, Device[dev].renderer)
     vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_runtime('CPU', prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
+      vmem_buf = UOp.from_buffer(Buffer(dev, 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.uint32)
+      args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
+      for p in prg.kernel_params:
+        if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(vals[p.arg.name])
+      run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)))
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)

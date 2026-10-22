@@ -823,7 +823,7 @@ class AMDDevice(Compiled):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
     self.is_vf = self.is_am() and self.iface.dev_impl.is_vf
-    self.can_recover, self.rtalloc_size = self.is_am() and not self.is_vf, (4 if self.is_usb else 64)<<20
+    self.can_recover = self.is_am() and not self.is_vf
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
