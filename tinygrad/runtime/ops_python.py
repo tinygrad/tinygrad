@@ -184,6 +184,8 @@ class PythonRenderer(Renderer):
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
+  def render_function(self, body:UOp) -> str: return self.render(list(body.src))
+
 class PythonDevice(Compiled):
   def __init__(self, device:str):
     super().__init__(device, HostAllocator(self), [PythonRenderer], PythonProgram)

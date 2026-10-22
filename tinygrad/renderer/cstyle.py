@@ -350,8 +350,6 @@ class ClangRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
-    self.compiler.args += ['-fno-strict-aliasing']
-    if self.compiler.cachekey is not None: self.compiler.cachekey += "_no_strict_aliasing"
 
 class OpenCLRenderer(CStyleLanguage):
   # language options
