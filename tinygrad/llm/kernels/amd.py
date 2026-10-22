@@ -287,16 +287,18 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)))
 
 @functools.cache
-def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
-                         out_features:int, in_features:int, ggml_type:int, sel:UOp|None=None, x_share:int=1) -> UOp:
+def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:int, in_features:int, ggml_type:int) -> UOp:
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type)
+
+def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int, in_features:int, ggml_type:int,
+                       gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_") -> UOp:
+  # gate(token, output, base) -> base: moves the weight rows, xtoken(token) -> the activation row of an output row
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
     if ggml_type in SMALL_BLOCK_QUANTS: base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[ggml_type]
-    if sel is not None:
-      expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
-      base += sel[token].maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
-      token = token // x_share
+    if gate is not None: base = gate(token, output, base)
+    if xtoken is not None: token = xtoken(token)
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
     xwords = _amd_load(xq[token, group, 0], 8)
@@ -335,12 +337,16 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
     return total * xd[token, group]
-  return _decode_linear(out, out_features, in_features//32, group_dot, ("linear_" if sel is None else "moe_")+QUANT_NAMES[ggml_type])
+  return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
 
+@functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
                        out_features:int, in_features:int, ggml_type:int, x_share:int) -> UOp:
-  return _quant_decode_kernel(out, raw, xq, xd, xs, *grids, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
-                              sel=sel, x_share=x_share)
+  # out rows are (token, slot): the slot's expert reads its weight rows, x_share slots share an activation row
+  expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
+  def gate(row:UOp, output:UOp, base:UOp) -> UOp: return base + sel[row].maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
+  def xtoken(row:UOp) -> UOp: return row // x_share
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_")
 
 def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   B, T, slots = cast(tuple[int, int, int], sel.shape[-3:]) # sel: (B, T, k), weight: (E, O, I)
