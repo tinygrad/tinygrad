@@ -56,6 +56,7 @@ class TestMov(unittest.TestCase):
     self.assertEqual(result_lo, 0x1234, f"Expected lo=0x1234, got 0x{result_lo:04x}")
     self.assertEqual(result_hi, 0xBEEF, f"Expected hi=0xBEEF (preserved), got 0x{result_hi:04x}")
 
+
 class TestTrigonometry(unittest.TestCase):
   """Tests for trigonometric instructions."""
 
