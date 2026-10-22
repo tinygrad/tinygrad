@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
-from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
+from tinygrad.helpers import colored, getenv, unwrap, word_wrap, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
@@ -122,7 +122,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
-    if u.op in {*GroupOp.Binary, *GroupOp.Ternary} and all(s.op in {Ops.CONST, Ops.PARAM} for s in u.src): excluded.update(u.src)
+    if u.op in GroupOp.Broadcastable and all(s.op in {Ops.CONST, Ops.PARAM} for s in u.src): excluded.update(u.src)
   for u in toposort:
     argst = u.arg if u.op is Ops.SOURCE else codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
     with soft_err():
@@ -160,12 +160,11 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label += "\n<ISSUE GETTING LABEL>"
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
-    if TRACEMETA >= 2 and u.metadata is not None: label += "\n"+str(u.metadata)
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
-                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
+                    "ref":ref, "addrspace":addrspace_color}
   return graph
 
 def _reconstruct(data:VizData, a:int) -> UOp:
@@ -174,8 +173,8 @@ def _reconstruct(data:VizData, a:int) -> UOp:
     num, visited = stack.pop()
     if num in data.all_uops: continue
     if visited:
-      op, src, arg, *rest = data.trace.uop_fields[num]
-      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg, *rest)
+      op, src, arg = data.trace.uop_fields[num]
+      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg)
     else:
       stack.append((num, True))
       stack.extend((s, False) for s in data.trace.uop_fields[num][1])

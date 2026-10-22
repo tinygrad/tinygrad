@@ -589,7 +589,6 @@ class NVDevice(Compiled):
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
-    if self.is_usb: self.rtalloc_size = 4 << 20
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)
@@ -702,7 +701,7 @@ class NVDevice(Compiled):
                          dev=self.device, queue=queue, deps=(tl,))
     call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(aux=HCQInfo((self.device,)))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
-    run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)
+    run_linear(hcq_link(linear), jit=True, update_stats=False, wait=True)
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required: return

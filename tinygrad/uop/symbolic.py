@@ -197,8 +197,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
    lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 and dtypes.is_float(x.dtype) else None),
   # unpack a uint64 packed from two uint32 (threefry)
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y', dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
-  (((UPat.var('x', dtypes.uint32).cast(dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
-   lambda x: x.cast(dtypes.uint64)),
+  (((UPat.var('x', dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
+   lambda x: x.cast(dtypes.uint32).cast(dtypes.uint64)),
   # ** simple where folding **
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
@@ -253,7 +253,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
-  (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.weakint) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # y*(x+c) -> y*x + y*c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
@@ -297,7 +296,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # *** rules from symbolic ***
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val)),
-  (UPat.var("x", dtypes.weakint)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.cvar("c"), lambda x,c: -c<x if c.val != x.dtype.min else None),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
   ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range

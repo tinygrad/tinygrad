@@ -607,6 +607,16 @@ class TestDSRegisterWidth(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0xDEADBEEF)
     self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should be untouched")
 
+  def test_ds_load_inactive_lane(self):
+    st = run_program([
+      v_mov_b32_e32(v[0], 0x40000000), # set lds base addr to 1GB
+      v_mov_b32_e32(v[1], 99),
+      s_mov_b32(EXEC_LO, 0), # all lanes are exec 0
+      ds_load_b64(addr=v[0], vdst=v[1:2]),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+      s_mov_b32(EXEC_LO, 1),
+    ])
+    self.assertEqual(st.vgpr[0][1], 99)
 
 class TestDS2AddrStride64(unittest.TestCase):
   """Tests for DS_*_2ADDR_STRIDE64 (offset * 256 for B32, offset * 512 for B64)."""
