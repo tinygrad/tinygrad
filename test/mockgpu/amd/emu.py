@@ -699,21 +699,13 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   soffset_val = _c(0).cast(dtypes.uint64)
   if not (isinstance(inst, irc.SMEM) and not inst.soffset_en):
     soffset_val = ctx.rsgpr_dyn(ctx.inst_field(type(inst).soffset)).cast(dtypes.uint64)
-  addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + soffset_val
-  # S_LOAD_(DTYPE) series: B32/DWORD=1, B64/DWORDX2=2, U8=0.25, I8=-0.25, etc.
-  op_name = _op_name(inst)
-  assert (op_name).startswith('S_LOAD_'), f"unexpected SMEM op: {op_name}"
-  part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
-  nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
-  ndwords = max(1, int(abs(nval)))
-  dword_base = addr >> UOp.const(2, dtypes.uint64)
-  vals = [ctx.vmem.index(dword_base + UOp.const(i, dtypes.uint64)) for i in range(ndwords)]
-  if abs(nval) < 1:
-    nbits = int(abs(nval) * 32)
-    byte_off = (addr & UOp.const(3, dtypes.uint64)).cast(dtypes.uint32) * UOp.const(8, dtypes.uint32)
-    extracted = (vals[0] >> byte_off) & UOp.const((1 << nbits) - 1, dtypes.uint32)
-    vals[0] = extracted.cast({8: dtypes.int8, 16: dtypes.int16}[nbits]).cast(dtypes.int32).bitcast(dtypes.uint32) if nval < 0 else extracted
-  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), vals[i]) for i in range(ndwords)]
+  base = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1)))
+  byte_offset = offset.cast(dtypes.uint64) + soffset_val
+  srcs = {'ADDR': base + byte_offset, 'sgpr_base': base, 'offset': byte_offset,
+          'SBASE': base, 'SOFFSET': soffset_val, 'OFFSET': offset, '_vmem': ctx.vmem}
+  funcs = {'CalcScalarGlobalAddr': lambda _base, soffset, offset: base + soffset.cast(dtypes.uint64) + offset.cast(dtypes.uint64)}
+  _, assigns = parse_pcode(get_pcode(inst.op), srcs, funcs)
+  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), val) for i, val in _collect_data_slices(assigns, 'SDATA').items()]
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4.SOPC|ir4.SOPK|irc.SOP1|irc.SOP2|irc.SOPC|irc.SOPK, ctx: _Ctx) -> UOp:
