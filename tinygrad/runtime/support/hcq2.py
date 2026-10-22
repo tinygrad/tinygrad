@@ -30,6 +30,10 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
+  # a copy between two devices runs on the one it goes to (pulls): a push's writes into the peer are posted, its completion signal (in host memory)
+  # takes another path and can land first, the peer then reads its memory before all of the copy is in it
+  if call.body.op is Ops.STORE and all_devices_in(dst:=call.src[1].device, HCQ_DEVS - UVM_DEVS) and all_devices_in(runs_on, HCQ_DEVS - UVM_DEVS) and \
+     isinstance(dst, str) and isinstance(runs_on, str) and dst.split(":")[0] == runs_on.split(":")[0] and getenv("HCQ_COPY_PULL", 1): runs_on = dst
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
   return devs
