@@ -77,10 +77,8 @@ class TestAsmGEMM(unittest.TestCase):
     if not is_cdna4() or not has_hipcc():
       self.skipTest("assembly gemm is only for cdna4")
 
-  @unittest.skipIf(DEV.interface.startswith("MOCK"), "emulator does not support DS_READ_B64_TR_B16")
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 256)
 
-  @unittest.skipIf(DEV.interface.startswith("MOCK"), "emulator does not support DS_READ_B64_TR_B16")
   def test_verify_with_numpy(self):
     import numpy as np
     M, N, K = 256, 256, 256
@@ -357,7 +355,6 @@ def run_atb_gemm(rows, M, N, a_shard=None, b_shard=None, gpus=1, atol=1.0, rtol=
   np.testing.assert_allclose(out.float().numpy(), ref.numpy(), atol=atol, rtol=rtol)
 
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
-@unittest.skipIf(DEV.interface.startswith("MOCK"), "emulator does not support DS_READ_B64_TR_B16")
 class TestHkBf16AtbGemm(unittest.TestCase):
   def setUp(self):
     if not is_cdna4(): self.skipTest("hk bf16 atb gemm is cdna4 only")
