@@ -2,6 +2,7 @@ import unittest, itertools
 from dataclasses import replace
 
 from tinygrad.codegen.late.coalesce import indexing_simplify, pm_simplify_add_image
+from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.weak import pm_commit_weak
@@ -519,6 +520,10 @@ class TestImageSimplification(unittest.TestCase):
                               (Special("gidx0", 10), idx_y))
     off = graph_rewrite(load.sink(), pm_commit_weak+indexing_simplify).src[0].src[0]
     self.assertEqual(off.src[1].get_valid(), UOp.const(True))
+
+  def test_int64_index_into_image_with_emulated_long(self):
+    with Context(DEV="NULL:OPENCL:,IMAGE_PITCH_ALIGNMENT=64", IMAGE=1, EMULATED_DTYPES="long"):
+      Tensor.empty(96, 128)[Tensor([3, 1, 5], dtype=dtypes.int64)].realize()
 
 class TestImageStore(unittest.TestCase):
   def test_half_store_converts_lane_by_lane(self):

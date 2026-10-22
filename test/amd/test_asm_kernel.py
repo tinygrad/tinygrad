@@ -15,6 +15,7 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
 from test.amd.helpers import TARGET_TO_ARCH
+from test.mockgpu.amd.emu import ASM_CALL
 from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
@@ -206,14 +207,11 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
-# import contextvar to use it
-from test.mockgpu.amd.emu import ASM_CALL # noqa: F401
-
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
   def setUp(self):
     self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
-    self.enterContext(Context(ASM_CALL=1))
+    self.enterContext(Context(ASM_CALL=max(ASM_CALL.value, 1)))
 
   def test_lift_cache(self):
     from test.mockgpu.amd import call

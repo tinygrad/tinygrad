@@ -2,7 +2,7 @@ from __future__ import annotations
 import platform, ctypes, struct
 from typing import Any
 from tinygrad.helpers import OSX, unwrap, data64_le, cpu_profile
-from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, Buffer, BufferSpec
+from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, BufferSpec
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -31,23 +31,23 @@ class CPUProgram(Program['CPUDevice']):
       deps = struct.pack(f"<{len(self.libraries)}Q", *(lib.fxn for lib in self.libraries))
       self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(self.libraries), payload=deps + obj.lib)[0]
     else:
-      self.buf = Buffer(dev.device, len(obj.lib), options=BufferSpec(nolru=True), preallocate=True)
-      loaded = self._load(obj.lib, self.buf._buf)
-      self.buf.host[:len(loaded)] = loaded
+      self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True))
+      loaded = self._load(obj.lib, self.buf.buf)
+      unwrap(self.buf.host)[:len(loaded)] = loaded
 
       # RWX pages are unrepresentable on apple silicon (https://blog.svenpeter.dev/posts/m1_sprr_gxf/), so flip the written pages to R-X
-      libc.mprotect(ctypes.c_void_p(self.buf._buf), len(obj.lib), libc.PROT_READ | libc.PROT_EXEC)
+      libc.mprotect(ctypes.c_void_p(self.buf.buf), len(obj.lib), libc.PROT_READ | libc.PROT_EXEC)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if 'rt' in DLL._loaded_: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.buf._buf), ctypes.c_void_p(self.buf._buf + len(loaded)))
+      if 'rt' in DLL._loaded_: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.buf.buf), ctypes.c_void_p(self.buf.buf + len(loaded)))
       else:
         # msync should be a universal POSIX way to do this
-        libc.msync(ctypes.c_void_p(self.buf._buf), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
+        libc.msync(ctypes.c_void_p(self.buf.buf), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.entry, = self.exports.values() if self.exports else (self.buf._buf,)
+      self.entry, = self.exports.values() if self.exports else (self.buf.buf,)
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.entry)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),

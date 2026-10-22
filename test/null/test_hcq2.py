@@ -154,8 +154,15 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def scheduled(self, *ts:Tensor) -> list[UOp]: return [self.check(b) for b in scheduled(*ts)]
   def batch(self, *ts:Tensor) -> UOp: return unwrap(self.scheduled(*ts)[0])
+  def kernels(self, batch:UOp) -> list[str]:
+    return [ins_name(c) or "kernel" for c in queues(batch)[("NULL", "COMPUTE:0")] if ins_name(c) in ("exec_barrier", None)]
 
   def test_kernels_run_in_order(self): self.assertEqual(orders(self.batch(chain(self.x, 3))), {(0, 1, 2)})
+
+  def test_exec_barrier(self):
+    self.assertEqual(self.kernels(self.batch(chain(self.x, 3))), ["kernel", "exec_barrier", "kernel", "exec_barrier", "kernel"])
+    a = (self.x + 1).contiguous()
+    self.assertEqual(self.kernels(self.batch((a + 1).contiguous(), (a + 2).contiguous())), ["kernel", "exec_barrier", "kernel", "kernel"])
 
   def test_a_copy_waits_for_the_kernel_when_the_scalar_is_first(self):
     n, B = Tensor(Variable("n", 0, 10, dtypes.int).bind(5)), Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
@@ -214,7 +221,7 @@ class TestHCQ2Link(unittest.TestCase):
     hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0", deps=())
     lowered = lower_hcq(var.after(hcq2.encode_cmdbuf(hq, device="CPU")).index(0).store(var.index(0).load() + 1))
     self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
-    linked = hcq2.hcq_link(lower_and_compile(lowered), use_rt=False)
+    linked = hcq2.hcq_link(lower_and_compile(lowered))
     args = zip(lowered.src[0].without_after.src[1:], linked.src[0].without_after.src[1:])
     cmdbuf = next(b.buffer for p, b in args if p.without_after.arg.name == "cmdbuf_copy_0")
     for step in range(3):

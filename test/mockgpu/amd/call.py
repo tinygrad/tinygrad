@@ -1,6 +1,6 @@
 import itertools, struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, rewrite_group, uopfunc
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, rewrite_group, uopfunc, AxisType, PatternMatcher, UPat, graph_rewrite
 from tinygrad.codegen import to_program, to_program_config, lower_call
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer
@@ -8,7 +8,7 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import Context, DEV, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import Inst, EXEC_LO, ttmp
-from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
+from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, ASM_CALL
 
 InstructionCall = tuple[UOp, list[UOp]]
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[InstructionCall|None, UOp|None]]]] = {}
@@ -53,7 +53,12 @@ def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   w = UOp.range(waves, 0, dtype=dtypes.int)
   return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
+pm_asm_call = PatternMatcher([
+  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(arg=(AxisType.LOOP, *r.arg[1:])) if r.axis_type is not AxisType.LOOP else None),
+])
+
 def lower_body(sink:UOp, renderer:Renderer, name:str) -> tuple[UOp, list[UOp]]:
+  sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", enter_calls=True)
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
   return lower_call(renderer, body.call(*bufs, name=name)), bufs
@@ -178,10 +183,11 @@ def decode_cfg(insts:dict[int, Inst]):
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
          user_data_count:int=0, name:str="") -> UOp:
-  with Context(DEV=DEV.target('CPU', renderer='LLVM')):
+  dev, ren = ('AMD', 'HIP') if ASM_CALL > 1 else ('CPU', 'LLVM')
+  with Context(DEV=DEV.target(dev, renderer=ren)):
     view = to_mv(lib, lib_sz)
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count)
-    renderer = Device['CPU'].renderer
+    renderer = Device[dev].renderer
     key = (lib_sz, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
     entries = dispatch_cache.setdefault(key, [])
     for code, prg in entries:
@@ -277,6 +283,7 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
                                                           1, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*buffers[b][1]) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args, *params[-3:-1], name="asm_block"), *gates, w).end(*gates).end(w).sink()
+    block = graph_rewrite(block, pm_asm_call, name="pm_asm_call", enter_calls=True)
     return lower_call(renderer, block.call(*args, name="asm_waves"))
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
@@ -295,4 +302,5 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
   sink = UOp.sink(body, arg=KernelInfo(name=f"emu {name}", optimized=True))
+  sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", enter_calls=True)
   return to_program(sink, renderer)

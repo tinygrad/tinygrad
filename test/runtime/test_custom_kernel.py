@@ -595,8 +595,8 @@ class TestCustomKernel(unittest.TestCase):
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
-@unittest.skipUnless(Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)),
-                     "calls in kernels render on CPU")
+@unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer))) \
+    or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render not implemented in renderer")
 class TestCallInKernel(unittest.TestCase):
   def test_simple(self):
     N = getenv("N", 4)
@@ -683,11 +683,11 @@ class TestCallInKernel(unittest.TestCase):
   def test_call_body_range_is_not_ours(self):
     @uopfunc
     def mul(out:UOp, A:UOp):
-      k = UOp.range(4, 0)
+      k = UOp.range(4, 0, AxisType.LOOP)
       return out[k].store(A[k]*3).end(k).sink()
 
     def kernel(C:UOp, A:UOp):
-      m, i, call = UOp.range(3, 1), UOp.range(4, 0), mul(C, A)
+      m, i, call = UOp.range(3, 1, AxisType.LOOP), UOp.range(4, 0, AxisType.LOOP), mul(C, A)
       self.assertIn(i, call.body.toposort())
       end_m = C.after(call)[m].store(A[m]).end(m)
       return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
@@ -719,12 +719,12 @@ class TestCallInKernel(unittest.TestCase):
   def test_uopfunc(self):
     @uopfunc
     def axpy(out:UOp, x:UOp, a:int) -> UOp: # a is a trace-time constant: two bodies, two C functions
-      i = UOp.range(x.shape[0], 0)
+      i = UOp.range(x.shape[0], 0, AxisType.LOOP)
       return out[i].store(out[i] + x[i] * a).end(i).sink()
 
     def kernel(C:UOp, A:UOp) -> UOp:
       C = C.after(axpy(C.after(axpy(C, A, 2)), A, 3))
-      i = UOp.range(A.shape[0], 1) # a loop after the calls
+      i = UOp.range(A.shape[0], 1, AxisType.LOOP) # a loop after the calls
       return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
