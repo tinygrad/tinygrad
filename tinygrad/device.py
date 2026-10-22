@@ -391,10 +391,6 @@ class Compiled:
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
 
-    spec = BufferSpec(host=True, uncached=True, cpu_access=True, nolru=True)
-    self.timeline = Buffer(device, 16, options=spec, initial_value=bytes(16), allocator=allocator)
-    self.error_state = Buffer(self.host, 8, options=spec, initial_value=bytes(8), allocator=allocator if self.host == device else None)
-
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
@@ -413,6 +409,13 @@ class Compiled:
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 
   def link_buffer(self, b:UOp) -> Buffer|None: return None
+
+  @functools.cached_property
+  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
+    return Buffer(self.device, 16, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
+
+  @functools.cached_property
+  def error_state(self) -> Buffer: return Buffer(self.host, 8, options=BufferSpec(nolru=True), preallocate=True)
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     timeout = timeout if timeout is not None and self.can_recover else None

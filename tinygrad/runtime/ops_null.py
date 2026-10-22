@@ -1,4 +1,4 @@
-import inspect, itertools
+import inspect, functools, itertools
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Compiled, HostAllocator, MMIOInterface, Program, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -50,8 +50,7 @@ class NullProgram(Program['NullDevice']):
     if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
 
 class NullAllocator(HostAllocator):
-  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: # host memory is real, the device's is fake
-    return super()._alloc(size, options) if options.host else BufferStorage(next(va))
+  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: return BufferStorage(next(va))
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
@@ -63,6 +62,8 @@ Compiled.pm_encode += PatternMatcher([
 
 class NullDevice(Compiled):
   host = property(lambda self: self.device)
+  timeline = functools.cached_property(lambda self: self.host_buffer(16))
+  error_state = functools.cached_property(lambda self: self.host_buffer(8))
 
   def __init__(self, device:str):
     assert (emu:=getenv("EMULATE", "")) == "", \
