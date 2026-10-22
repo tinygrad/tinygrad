@@ -35,14 +35,12 @@ class Estimates:
 
       # traverse in reverse order to greedily ignore indexing ALU if necessary
       for u in reversed(uops):
-        # compute multiplicity of op over compile time over RANGEs and CALL context
+        # compute compile time known multiplicity of op over RANGEs and CALL context
         if (rngs:=tuple(u.ranges)) not in multcache:
           resolved = tuple(r.substitute(bindings) for r in rngs)
           bnds = [cast(sint, r.src[0].without_after.ssimplify()) for r in resolved if r.dtype != dtypes.void and
             not any(u.addrspace is not AddrSpace.ALU for u in r.src[0].without_after.backward_slice_with_self)]
           local_mult = prod(bnds)
-          if isinstance(local_mult, UOp):
-            local_mult = local_mult.substitute({x:x.const_like(0) for x in local_mult.toposort() if x.op is Ops.SPECIAL})
           multcache[rngs] = local_mult * caller_mult
         mult = multcache[rngs]
 
@@ -50,7 +48,7 @@ class Estimates:
         if ignore_indexing and u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
         elif u.op is Ops.CALL and enter_calls:
-          # pass bindings instead of resolving whole body because the bound ALU shouldnt get double counted, and its unecessary
+          # pass bindings instead of resolving whole body because the bound ops shouldnt get double counted
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.backward_slice if p.op is Ops.PARAM and p.arg.slot >= 0}
           child_flops, child_lds, child_mem = estimates_from_body(u.body, mult, child_bindings)
