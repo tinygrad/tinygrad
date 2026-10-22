@@ -2428,8 +2428,56 @@ def _mla_flash_wmma_kernel(out:UOp, q:UOp, cache:UOp, *mask:UOp, tokens:int, q_s
             for dt, o in enumerate(o_regs) for e in range(8)]
   return UOp.group(*stores).end(blk, wave, lane).sink(arg=KernelInfo(name="mla_flash_wmma", opts_to_apply=()))
 
+# ******** paged caches (batched decoding): a buffer of pages of PG rows (the model's own cache's, then extra ones) ********
+# table (slots, pages) holds the page of every page of every sequence
+
+def _page_row(buf:UOp, table:UOp, g:int|UOp, pos:UOp, PG:int) -> UOp:
+  """the row of buf of a sequence's position pos (group g)"""
+  NR, NP = cast(int, buf.shape[0]), cast(int, table.shape[1])
+  page = table[g, (pos // PG).maximum(0).minimum(NP-1)].load().cast(dtypes.weakint)
+  return (page * PG + pos % PG).maximum(0).minimum(NR-1)
+
 @functools.cache
-def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp) -> UOp:
+def _paged_rows_kernel(buf:UOp, rows:UOp, table:UOp, start:UOp, g:int, PG:int, T:int) -> UOp:
+  # the T rows (rows (T, D)) of sequence g at positions start.. into its pages
+  D = cast(int, rows.shape[1])
+  t, d = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
+  return buf[_page_row(buf, table, g, start + t, PG), d].store(rows[t, d].load().cast(buf.dtype)).end(t, d) \
+    .sink(arg=KernelInfo(name="paged_rows", opts_to_apply=()))
+
+def paged_rows(buf:Tensor, rows:Tensor, table:Tensor, start:UOp, g:int, PG:int) -> Tensor:
+  """writes rows (T, D) of sequence g at positions start.. into its pages of buf (N, D): buf after"""
+  return Tensor.custom_kernel(Tensor(buf.uop.after(start)), rows.contiguous(), table,
+                              fxn=functools.partial(_paged_rows_kernel, start=_unbind(start), g=g, PG=PG, T=int(rows.shape[0])))[0]
+
+@functools.cache
+def _paged_copy_kernel(buf:UOp, table:UOp, slot:UOp, pages:UOp, PG:int) -> UOp:
+  # the rows of the first `pages` pages of buf (the model's cache: a prefilled sequence) into the pages of sequence `slot` (the same: nothing)
+  D, NP = cast(int, buf.shape[1]), cast(int, table.shape[1])
+  pr, d = UOp.range(NP*PG, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
+  page = table[slot, (pr // PG).minimum(NP-1)].load().cast(dtypes.weakint)
+  ok = ((pr // PG) < pages) & page.ne(pr // PG)
+  return buf[_page_row(buf, table, slot, pr, PG), d.valid(ok)].store(buf[pr, d.valid(ok)].load()).end(pr, d) \
+    .sink(arg=KernelInfo(name="paged_copy", opts_to_apply=()))
+
+def paged_copy(buf:Tensor, table:Tensor, slot:UOp, pages:UOp, PG:int) -> Tensor:
+  """the first `pages` pages of buf into the pages of sequence `slot` (table): buf after"""
+  return Tensor.custom_kernel(Tensor(buf.uop.after(slot, pages)), table,
+                              fxn=functools.partial(_paged_copy_kernel, slot=_unbind(slot), pages=_unbind(pages), PG=PG))[0]
+
+@functools.cache
+def _page_move_kernel(buf:UOp, src:UOp, dst:UOp, PG:int) -> UOp:
+  D = cast(int, buf.shape[1])
+  r, d = UOp.range(PG, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
+  return buf[dst * PG + r, d].store(buf[src * PG + r, d].load()).end(r, d).sink(arg=KernelInfo(name="page_move", opts_to_apply=()))
+
+def page_move(buf:Tensor, src:UOp, dst:UOp, PG:int) -> Tensor:
+  """page src of buf into page dst: buf after"""
+  fxn = functools.partial(_page_move_kernel, src=_unbind(src), dst=_unbind(dst), PG=PG)
+  return Tensor.custom_kernel(Tensor(buf.uop.after(src, dst)), fxn=fxn)[0]
+
+@functools.cache
+def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *paged:UOp, scale:float, valid_len:UOp, g:int=0, PG:int=0) -> UOp:
   # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
   # they share the keys. 4 waves own a quarter of the latent dims each: they sum their partial scores through LDS, then update their quarter of
   # the output with P (via LDS). keys past valid_len aren't seen (padding rows of a chunk past its tokens: the cache isn't written there)
@@ -2453,7 +2501,9 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   s_acc = zero8
-  for kk in range(KT): s_acc = UOp.wmma(qfrag[kk], UOp.stack(*(cache[key, dbase + kk*16 + k].load() for k in ks)), s_acc, *WMMA_ARG)
+  # paged (table: g's pages of PG rows of the cache, see _page_row): the rows of the keys' positions
+  def kv(pos:UOp, c:UOp) -> UOp: return cache[_page_row(cache, paged[0], g, pos, PG) if PG else pos, c].load()
+  for kk in range(KT): s_acc = UOp.wmma(qfrag[kk], UOp.stack(*(kv(key, dbase + kk*16 + k) for k in ks)), s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
   s_reg = s_reg.after(s_reg.store(s_acc))
   lds_s = UOp.alloc((WAVES, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
@@ -2487,7 +2537,7 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   o_new = []
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
-    vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
+    vfrag = UOp.stack(*(vok.where(kv(vk, dbase + dt*16 + col), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     prev = o_regs[dt].after(n_tile)
     o_new.append(UOp.wmma(pfrag, vfrag, UOp.stack(*(prev[e].load() * alpha[e] for e in range(8))), *WMMA_ARG))
   update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier().end(n_tile)
@@ -2501,7 +2551,7 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, v
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*D*4)
   return UOp.group(*stores).end(tok, wave, lane).sink(arg=KernelInfo(name="mla_sparse_wmma", opts_to_apply=(), estimates=est))
 
-def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp) -> Tensor:
+def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp, paged:tuple|None=None) -> Tensor:
   """
   the attention of the (B=1, H, T, D) queries on the shared latent cache (1, 1, 1, N, D), every token on the keys of its list (T, n_max+1)
   (pool_index_rows): (1, H, T, D). the heads (at most 16) of a token are the rows of a workgroup
@@ -2513,10 +2563,13 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
   assert B == 1 and hl <= 16 and D % 64 == 0
   rows = q.reshape(n, hl, T, D).pad((None, (0, 16 - hl), None, None)).permute(0, 2, 1, 3).half().reshape(n*T*16, D).contiguous()
   out = Tensor.empty(n*T*16, D, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
-  vl = _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len, dtypes.weakint)
+  vl = cast(UOp, _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len, dtypes.weakint))
   if isinstance(valid_len, UOp): index = Tensor(index.uop.after(valid_len))
-  out = Tensor.custom_kernel(out, rows, cache.reshape(cache.shape[-2], D), index,
-                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl))[0]
+  # paged (table, g, PG): a sequence's positions are pages of the cache (see _page_row)
+  extra = (paged[0],) if paged is not None else ()
+  g, PG = (int(paged[1]), int(paged[2])) if paged is not None else (0, 0)
+  out = Tensor.custom_kernel(out, rows, cache.reshape(cache.shape[-2], D), index, *extra,
+                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, g=g, PG=PG))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
 
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
@@ -2819,7 +2872,7 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), fxn=fxn)[0]
 
 @functools.cache
-def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, start_pos:UOp, T:UOp) -> UOp:
+def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *paged:UOp, start_pos:UOp, T:UOp, slot:int=0, PG:int=0) -> UOp:
   # the pooled key of every pool with a token of this call: the softmax of the gates (+ape) over the pool's tokens weighs their keys. the
   # tokens before start_pos in the first pool come from the ring (the last tokens), the others from kg (T rows of key and gate)
   P, D = cast(tuple[int, int], pk.shape)
@@ -2839,6 +2892,10 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, start_pos:UOp, T:UOp) -
   mx = functools.reduce(UOp.maximum, logits)
   ws = [((l - mx) * LOG2E).exp2() for l in logits]
   pooled = functools.reduce(lambda a, b: a + b, (w * k for w, k in zip(ws, keys))) / functools.reduce(lambda a, b: a + b, ws)
+  if PG:
+    # paged (table): the sequence's pools are pages of PG of pk
+    return pk[_page_row(pk, paged[0], slot, pool, PG), d.valid(pool * kpool < end)].store(pooled.cast(pk.dtype)).end(j, d) \
+      .sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
   ok = (pool * kpool < end) & (pool < P)
   return pk[pool.valid(ok).minimum(P-1), d].store(pooled.cast(pk.dtype)).end(j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
 
@@ -2855,7 +2912,7 @@ def _pool_ring_kernel(ring:UOp, kg:UOp, start_pos:UOp, T:UOp) -> UOp:
   return ring[((end + r) % R).valid(ok), i, d].store(kg[(pos - start_pos).maximum(0).minimum(rows-1), i, d].load().cast(ring.dtype)).end(r, i, d) \
     .sink(arg=KernelInfo(name="pool_ring", opts_to_apply=()))
 
-def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:int|UOp) -> Tensor:
+def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:int|UOp, paged:tuple|None=None) -> Tensor:
   """
   updates the (P, D) pooled key cache with the pools of the T tokens at start_pos (kg: their (rows, 2, D) keys and gates, rows >= T), the ring
   (R, 2, D) holds the last R tokens (R >= 2*kpool: the next call can start at most kpool positions before the end). returns the cache after
@@ -2863,19 +2920,24 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp, T:in
   """
   ints = [_unbind(x) if isinstance(x, UOp) else UOp.const(x, dtypes.weakint) for x in (start_pos, T)]
   pk, ring = (Tensor(x.uop.after(*(v for v in (start_pos, T) if isinstance(v, UOp)))) for x in (pk, ring))
-  pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), fxn=functools.partial(_pool_keys_kernel, start_pos=ints[0], T=ints[1]))[0]
+  if paged is not None:
+    # paged (table, g, PP): the pools of the sequence are pages of PP of pk
+    pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), paged[0],
+                              fxn=functools.partial(_pool_keys_kernel, start_pos=ints[0], T=ints[1], slot=paged[1], PG=paged[2]))[0]
+  else:
+    pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), fxn=functools.partial(_pool_keys_kernel, start_pos=ints[0], T=ints[1]))[0]
   ring = Tensor(ring.uop.after(pk.uop))
   ring = Tensor.custom_kernel(ring, kg.contiguous(), fxn=functools.partial(_pool_ring_kernel, start_pos=ints[0], T=ints[1]))[0]
   return Tensor(pk.uop.after(ring.uop))
 
 @functools.cache
-def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=2) -> UOp:
+def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *paged:UOp, pools:UOp, NP:int=2, slot:int=0, PG:int=0) -> UOp:
   # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
   # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max. a few queries: q (T, H, D), w (T, H), out (T, P),
   # the waves of every query
   T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
   H, D = cast(tuple[int, int], q.shape[-2:])
-  P = cast(int, k.shape[0])
+  P = cast(int, k.shape[0]) if not PG else cast(int, paged[0].shape[1]) * PG  # (paged: the pools of the table's pages)
   G = min(256, P // (16*NP))
   q, w, out = q.reshape(T, H, D), w.reshape(T, H), out.reshape(T, P)
   gr, lane = UOp.range(T*G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
@@ -2893,7 +2955,8 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:in
     wt = [w[ht*16 + half*8 + e].load() for e in range(8)]
     for n in range(NP):
       s = zero8
-      for kk in range(D // 16): s = UOp.wmma(qfrags[kk], UOp.stack(*(k[p0 + n*16 + col, kk*16 + j].load() for j in ks)), s, *WMMA_ARG)
+      def kl(p:UOp, c:int) -> UOp: return k[_page_row(k, paged[0], slot, p, PG) if PG else p, c].load()
+      for kk in range(D // 16): s = UOp.wmma(qfrags[kk], UOp.stack(*(kl(p0 + n*16 + col, kk*16 + j) for j in ks)), s, *WMMA_ARG)
       s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
       s_reg = s_reg.after(s_reg.store(s))
       totals[n] = totals[n] + functools.reduce(lambda a, e: a + s_reg[e].load().maximum(0) * wt[e], range(1, 8), s_reg[0].load().maximum(0) * wt[0])
@@ -3019,14 +3082,18 @@ def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UO
                                 fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
   return pool_index_rows(scores.reshape(1, P), q_start, pools, top, kpool).reshape(-1)
 
-def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
-  """indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists"""
-  T, P = int(q.shape[0]), int(k.shape[0])
+def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int, paged:tuple|None=None) -> Tensor:
+  """
+  indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists. paged (table, g, PP): the
+  pooled keys of a sequence are pages of PP of k (see _page_row), P is the table's pages times PP
+  """
+  T, P = int(q.shape[0]), (int(k.shape[0]) if paged is None else int(paged[0].shape[1]) * paged[2])
   scores = Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
-  scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(),
-                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
+  extra, g, PG = ((paged[0],), paged[1], paged[2]) if paged is not None else ((), 0, 0)
+  scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(), *extra,
+                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, slot=g, PG=PG))[0]
   return pool_index_rows(scores, q_start, pools, top, kpool)
 
 KDA_WAVES = 8
