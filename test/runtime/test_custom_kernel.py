@@ -719,12 +719,12 @@ class TestCallInKernel(unittest.TestCase):
   def test_uopfunc(self):
     @uopfunc
     def axpy(out:UOp, x:UOp, a:int) -> UOp: # a is a trace-time constant: two bodies, two C functions
-      i = UOp.range(x.shape[0], 0)
+      i = UOp.range(x.shape[0], 0, AxisType.LOOP)
       return out[i].store(out[i] + x[i] * a).end(i).sink()
 
     def kernel(C:UOp, A:UOp) -> UOp:
       C = C.after(axpy(C.after(axpy(C, A, 2)), A, 3))
-      i = UOp.range(A.shape[0], 1) # a loop after the calls
+      i = UOp.range(A.shape[0], 1, AxisType.LOOP) # a loop after the calls
       return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
