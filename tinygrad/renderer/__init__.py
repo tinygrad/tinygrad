@@ -13,12 +13,6 @@ def with_storage(x:UOp, dt:DType) -> UOp:
   if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
-def idx_alu(uops:list[UOp]):
-  excluded: set[UOp] = set()
-  for u in uops:
-    if u.op in {Ops.INDEX, Ops.SHRINK}:
-      excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
-  return excluded
 
 @dataclass(frozen=True)
 class Estimates:
@@ -32,6 +26,7 @@ class Estimates:
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
   def from_uops(sink:UOp, ignore_indexing=False) -> Estimates:
+
     @functools.cache
     def mults(ranges:tuple[UOp,...]) -> sint:
       mult = prod([cast(sint, r.src[0].without_after.ssimplify()) for r in ranges if not
@@ -44,8 +39,14 @@ class Estimates:
       lds: sint = 0
       mem: dict[tuple[UOp, Ops], sint] = {}
       uops = uops if isinstance(uops, list) else list(uops.toposort(enter_calls=False))
-      excluded = idx_alu(uops) if ignore_indexing else set()
+      excluded: set[UOp] = set()
       rcache: dict[tuple[UOp,...], tuple[UOp,...]] = {}
+
+      if ignore_indexing:
+        for u in uops:
+          if u.op in {Ops.INDEX, Ops.SHRINK}:
+            excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+
       for u in uops:
         if (rngs:=tuple(u.ranges)) not in rcache: rcache[rngs] = tuple(r.substitute(bindings) for r in rngs)
         mult = mults(rcache[rngs]) * caller_mult
@@ -58,6 +59,7 @@ class Estimates:
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
           inline = process_body(u.body, mult, child_bindings) # noqa: F821
+
           for (buf,op),accessed in inline[2].items():
             mem[(buf,op)] = smin(mem.get((buf,op),0) + accessed, buf.max_numel() * buf.dtype.itemsize)
           flops += inline[0]
