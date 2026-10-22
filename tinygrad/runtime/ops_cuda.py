@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
-from typing import Any
+from typing import Any, Callable
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap, to_name
 from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
@@ -44,13 +44,13 @@ pm_cuda = PatternMatcher([ # None is the stream
                      sig[1:2].getaddr(ctx.device))),
 ])
 
-def cuda_submit(s:UOp) -> UOp:
+def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> UOp:
   (call, *deps), q = s.src, s.src[0].src[1]
   rt_vars = UOp.param(0, dtypes.uint64, 3, q.device, name="rt_vars") # [ctx, compute stream, copy stream]
-  h = ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
+  h = ccallfn(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
   for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
     stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
-    h = ccall(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
+    h = ccallfn(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
   return h.sink().call(UOp.alloc((3,), dtypes.uint64, 0, device=q.device, name="handles").after(*deps), name=call.body.arg.name)
 
 Compiled.pm_encode += PatternMatcher([

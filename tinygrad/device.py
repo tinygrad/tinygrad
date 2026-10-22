@@ -11,7 +11,6 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
-  from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
 
@@ -408,8 +407,6 @@ class Compiled:
   def compiler(self) -> Compiler: return self.renderer.compiler
 
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
-
-  def link_buffer(self, b:UOp) -> Buffer|None: return None
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
