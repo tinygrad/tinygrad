@@ -1,10 +1,8 @@
 import struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc
-from tinygrad.codegen import to_program
-from tinygrad.device import Device
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc, AxisType
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import Context, DEV, dedup, to_mv
+from tinygrad.helpers import dedup, to_mv
 from tinygrad.runtime.autogen import hsa
 from tinygrad.renderer.amd.dsl import EXEC_LO, ttmp
 from test.mockgpu.amd.emu import _Ctx, _get_handler, _wave_size, _canonical_info, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE
@@ -52,6 +50,7 @@ def move_const_idxs(call:UOp) -> UOp|None:
   return call.replace(src=(call.body.substitute(rep, walk=True), *call.src[1:], *idxs))
 
 pm_asm_call = PatternMatcher([
+  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(arg=(AxisType.LOOP, *r.arg[1:])) if r.axis_type is not AxisType.LOOP else None),
   # move CONST outside CALL body
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), move_const_idxs),
 ])
