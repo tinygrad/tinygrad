@@ -2652,6 +2652,15 @@ def _slot_of(slots:tuple[UOp, ...], g:UOp) -> UOp:
 
 @functools.cache
 def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0) -> UOp:
+  return _mla_sparse_body(out, None, q, cache, index, grouped, scale, valid_len, stride, 1)
+
+@functools.cache
+def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, split:int) -> UOp:
+  # a token's keys split over `split` workgroups: out (T*split*16, D) every split's output (normed by its sum), ml its rows' max and sum
+  return _mla_sparse_body(out, ml, q, cache, index, (), scale, valid_len, 0, split)
+
+def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
+                     split:int) -> UOp:
   # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
   # they share the keys. 4 waves own a quarter of the latent dims each: they sum their partial scores through LDS, then update their quarter of
   # the output with P (via LDS). keys past valid_len aren't seen (padding rows of a chunk past its tokens: the cache isn't written there)
@@ -2660,7 +2669,8 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, 
   N, WAVES = cache.shape[0], 4
   DW = D // WAVES
   KT = DW // 16
-  tok = UOp.range(T, 0, AxisType.GLOBAL)
+  tg = UOp.range(T*split, 0, AxisType.GLOBAL)
+  tok, sp = tg // split, tg % split
   wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half = lane % 16, lane // 16
   dbase = wave * DW
@@ -2672,7 +2682,11 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, 
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
   qfrag = [UOp.stack(*(q[tok*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
   count = index[tok, n_max].load().cast(dtypes.weakint).minimum(n_max)
-  n_tile = UOp.range((count + 15) // 16, 2, AxisType.LOOP)
+  # (split: the tiles of the keys of a token in ranges, sp's)
+  tiles = (count + 15) // 16
+  per = (tiles + split - 1) // split
+  n_tile_r = UOp.range((tiles - sp*per).maximum(0).minimum(per), 2, AxisType.LOOP)
+  n_tile = n_tile_r + sp*per
   def key_at(j) -> tuple[UOp, UOp]:
     i = n_tile * 16 + j
     key = index[tok, i.minimum(n_max-1)].load().cast(dtypes.weakint)
@@ -2689,7 +2703,7 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, 
   # the softmax of rows e (of both halves) in ES = 8//WAVES of them a wave: its running max and sum, P and the rescale of the rows to LDS
   ES = 8 // WAVES
   m_reg, l_reg = _reg((ES,), -1e30), _reg((ES,), 0)
-  m_old, l_old = m_reg.after(n_tile), l_reg.after(n_tile)
+  m_old, l_old = m_reg.after(n_tile_r), l_reg.after(n_tile_r)
   lds_p = UOp.alloc((16, 16 + 2), dtypes.half, addrspace=AddrSpace.LOCAL)
   lds_a = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
   pst, m_new, l_new = [], [], []
@@ -2715,18 +2729,22 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, 
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
     vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
-    prev = o_regs[dt].after(n_tile)
+    prev = o_regs[dt].after(n_tile_r)
     o_new.append(UOp.wmma(pfrag, vfrag, UOp.stack(*(prev[e].load() * alpha[e] for e in range(8))), *WMMA_ARG))
-  update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier().end(n_tile)
+  update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier().end(n_tile_r)
   # the sums of the rows of every wave (LDS)
   lds_l = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
   l_fin = l_reg.after(update)
   lds_l = lds_l.after(UOp.group(*(lds_l[(half*8 + wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
-  stores = [out[tok*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30))
+  stores = [out[tg*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30))
             for dt, o in enumerate(o_regs) for e in range(8)]
+  if ml is not None:
+    m_fin = m_reg.after(update)
+    stores += [ml[tg*16 + half*8 + wave*ES + i, UOp.const(c, dtypes.weakint).valid(col.eq(0))].store(v)
+               for i in range(ES) for c, v in ((0, m_fin[i].load()), (1, l_fin[i].load()))]
   # a data dependent count of keys, an upper bound estimate
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*D*4)
-  return UOp.group(*stores).end(tok, wave, lane).sink(arg=KernelInfo(name="mla_sparse_wmma", opts_to_apply=(), estimates=est))
+  return UOp.group(*stores).end(tg, wave, lane).sink(arg=KernelInfo(name="mla_sparse_wmma", opts_to_apply=(), estimates=est))
 
 def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None) -> Tensor:
   """
@@ -2745,8 +2763,18 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
   # grouped (positions, stride): the tokens of G sequences (T//G each, the first at positions[g]), a sequence's keys stride rows of the cache
   # (and slots: the slot of every sequence, else slot g the g-th's)
   extra, stride = ((grouped[0], *[x for x in grouped[2:] if x is not None]), int(grouped[1])) if grouped is not None else ((), 0)
-  out = Tensor.custom_kernel(out, rows, cache.reshape(-1, D), index, *extra,
-                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
+  if grouped is None and (split:=getenv("MLA_SPLIT", 16) if T < 16 else 1) > 1:
+    # a few tokens: a token's keys over `split` workgroups, their outputs combined by their max and sum (the GPU's workgroups, not a few)
+    parts = Tensor.empty(n*T*split*16, D, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
+    ml = Tensor.empty(n*T*split*16, 2, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
+    parts, ml = Tensor.custom_kernel(parts, ml, rows, cache.reshape(-1, D), index,
+                                     fxn=functools.partial(_mla_sparse_split_kernel, scale=scale, valid_len=vl, split=split))[:2]
+    m, l = (ml.reshape(n, T, split, 16, 2)[..., i:i+1] for i in range(2))
+    w = l * (m - m.max(2, keepdim=True)).exp()
+    out = ((parts.reshape(n, T, split, 16, D) * w).sum(2) / w.sum(2).maximum(1e-30)).reshape(n*T*16, D)
+  else:
+    out = Tensor.custom_kernel(out, rows, cache.reshape(-1, D), index, *extra,
+                               fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
 
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
@@ -3216,12 +3244,13 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
   # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
   lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
   thr_reg = _reg_u32()
+  # (a thread's keys in registers, loaded once: the rounds count them there)
+  kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
+  kreg = kreg.after(UOp.group(*(kreg[c].store(key(UOp.const(c, dtypes.weakint))) for c in range(per))))
   bit = UOp.range((pools > k).where(32, 0), 3, AxisType.LOOP)
   prev = thr_reg.after(bit)[0].load()
   cand = prev | (UOp.const(1, dtypes.uint32) << (31 - bit).cast(dtypes.uint32))
-  c = UOp.range(npc, 4, AxisType.LOOP)
-  cnt_reg = _reg((1,), 0, bit)  # zeroed for every bit
-  cnt = cnt_reg.after(cnt_reg[0].store(cnt_reg.after(c)[0].load() + (key(c) >= cand).cast(dtypes.float32)).end(c))[0].load()
+  cnt = functools.reduce(lambda a, b: a + b, [(kreg.after(bit)[c].load() >= cand).cast(dtypes.float32) for c in range(per)])
   stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
   total = warp_reduce(stage[bit, lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)  # the sum of the waves' counts
   thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load().maximum(1)
