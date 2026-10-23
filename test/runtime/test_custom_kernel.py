@@ -554,7 +554,7 @@ class TestCustomKernel(unittest.TestCase):
     assert isinstance(source, str)
     # call to PROGRAM
     def custom_source(out:UOp, inp:UOp) -> UOp:
-      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("call_to_source"))
+      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=source)))
     cpu_src = Tensor([2], device="CPU").realize()
     t = Tensor.custom_kernel(t, cpu_src.to(t.device), fxn=custom_source)[0]
