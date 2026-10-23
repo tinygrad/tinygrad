@@ -1063,33 +1063,37 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(OW * TW, 3, axis_type=AxisType.LOCAL)
   col, half = lane % 16, lane // 16
   wt, wo, tid = wave // OW, wave % OW, wave * 32 + lane
-  g = UOp.range(groups, 4, AxisType.LOOP)
-  # the stage: x (token_tile, 32) in eight halves a thread, the weights (128, 32): the block of output tid
-  lds_x = UOp.alloc((token_tile, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)
-  lds_w = UOp.alloc((128, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  # GS groups of 32 inputs a stage (a barrier a stage)
+  GS = next(gs for gs in (getenv("Q8_GEMM_GS", 2), 1) if groups % gs == 0 and token_tile * (32*gs + 8) <= 128 * 72)
+  gr = UOp.range(groups // GS, 4, AxisType.LOOP)
+  g = gr * GS
+  # the stage: x (token_tile, 32*GS) in eight halves a thread, the weights (128, 32*GS): the blocks of output tid
+  lds_x = UOp.alloc((token_tile, 32*GS + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  lds_w = UOp.alloc((128, 32*GS + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
   st = []
-  for k in range((token_tile * 4 + 127) // 128):
+  for k in range((token_tile * 4 * GS + 127) // 128):
     e = tid + k * 128
-    r, c = (e // 4).minimum(token_tile - 1), e % 4
-    st += [lds_x[r.valid(e < token_tile * 4), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
-  base = (((output_block * 128 + tid).minimum(N - 1)) * groups + g) * 17
-  scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
-  for w in range(16):
-    word = raw[base + 1 + w].load().cast(dtypes.uint32)
-    for b in range(2):
-      st.append(lds_w[tid, w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
+    r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
+    st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
+  for gi in range(GS):
+    base = (((output_block * 128 + tid).minimum(N - 1)) * groups + g + gi) * 17
+    scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
+    for w in range(16):
+      word = raw[base + 1 + w].load().cast(dtypes.uint32)
+      for b in range(2):
+        st.append(lds_w[tid, gi * 32 + w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
   staged = UOp.group(*st).barrier()
   lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
   ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8))
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
-  cur:list[list[UOp]] = [[accs[o][t].after(g) for t in range(TT)] for o in range(OT)]
-  for kh in range(2):
+  cur:list[list[UOp]] = [[accs[o][t].after(gr) for t in range(TT)] for o in range(OT)]
+  for kh in range(2*GS):
     afr = [UOp.stack(*(lds_x[wt * TT * 16 + t * 16 + col, kh * 16 + i].load() for i in ks)) for t in range(TT)]
     bfr = [UOp.stack(*(lds_w[wo * OT * 16 + o * 16 + col, kh * 16 + i].load() for i in ks)) for o in range(OT)]
     cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
   # (a barrier after the group's reads: the next group's stage doesn't overwrite what a slower wave still reads)
-  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier().end(g)
+  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier().end(gr)
   def ocol(o:int) -> UOp:
     c = output_block * 128 + wo * OT * 16 + o * 16 + col
     return c.valid(c < N) if N % 128 else c
