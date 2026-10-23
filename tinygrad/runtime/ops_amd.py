@@ -1000,11 +1000,6 @@ class AMDDevice(Compiled):
     blob = bytes(self.sqtt_buf.host.view(fmt='B')[off:off + wptr])
     return (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + blob) if self.target[0] == 9 else blob
 
-  def _at_profile_finalize(self): # the calibration kernels aren't profiles
-    self.synchronize()
-    super()._at_profile_finalize()
-    if self.prof_enabled: self.prof_read = self.prof_log.host.view(fmt='Q')[0]
-
   def collect_prof(self):
     if self.prof_enabled:
       log = self.prof_log.host.view(fmt='Q')
