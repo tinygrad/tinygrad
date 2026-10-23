@@ -1102,6 +1102,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
   splits = layer.in_features // in_features
+  if Q8_ROWS_I8[0] and tokens > 64 and tokens % 64 and tokens % 16 == 0 and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
+    # (the rows of batched decoding that aren't whole tiles of the kernels (80 sequences: 240): padded to tiles of 64, the extra rows sliced off)
+    out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, round_up(tokens, 64) - tokens), (0, 0))), reduce, None, split, half_out)
+    out = out[:, :tokens] if splits > 1 and not reduce else out[:tokens]
+    return out.reshape(*((splits,) if splits > 1 and not reduce else ()), *x.shape[:-1], out_features)
   assert (layer.shard_axis == 1) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.shard_axis}"
   out_shape:tuple[int, ...] = (splits*tokens, out_features)
   fxn:Callable[..., UOp]
@@ -1560,7 +1565,7 @@ def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
   n = prod(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and (rows:=prod(x.shape[1:-1])) > 4 and getenv("P2P_AR_HALF", 1) and \
-     (pw:=next(((p, w) for cap in (P2P_AR_PART, P2P_AR_MAXG*P2P_AR_MAXW) for p in (1, 2, 4, 8) for w in (3, 2) if rows % p == 0 and
+     (pw:=next(((p, w) for cap in (P2P_AR_PART, P2P_AR_MAXG*P2P_AR_MAXW) for p in (1, 2, 4, 8, 16) for w in (3, 2) if rows % p == 0 and
                 n % (w*p) == 0 and n // (w*p) <= cap and p2p_ar_shape(n // (w*p)) is not None), None)) and p2p_allreduce(x.device):
     # many rows (batched decoding): in half, three values a word (or two) (the copies would sum them in half too). the same bits on every device. rows
     # that don't fit the mailbox in parts, an allreduce each (one of more workgroups than the devices run at once waits on the ones that don't)
@@ -3281,7 +3286,7 @@ KDA_WAVES = 8
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
                        dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0, G:int=1,
-                       positions:UOp|None=None, S:int=0) -> UOp:
+                       positions:UOp|None=None, S:int=0, SC:int=0) -> UOp:
   # row0: the tokens are rows row0.. of the inputs (a row of batched decoding: the inputs of all of them, not a copy of its own)
   # G: groups (batched decoding: a sequence each, its tokens the rows g*T.., its states the S of g*S.. in the states, its start position the
   # g-th of positions)
@@ -3291,13 +3296,16 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   # k, the decay and the delta rule update of the head's state token by token, the rms norm of the outputs and their sigmoid gates.
   # the states (S, ...) at a position p are p%S: read at start_pos, the ones after every token written (the others keep the states before)
   # (S: the states of a group, the state buffer can hold more groups than the call's)
+  # (SC: the conv states' S, default S. a recurrent state of S == T: a thread reads its rows of the one of start_pos before it writes them, the
+  # conv states (read by every workgroup of a head, written by the first) need SC > T)
   S, T, N = S or cast(int, state.shape[0]), cast(int, z.shape[-2]) // G, cast(int, pq.shape[-2])
+  SC = SC or S
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else getenv("KDA_MULTI_WAVES", 2)), cast(int, wq.shape[-1])
   if R: W = getenv("KDA_SPLIT_WAVES", 8)
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
-  assert T < S, "the states of the T tokens and the one before"
+  assert T <= S and T < SC, "the states of the T tokens and the one before"
   state, z = state.reshape(-1, V, K), z.reshape(G*T, heads*V)
   cq, ck, cv = (x.reshape(-1, heads*K) for x in (cq, ck, cv))
   pq, pk, pv, gate, alpha = (x.reshape(N, heads*K) for x in (pq, pk, pv, gate, alpha))
@@ -3306,6 +3314,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   grp, hr = (ghr // (heads*max(R, 1)), ghr % (heads*max(R, 1))) if G > 1 else (UOp.const(0, dtypes.weakint), ghr)
   if positions is not None: start_pos = positions[grp].load().cast(dtypes.weakint)
   rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
+  rpc, wpcs, cbase = start_pos % SC, [(start_pos + t + 1) % SC for t in range(T)], grp*SC
   sbase, prow = grp*S, [grp*T + row0 + t for t in range(T)]  # (the group's states and the rows of its tokens)
   qrows, krows, vrows, gate_rows, alpha_rows, beta_rows = ([x[r] for r in prow] for x in (pq, pk, pv, gate, alpha, beta))
   hr = ghr if G == 1 else hr
@@ -3318,12 +3327,12 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   ch, active = h * K + tid % K, tid < K
   stores = []
   for i, (cs, p, w) in enumerate(((cq, qrows, wq), (ck, krows, wk), (cv, vrows, wv))):
-    inputs = [initial.where(0, cs[(sbase+rp)*(conv-1) + j, ch].load().float()) for j in range(conv-1)] + [p[t][ch].load().float() for t in range(T)]
+    inputs = [initial.where(0, cs[(cbase+rpc)*(conv-1) + j, ch].load().float()) for j in range(conv-1)] + [p[t][ch].load().float() for t in range(T)]
     weights = [w[ch, j].load().float() for j in range(conv)]
     for t in range(T):
       window = inputs[t:t+conv]
       out = silu(sum((weights[j] * window[j] for j in range(1, conv)), weights[0] * window[0]))
-      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[(sbase+wps[t])*(conv-1) + j, ch.valid(active & chunk.eq(0))].store(
+      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[(cbase+wpcs[t])*(conv-1) + j, ch.valid(active & chunk.eq(0))].store(
                    window[j+1].cast(cs.dtype)) for j in range(conv-1)]
   lds = lds.after(UOp.group(*stores).barrier())
   # every wave: q and k of the head (key column lane + 32*i), l2 normalized, the decay of every column
@@ -3388,7 +3397,7 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
-               positions:Tensor|None=None, groups:int=1, S:int=0) -> Tensor:
+               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
   are p%S: the ones of start_pos are read, the ones after every token written (T < S)
@@ -3410,7 +3419,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   pos_param = params[-1] if positions is not None else None
   call = _kda_decode_kernel(*(params[:-1] if positions is not None else params), cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
-                            pos_param, S).call(*contig)
+                            pos_param, S, SC).call(*contig)
   out = Tensor(contig[0].after(call))
   if not R: return out
   # the norm, the gate and the quantization of the outputs (the output projection's input)

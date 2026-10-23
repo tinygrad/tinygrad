@@ -273,7 +273,7 @@ def _identity(x:Tensor) -> Tensor: return x
 # the experts of a few tokens are the ones of every token (a decode kernel each), more are grouped by expert (prefill)
 MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 96)
 # batched decoding: rows of experts decoded (in bundles) up to this many, grouped (the prefill kernels) past it
-MOE_BATCH_ROWS = getenv("MOE_BATCH_ROWS", 192)
+MOE_BATCH_ROWS = getenv("MOE_BATCH_ROWS", 512)
 def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None else MOE_DECODE_ROWS
 
 # batched decoding (Transformer.forward_batch): the rows are groups of a sequence each, group g (its rows the tokens at positions pos.. of the
@@ -290,6 +290,13 @@ class BatchPrefill:
     """(G*P,) the rows that are tokens (the others pad a prompt to P rows)"""
     return (Tensor.arange(self.P).reshape(1, self.P).to(self.counts.device) < self.counts.reshape(-1, 1)).reshape(-1)
 _batch_prefill:list[BatchPrefill|None] = [None]
+
+def slot_states(k:int) -> tuple[int, int]:
+  """
+  the S of a slot's recurrent states and of its conv states (the state of a position p is p%S, see kda_decode): a step of k+1 tokens reads
+  one and writes k+1, the recurrent ones can overwrite the one read (SLOT_STATES_TIGHT: a quarter less memory, more slots)
+  """
+  return (k + 1 if k and getenv("SLOT_STATES_TIGHT", 1) else k + 2), k + 2
 
 def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|None) -> Tensor:
   """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
@@ -1063,7 +1070,7 @@ class GatedDeltaNetBlock(FFNBlock):
     slots, counts = pf.slots.to(x.device), pf.counts.to(x.device)
     pf.effects.append(slot_scatter(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), state.reshape(G, 1, -1), slots, counts, S))
     # (a conv state: the window's rows count.. of the prompt, the C-1 inputs before its end)
-    pf.effects.extend(slot_scatter(pool.reshape(pool.shape[0], C-1, -1), window, slots, counts, S, shift=1)
+    pf.effects.extend(slot_scatter(pool.reshape(pool.shape[0], C-1, -1), window, slots, counts, int(self.slot_conv[0][0].shape[0]), shift=1)
                       for pool, window in zip(self.pool_conv, windows))
     z = (self.ssm_norm(core) * out_gate.sigmoid()).cast(x.dtype).contiguous()
     return _out(self.ssm_out, z.reshape(Bt, Tq, -1))
@@ -1077,30 +1084,30 @@ class GatedDeltaNetBlock(FFNBlock):
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
     # groups of the same size: a kernel for all of them (their states in the pools, their positions in a tensor)
     if len({T for _, T in groups}) == 1 and getenv("KDA_GROUPS", 1):
-      S, T = int(self.slot_rec[0].shape[0]), groups[0][1]
+      S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), groups[0][1]
       z = kda_decode(self.pool_rec, self.pool_conv, projs, weights, gate, alpha, beta, self.ssm_dt["bias"], self.ssm_a,
                      unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
-                     positions=_group_positions(groups, self.pool_rec.device), groups=len(groups), S=S)
+                     positions=_group_positions(groups, self.pool_rec.device), groups=len(groups), S=S, SC=SC)
       return self.ssm_out(z)
     # (every row's kernel reads its row of the inputs)
     starts = list(itertools.accumulate((t for _, t in groups), initial=0))
     zs = [kda_decode(self.slot_rec[g], self.slot_conv[g], projs, weights, gate, alpha, beta, self.ssm_dt["bias"], self.ssm_a,
-                     unwrap(self.ssm_norm.weight), Tensor(pos), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=starts[g], rows=T)
+                     unwrap(self.ssm_norm.weight), Tensor(pos), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=starts[g], rows=T,
+                     SC=int(self.slot_conv[g][0].shape[0]))
           for g, (pos, T) in enumerate(groups)]
     return self.ssm_out(zs[0].cat(*zs[1:], dim=1))
 
   def _init_slots(self, n:int, ctx:int):
     """
-    the states of n sequences of batched decoding (one slot each): S of each state, the one of a position p is p%S (see kda_decode). a step of
-    T tokens (speculative decoding: k+1) needs S > T
+    the states of n sequences of batched decoding (one slot each): S of each state, the one of a position p is p%S (see slot_states)
     """
     if len(getattr(self, "slot_rec", [])) >= n: return
-    S = self.config.spec_drafts + 2
+    S, SC = slot_states(self.config.spec_drafts)
     # (in one buffer of every device: slot_store writes what a step reads)
     # (in half: the memory of more slots. the kernels compute in float)
     self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]),
                                               dtypes.half if getenv("SLOT_STATE_HALF", 1) else None)
-    pools = [_slot_pool(n, c, (S, *c.shape[1:])) for c in self.conv_states]
+    pools = [_slot_pool(n, c, (SC, *c.shape[1:])) for c in self.conv_states]
     self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[i] for _, slots in pools] for i in range(n)]
 
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
@@ -1415,11 +1422,11 @@ class Transformer:
   # a sequence is prefilled as usual (the states of the model), then its states are copied into a free slot (slot_store); steps take the
   # sequences of the slots 0..n-1 (the rows of a step), the projections, experts and the head read their weights once for all of them
 
-  BATCH_SIZES = (1, 2, 4, 8, 16, 32, 64)
+  BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,4,8,16,32,64,80")).split(","))
   def batch_slots(self) -> int:
     # (the memory of the slots: a shorter context of the model's own frees some)
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
-    return min(getenv("BATCH_SLOTS", 64 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
+    return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
 
   def _init_slots(self, alloc:bool=True):
@@ -1464,9 +1471,10 @@ class Transformer:
     self._slots_ready = True
 
   def _slot_blocks(self) -> list[FFNBlock]: return self.blk + ([self.mtp] if self.config.spec_drafts else [])
-  def _slot_copy(self, slot:UOp, rp:UOp, wp:UOp, hrow:UOp):
+  def _slot_copy(self, slot:UOp, rp:UOp, wp:UOp, wpc:UOp, hrow:UOp):
     """
-    the states of the model at the end of its tokens (the recurrent ones in rp) into a slot (its recurrent ones in wp): in the pools.
+    the states of the model at the end of its tokens (the recurrent ones in rp) into a slot (its recurrent ones in wp, its conv ones in wpc): in
+    the pools.
     speculative decoding: the hidden state of the last token (row hrow of _spec_h) is the slot's row 0
     """
     copies:list[Tensor] = []
@@ -1474,9 +1482,9 @@ class Transformer:
     if (k:=self.config.spec_drafts): copies.append(rows(self.pool_spec_h, slot*2*(k+1)).assign(rows(self._spec_h, hrow)))
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock):
-        S = int(b.slot_rec[0].shape[0])
-        copies += [rows(d, slot*S + wp).assign(rows(c, rp).cast(d.dtype))
-                   for d, c in zip([b.pool_rec, *b.pool_conv], [b.recurrent_state, *b.conv_states])]
+        S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
+        copies.append(rows(b.pool_rec, slot*S + wp).assign(rows(b.recurrent_state, rp).cast(b.pool_rec.dtype)))
+        copies += [rows(d, slot*SC + wpc).assign(rows(c, rp).cast(d.dtype)) for d, c in zip(b.pool_conv, b.conv_states)]
       if isinstance(b, MLATransformerBlock):
         ctx = int(b.slot_k[0].shape[2])
         copies.append(rows(b.pool_k, slot).assign(b.cache_k[:, :, :ctx]))
@@ -1489,7 +1497,8 @@ class Transformer:
     """every pool of the slots' states and the rows of a slot in it"""
     pools:list[tuple[Tensor, int]] = [(self.pool_spec_h, int(self.slot_spec_h[0].shape[0]))] if hasattr(self, "pool_spec_h") else []
     for b in self._slot_blocks():
-      if isinstance(b, GatedDeltaNetBlock): pools += [(p, int(b.slot_rec[0].shape[0])) for p in [b.pool_rec, *b.pool_conv]]
+      if isinstance(b, GatedDeltaNetBlock):
+        pools += [(b.pool_rec, int(b.slot_rec[0].shape[0]))] + [(p, int(b.slot_conv[0][0].shape[0])) for p in b.pool_conv]
       if isinstance(b, MLATransformerBlock):
         pools.append((b.pool_k, 1))
         if (idx:=b.indexer) is not None: pools += [(idx.pool_pk, int(idx.slot_pk[0].shape[0])), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
@@ -1504,10 +1513,11 @@ class Transformer:
     v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
     return v("slot_src").bind(src), v("slot_dst").bind(dst)
   def _slot_store_vars(self, i:int, length:int, hrow:int) -> tuple[UOp, ...]:
-    S = self.config.spec_drafts + 2
+    S, SC = slot_states(self.config.spec_drafts)
     rp = UOp.variable("slot_rp", 0, self.config.rewind).bind(length % (self.config.rewind + 1))
     return (UOp.variable("slot", 0, self.batch_slots()-1).bind(i), rp, UOp.variable("slot_wp", 0, S-1).bind(length % S),
-            UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
+            UOp.variable("slot_wpc", 0, SC-1).bind(length % SC), UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
+
 
   def slot_move(self, src:int, dst:int):
     """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
@@ -1966,7 +1976,8 @@ class Transformer:
     """the prefill chunk sizes, ascending: the custom kernels compute chunks padded to a static size, a piece of a prompt runs the smallest
     one it fits (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
     fast = amd_custom_kernels_supported(self.token_embd.weight.device)
-    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 4096 if fast else 32), self.max_context)
+    # (a context of 64K or less (many sequences batched): chunks of 2048, their memory the slots')
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", (4096 if self.max_context > 65536 else 2048) if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
     sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_TINY", 192), getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048),
                                                           4096) if fast else ())]
