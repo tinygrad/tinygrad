@@ -272,6 +272,9 @@ def _identity(x:Tensor) -> Tensor: return x
 
 # the experts of a few tokens are the ones of every token (a decode kernel each), more are grouped by expert (prefill)
 MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 96)
+# batched decoding: rows of experts decoded (in bundles) up to this many, grouped (the prefill kernels) past it
+MOE_BATCH_ROWS = getenv("MOE_BATCH_ROWS", 192)
+def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None else MOE_DECODE_ROWS
 
 # batched decoding (Transformer.forward_batch): the rows are groups of a sequence each, group g (its rows the tokens at positions pos.. of the
 # sequence) in the state slot g: (pos, rows) of every group
@@ -506,7 +509,7 @@ class FFNBlock:
          amd_custom_kernels_supported(x.device) and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1):
         k, scale, exps = self.config.num_experts_per_tok, self.config.routed_scaling_factor, self.ffn_gate_exps
         exps.set_quantized()
-        if rows is None and xr.shape[1] <= MOE_DECODE_ROWS and exps.slices and exps.ggml_type is not None and getenv("MOE_ROUTER_LOCAL", 1):
+        if rows is None and xr.shape[1] <= _decode_rows() and exps.slices and exps.ggml_type is not None and getenv("MOE_ROUTER_LOCAL", 1):
           # decoding: the device's slices of the selections in the router's kernel
           return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table), local=True)
         sel, probs = moe_router(logits, bias, k, scale)
@@ -540,7 +543,7 @@ class FFNBlock:
     if (T:=_ffn_rows[0]) is not None and sel.ndim >= 3 and isinstance(R:=sel.shape[-2], int) and getenv("MOE_SKIP_PAD", 1):
       sel = (Tensor.arange(R).reshape(R, 1) < (Tensor(T) if isinstance(T, UOp) else T)).to(sel.device).where(sel, -1)
     # many tokens: grouped by expert (prefill), a few (the drafts of speculative decoding) as decoding
-    grouped = (not isinstance(x.shape[1], int) or x.shape[1] > MOE_DECODE_ROWS) and all(e.ggml_type is not None for e in exps)
+    grouped = (not isinstance(x.shape[1], int) or x.shape[1] > _decode_rows()) and all(e.ggml_type is not None for e in exps)
     shexp:Tensor|None = None
     if grouped and hasattr(self, 'ffn_gate_shexp') and not hasattr(self, 'ffn_gate_inp_shexp') and self.ffn_gate_exps.expert_parallel and \
        isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1:
@@ -1350,9 +1353,11 @@ class Transformer:
   # a sequence is prefilled as usual (the states of the model), then its states are copied into a free slot (slot_store); steps take the
   # sequences of the slots 0..n-1 (the rows of a step), the projections, experts and the head read their weights once for all of them
 
-  BATCH_SIZES = (1, 2, 4, 8, 16, 32)
+  BATCH_SIZES = (1, 2, 4, 8, 16, 32, 64)
   def batch_slots(self) -> int:
-    return min(getenv("BATCH_SLOTS", 32), max(self.BATCH_SIZES)) if self.has_recurrent_block and self.config.kv_lora_rank > 0 else 0
+    # (the memory of the slots: a shorter context of the model's own frees some)
+    if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
+    return min(getenv("BATCH_SLOTS", 64 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
 
   def _init_slots(self, alloc:bool=True):
