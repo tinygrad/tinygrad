@@ -1518,7 +1518,6 @@ class Transformer:
     return (UOp.variable("slot", 0, self.batch_slots()-1).bind(i), rp, UOp.variable("slot_wp", 0, S-1).bind(length % S),
             UOp.variable("slot_wpc", 0, SC-1).bind(length % SC), UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
 
-
   def slot_move(self, src:int, dst:int):
     """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
     self._slot_jits()
