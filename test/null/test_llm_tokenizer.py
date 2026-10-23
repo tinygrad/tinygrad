@@ -150,15 +150,16 @@ class TestLLMTokenizer(unittest.TestCase):
     }
     for s, want in shared.items():
       self.assertEqual(split["tekken"](s), want, f"tekken {s!r}")
-      for p in ("gpt-4o", "kimi-k2"): self.assertEqual(split[p](s), want, f"{p} {s!r}")
+      self.assertEqual(split["gpt-4o"](s), want, f"gpt-4o {s!r}")
+      self.assertEqual(split["kimi-k2"](s), want, f"kimi-k2 {s!r}")
     differ = [
       ("12345", list("12345"), ["123", "45"]),  # digits: tekken single, o200k groups {1,3}
       ("it's I'M don'T", ["it", "'s", " I", "'M", " don", "'T"], ["it's", " I'M", " don'T"]),  # contraction: o200k inline suffix
     ]
     for s, tk, go in differ:
       self.assertEqual(split["tekken"](s), tk, f"tekken {s!r}")
-      for p in ("gpt-4o", "kimi-k2"): self.assertEqual(split[p](s), go, f"{p} {s!r}")
-    self.assertEqual(split["gpt-4o"]("a.\n/b"), ["a", ".\n/", "b"])
+      self.assertEqual(split["gpt-4o"](s), go, f"gpt-4o {s!r}")
+      self.assertEqual(split["kimi-k2"](s), go, f"kimi-k2 {s!r}")
     self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
 
   def test_stream_decoder(self):
