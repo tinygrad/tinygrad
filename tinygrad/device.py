@@ -488,9 +488,8 @@ class Compiled:
     for _ in range(5):
       with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
       if not (ents:=list(self.prof_ents.items())): return
-      self.prof_ents.clear()
       st = perf_counter_us()
-      self.synchronize()
+      with Context(PROFILE=0): self.synchronize()
       gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
