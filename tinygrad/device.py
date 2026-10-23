@@ -250,7 +250,6 @@ class Allocator(Generic[DeviceType]):
 
   def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
-    self.default_buffer_spec: BufferSpec = BufferSpec()
     self.cache:dict[tuple[int, BufferSpec|None], list[tuple[BufferStorage, dict[Compiled, int]]]] = defaultdict(list)
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
@@ -260,7 +259,7 @@ class Allocator(Generic[DeviceType]):
     if (c:=self.cache[(size, options)]) and all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
       return c.pop(0)[0]
 
-    spec = options if options is not None else self.default_buffer_spec
+    spec = options if options is not None else BufferSpec()
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError): self.free_cache()
     try: return self._alloc(size, spec)
@@ -268,7 +267,7 @@ class Allocator(Generic[DeviceType]):
                                                                f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
 
   def free(self, storage:BufferStorage, size:int, options:BufferSpec|None=None):
-    spec = options if options is not None else self.default_buffer_spec
+    spec = options if options is not None else BufferSpec()
     if not LRU or not self.lru or spec.nolru or spec.external_ptr is not None: return self.do_free(storage, spec)
 
     # add that buf to cache
@@ -278,7 +277,7 @@ class Allocator(Generic[DeviceType]):
 
   def free_cache(self):
     for (_, options), storages in self.cache.items():
-      for storage, _ in storages: self.do_free(storage, options if options is not None else self.default_buffer_spec)
+      for storage, _ in storages: self.do_free(storage, options if options is not None else BufferSpec())
       storages.clear()
 
   def do_free(self, storage:BufferStorage, options:BufferSpec):
