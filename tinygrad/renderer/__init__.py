@@ -28,12 +28,14 @@ class Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
-    def estimates_from_body(sink:UOp, caller_mult:sint|None=None, bindings:dict[UOp,UOp]={}) -> tuple[sint, sint, dict[tuple[UOp, Ops], sint]]:
-      nonlocal flops, lds, mem
+    pending = [(sink, None, {})]
+
+    # traverse in reverse order to greedily ignore indexing ALU if necessary
+    while pending:
+      sink, caller_mult, bindings = pending.pop()
       uops, multcache, excluded = list(sink.toposort()), {}, set()
       if caller_mult is None: caller_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
 
-      # traverse in reverse order to greedily ignore indexing ALU if necessary
       for u in reversed(uops):
         # compute compile time known multiplicity of op over RANGEs and CALL context
         if (rngs:=tuple(u.ranges)) not in multcache:
@@ -53,7 +55,7 @@ class Estimates:
           # pass bindings instead of resolving whole body because the bound ops shouldnt get double counted
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.backward_slice if p.op is Ops.PARAM and p.arg.slot >= 0}
-          estimates_from_body(u.body, mult, child_bindings)
+          pending.append((u.body, mult, child_bindings))
         elif u.op in {Ops.LOAD, Ops.STORE}:
           buf = bindings.get(u.buf_uop, u.buf_uop).without_after
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
@@ -67,7 +69,6 @@ class Estimates:
         elif u.op is Ops.WMMA and u not in excluded:
           flops += mult * (2 * prod(u.arg[0]) // u.arg[2])
 
-    estimates_from_body(sink)
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
