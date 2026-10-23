@@ -140,11 +140,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
   try:
     if (axes:=k.upcastable_dims(reduce=True)) and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UPCAST, reduce=True)) and k.upcast_size() < 64:
-      if (s:=k.full_shape[axes[-1]]) <= 32:
+      if k.full_shape[axes[-1]] <= 32:
         k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (0, AxisType.UPCAST)))
-        # if it's small, upcast a second reduce dimension too
-        if (axes:=k.upcastable_dims(reduce=True)) and s <= 3 and k.full_shape[axes[-1]] <= 3:
-          k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (0, AxisType.UPCAST)))
       elif k.full_shape[axes[-1]] % 4 == 0:
         k.apply_opt(Opt(OptOps.SPLIT, axes[-1], (4, AxisType.UPCAST)))
   except KernelOptError: pass
