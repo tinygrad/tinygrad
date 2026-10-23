@@ -405,7 +405,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
   dwords = [(UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.u32).index(r).load() + 4 * k, (w >> 32 * k).cast(dtypes.u32))
             for w, (at, r) in looped.items() for k in range(w.dtype.itemsize // 4)]
   patches = [(o, w) for o, w in hq.patches if w not in looped] + dwords
-  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
+  nested = dedup([g.src[0] for g in UOp.sink(*[w for _, w in patches]).toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
   bufs = []
