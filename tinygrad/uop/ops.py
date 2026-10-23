@@ -1357,11 +1357,7 @@ class ProgramInfo:
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].substitute(
         {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify())
-    print(sink.arg.name, outs, ins, _globals)
-    from tinygrad.helpers import DEBUG
-    if DEBUG >= 2:
-      print(f"DEBUG from_sink name={sink.arg.name} outs={outs} ins={ins} globals={_globals}")
-    if not outs and not ins and getenv("HACK_OUTS_INS", 1): outs = ins = _globals # if neither is inferred, default to all buffers
+    if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
                        tuple(sorted(_params, key=lambda p: p.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
                        tuple(sorted(dedup(ins))), target)
