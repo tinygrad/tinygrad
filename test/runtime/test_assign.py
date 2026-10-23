@@ -418,7 +418,20 @@ class TestAssign(unittest.TestCase):
     a.realize()
     self.assertListEqual(a.tolist(), [[2.,2.,2.,2.],[2.,2.,2.,2.],[3.,3.,3.,3.], [3.,3.,3.,3.]])
 
-  # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
+  def test_flipped_assignment_from_self(self):
+    a = Tensor([0, 1, 2]).realize()
+    a[::-1] = a
+    self.assertEqual(a.tolist(), [2, 1, 0])
+
+  def test_add_row_from_self(self):
+    a = Tensor([[0, 1], [2, 3], [4, 5]]).realize()
+    a += a[0]
+    self.assertEqual(a.tolist(), [[0, 2], [2, 4], [4, 6]])
+
+  def test_roll_assignment_from_self(self):
+    a = Tensor([[0, 1], [2, 3]]).realize()
+    a.assign(a.roll(1, 0))
+    self.assertEqual(a.tolist(), [[2, 3], [0, 1]])
 
   def test_overlapping_shrink_assignment_forward(self):
     # Forward shift: read index > write index in overlap
