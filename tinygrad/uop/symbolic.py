@@ -474,5 +474,5 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** combine terms (opinionated) **
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.weakint) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  ((UPat.var("x", dtypes.weakint) + UPat.var("y", dtypes.weakint)) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])+pm_clean_up_group_sink
