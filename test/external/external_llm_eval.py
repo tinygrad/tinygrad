@@ -1,7 +1,7 @@
 # eval for OpenAI API server
 # uses Meta's exact ARC-Challenge prompt template from lm-evaluation-harness llama3 tasks
 import argparse, re, pyarrow.parquet as pq
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from tinygrad.helpers import fetch, colored
 
@@ -39,9 +39,11 @@ if __name__ == "__main__":
                                           max_tokens=args.max_tokens, temperature=args.temperature)
     return phrasing, answer, resp
 
-  # the questions in flight at the same time, their results in order
+  # the questions in flight at the same time, their results as they come in (any order)
   with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
-    for phrasing, answer, resp in pool.map(ask, rows[args.offset:total_questions]):
+    futures = {pool.submit(ask, row): i for i, row in enumerate(rows[args.offset:total_questions], start=args.offset)}
+    for fut in as_completed(futures):
+      phrasing, answer, resp = fut.result()
       # normalize answer key (some use 1/2/3/4 instead of A/B/C/D)
       correct = answer.as_py().strip()
       if correct not in LABEL: correct = LABEL[int(correct) - 1]
@@ -52,7 +54,7 @@ if __name__ == "__main__":
       given = m[-1] if m else text[:1]
       num_correct += correct == given
       num_answered += 1
-      print(f"{num_answered:4d}/{total_questions:4d}  "+\
+      print(f"{num_answered:4d}/{total_questions:4d}  question {futures[fut]:4d}  "+\
             f"Correct Answer: {correct}  "+\
             f"Given Answer: {colored(given, 'green' if correct==given else 'red')}  "+\
             f"Percent: {num_correct*100.0/num_answered:.2f}%")
