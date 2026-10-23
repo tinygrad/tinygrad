@@ -1155,7 +1155,9 @@ class GatedDeltaNetBlock(FFNBlock):
       # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
       state = parity(states, rp).reshape(states.shape[1:])
       window = (masked:=initial.where(0, state)).cat(proj.cast(state.dtype), dim=1)
-      window = window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
+      # (the fused kernel makes the conv itself: the window is the next state's rows only, not a buffer)
+      window = window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1]))
+      if not fused: window = window.contiguous()
       # the last conv_kernel-1 columns of the window become the next conv state
       store = parity(states, wp).uop.store(window[:, T:T+self.ssm_conv_kernel-1].cast(state.dtype).unsqueeze(0).uop)
       return functools.reduce(lambda a,b: a+b, (window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store, \
