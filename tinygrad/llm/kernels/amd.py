@@ -501,6 +501,21 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
     signs = byte(34+subgroup*4+i//2)
   return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)))
 
+def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, grid:UOp|None) -> list[tuple[UOp, UOp]]:
+  """the words of a WMMA fragment's lane (half ph) of a group: (_quant_word h*4+ph, h*4+ph+2) for h 0, 1, the bytes they share loaded once (IQ3_S)"""
+  if ggml_type == IQ3_S and raw.dtype.itemsize == 2 and grid is not None:
+    # words i = 2j+ph (j 0..3): index byte ph of qs halfword j, its 9th bit bit i of qh, its signs nibble ph of signs byte j
+    sh = (ph * 8).cast(dtypes.uint32)
+    qs = [(raw[base + 1 + subgroup*4 + j].load().cast(dtypes.uint32) >> sh) & 255 for j in range(4)]
+    qh = (raw[base + 33 + subgroup//2].load().cast(dtypes.uint32) >> ((subgroup % 2)*8).cast(dtypes.uint32)) & 255
+    sg = [raw[base + 37 + subgroup*2 + k].load().cast(dtypes.uint32) for k in range(2)]
+    def word(j:int) -> UOp:
+      index = qs[j] | (((qh >> (ph.cast(dtypes.uint32) + 2*j)) & 1) << 8)
+      signs = (sg[j//2] >> (8*(j % 2))) & 255
+      return _iq_signed_word(grid[index], signs >> (4*ph).cast(dtypes.uint32))
+    return [(word(2*h), word(2*h+1)) for h in range(2)]
+  return [tuple(_quant_word(raw, base, subgroup, h*4 + i, ggml_type, grid) for i in (ph, ph+2)) for h in range(2)]  # type: ignore[misc]
+
 def _quant_group_words(raw:UOp, base:UOp, subgroup:UOp, ggml_type:int, grid:UOp|None) -> list[UOp]:
   """the 8 words of _quant_word of a group (32 weights) of a block: the bytes they share loaded once (IQ3_S, IQ4_XS), else word by word"""
   if ggml_type == IQ3_S and raw.dtype.itemsize == 2 and grid is not None:
@@ -859,7 +874,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   sums = []
   for o, base in enumerate(bases):
     sub = sub_scale(base, sb)
-    bfr = [_i8_frag(tuple(_quant_word(raw, base, sb, h*4 + i, ggml_type, grid) for i in (ph, ph+2))) for h in range(2)]
+    bfr = [_i8_frag(w) for w in _quant_frag_words(raw, base, sb, ph, ggml_type, grid)]
     for t in range(TT):
       dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
       dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
@@ -3219,6 +3234,42 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
   for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))
   return x
 
+def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp) -> UOp:
+  """
+  the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
+  than k): a radix select, 4 passes of 8 bits from the top. a pass counts the digits of the keys whose higher digits are the prefix found (a
+  histogram in LDS, atomics), one wave scans it from the top for the bin of the k-th (the keys left), the next pass that bin's. the same as a
+  bisection bit by bit, 8 barriers
+  """
+  zero = UOp.const(0, dtypes.int32)
+  hist = UOp.alloc((4*256,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  hist = hist.after(UOp.group(*(hist[(t + i*DECODE_THREADS).valid(t + i*DECODE_THREADS < 4*256)].store(zero)
+                                for i in range((4*256 + DECODE_THREADS - 1) // DECODE_THREADS))).barrier())
+  res = UOp.alloc((4, 2), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  prefix, left = UOp.const(0, dtypes.uint32), UOp.const(k, dtypes.int32)
+  for d in range(4):
+    c = UOp.range(npc, 20 + d, AxisType.LOOP)
+    kv = key(c)
+    match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
+    digit = ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)
+    add = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);", dtypes.void, hist[d*256 + digit],
+               match.cast(dtypes.int32))
+    hd = hist.after(UOp.group(add).end(c).barrier())
+    # lane L the bins 255-8L-j (j 0..7): from the top
+    bins = [hd[d*256 + 255 - lane*8 - j].load() for j in range(8)]
+    lane_sum = functools.reduce(lambda a, b: a + b, bins)
+    incl = _wave_scan(lane_sum, lane)
+    cum, dsel, before = incl - lane_sum, zero, zero
+    for j in range(8):
+      hit = (cum < left) & (cum + bins[j] >= left)
+      dsel, before = hit.where((255 - lane*8 - j).cast(dtypes.int32), dsel), hit.where(cum, before)
+      cum = cum + bins[j]
+    found = ((incl - lane_sum) < left) & (incl >= left) & wave.eq(0)
+    res = res.after(UOp.group(res[d, UOp.const(0, dtypes.weakint).valid(found)].store(dsel),
+                              res[d, UOp.const(1, dtypes.weakint).valid(found)].store(left - before)).barrier())
+    prefix, left = (prefix << 8) | res[d, 0].load().cast(dtypes.uint32), res[d, 1].load()
+  return (pools > k).where(prefix, UOp.const(0, dtypes.uint32)).maximum(1)
+
 @functools.cache
 def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0) -> UOp:
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
@@ -3245,19 +3296,21 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     bits = scores[row, p.minimum(P-1).valid(ok)].load().bitcast(dtypes.uint32)
     return ok.where((bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000), UOp.const(0, dtypes.uint32))
   zero = UOp.const(0, dtypes.int32)
-  # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
-  lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  thr_reg = _reg_u32()
-  # (a thread's keys in registers, loaded once: the rounds count them there)
-  kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
-  kreg = kreg.after(UOp.group(*(kreg[c].store(key(UOp.const(c, dtypes.weakint))) for c in range(per))))
-  bit = UOp.range((pools > k).where(32, 0), 3, AxisType.LOOP)
-  prev = thr_reg.after(bit)[0].load()
-  cand = prev | (UOp.const(1, dtypes.uint32) << (31 - bit).cast(dtypes.uint32))
-  cnt = functools.reduce(lambda a, b: a + b, [(kreg.after(bit)[c].load() >= cand).cast(dtypes.float32) for c in range(per)])
-  stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
-  total = warp_reduce(stage[bit, lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)  # the sum of the waves' counts
-  thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load().maximum(1)
+  if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane)
+  else:
+    # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
+    lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    thr_reg = _reg_u32()
+    # (a thread's keys in registers, loaded once: the rounds count them there)
+    kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
+    kreg = kreg.after(UOp.group(*(kreg[c].store(key(UOp.const(c, dtypes.weakint))) for c in range(per))))
+    bit = UOp.range((pools > k).where(32, 0), 3, AxisType.LOOP)
+    prev = thr_reg.after(bit)[0].load()
+    cand = prev | (UOp.const(1, dtypes.uint32) << (31 - bit).cast(dtypes.uint32))
+    cnt = functools.reduce(lambda a, b: a + b, [(kreg.after(bit)[c].load() >= cand).cast(dtypes.float32) for c in range(per)])
+    stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
+    total = warp_reduce(stage[bit, lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)  # the sum of the waves' counts
+    thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load().maximum(1)
   # the picks of every (chunk, wave): the counts of a ballot
   wc = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL)
   c2 = UOp.range(npc, 5, AxisType.LOOP)
