@@ -484,14 +484,15 @@ class Compiled:
   def _at_profile_finalize(self):
     if self.device.split(":")[0] not in HCQ_DEVS: return
     from tinygrad.tensor import Tensor
-    tdiffs = []
+    tdiffs, n = [], len(Compiled.profile_events)
     for _ in range(5):
       with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
       if not (ents:=list(self.prof_ents.items())): return
       st = perf_counter_us()
-      with Context(PROFILE=0): self.synchronize()
+      self.synchronize()
       gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
+    del Compiled.profile_events[n:] # cut calibration kernels
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
 if PROFILE:
