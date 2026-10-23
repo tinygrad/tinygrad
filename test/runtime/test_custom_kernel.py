@@ -746,6 +746,7 @@ class TestCallInKernel(unittest.TestCase):
     out = dst.custom_kernel(src, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [-1., 1., 2., 3., 4., -1.])
 
+  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
   def test_call_to_copy(self):
     @uopfunc
     def copy(out:UOp, A:UOp):
