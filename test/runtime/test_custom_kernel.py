@@ -761,11 +761,11 @@ class TestCallInKernel(unittest.TestCase):
     x = Tensor([1, 2, 3, 4], device="CPU").realize().to(Device.DEFAULT)
     y, z = x.empty_like(), x.empty_like()
     y, z, _ = Tensor.custom_kernel(y, z, x, fxn=forward)
+    y, z = y.to("CPU"), z.to("CPU")
+    Tensor.realize(y, z)
 
-    cpy = y.to("CPU").tolist()
-    cpz = z.to("CPU").tolist()
-    self.assertEqual(cpy, cpz)
-    self.assertEqual(x.tolist(), cpz)
+    self.assertEqual(y.tolist(), z.tolist())
+    self.assertEqual(x.tolist(), z.tolist())
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
