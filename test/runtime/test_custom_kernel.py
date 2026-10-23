@@ -762,7 +762,7 @@ class TestCallInKernel(unittest.TestCase):
     y, z = x.empty_like(), x.empty_like()
     y, z, _ = Tensor.custom_kernel(y, z, x, fxn=forward)
 
-    cpy = x.to("CPU").realize()
+    cpy = y.to("CPU").realize()
     cpz = z.to("CPU").realize()
     print(cpy.tolist())
     print(cpz.tolist())
