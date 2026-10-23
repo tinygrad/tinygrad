@@ -4,6 +4,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
+from tinygrad.codegen import compile_calls
 from tinygrad.uop.ops import Ops, UOp, uopfunc
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -221,7 +222,8 @@ class TestHostCalls(unittest.TestCase):
     first = lower_and_compile(lower_hcq(both(self._buf(2), a, b))).src[0].without_after.body
     second = lower_and_compile(lower_hcq(addr_of(self._buf(1), a))).src[0].without_after.body
     # Different parents share the compiled helper, not just its lowered graph.
-    shared = set(first.src[3].toposort()) & set(second.src[3].toposort())
+    shared = set(UOp.sink(*compile_calls(Device["CPU"].renderer, first.src[1])).toposort()) & \
+             set(UOp.sink(*compile_calls(Device["CPU"].renderer, second.src[1])).toposort())
     self.assertTrue(any(u.op is Ops.BINARY for u in shared))
 
   def test_nested_placeholders(self): # storage a function keeps for itself

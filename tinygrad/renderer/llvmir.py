@@ -175,7 +175,7 @@ class LLVMRenderer(Renderer):
     self.extra_matcher += PatternMatcher([
       (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
     ])
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False, hidden=False) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
     sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
@@ -183,9 +183,10 @@ class LLVMRenderer(Renderer):
       args_t = "{ " + ", ".join(tys) + " }"
       kernel = [f"  %args_t = load {args_t}, ptr %args"] + [f"  {n} = extractvalue {args_t} %args_t, {i}" for i,(n,_) in enumerate(args)] + kernel
       sargs = "ptr %args"
-    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+    decl = f"define{' hidden' if hidden else ''}{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0"
+    return "\n".join((prefix or []) + [decl, "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", fns:dict[UOp, str]|None=None,
-                     args_struct=False) -> tuple[tuple[str, ...], str]:
+                     args_struct=False, hidden=False) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = dict(fns or {}) # the functions the kernel calls, by name
     args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
@@ -227,7 +228,7 @@ class LLVMRenderer(Renderer):
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix, args_struct)
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix, args_struct, hidden)
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
@@ -242,11 +243,11 @@ class CPULLVMRenderer(LLVMRenderer):
     return self._render_module(uops, args_struct=True)
 
   def render_function(self, body:UOp) -> str:
-    return self._render_module(list(body.src), name="__tinygrad_entry")
+    return self._render_module(list(body.src), name="__tinygrad_entry", hidden=True)
 
-  def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
+  def _render_module(self, uops:list[UOp], name="test", args_struct=False, hidden=False) -> str:
     self.fn_names = {b:f"@__tinygrad_call_{i}" for i,b in enumerate(call_bodies(uops))}
-    k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct)
+    k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct, hidden=hidden)
     return "\n".join((*k[0], k[1], self._render_footer(uops)))
 
   def _render_footer(self, uops: list[UOp]) -> str:

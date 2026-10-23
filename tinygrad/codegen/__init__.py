@@ -461,8 +461,12 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
+  binary = UOp(Ops.BINARY, arg=lib, src=compile_calls(ctx, prg.src[1]))
+  objects = (binary, *(b for b in binary.toposort() if b is not binary))
+  names = {b:f"__tinygrad_call_{i}" for i,b in enumerate(objects)}
+  lib = ctx.compiler.link([(b.arg, names[b] if b is not binary else "", tuple(names[s] for s in b.src)) for b in objects])
   if DEBUG >= 7: ctx.compiler.disassemble(lib)
-  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib, src=compile_calls(ctx, prg.src[1])),))
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
 def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
   deps = []
@@ -476,7 +480,8 @@ def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
 @rewrite_group(name=lambda ctx,body,ret: TracingKey(body.arg, (ret.key, body.arg), ret=ctx))
 def do_compile_function(ctx:Renderer, body:UOp) -> UOp:
   prg = UOp(Ops.PROGRAM, src=(UOp.sink(arg=KernelInfo(body.arg)), body, UOp(Ops.SOURCE, arg=ctx.render_function(body))))
-  prg = graph_rewrite(prg, pm_to_program, ctx=ctx, name="linearize/render")
+  lib = ctx.compiler.compile_cached(prg.src[2].arg)
+  prg = prg.replace(src=(*prg.src, UOp(Ops.BINARY, arg=lib, src=compile_calls(ctx, body))))
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg.src[3]
 

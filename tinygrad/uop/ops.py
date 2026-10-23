@@ -1298,10 +1298,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     sig = tuple((p.arg.name, p.arg.addrspace, p.dtype, p._shape) for p in self.kernel_params)
-    libraries:dict[UOp, TinyELF] = {}
-    for b in self.src[3].toposort():
-      if b is not self.src[3]: libraries[b] = TinyELF(b.arg, "", self.arg.target, (), libraries=tuple(libraries[s] for s in b.src))
-    return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key, tuple(libraries[s] for s in self.src[3].src))
+    return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
   @property
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src

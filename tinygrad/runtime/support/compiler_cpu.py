@@ -1,6 +1,19 @@
-import subprocess
+import subprocess, tempfile, pathlib, shutil
 from tinygrad.device import Compiler
 from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump
+from tinygrad.runtime.support.elf import elf_rename_symbols
+
+def link_objects(objects:list[tuple[bytes, str, tuple[str, ...]]]) -> bytes:
+  if len(objects) == 1: return objects[0][0]
+  with tempfile.TemporaryDirectory() as tmp:
+    paths = [pathlib.Path(tmp) / f"{i}.o" for i in range(len(objects))]
+    for path, (lib, name, deps) in zip(paths, objects):
+      names = {f"__tinygrad_call_{i}": dep for i,dep in enumerate(deps)} | ({"__tinygrad_entry": name} if name else {})
+      path.write_bytes(elf_rename_symbols(lib, names))
+    output = pathlib.Path(tmp) / "linked.o"
+    subprocess.run([getenv("LD", shutil.which("ld.lld") or "ld"), "-r", "-o", str(output), *map(str, paths)],
+                   check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return output.read_bytes()
 
 class ClangCompiler(Compiler):
   def __init__(self, arch:list[str], cachekey="compile_clang_obj"):
@@ -22,6 +35,7 @@ class ClangCompiler(Compiler):
                                     '-fno-ident', f'--target={self.arch}-none-unknown-elf', *self.args, '-', '-o', '-'], input=src.encode('utf-8'))
 
   def disassemble(self, lib: bytes): cpu_objdump(lib)
+  link = staticmethod(link_objects)
 
 
 class X86Compiler(Compiler):

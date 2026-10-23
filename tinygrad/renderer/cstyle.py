@@ -305,7 +305,7 @@ class ClangRenderer(CStyleLanguage):
     _, lines, bufs = self._render(uops)
     params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
     return '\n'.join(self._render_defines(uops) + prefix + [
-      f"{self.kernel_typedef} __tinygrad_entry({params}) {{\n" + '\n'.join(lines) + "\n}"])
+      f'{self.kernel_typedef} __attribute__((visibility("hidden"))) __tinygrad_entry({params}) {{\n' + '\n'.join(lines) + "\n}"])
 
   float4 = "(float4)"
   float4_style = ('{', '}')

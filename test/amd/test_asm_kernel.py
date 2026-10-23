@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.codegen import to_program_cache
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile, get_runtime
 from tinygrad.renderer import Estimates
@@ -271,7 +272,7 @@ class TestAsmKernel(unittest.TestCase):
 
   def test_jit_call_reuse(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
-    libraries = Device["CPU"].libraries
+    libraries = to_program_cache
     def kernel(out:UOp, second=False):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
@@ -292,10 +293,10 @@ class TestAsmKernel(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
     a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
     self.assertEqual(a.tolist(), [15]*32)
-    functions = dict(libraries)
+    functions = {k:v for k,v in libraries.items() if k[0] == "function"}
     b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=lambda out: kernel(out, second=True))[0]
     self.assertEqual(b.tolist(), [23]*32)
-    self.assertTrue(functions.keys() < libraries.keys())
+    self.assertTrue(functions.keys() < {k for k in libraries if k[0] == "function"})
     for lib, runtime in functions.items(): self.assertIs(libraries[lib], runtime)
 
   def test_variable(self):

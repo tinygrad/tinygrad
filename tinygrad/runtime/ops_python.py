@@ -161,6 +161,7 @@ class PythonProgram(Program['PythonDevice']):
 
 class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
+  def link(self, objects:list[tuple[bytes, str, tuple[str, ...]]]) -> bytes: return objects[0][0]
 
 class PythonRenderer(Renderer):
   code_for_op = python_alu
