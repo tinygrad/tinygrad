@@ -1422,7 +1422,7 @@ class Transformer:
   # a sequence is prefilled as usual (the states of the model), then its states are copied into a free slot (slot_store); steps take the
   # sequences of the slots 0..n-1 (the rows of a step), the projections, experts and the head read their weights once for all of them
 
-  BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,4,8,16,32,64,80")).split(","))
+  BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,2,4,16,32,64,80")).split(","))
   def batch_slots(self) -> int:
     # (the memory of the slots: a shorter context of the model's own frees some)
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
