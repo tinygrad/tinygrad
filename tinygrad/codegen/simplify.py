@@ -84,11 +84,10 @@ def reduce_unparented(red:UOp) -> UOp|None:
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
-  for r in reduce_unparented:
-    # an idempotent op (MAX, and bool ADD/MUL which are OR/AND) applied N times is the op once, or the identity when N is 0
-    if red.arg[0] is Ops.MAX or red.dtype is dtypes.bool: ret = (r.src[0] > 0).where(ret, ret.const_like(identity_element(red.arg[0], red.dtype)))
-    else: ret = ret * r.src[0] if red.arg[0] is Ops.ADD else ret ** r.src[0]
-  return ret
+  # the op applied n times, MAX and bool ADD/MUL (OR/AND) are idempotent. an empty range is the identity
+  n, op = UOp.uprod(*[r.src[0] for r in reduce_unparented]), red.arg[0]
+  if op is not Ops.MAX and red.dtype is not dtypes.bool: ret = ret*n if op is Ops.ADD else ret**n
+  return (n > 0).where(ret, ret.const_like(identity_element(op, red.dtype)))
 
 pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
