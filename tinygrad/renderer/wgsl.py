@@ -90,6 +90,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v: f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
+    (UPat(Ops.RANGE, dtypes.void), lambda: "loop {"),
+    (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("cond"))), lambda ctx,cond: f"  continuing {{ break if !({ctx[cond]}); }}\n}}"),
   ]) + base_rewrite
 
   def render_cast(self, u:UOp, val: str) -> str:

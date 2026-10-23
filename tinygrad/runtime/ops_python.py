@@ -50,7 +50,6 @@ class PythonProgram(Program['PythonDevice']):
     self.fxns = {u: PythonProgram(dev, obj, list(u.body.src)) for u in self.uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
     self.tensor_cores = PythonRenderer(obj.target).tensor_cores
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -62,24 +61,24 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_values = [values.get(v, None) for v in u.src_without_body if v.dtype is not dtypes.void]
         src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
+        if u.op is Ops.ENDIF:
+          exec_masks.pop()
+          i += 1
+          continue
+        if not any(exec_masks[-1]): # NOTE: thread divergence isnt handled
+          i += 1
+          continue
         if u.op is Ops.BACKEDGE:
           i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
-          continue
-        if u.op is Ops.END:
-          i = self.uop_to_index[u.src[1]]
           continue
         if u.op is Ops.IF:
           exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
           i += 1
           continue
-        if u.op is Ops.ENDIF:
-          exec_masks.pop()
-          i += 1
-          continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.CUSTOM_FUNCTION, Ops.RANGE) or u in env \
           or (u.op is Ops.AFTER and u.dtype is dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
@@ -122,15 +121,6 @@ class PythonProgram(Program['PythonDevice']):
             scale = v.dtype.itemsize // v.src[0].dtype.itemsize if (v:=u.src[0].without_after).op is Ops.BITCAST else 1
             for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
-        elif u.op is Ops.RANGE:
-          if u not in values: values[u] = [0] * warp_size
-          else:
-            for j in range(len(values[u])):
-              values[u][j] += 1
-          if values[u][0] == src_values[0][0]:
-            del values[u]
-            i = self.loop_ends[u] + 1
-            continue
         elif u.op is Ops.STACK: values[u] = src_values
         elif u.op is Ops.BITCAST: values[u] = [bitcast(x, src_dtypes[0], u.dtype) for x in src_values[0]]
         elif u.op is Ops.CAST:

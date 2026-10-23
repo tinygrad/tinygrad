@@ -2,7 +2,7 @@ from typing import Literal, Callable
 import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
@@ -15,11 +15,9 @@ base_rewrite = PatternMatcher([
 
   # range/loop/if/endif
   (UPat(Ops.RANGE, dtypes.void), lambda ctx: "for (;;) {"),
-  (UPat(Ops.RANGE, name="x"),
-   lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE), UPat(name="c", dtype=dtypes.bool))), lambda ctx,c: f"  if (!({ctx[c]})) {{ break; }}\n}}"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
-  (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
+  (UPat(Ops.ENDIF), lambda ctx: "}"),
 
   # const
   (UPat.cvar("c").cast(dtypes.floats, name="x"), lambda ctx,x,c: None if math.isfinite(v:=c.val) else \
@@ -247,7 +245,6 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
-      elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.axis_type]}idx"+range_str(u)
       else:
         prefix = {Ops.WMMA: "wmma", Ops.BUFFER: "buf", Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.STACK: "cast",
                   Ops.INDEX: "bidx", Ops.LOAD: "val"}.get(u.op, "alu")
@@ -256,7 +253,7 @@ class CStyleLanguage(Renderer):
       l: str|None = self.string_rewrite.rewrite(u, ctx=self)
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
-      if u.op in {Ops.ENDIF, Ops.END, Ops.BACKEDGE}: depth -= 1
+      if u.op in {Ops.ENDIF, Ops.BACKEDGE}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and ((u.op is Ops.CAST and u.src[0].op is Ops.CONST) or \
         u.op in {Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
@@ -264,7 +261,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op not in {Ops.RANGE, Ops.BUFFER, Ops.BINARY} and u.dtype != dtypes.void:
+        if u.op not in {Ops.BUFFER, Ops.BINARY} and u.dtype != dtypes.void:
           l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         elif u.op is Ops.CAST: l += ";"  # a discarded value renders as a bare statement
         kernel.append("\n".join("  "*depth + line for line in l.split("\n")))

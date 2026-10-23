@@ -98,8 +98,9 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(tmp[0]).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
-    self.assertEqual(prg.ranges, {})
-    self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
+    barriers = [u for u in prg.src[1].src if u.op is Ops.BARRIER]
+    self.assertEqual(len(barriers), 1)
+    self.assertEqual(barriers[0].ranges, {})
 
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
