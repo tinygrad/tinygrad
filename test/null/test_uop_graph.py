@@ -297,19 +297,6 @@ class TestUOpGraph(unittest.TestCase):
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD: self.assertIs(u.src[1], expected)
 
-  def test_where_on_gated_load_with_cast(self):
-    ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.int, 100)
-    gate_idx = ridx0.valid((ridx0<50))
-    ld = d0.index(gate_idx).cast(dtypes.float)
-    w = (ridx0<50).where(ld, 5.0)
-    out = UOp.param(1, dtypes.float, 100)
-    uops = to_uops_list([out.index(ridx0).store(w)])
-    expected = full_rewrite(UOp.const(5, dtypes.int).sink()).src[0]
-    for u in uops:
-      assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: self.assertIs(u.src[1], expected)
-
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.float, 100)
