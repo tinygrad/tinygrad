@@ -367,6 +367,8 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual(parse_tool_call(body), ('read', {'path':'\na.txt\n', 'offset':3}))
     self.assertIsNone(parse_tool_call(body+'<|open|>argument key="broken"'))
     self.assertEqual(parse_tool_call('tool="ping" index="1"<|sep|>'), ('ping', {}))
+    escaped = 'tool="a&amp;b" index="1"<|sep|><|open|>argument key="x&quot;y" type="string"<|sep|>&amp;<|close|>argument<|sep|>'
+    self.assertEqual(parse_tool_call(escaped), ('a&b', {'x"y':'&amp;'}))
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):

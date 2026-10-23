@@ -13,7 +13,8 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   if (m := re.fullmatch(r'tool="([^"]+)"(?: index="\d+")?<\|sep\|>(.*)', s, re.DOTALL)):
     pattern = r'<\|open\|>argument key="([^"]+)" type="([^"]+)"<\|sep\|>(.*?)<\|close\|>argument<\|sep\|>'
     if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
-    try: return m[1], {a[1]: a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
+    def unescape(v:str) -> str: return v.replace('&quot;', '"').replace('&amp;', '&')
+    try: return unescape(m[1]), {unescape(a[1]): a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
     except json.JSONDecodeError: return None
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
