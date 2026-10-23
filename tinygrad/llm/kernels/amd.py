@@ -501,6 +501,24 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
     signs = byte(34+subgroup*4+i//2)
   return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)))
 
+def _quant_group_words(raw:UOp, base:UOp, subgroup:UOp, ggml_type:int, grid:UOp|None) -> list[UOp]:
+  """the 8 words of _quant_word of a group (32 weights) of a block: the bytes they share loaded once (IQ3_S, IQ4_XS), else word by word"""
+  if ggml_type == IQ3_S and raw.dtype.itemsize == 2 and grid is not None:
+    # qs (8 index bytes), qh (the 9th bits), signs (a nibble a word): halfwords
+    qs = [raw[base + 1 + subgroup*4 + k].load().cast(dtypes.uint32) for k in range(4)]
+    qh = (raw[base + 33 + subgroup//2].load().cast(dtypes.uint32) >> ((subgroup % 2)*8).cast(dtypes.uint32)) & 255
+    sg = [raw[base + 37 + subgroup*2 + k].load().cast(dtypes.uint32) for k in range(2)]
+    words = []
+    for i in range(8):
+      index = ((qs[i//2] >> (8*(i % 2))) & 255) | (((qh >> i) & 1) << 8)
+      signs = (sg[i//4] >> (8*((i//2) % 2))) & 255
+      words.append(_iq_signed_word(grid[index], signs >> (4*(i % 2))))
+    return words
+  if ggml_type == IQ4_XS and raw.dtype.itemsize == 4:
+    packed = [raw[base + 2 + subgroup*4 + k].load() for k in range(4)]
+    return [_iq4_bytes(packed[i % 4], 4*(i//4)) for i in range(8)]
+  return [_quant_word(raw, base, subgroup, i, ggml_type, grid) for i in range(8)]
+
 @functools.cache
 def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
                          out_features:int, in_features:int, ggml_type:int) -> UOp:
@@ -1686,6 +1704,66 @@ def _moe_bundled_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow
                             bundle=(int(bexp.shape[0]), M, store_row))
 
 @functools.cache
+def _moe_bundled_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow:UOp, *grids:UOp, out_features:int, in_features:int,
+                             ggml_type:int, slots:int, x_slots:int, waves:int=2, oloop:int=1) -> UOp:
+  # the bundles of moe_bundles (16 rows of an expert each) on the int8 tensor cores: a workgroup a bundle and oloop blocks of 16*waves outputs
+  # (a wave 16 of a block) in a loop. per block of 256 inputs the threads decode the outputs' weights (a thread a group's 8 words: the loads of a
+  # row's block are coalesced) and their scales to LDS once for the bundle's rows, then a wave's fragments are its outputs' words (as
+  # _quant_linear_i8_wmma_kernel's), the rows' q8 activations the other fragment. a row's output is stored to its selection's row (brow, -1:
+  # none)
+  NB, OB, threads = cast(int, bexp.shape[0]), 16*waves, 32*waves
+  RS = GGML_BLOCK_SIZE // 4 + 1  # a row's words in LDS (+1: the 16 rows of a fragment's lanes on different banks)
+  bundle, output_block = UOp.range(NB, 0, AxisType.GLOBAL), UOp.range(out_features // (OB*oloop), 1, AxisType.GLOBAL)
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(waves, 3, axis_type=AxisType.LOCAL)
+  tid, col, ph = wave*32 + lane, lane % 16, lane // 16
+  grid = None
+  if grids:
+    grid = UOp.alloc((int(grids[0].numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    grid = grid.after(*(grid[tid+i*threads].store(grids[0][tid+i*threads]) for i in range(int(grid.numel())//threads)))
+  type_words = QUANT_SIZES[ggml_type]//raw.dtype.itemsize
+  output_words, n_kb = in_features * type_words // GGML_BLOCK_SIZE, in_features // GGML_BLOCK_SIZE
+  expert = bexp[bundle].load()
+  ob = UOp.range((expert >= 0).where(oloop, 0), 5, AxisType.LOOP)
+  kb = UOp.range(n_kb, 4, AxisType.LOOP)
+  expert_base = expert.maximum(0).cast(dtypes.weakint) * (out_features * output_words)
+  first_out = (output_block*oloop + ob)*OB
+  # the block's weights and scales to LDS: a thread a (row, group), its 8 words and its scale (8 threads a row's block)
+  lds_w = UOp.alloc((OB*RS,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  lds_s = UOp.alloc((OB*8,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  st = []
+  for k in range(OB*8 // threads):
+    row, sg = (e:=tid + k*threads) // 8, (tid + k*threads) % 8
+    base = expert_base + (first_out + row)*output_words + kb*type_words
+    st += [lds_w[row*RS + sg*8 + i].store(w) for i, w in enumerate(_quant_group_words(raw, base, sg, ggml_type, grid))]
+    st.append(lds_s[e].store(_wmma_scale(raw, base, sg, 0, ggml_type)[0]))
+  staged = UOp.group(*st).barrier()
+  lds_w, lds_s = lds_w.after(staged), lds_s.after(staged)
+  def srow(t:UOp) -> UOp: return brow[bundle*16 + t].load().cast(dtypes.weakint)
+  def xrow(t:UOp) -> UOp: return srow(t).maximum(0) // (1 if x_slots == slots else slots)
+  a_row, s_rows = xrow(col), [xrow(ph*8 + j) for j in range(8)]
+  acc = UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG)
+  acc = acc.after(acc.after(ob).store(acc.const_like(0)))
+  vals = [acc.after(kb)[j].load() for j in range(8)]
+  orow = wave*16 + col
+  for sg in range(8):
+    g = kb*8 + sg
+    afrags = [_i8_frag((xq[a_row, g, half*4+ph].load(), xq[a_row, g, half*4+2+ph].load())) for half in (0, 1)]
+    bfrags = [_i8_frag(tuple(lds_w[orow*RS + sg*8 + half*4 + i].load() for i in (ph, ph+2))) for half in (0, 1)]
+    dot_i = UOp.wmma(afrags[1], bfrags[1], UOp.wmma(afrags[0], bfrags[0], UOp.stack(*[UOp.const(0, dtypes.int32)]*8), *WMMA_ARG), *WMMA_ARG)
+    dot = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+    dot = dot.after(dot.store(dot_i))
+    scale = lds_s[orow*8 + sg].load()
+    vals = [vals[j] + xd[s_rows[j], g].load() * (scale * dot[j].load().float()) for j in range(8)]
+  # (a barrier after the block's reads: the next block's stage doesn't overwrite what a slower wave still reads)
+  update = acc.store(UOp.stack(*vals)).barrier().end(kb)
+  output = first_out + orow
+  stores = [out[(r:=srow(ph*8 + j)).maximum(0), output.valid(r >= 0)].store(acc.after(update)[j].load().cast(out.dtype)) for j in range(8)]
+  weights = NB*16*out_features*in_features
+  est = Estimates(2*weights, weights*type_words*2//16//GGML_BLOCK_SIZE, 0)  # (an upper bound: every bundle used)
+  return UOp.group(*stores).end(ob).end(bundle, output_block, lane, wave).sink(arg=KernelInfo(
+    name=f"moe_bundled_{QUANT_NAMES[ggml_type]}_wmma", opts_to_apply=(), estimates=est))
+
+@functools.cache
 def _moe_bundle_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:int) -> UOp:
   """
   the selections (sel: the expert of every (token, slot) row, first the device's first) in bundles of at most M rows of an expert: bexp the
@@ -1805,7 +1883,9 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   devices = len(weight.device) if isinstance(weight.device, tuple) else 1
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   xq = q8_quantize(x, tokens*x_slots, in_features)
-  if (M:=MOE_BUNDLE) and tokens >= MOE_BUNDLE_MIN:
+  wmma = bool(MOE_WMMA) and ggml_type in MOE_WMMA_QUANTS and _wmma_rdna4(x.device) and tokens >= MOE_WMMA_MIN and out_features % 32 == 0 and \
+    in_features % GGML_BLOCK_SIZE == 0
+  if (M:=(16 if wmma else MOE_BUNDLE)) and tokens >= MOE_BUNDLE_MIN:
     # many rows (batched decoding): the rows of an expert in bundles of M, a bundle reads the expert's weights once
     # (the gate and up rows' bundles are the down rows' too: the same selections)
     key = (sel.uop, first.uop, experts, M)
@@ -1815,7 +1895,10 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
     bexp, brow = bundles
     out = Tensor.empty(devices*tokens*slots, out_features, dtype=dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
     out = out.zeros_like().contiguous()
-    fxn = functools.partial(_moe_bundled_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, slots=int(slots),
+    # (the int8 tensor cores: a workgroup a few blocks of outputs of a narrow input, their activations loaded once)
+    fxn = functools.partial(_moe_bundled_wmma_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
+                            slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1) if wmma else \
+          functools.partial(_moe_bundled_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, slots=int(slots),
                             x_slots=x_slots, M=M)
     result = Tensor.custom_kernel(out, weight, *xq, bexp, brow, *extra, fxn=fxn)[0]
     return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
@@ -1831,6 +1914,8 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
 _bundle_cache:dict[tuple, tuple[Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 40)
+# many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
+MOE_WMMA, MOE_WMMA_MIN, MOE_WMMA_QUANTS = getenv("MOE_WMMA", 1), getenv("MOE_WMMA_MIN", 64), (IQ3_S, IQ4_XS)
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
 def _moe_tile(group:tuple[UOp, ...]) -> int:
   """the rows of a tile of grouped experts (moe_route): its rows (entries) over its tiles"""
