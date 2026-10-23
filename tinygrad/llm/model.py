@@ -928,7 +928,10 @@ class MLATransformerBlock(FFNBlock):
     q_lora = self.attn_q_a_norm(self.attn_q_a(x))
     q = self.attn_q_b(q_lora).reshape(B, Tq, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    q = mla_bmm(q_nope, self.attn_k_b["weight"])
+    # (many rows: the tensor cores)
+    tc = Tq > getenv("MLA_BMM_ROWS", 64) and self.attn_k_b["weight"].dtype == dtypes.half
+    if tc: q = q_nope.half().contiguous().matmul(self.attn_k_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
+    else: q = mla_bmm(q_nope, self.attn_k_b["weight"])
     q = q.cat(q_rope.cast(q.dtype), dim=-1)
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
@@ -948,7 +951,8 @@ class MLATransformerBlock(FFNBlock):
     pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R))
     picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P))
     attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx))[..., :self.config.kv_lora_rank]
-    attn = mla_bmm(attn, self.attn_v_b["weight"])
+    if tc: attn = attn.half().contiguous().matmul(self.attn_v_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
+    else: attn = mla_bmm(attn, self.attn_v_b["weight"])
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
 
   def _init_slots(self, n:int, ctx:int):

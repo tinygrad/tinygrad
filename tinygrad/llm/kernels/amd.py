@@ -1737,6 +1737,51 @@ def _moe_bundle_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:in
     stores.append(bexp[(start + b).valid(ok & (b < n.cast(dtypes.weakint)))].store(e.cast(dtypes.int32)).end(b))
   return UOp.group(*stores).end(tid).sink(arg=KernelInfo(name="moe_bundle", opts_to_apply=()))
 
+@functools.cache
+def _moe_bundle_atomic_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:int) -> UOp:
+  """
+  _moe_bundle_kernel with a thread a selection: its rank in its expert by an atomic add of the expert's count (the order of the rows of an expert
+  is the order the adds came in: a row's output doesn't depend on its bundle), the bundles before every expert by a scan of the threads' counts
+  (a thread the experts tid*per..), then every selection to its place
+  """
+  N, THREADS = cast(int, sel.shape[0]), 256
+  per = (experts + THREADS - 1) // THREADS
+  # (the lanes of a wave: hardware lanes, the scans permute across them)
+  wave, lane = UOp.range(THREADS // WARP_SIZE, 0, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  tid = wave * WARP_SIZE + lane
+  zero = UOp.const(0, dtypes.int32)
+  cnt = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  cnt = cnt.after(UOp.group(*(cnt[tid*per + m].store(zero) for m in range(per))).barrier())
+  # the ranks (in LDS)
+  Q = (N + THREADS - 1) // THREADS
+  rank = UOp.alloc((Q*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  def expert(i:UOp) -> tuple[UOp, UOp]:
+    e = (sel[i.minimum(N-1)].load() - first[0].load()).cast(dtypes.weakint)
+    return e.maximum(0).minimum(experts-1), (i < N) & (e >= 0) & (e < experts)
+  adds = []
+  for q in range(Q):
+    e, ok = expert(i:=tid + THREADS*q)
+    r = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP)", dtypes.int32, cnt[e], ok.cast(dtypes.int32))
+    adds.append(rank[i].store(r))
+  rank, cnt = rank.after(UOp.group(*adds).barrier()), cnt.after(UOp.group(*adds).barrier())
+  # the bundles of the thread's experts, their exclusive scan over the threads (the waves', then the waves' totals)
+  nbs = [(cnt[tid*per + m].load() + (M-1)) // M for m in range(per)]
+  local = [functools.reduce(lambda a, b: a + b, nbs[:m], zero) for m in range(per)]
+  total = functools.reduce(lambda a, b: a + b, nbs, zero)
+  incl = _wave_scan(total, lane)
+  wt = UOp.alloc((THREADS // WARP_SIZE,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  wt = wt.after(wt[wave.valid(lane.eq(WARP_SIZE-1))].store(incl).barrier())
+  woff = functools.reduce(lambda a, b: a + b, [(w < wave).where(wt[w].load(), zero) for w in range(THREADS // WARP_SIZE)], zero)
+  start = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  start = start.after(UOp.group(*(start[tid*per + m].store(woff + incl - total + local[m]) for m in range(per))).barrier())
+  # every selection to its place, the first of a bundle its expert
+  stores = []
+  for q in range(Q):
+    e, ok = expert(i:=tid + THREADS*q)
+    rk, st = rank[i].load().cast(dtypes.weakint), start[e].load().cast(dtypes.weakint)
+    stores += [brow[(st*M + rk).valid(ok)].store(i.cast(dtypes.int32)), bexp[(st + rk // M).valid(ok & (rk % M).eq(0))].store(e.cast(dtypes.int32))]
+  return UOp.group(*stores).end(wave, lane).sink(arg=KernelInfo(name="moe_bundle", opts_to_apply=()))
+
 def moe_bundles(sel:Tensor, first:Tensor, experts:int, M:int, N:int) -> tuple[Tensor, Tensor]:
   """the N selections sel of every device in bundles of at most M rows of an expert (_moe_bundle_kernel): (bexp, brow) of every device"""
   NB = (N + M - 1) // M + min(experts, N)
@@ -1744,8 +1789,9 @@ def moe_bundles(sel:Tensor, first:Tensor, experts:int, M:int, N:int) -> tuple[Te
   def filled(n:int) -> Tensor:
     shape, axis = ((len(devs)*n,), 0) if isinstance(devs, tuple) else ((n,), None)
     return Tensor.empty(*shape, dtype=dtypes.int32, device=devs, axis=axis).full_like(-1).contiguous()
+  kernel = _moe_bundle_atomic_kernel if getenv("MOE_BUNDLE_ATOMIC", 1) else _moe_bundle_kernel
   bexp, brow = Tensor.custom_kernel(filled(NB), filled(NB*M), sel.cast(dtypes.int32).reshape(-1).contiguous(), first,
-                                    fxn=functools.partial(_moe_bundle_kernel, experts=experts, M=M))[:2]
+                                    fxn=functools.partial(kernel, experts=experts, M=M))[:2]
   return bexp, brow
 
 def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, first:Tensor) -> Tensor:
