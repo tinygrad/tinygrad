@@ -746,6 +746,34 @@ class TestCallInKernel(unittest.TestCase):
     out = dst.custom_kernel(src, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [-1., 1., 2., 3., 4., -1.])
 
+  def test_call_to_copy(self):
+    @uopfunc
+    def copy(out:UOp, A:UOp):
+      i = UOp.range(out.shape[0], 0, AxisType.LOOP)
+      return out[i].store(A[i]).end(i).sink()
+
+    def forward(out1:UOp, out2:UOp, A:UOp):
+      call = copy(out1, A)
+      i = UOp.range(out2.shape[0], 0, AxisType.LOOP)
+      inline = out2[i].store(A[i]).end(i).sink()
+      return UOp.group(call, inline).sink(arg=KernelInfo(name="forward", opts_to_apply=()))
+
+    x = Tensor([1, 2, 3, 4], device="CPU").realize().to(Device.DEFAULT)
+    y, z = x.empty_like(), x.empty_like()
+    y, z, _ = Tensor.custom_kernel(y, z, x, fxn=forward)
+
+    cpy = x.to("CPU").realize()
+    cpz = z.to("CPU").realize()
+    print(cpy.tolist())
+    print(cpz.tolist())
+
+    """
+    cpu_src = Tensor([2], device="CPU").realize()
+    t = Tensor.custom_kernel(t, cpu_src.to(t.device), fxn=custom_source)[0]
+    self.assertEqual(t.tolist(), [3])
+    self.assertEqual(cp.tolist(), [3])
+    """
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
