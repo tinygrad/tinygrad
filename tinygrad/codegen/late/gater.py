@@ -2,9 +2,7 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 from tinygrad.dtype import Invalid, dtypes
 
-def move_where_load(gate, l, a, w):
-  return l.replace(src=(l.src[0], l.vconst_like(0) if a.is_invalid else l.const_like(a.val) if a.op is Ops.CONST else
-    a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(w.dtype)
+def move_where_load(gate, l, a): return l.replace(src=(l.src[0], l.vconst_like(0) if a.is_invalid else a.cast(l.dtype), l.src[2]))
 
 pm_move_gates_from_index = PatternMatcher([
   # for image idx (must be first)
@@ -22,8 +20,6 @@ pm_move_gates_from_index = PatternMatcher([
    .store(UPat.var("data")), lambda mop,gate,idx,data: mop.replace(src=(mop.src[0],idx)+mop.src[2:]).store(data, gate)),
 
   # Where after gated load becomes alt value
-  (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate", dtype=dtypes.bool), name="l").or_casted(), UPat.var("a")).named("w"),
-   move_where_load),
-  (UPat.var("gate").where(UPat.var("a"), UPat().load(UPat(), ~UPat.var("gate", dtype=dtypes.bool), name="l").or_casted()).named("w"),
-   move_where_load),
+  (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate", dtype=dtypes.bool), name="l"), UPat.var("a")), move_where_load),
+  (UPat.var("gate").where(UPat.var("a"), UPat().load(UPat(), ~UPat.var("gate", dtype=dtypes.bool), name="l")), move_where_load),
 ])

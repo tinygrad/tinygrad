@@ -55,8 +55,8 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, PROFILE, colored, getenv, ContextVar
-from tinygrad.engine.realize import get_runtime
+from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar
+from tinygrad.engine.realize import get_runtime, run_linear
 from tinygrad.codegen import to_program
 
 from tinygrad.renderer.amd import decode_inst
@@ -516,12 +516,16 @@ class _Ctx:
     """Read PC as 64-bit byte address."""
     # Index at PC_LO, then cast to uint64 ptr and load
     return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
+  def wpc(self, val:UOp) -> list[UOp]:
+    if val.op is Ops.WHERE: self.branch_cond = val.src[0]
+    if self.inst_addr is not None: return []
+    lo, hi = _split64(val.cast(dtypes.uint64))
+    return [self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)]
 
   def inc_pc(self) -> list[UOp]:
     """Increment PC by instruction size in bytes. Returns [store]."""
     new_pc = self.rpc() + UOp.const(self.inst_size, dtypes.uint64)
-    lo, hi = _split64(new_pc)
-    return [self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)]
+    return self.wpc(new_pc)
 
   def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
     """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
@@ -670,8 +674,7 @@ class _Ctx:
 def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
-    return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(0xFFFFFFFF, dtypes.uint32)),
-                          ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(0xFFFFFFFF, dtypes.uint32)))
+    return UOp.sink(*ctx.wpc(UOp.const(0xFFFFFFFFFFFFFFFF, dtypes.uint64)))
   # S_BARRIER: advance PC past the barrier instruction. The execution loop detects barriers before executing and handles synchronization.
   if inst.op in _BARRIER_OPS: return UOp.sink(*ctx.inc_pc())
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
@@ -685,15 +688,10 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
             'VCCZ': vcc.eq(UOp.const(0, vcc.dtype)).cast(dtypes.uint32),
             'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
-      if dest.startswith('PC'):
-        if val.op is Ops.WHERE: ctx.branch_cond = val.src[0]
-        lo, hi = _split64(val.cast(dtypes.uint64))
-        return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
+      if dest.startswith('PC'): return UOp.sink(*ctx.wpc(val))
   return UOp.sink(*ctx.inc_pc())
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
-  # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  if '_INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
   sbase = ctx.inst_field(type(inst).sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
@@ -705,21 +703,13 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   soffset_val = _c(0).cast(dtypes.uint64)
   if not (isinstance(inst, irc.SMEM) and not inst.soffset_en):
     soffset_val = ctx.rsgpr_dyn(ctx.inst_field(type(inst).soffset)).cast(dtypes.uint64)
-  addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + soffset_val
-  # S_LOAD_(DTYPE) series: B32/DWORD=1, B64/DWORDX2=2, U8=0.25, I8=-0.25, etc.
-  op_name = _op_name(inst)
-  assert (op_name).startswith('S_LOAD_'), f"unexpected SMEM op: {op_name}"
-  part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
-  nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
-  ndwords = max(1, int(abs(nval)))
-  dword_base = addr >> UOp.const(2, dtypes.uint64)
-  vals = [ctx.vmem.index(dword_base + UOp.const(i, dtypes.uint64)) for i in range(ndwords)]
-  if abs(nval) < 1:
-    nbits = int(abs(nval) * 32)
-    byte_off = (addr & UOp.const(3, dtypes.uint64)).cast(dtypes.uint32) * UOp.const(8, dtypes.uint32)
-    extracted = (vals[0] >> byte_off) & UOp.const((1 << nbits) - 1, dtypes.uint32)
-    vals[0] = extracted.cast({8: dtypes.int8, 16: dtypes.int16}[nbits]).cast(dtypes.int32).bitcast(dtypes.uint32) if nval < 0 else extracted
-  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), vals[i]) for i in range(ndwords)]
+  base = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1)))
+  byte_offset = offset.cast(dtypes.uint64) + soffset_val
+  srcs = {'ADDR': base + byte_offset, 'sgpr_base': base, 'offset': byte_offset,
+          'SBASE': base, 'SOFFSET': soffset_val, 'OFFSET': offset, '_vmem': ctx.vmem}
+  funcs = {'CalcScalarGlobalAddr': lambda _base, soffset, offset: base + soffset.cast(dtypes.uint64) + offset.cast(dtypes.uint64)}
+  _, assigns = parse_pcode(get_pcode(inst.op), srcs, funcs)
+  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), val) for i, val in _collect_data_slices(assigns, 'SDATA').items()]
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4.SOPC|ir4.SOPK|irc.SOP1|irc.SOP2|irc.SOPC|irc.SOPK, ctx: _Ctx) -> UOp:
@@ -938,7 +928,7 @@ def _load_vsrc0(ctx: _Ctx, inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3
     return s0, None
   src0_off = ctx.inst_field(type(inst).src0)
   s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, is_f64)
-  if bits['s0'] == 16:  # src0 >= 384 means hi half of v[src0-384]. Guard index against OOB access.
+  if bits['s0'] == 16 and not isinstance(inst, (irc.VOP1, irc.VOP2)):  # src0 >= 384 means hi half of v[src0-384]. Guard index against OOB access.
     src0_hi = src0_off >= _c(384)
     s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_hi.where(src0_off - _c(384), _c(0)), lane)), s0)
   return s0, src0_off
@@ -961,7 +951,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
   is_float = any(x in op_name for x in ('F16', 'F32', 'F64'))
   is_dpp16 = hasattr(type(inst), 'dpp') and hasattr(type(inst), 'vsrc0')
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  write_hi_half = bits['d'] == 16 and (vdst_reg >= _c(128))
+  write_hi_half = bits['d'] == 16 and not isinstance(inst, (irc.VOP1, irc.VOP2)) and (vdst_reg >= _c(128))
   if isinstance(write_hi_half, UOp): vdst_reg = write_hi_half.where(vdst_reg - _c(128), vdst_reg)
   elif write_hi_half: vdst_reg -= 128
   if isinstance(inst, (ir3.VOP1, ir4.VOP1, irc.VOP1)):
@@ -970,7 +960,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
     srcs: dict[str, UOp | int] = {'S0': s0, 'D0': d0, 'OPSEL': _c(0)}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
-    vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
+    vsrc1_hi = bits['s0'] == 16 and not isinstance(inst, irc.VOP2) and (vsrc1_reg >= _c(128))
     if bits['s1'] == 64:
       s1 = _u64(ctx.rvgpr_dyn(vsrc1_reg, lane), ctx.rvgpr_dyn(vsrc1_reg + _c(1), lane))
       d0 = _u64(ctx.rvgpr_dyn(vdst_reg, lane), ctx.rvgpr_dyn(vdst_reg + _c(1), lane))
@@ -998,7 +988,7 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
     src0_off = ctx.inst_field(type(inst).src0)
     vsrc1_off = ctx.inst_field(type(inst).vsrc1)  # type: ignore[union-attr]
     # For 16-bit ops, vsrc1 >= 128 means hi-half of v[vsrc1-128]
-    if bits['s0'] == 16:
+    if bits['s0'] == 16 and not isinstance(inst, irc.VOPC):
       vsrc1_hi = vsrc1_off >= _c(128)
       src1_off = _c(256) + vsrc1_hi.where(vsrc1_off - _c(128), vsrc1_off)
     else:
@@ -1645,7 +1635,8 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       if 'D16' in op_name: data['RETURN_DATA'] = _rvdata(vdst_reg, lane)
       # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
-              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data}
+              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1,
+              '_active': _lane_active(exec_mask, lane), **data}
     active = _lane_active(exec_mask, lane)
     # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(False)
@@ -1845,10 +1836,10 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   ctx = _Ctx(inst_size, _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
   base, mask, size, canonical_name = _canonical_info(inst, ctx, inst_bytes)
-  sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
+  sink = sink.replace(arg=KernelInfo(name=canonical_name))
 
   # NOTE: renderer output is not reproducible because of _MXCSRContext.
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+  with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
     prg = to_program(sink, Device['CPU'].renderer)
     runtime = get_runtime('CPU', prg)
   _canonical_runner_cache.append((type(inst), base, mask, size, (prg, runtime)))
@@ -1963,17 +1954,25 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   return st
 
 # lift assembly to a CALL graph and execute
-ASM_CALL, ASM_CALL_BACKEND = ContextVar("ASM_CALL", 0), getenv("ASM_CALL_BACKEND", "CPU")
+ASM_CALL = ContextVar("ASM_CALL", 0)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  if ASM_CALL:
+  # TODO: better way to check for lifted kernels
+  if ASM_CALL and not name.startswith("emu"):
     from test.mockgpu.amd.call import lift
-    prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), ASM_CALL_BACKEND, name=name)
+    sink = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
+    dev, ren = ('AMD', 'HIP') if ASM_CALL > 1 else ('CPU', 'LLVM')
+    with Context(DEV=DEV.target(dev, renderer=ren), CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+      prg = to_program(sink, Device[dev].renderer)
     vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
     with _MXCSRContext():
-      get_runtime(ASM_CALL_BACKEND, prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else 0 for p in prg.kernel_params])
+      vmem_buf = UOp.from_buffer(Buffer(dev, 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.uint32)
+      args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
+      for p in prg.kernel_params:
+        if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(vals[p.arg.name])
+      run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)))
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
@@ -2011,9 +2010,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     for wave_start in range(0, total_threads, wave_size):
       st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data, wave_size)
       scratch_base = scratch_buf._buf + (wave_start // wave_size) * scratch_size * wave_size if scratch_buf else 0
-      waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf), ctypes.c_uint64(st.vgpr_buf._buf),
-                         ctypes.c_uint64(vmem_buf._buf), ctypes.c_uint64(lds_buf._buf),
-                         ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
+      waves.append((st, [st.sgpr_buf._buf, st.vgpr_buf._buf, vmem_buf._buf, lds_buf._buf, scratch_base if scratch_buf else 0, st.accvgpr_buf._buf]))
     done = [False] * len(waves)
     for _ in range(10_000_000):
       if all(done): return
@@ -2028,7 +2025,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             break
           fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
           if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
-          fxn(*[c_bufs[g] for g in globals_list])
+          fxn((ctypes.c_uint64 * len(globals_list))(*[c_bufs[g] for g in globals_list]))
           if tracing:
             inst_op = inst.op.value if hasattr(inst, 'op') else 0
             sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)

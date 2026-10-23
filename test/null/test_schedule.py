@@ -1,5 +1,5 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest, time, gc
+import unittest, time
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.helpers import GlobalCounters, Context, all_same
@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
-from test.helpers import check_schedule, assert_kernel_count, KernelCountException, jit_cache_count
+from test.helpers import check_schedule, assert_kernel_count, KernelCountException, jit_cache_count, measure_mem
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -611,13 +611,10 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_half(self): self.test_conv2d(4, dtype=dtypes.half)
 
   def test_schedule_mem_used_with_inputs(self):
-    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
-    gc.collect()
-    base = GlobalCounters.mem_used
-    x = Tensor.ones(256).contiguous().realize()
-    (x+Tensor.ones(256).contiguous()).schedule_linear()
-    gc.collect()
-    self.assertEqual(GlobalCounters.mem_used-base, 1024)
+    with measure_mem() as used:
+      x = Tensor.ones(256).contiguous().realize()
+      (x+Tensor.ones(256).contiguous()).schedule_linear()
+    self.assertEqual(used(), 1024)
 
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -722,7 +719,8 @@ class TestSchedule(unittest.TestCase):
       for call in linear.src:
         if call.src[0].op is not Ops.SINK: continue
         sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
-        reduce_kernels += any(u.op is Ops.STORE and u.addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
+        # a reduce kernel is identified by a STORE into a REG buffer (STORE has void dtype, check the addrspace of its target)
+        reduce_kernels += any(u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
       self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):
@@ -1698,13 +1696,10 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
-    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
-    gc.collect()
-    base = GlobalCounters.mem_used
-    Tensor.ones(256).contiguous().realize()
-    Tensor.ones(5, 5).contiguous().schedule_linear()
-    gc.collect()
-    self.assertEqual(GlobalCounters.mem_used-base, 0)
+    with measure_mem() as used:
+      Tensor.ones(256).contiguous().realize()
+      Tensor.ones(5, 5).contiguous().schedule_linear()
+    self.assertEqual(used(), 0)
 
   def test_const_schedule(self):
     constv = Tensor.empty(2, 2).const_like(10).uop

@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, argsort, partition, to_function_name
+from tinygrad.helpers import all_same, argsort, partition, to_function_name
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -101,10 +101,10 @@ pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
    lambda add, wmma: UOp(wmma.op, src=(wmma.src[0], wmma.src[1], wmma.src[2]+add), arg=wmma.arg)),
   # push permute/reshape to the other side of the add
-  (UPat(Ops.PERMUTE, src=(UPat(Ops.WMMA, name="wmma"),), name="permute") + UPat.var("add"),
-    lambda wmma,permute,add: (wmma + add.permute(argsort(permute.arg))).permute(permute.arg)),
-  (UPat(Ops.PERMUTE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.WMMA, name="wmma"), UPat()), name="reshape"),), name="permute") + UPat.var("add"),
-    lambda wmma,reshape,permute,add: (wmma + add.permute(argsort(permute.arg)).reshape(wmma.shape)).reshape(reshape.shape).permute(permute.arg)),
+  (UPat(Ops.PERMUTE, src=(UPat(Ops.WMMA, name="wmma"), UPat()), name="permute") + UPat.var("add"),
+    lambda wmma,permute,add: (wmma + add.permute(argsort(permute.marg))).permute(permute.marg)),
+  (UPat(Ops.PERMUTE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.WMMA, name="wmma"), UPat()), name="reshape"), UPat()), name="permute") + UPat.var("add"),
+    lambda wmma,reshape,permute,add: (wmma + add.permute(argsort(permute.marg)).reshape(wmma.shape)).reshape(reshape.shape).permute(permute.marg)),
 ])
 
 pm_expand_broadcast = pm_wmma_add+PatternMatcher([
@@ -149,10 +149,6 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
-  # EXPAND on scalar -> nested STACKs with the same shape
-  (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
-   lambda x,out: functools.reduce(lambda x,s: UOp.stack(*([x]*s)), reversed(out.shape), x)
-   if x.shape == () and all_int(out.shape) and 0 not in out.shape else None),
 ])
 
 def fix_group_for_reduce(x:UOp):
@@ -242,7 +238,7 @@ pm_cast_float_alu = PatternMatcher([
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
 ])
 
-def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
+def _is_local_store(x:UOp): return x.op is Ops.STORE and x.src[0].addrspace is AddrSpace.LOCAL
 
 def add_raw_barrier(after:UOp):
   # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
@@ -415,10 +411,12 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   return newlst
 
 def lower_call(ctx:Renderer, call:UOp) -> UOp:
-  body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-  body = full_rewrite_to_sink(body, ctx, optimize=False)
-  body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)), arg=to_function_name(call.arg.name))
-  return call.replace(src=(body,)+call.src[1:])
+  key = (call.body.key, type(ctx), ctx.target, *[x.value for x in to_program_config])
+  if (body:=to_program_cache.get(key)) is None:
+    body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
+    body = full_rewrite_to_sink(body, ctx, optimize=False)
+    to_program_cache[key] = body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)))
+  return call.replace(src=(body.replace(arg=to_function_name(call.arg.name)),)+call.src[1:])
 
 pm_lower_calls = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),

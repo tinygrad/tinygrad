@@ -373,12 +373,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", -5, 5)*4 < -13, 0, 1, "(a<-3)")
-    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "((a*-1)<4)")
+    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "(-4<a)")
     c0, c1 = 2, 2**54+1
     self.helper_test_variable(Variable("a", 0, c1)*c0 < c1, 0, 1, f"(a<{2**53+1})")
     c0, c1 = -2, -(2**54-1)
-    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"((a*-1)<{-(2**53-1)})")
-    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
+    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"({2**53-1}<a)")
+    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "(0<a)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
 
@@ -476,6 +476,14 @@ class TestSymbolic(unittest.TestCase):
     z = UOp.const(0.0)
     self.assertTrue(math.isnan(graph_rewrite(z/z, symbolic_simple, bottom_up=True).arg))
 
+  def test_two_stage_const_folding(self):
+    x = UOp.variable("x", 0, 10)
+    self.assertIs(graph_rewrite((x+1)+2, symbolic_simple), x+3)
+
+  def test_unpack_uint64_high(self):
+    x, y = UOp.variable("x", 0, 2**32-1, dtypes.uint64), UOp.variable("y", 0, 2**32-1, dtypes.uint32)
+    self.assertIs(graph_rewrite((((x<<32) | y.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32), symbolic_simple), x.cast(dtypes.uint32))
+
   def test_masked_shr_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
@@ -483,6 +491,19 @@ class TestSymbolic(unittest.TestCase):
   def test_masked_idiv_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
+
+  def test_masked_shr_fold_committed_mask(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) >> 2, 0, 63, "(x>>2)")
+
+  def test_masked_idiv_fold_committed_mask(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) // 4, 0, 63, "(x//4)")
+
+  def test_signed_const_wraps(self):
+    c = UOp.const(2**31, dtypes.int32)
+    self.assertEqual(c.val, -2**31)
+    self.assertIs((UOp.const(1, dtypes.int32) < c).simplify().arg, False)
 
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
@@ -1284,10 +1305,6 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
-  def test_sym_infer_tagged(self):
-    a = Variable("a", 0, 10)
-    assert sym_infer((a*3+1).rtag("t"), {a.expr: 2}) == 7
-
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
     # max(x, negative_const) can't be simplified when x can be negative, so nesting compounds

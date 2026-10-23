@@ -153,6 +153,9 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.TRUNC, dtypes.float, (-math.inf,)), -math.inf)
     self.assertTrue(math.isnan(exec_alu(Ops.TRUNC, dtypes.float, (math.nan,))))
 
+  def test_trunc_neg_zero(self):
+    self.assertEqual(repr(exec_alu(Ops.TRUNC, dtypes.float, (-0.5,))), "-0.0")
+
   def test_invalid_poison(self):
     # Invalid poisons any binary op regardless of result dtype: a comparison must not fold to a boolean
     self.assertIs(exec_alu(Ops.CMPLT, dtypes.bool, (Invalid, 1)), Invalid)
@@ -234,9 +237,6 @@ class TestExecALU(unittest.TestCase):
 
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
-
-    # test no truncate
-    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
 
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
@@ -425,6 +425,12 @@ class TestFastIdiv(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertNotIn(Ops.SHR, ops)
     self.assertIn(Ops.CDIV, ops)
+
+class TestNegLowering(unittest.TestCase):
+  def test_int_neg(self):
+    for dt in dtypes.ints:
+      x = UOp.param(0, dt, 1).index(UOp.const(0))
+      self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
@@ -627,6 +633,24 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.CMPEQ, ops)
     self.assertNotIn(Ops.CMPNE, ops)
+
+  def test_int_compare_without_negation(self):
+    for dt in (dtypes.int32, dtypes.uint32):
+      x = UOp.param(0, dt, 8).index(UOp.const(0))
+      for comp in [(x<7).ne(True), (x.const_like(7)<x).ne(True)]:
+        ops = [u.op for u in to_uops_list([comp], ren=self.renderer)]
+        self.assertEqual(ops.count(Ops.CMPLT), 1)
+        self.assertNotIn(Ops.XOR, ops)
+      ops = [u.op for u in to_uops_list([(x.const_like(6)<x) & (x<8)], ren=self.renderer)]
+      self.assertIn(Ops.CMPEQ, ops)
+      self.assertNotIn(Ops.CMPLT, ops)
+
+  def test_signed_compare_moves_negation(self):
+    x, y = UOp.param(0, dtypes.int32, 8).index(UOp.const(0)), UOp.param(0, dtypes.int32, 8).index(UOp.const(1))
+    for comp in [(x*-1)<7, (x*-1)<(y*-1)]:
+      ops = [u.op for u in to_uops_list([comp], ren=self.renderer)]
+      self.assertNotIn(Ops.MUL, ops)
+      self.assertNotIn(Ops.NEG, ops)
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,4 +1,4 @@
-import unittest, base64, functools, re, time, unicodedata
+import unittest, base64, functools, re, time, unicodedata, json, pathlib, tempfile
 from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
 
@@ -103,6 +103,41 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertEqual(tok.decode([2]), "[PAD7]")
     self.assertTrue(tok.is_end(0))  # eom ends generation
     self.assertFalse(tok.is_end(2))
+
+  def test_hf_tokens(self):
+    with tempfile.TemporaryDirectory() as folder:
+      path = pathlib.Path(folder)
+      vocab = {"h": 0, "i": 1, "hi": 2, "Ġ": 3, "!": 4, "[gMASK]": 5, "hello world": 9, "1": 10, "2": 11, "3": 12, "123": 13}
+      added = [dict(content=t, id=i, special=i != 9) for t, i in (("[gMASK]", 5), ("<eos>", 6), ("<eot>", 7), ("<eom>", 8), ("hello world", 9))]
+      (path / "tokenizer.json").write_text(json.dumps(dict(model=dict(vocab=vocab), added_tokens=added)))
+      (path / "config.json").write_text(json.dumps(dict(eos_token_id=[6, 7, 8])))
+      for preset in ("glm4", "llama3", "tekken"):
+        with self.subTest(preset=preset):
+          tok = SimpleTokenizer.from_hf(str(path), preset=preset)
+          self.assertEqual(tok.preset, preset)
+          self._test_coding(tok, "hi hi!", [2, 3, 2, 4])
+          self._test_coding(tok, "h!i", [0, 4, 1])
+          self._test_coding(tok, "hi [gMASK]hello world!<eos>", [2, 3, 5, 9, 4, 6])
+          self._test_coding(tok, "123", [10, 11, 12] if preset == "tekken" else [13])
+          self.assertEqual((tok.eos_id, tok.eot_id, tok.eom_id), (6, 7, 8))
+          self.assertEqual([tok.is_end(i) for i in range(5, 10)], [False, True, True, True, False])
+
+  def test_hf_metadata(self):
+    with tempfile.TemporaryDirectory() as folder:
+      path = pathlib.Path(folder)
+      (path / "tokenizer.json").write_text(json.dumps(dict(model=dict(vocab={"<s>": 0}))))
+      (path / "config.json").write_text(json.dumps(dict(eos_token_id=1)))
+      tok = SimpleTokenizer.from_hf(path, preset="llama3")
+      self.assertIsNone(tok.bos_id)
+      self.assertIsNone(tok.chat_template)
+      self.assertEqual((tok.eos_id, tok.eot_id, tok.eom_id), (1, None, None))
+      self.assertTrue(tok.is_end(1))
+      (path / "tokenizer_config.json").write_text(json.dumps(dict(bos_token="<s>", chat_template="config template")))
+      tok = SimpleTokenizer.from_hf(path, preset="llama3")
+      self.assertEqual(tok.bos_id, 0)
+      self.assertEqual(tok.chat_template, "config template")
+      (path / "chat_template.jinja").write_text("{{ messages[0].content }}")
+      self.assertEqual(SimpleTokenizer.from_hf(path, preset="llama3").chat_template, "{{ messages[0].content }}")
 
   def test_tekken_gpt4o_split(self):
     split = {p: SimpleTokenizer({}, {}, p)._split_to_word.findall for p in ("tekken", "gpt-4o")}

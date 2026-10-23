@@ -36,7 +36,7 @@ class NullQueue(HWQueue):
   def wait(self, signal:UOp, value:UOp, eq:bool=False): self.cmd(WAIT, signal, value, int(eq))
   def signal(self, signal:UOp, value:UOp): self.cmd(STORE, signal, value)
   def timestamp(self, signal:UOp): self.cmd(TIMESTAMP, signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
-  def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0]).rtag("doorbell"))
+  def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0], name="doorbell"))
 
 class NullProgram(Program['NullDevice']):
   def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
@@ -47,10 +47,11 @@ class NullProgram(Program['NullDevice']):
       if op == TIMESTAMP: MMIOInterface(addr, 8, fmt='Q')[0] = int((st + done) * 1000)
     descs = [list(null_events)[event] for op, event in zip(words[0::4], words[3::4]) if op in (EXEC, COPY)] if PROFILE else []
     sigs = [st + sum(x[0] == d[0] for x in descs[:i]) + k for i, d in enumerate(descs) for k in (0, 1)]
-    if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
+    if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], sigs))
 
 class NullAllocator(HostAllocator):
-  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: return BufferStorage(next(va))
+  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage:
+    return super()._alloc(size, options) if options.host or options.cpu_access else BufferStorage(next(va))
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
@@ -62,8 +63,8 @@ Compiled.pm_encode += PatternMatcher([
 
 class NullDevice(Compiled):
   host = property(lambda self: self.device)
-  timeline = functools.cached_property(lambda self: self.link_buffer(2, dtypes.uint64))
-  error_state = functools.cached_property(lambda self: self.link_buffer(1, dtypes.int64))
+  timeline = functools.cached_property(lambda self: self.host_buffer(16))
+  error_state = functools.cached_property(lambda self: self.host_buffer(8))
 
   def __init__(self, device:str):
     assert (emu:=getenv("EMULATE", "")) == "", \
@@ -71,8 +72,6 @@ class NullDevice(Compiled):
     renderers = [NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
                                   if inspect.isclass(r) and issubclass(r, Renderer)]
     super().__init__(device, NullAllocator(self), dedup(renderers), NullProgram)
-    Compiled.pm_bufferize += PatternMatcher([ # its memory is fake: every placeholder on it is a link buffer
-      (UPat(Ops.ALLOC, name="b"), lambda b, d=self: d.link_buffer(b.max_numel(), b.dtype) if b.device == d.device else None)])
 
-  def link_buffer(self, n, dt):
-    return Buffer(self.device, n * dt.itemsize, opaque=memoryview(bytearray(n * dt.itemsize)), options=BufferSpec(external_ptr=1))
+  # its memory is fake: every placeholder on it gets host memory
+  def host_buffer(self, n:int) -> Buffer: return Buffer(self.device, n, opaque=memoryview(bytearray(n)), options=BufferSpec(external_ptr=1))

@@ -134,7 +134,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
     # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
-    # on archs like x86, stack args (after the 6th) aren't PARAMs in the body, so also check the PROGRAM's kernel_params
+    # on x86 the params aren't PARAMs in the body, so also check the PROGRAM's kernel_params
     has_dnum = ((isinstance(call.body.arg, ProgramInfo) and any(p.arg.name == '_device_num' for p in call.body.kernel_params)) or
                 any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
                     for x in call.body.toposort()))
@@ -187,7 +187,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
-  for d in {d for d, _, _, prof, *_ in info.kernels if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
+  if PROFILE:
+    for d in {d for d, _, _, prof, *_ in info.kernels if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   if not (ctx.wait or PROFILE): return ets
 
@@ -276,8 +277,7 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
   return linear
 
-def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
-  return hcq_link(linear, input_uops=input_uops, allow_cache=allow_cache)
+def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_link(linear, input_uops=input_uops)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
@@ -289,7 +289,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), allow_cache=ctx.cache)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False))
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.device], 'invalidate_caches'): dev.invalidate_caches()

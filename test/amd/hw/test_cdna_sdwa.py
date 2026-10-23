@@ -10,6 +10,7 @@ class TestCDNASDWA(unittest.TestCase):
       cdna.v_mov_b32_e32(cdna.v[0], cdna.s[0]),
       cdna.v_mov_b32_e32(cdna.v[13], 1),
       cdna.v_add_co_u32_e32(cdna.v[0], cdna.SDWA, cdna.v[13], vsrc0=cdna.v[0], dst_sel=6, src0_sel=6),
+      cdna.s_nop(1),
       cdna.v_mov_b32_e32(cdna.v[2], cdna.VCC_LO),
       cdna.v_lshlrev_b32_e32(cdna.v[2], 31, cdna.v[2]),
       cdna.v_or_b32_e32(cdna.v[2], cdna.v[2], cdna.v[0]),

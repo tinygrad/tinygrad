@@ -1,6 +1,6 @@
 import unittest, struct, contextlib, statistics
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, flatten, ansistrip
+from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, flatten, ansistrip, perf_counter_us
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from extra.hcq1.hcq import HCQCompiled
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS
@@ -80,6 +80,14 @@ class TestProfiler(unittest.TestCase):
   def test_profile_kernel_run_wait(self):
     self.test_profile_kernel_run(wait=True)
 
+  def test_profile_kernel_run_time_sync(self):
+    with helper_collect_profile(TestProfiler.d0) as profile:
+      st = perf_counter_us()
+      run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)))
+    _, dev_ev = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    ev = next(e for e in profile if isinstance(e, ProfileGraphEvent))
+    self.assertLess(abs(ev.sigs[ev.ents[0].st_id] + dev_ev.tdiff - st), 1e6) # kernel within 1s of its cpu time
+
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 8, options=BufferSpec(nolru=True)).ensure_allocated()
     src = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1))
@@ -131,7 +139,7 @@ class TestProfiler(unittest.TestCase):
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
-    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
+    if Device.DEFAULT in {"CUDA", "CL"}: self.skipTest(f"{Device.DEFAULT} has no p2p: a transfer is two staged copies")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
@@ -145,7 +153,7 @@ class TestProfiler(unittest.TestCase):
   def test_profile_graph(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
-    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
+    if Device.DEFAULT in {"CUDA", "CL"}: self.skipTest(f"{Device.DEFAULT} has no p2p: a transfer is two staged copies")
 
     def f(a):
       x = (a + 1).realize()

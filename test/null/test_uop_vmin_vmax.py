@@ -142,6 +142,10 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.variable('x', -1, 10).cast(dtypes.uint8)._min_max, (0, 255))
     self.assertEqual(UOp.variable('x', 250, 260).cast(dtypes.uint8)._min_max, (0, 255))
 
+  def test_vmin_vmax_unsigned_sub(self):
+    x = UOp.variable('x', 0, 1, dtypes.uint32)
+    self.assertEqual(x.alu(Ops.SUB, x.const_like(1))._min_max, (0, dtypes.uint32.max))
+
   def test_vmin_vmax_xor_neg1(self):
     x = UOp.variable('x', 3, 7)
     uop = x ^ -1
@@ -189,7 +193,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.variable('x', 3e9, 4e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.variable('x', -4e9, -3e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.variable('x', 200, 300, dtypes.int).cast(dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
-    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
+    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (44, 44))
     self.assertEqual(UOp.const(math.inf).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.const(math.nan, dtypes.float)._min_max, (-math.inf, math.inf))
     # a weak destination has no width to clamp to

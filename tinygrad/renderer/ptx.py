@@ -5,7 +5,7 @@ from tinygrad.renderer import tc
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.renderer import Renderer, with_storage
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer, pm_narrow_uint
 from tinygrad.helpers import flatten, prod, unwrap, Target
 
 def render_val(x, dtype):
@@ -87,7 +87,7 @@ string_rewrite = PatternMatcher([
   # address computation: addr = buf + idx*itemsize
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("idx")), allow_any_len=True, name="x"), lambda ctx, x, buf, idx:
    [f"cvt.s64.{ctx.types[idx.dtype]} {ctx.r[x]}, {ctx.r[idx]};", f"mad.lo.s64 {ctx.r[x]}, {ctx.r[x]}, {x.dtype.itemsize}, {ctx.r[buf]};"]),
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
+  (UPat(GroupOp.Comparison, name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),)), lambda ctx, x, a: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {ctx.r[a]};"),
@@ -138,7 +138,7 @@ class PTXRenderer(Renderer):
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   code_for_op = asm_for_op
-  extra_matcher = ptx_matcher
+  extra_matcher = pm_narrow_uint + ptx_matcher
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
