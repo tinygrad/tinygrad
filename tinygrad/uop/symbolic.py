@@ -79,7 +79,7 @@ def lift_reduce_gate(red:UOp, cond:UOp, x:UOp, i:UOp) -> UOp|None:
   return lift[0].uprod(*lift[1:]).where(red.replace(src=(inner,)+red.src[1:]), i) if lift else None
 
 pm_data_invalid = PatternMatcher([
-  (invalid_pat.broadcast(), lambda i: i),
+  (invalid_pat.broadcast(name="s"), lambda i,s: i.expand(s.shape)),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
    lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i)),
