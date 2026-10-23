@@ -2,7 +2,7 @@ import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition, dedup, prod
+from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
@@ -85,7 +85,7 @@ def reduce_unparented(red:UOp) -> UOp|None:
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
   # the op applied n times, MAX and bool ADD/MUL (OR/AND) are idempotent. an empty range is the identity
-  n, op = prod(r.src[0] for r in reduce_unparented), red.arg[0]
+  n, op = UOp.uprod(*[r.src[0] for r in reduce_unparented]), red.arg[0]
   if op is not Ops.MAX and red.dtype is not dtypes.bool: ret = ret*n if op is Ops.ADD else ret**n
   return (n > 0).where(ret, ret.const_like(identity_element(op, red.dtype)))
 
