@@ -124,7 +124,7 @@ class ExpertWeights:
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
     if bias: self.bias = Tensor.zeros(num_experts, out_features)
   def set_quantized(self):
-    if self.weight.uop.axis not in (None, 1) or (found:=find_packed(self.weight, self.in_features)) is None: return
+    if self.weight.uop.axis == 0 or (found:=find_packed(self.weight, self.in_features)) is None: return
     self.ggml_type, self.packed = found
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
@@ -353,8 +353,10 @@ def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2]) # gate/up: (B, T, 1, D), down: (B, T, k, H)
   assert x_slots in (1, slots), f"x has {x_slots} rows per token, expected 1 or {slots}"
   local_out, global_out, ggml_type = int(layer.weight.uop.max_shard_shape[1]), int(layer.weight.shape[1]), unwrap(layer.ggml_type)
+  splits = layer.in_features // in_features
+  assert (layer.weight.uop.axis == 2) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.weight.uop.axis}"
   xq, xd, xs = q8_quantize(x.contiguous(), B*T*x_slots, in_features)
-  out = Tensor.empty(B*T*slots, global_out, (in_features+1023)//1024, dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
+  out = Tensor.empty(B*T*slots, global_out, splits*((in_features+1023)//1024), dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
   fxn = functools.partial(_moe_decode_kernel, out_features=local_out, in_features=in_features, ggml_type=ggml_type, x_share=slots//x_slots)
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   result = Tensor.custom_kernel(out, layer.packed, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
