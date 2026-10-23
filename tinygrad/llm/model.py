@@ -84,12 +84,12 @@ class ExpertWeights:
     assert self.ggml_type is not None and self.ggml_type == up.ggml_type and self.weight.device == up.weight.device
     self.weight = fuse_gate_up(self.weight, up.weight, self.num_experts, rows).contiguous().realize()
     self.fused = True
-  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
-    # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
+  def __call__(self, sel:Tensor, x:Tensor, out_dtype:DType=dtypes.float32) -> Tensor:
+    # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out) (out_dtype: the bundles of batched decoding's)
     # expert parallel: x and the output have a leading device axis, (devices, B, T, k, out) partial outputs from the experts of each device
     self.set_quantized()
     if self.ggml_type is not None:
-      if isinstance(sel.numel(), int): return moe_linear(self.weight, self.ggml_type, self.local_experts, x, sel, self.first)
+      if isinstance(sel.numel(), int): return moe_linear(self.weight, self.ggml_type, self.local_experts, x, sel, self.first, out_dtype)
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = moe_linear(self.weight, self.ggml_type, self.local_experts, x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), self.first)
       return out.shrink(tuple((0, s) for s in out.shape[:-4])+tuple((0, s) for s in sel.shape)+((0, out.shape[-1]),))
@@ -574,7 +574,8 @@ class FFNBlock:
         gate, up = gu[..., 0, :].flatten(-2), gu[..., 1, :].flatten(-2)
       else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-      x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D), expert parallel: (devices, B, T, k, D) partials
+      # (batched decoding: a row a selection of a slice, in half as the grouped experts' (their weighted sum in float))
+      x_down = self.ffn_down_exps(sel, act.contiguous(), dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices else dtypes.float32)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
     keep = partial and _partial_out[0]  # the partial sums are returned (sequence parallel)

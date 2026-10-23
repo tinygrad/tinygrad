@@ -1872,7 +1872,7 @@ def moe_bundles(sel:Tensor, first:Tensor, experts:int, M:int, N:int) -> tuple[Te
                                     fxn=functools.partial(kernel, experts=experts, M=M))[:2]
   return bexp, brow
 
-def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, first:Tensor) -> Tensor:
+def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, first:Tensor, out_dtype:DType=dtypes.float32) -> Tensor:
   """
   weight: packed (experts, out, in) local to each device, x: (..., x_slots, in), sel: (B, T, slots) expert ids, first: the first expert of a device.
   returns (..., slots, out). on devices holding some of the experts the output is (devices, B, T, slots, out), every device has its own partial
@@ -1893,7 +1893,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
       if len(_bundle_cache) > 256: _bundle_cache.clear()
       bundles = _bundle_cache[key] = moe_bundles(sel, first, experts, M, tokens*int(slots))
     bexp, brow = bundles
-    out = Tensor.empty(devices*tokens*slots, out_features, dtype=dtypes.float32, device=x.device, axis=0 if devices > 1 else None)
+    out = Tensor.empty(devices*tokens*slots, out_features, dtype=out_dtype, device=x.device, axis=0 if devices > 1 else None)
     out = out.zeros_like().contiguous()
     # (the int8 tensor cores: a workgroup a few blocks of outputs of a narrow input, their activations loaded once)
     fxn = functools.partial(_moe_bundled_wmma_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
