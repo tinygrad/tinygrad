@@ -769,6 +769,28 @@ class TestCallInKernel(unittest.TestCase):
       self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
 
+  def test_nop_call(self):
+    @uopfunc
+    def reg():
+      tmp = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
+      return tmp[0].store(7).sink()
+    def kernel(C:UOp): return reg().sink(arg=KernelInfo())
+    out = Tensor([11], dtype=dtypes.int).realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [11])
+
+  def test_call_alias(self):
+    @uopfunc
+    def incr(out:UOp, A:UOp):
+      store = out[0].store(A[0]+1)
+      out, A = out.after(store), A.after(store)
+      return out[1].store(A[0]).sink()
+
+    def kernel(A:UOp):
+      return incr(A, A).sink(arg=KernelInfo(opts_to_apply=()))
+
+    a = Tensor([0, 0], dtype=dtypes.int).realize()
+    self.assertEqual(a.custom_kernel(fxn=kernel)[0].tolist(), [1, 1])
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
