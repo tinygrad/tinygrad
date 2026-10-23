@@ -545,6 +545,23 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
+  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
+  def test_call_to_program(self):
+    t = Tensor([-1]).realize()
+    # render a source string
+    from tinygrad.codegen import do_to_program
+    source:str = do_to_program(custom_add_one_kernel(t.uop.param_like(0), t.uop.param_like(1)), Device[t.device].renderer).src[2].arg
+    assert isinstance(source, str)
+    # call to PROGRAM
+    def custom_source(out:UOp, inp:UOp) -> UOp:
+      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("call_to_source"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=source)))
+    cpu_src = Tensor([2], device="CPU").realize()
+    t = Tensor.custom_kernel(t, cpu_src.to(t.device), fxn=custom_source)[0]
+    cp = t.to("CPU").realize()
+    self.assertEqual(t.tolist(), [3])
+    self.assertEqual(cp.tolist(), [3])
+
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
@@ -728,24 +745,6 @@ class TestCallInKernel(unittest.TestCase):
     dst = Tensor([-1.] * 6).realize()
     out = dst.custom_kernel(src, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [-1., 1., 2., 3., 4., -1.])
-
-  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
-  def test_call_to_program(self):
-    t = Tensor([-1]).realize()
-    # render a source string
-    from tinygrad.codegen import do_to_program
-    source:str = do_to_program(custom_add_one_kernel(t.uop.param_like(0), t.uop.param_like(1)), Device[t.device].renderer).src[2].arg
-    assert isinstance(source, str)
-    # call to PROGRAM
-    def custom_source(out:UOp, inp:UOp) -> UOp:
-      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("call_to_source"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=source)))
-    cpu_src = Tensor([2], device="CPU").realize()
-    t = Tensor.custom_kernel(t, cpu_src.to(t.device), fxn=custom_source)[0]
-    cp = t.to("CPU").realize()
-    self.assertEqual(t.tolist(), [3])
-    self.assertEqual(cp.tolist(), [3])
-
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
