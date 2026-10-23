@@ -82,7 +82,7 @@ class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; b
 class ProfileGraphEntry: device:str; name:str|TracingKey; st_id:int; en_id:int; profile_key:bytes|None=None # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
+class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; sigs:list[decimal.Decimal] # noqa: E702
 
 # **************** Buffer + Allocators ****************
 
@@ -478,7 +478,7 @@ class Compiled:
   def collect_prof(self):
     div = decimal.Decimal(self.timestamp_divider)
     for buf, g in itertools.groupby(self.prof_ents.items(), key=lambda x: x[0][0]) if PROFILE else []:
-      Compiled.profile_events.append(ProfileGraphEvent([e for _, e in g], [], [t/div for t in buf.host.view(fmt='Q')[:]]))
+      Compiled.profile_events.append(ProfileGraphEvent([e for _, e in g], [t/div for t in buf.host.view(fmt='Q')[:]]))
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
