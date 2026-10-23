@@ -158,6 +158,8 @@ class TestLLMTokenizer(unittest.TestCase):
     for s, tk, go in differ:
       self.assertEqual(split["tekken"](s), tk, f"tekken {s!r}")
       for p in ("gpt-4o", "kimi-k2"): self.assertEqual(split[p](s), go, f"{p} {s!r}")
+    self.assertEqual(split["gpt-4o"]("a.\n/b"), ["a", ".\n/", "b"])
+    self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
 
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""

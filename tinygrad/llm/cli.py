@@ -33,7 +33,8 @@ class SimpleTokenizer:
     if preset in ("tekken", "gpt-4o", "kimi-k2"):
       r_up, r_lo = ucat_range(("Lu","Lt","Lm","Lo","M")), ucat_range(("Ll","Lm","Lo","M"))
       sfx = "" if preset == "tekken" else f"{contr}?"
-      r_p, r_w = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*", f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+      r_w = f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+      if preset != "kimi-k2": r_p = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*"
     self._split_to_word = re.compile(f"{r_w}|{r_n}|{r_p}|{r_t}")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
