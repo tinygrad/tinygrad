@@ -17,13 +17,18 @@ class CPUProgram(Program['CPUDevice']):
   entry:int
 
   def _load(self, lib, base=0):
-    return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()), exports=self.exports)
+    return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()), exports=self.exports,
+                                                                 symbols={f"__tinygrad_call_{i}":lib.entry for i,lib in enumerate(self.libraries)})
 
-  def __init__(self, dev:CPUDevice, obj:TinyELF):
+  def __init__(self, dev:CPUDevice, obj:TinyELF, libraries:tuple[CPUProgram, ...]|None=None):
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
-    self.exports:dict[int, int] = {}
     self.lvp = obj.target.renderer == "LVP"
-    if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
+    self.exports:dict[int, int] = {}
+    loaded_libraries:dict[int, CPUProgram] = {}
+    self.libraries = tuple(dev.load_library(lib, loaded_libraries) for lib in obj.libraries) if libraries is None else libraries
+    if dev.remote is not None:
+      deps = struct.pack(f"<{len(self.libraries)}Q", *(lib.fxn for lib in self.libraries))
+      self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(self.libraries), payload=deps + obj.lib)[0]
     else:
       self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True))
       loaded = self._load(obj.lib, self.buf.buf)
@@ -61,6 +66,7 @@ class CPUDevice(Compiled):
   def has_copy_queue(self) -> bool: return False
 
   def __init__(self, device:str=""):
+    self.libraries:dict[tuple[bytes, tuple[CPUProgram, ...]], CPUProgram] = {}
     self.remote = None
     if len(parts:=device.split(':')) == 3:
       self.remote = RemotePCIDevice("CPU", f"remote:{device[4:]}:0", RemotePCIDevice.connect(parts[1], int(parts[2])))
@@ -71,3 +77,11 @@ class CPUDevice(Compiled):
   def synchronize(self, timeout:int|None=None):
     if self.remote is not None: self.remote.rpc(RemoteCmd.PING)
     super().synchronize(timeout)
+
+  def load_library(self, obj:TinyELF, loaded:dict[int, CPUProgram]) -> CPUProgram:
+    if id(obj) not in loaded:
+      deps = tuple(self.load_library(lib, loaded) for lib in obj.libraries)
+      key = (obj.lib, deps)
+      if key not in self.libraries: self.libraries[key] = CPUProgram(self, obj, deps)
+      loaded[id(obj)] = self.libraries[key]
+    return loaded[id(obj)]

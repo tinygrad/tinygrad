@@ -4,6 +4,7 @@ from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.device import Device, TinyELF
+from tinygrad.runtime.ops_cpu import CPUProgram
 from tinygrad.helpers import DEBUG, Target, to_mv
 
 def resp(resp0=0, resp1=0, status=0): return struct.pack(REMOTE_RESP, status, resp0, resp1)
@@ -79,7 +80,9 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     FileIOInterface.munmap(arg0, arg1)
     conn.sendall(resp())
   elif cmd == RemoteCmd.LOAD_PROG:
-    programs.append(Device["CPU"].runtime(TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), ())))
+    deps = struct.unpack(f"<{arg1}Q", conn.recv(arg1 * 8, socket.MSG_WAITALL)) if arg1 else ()
+    obj = TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), ())
+    programs.append(CPUProgram(Device["CPU"], obj, libraries=tuple(programs[i] for i in deps)))
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
     kernargs = ctypes.create_string_buffer(conn.recv(arg1, socket.MSG_WAITALL))

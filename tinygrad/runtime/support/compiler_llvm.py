@@ -2,7 +2,6 @@ import ctypes
 from tinygrad.device import Compiler, CompileError
 from tinygrad.helpers import getenv, cpu_objdump, amdgpu_disassemble, unwrap, DEBUG
 from tinygrad.runtime.autogen import llvm
-from tinygrad.runtime.support.compiler_cpu import link_objects
 
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
 
@@ -64,7 +63,6 @@ class LLVMCompiler(Compiler):
     return obj
 
 class CPULLVMCompiler(LLVMCompiler):
-  link = staticmethod(link_objects)
   def __init__(self, arch:list[str], cache_key=None):
     assert len(arch) >= 2, f"invalid arch string: {','.join(arch)!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     self.arch, cpu, *feats = arch

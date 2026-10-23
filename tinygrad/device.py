@@ -336,9 +336,6 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
-  def link(self, objects:list[tuple[bytes, str, tuple[str, ...]]]) -> bytes:
-    assert len(objects) == 1, "compiler does not support object linking"
-    return objects[0][0]
   def disassemble(self, lib:bytes): pass
   def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
     argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
@@ -357,6 +354,7 @@ class TinyELF:
   # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
   signature: tuple[tuple[str|None, AddrSpace, DType, tuple], ...]
   profile_key: bytes|None = None
+  libraries: tuple[TinyELF, ...] = ()
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:

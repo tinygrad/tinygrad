@@ -32,35 +32,14 @@ def elf_symbols(ecls:str, sections:list[ElfSection]) -> list[tuple[str, libc.Elf
   strings = sections[symsec.header.sh_link].content
   return [(_strtab(strings, sym.st_name), sym) for sym in _to_carray(symsec, getattr(libc, f"{ecls}_Sym"))]
 
-def elf_rename_symbols(blob:bytes, names:dict[str, str]) -> bytes:
-  if not names: return blob
-  ecls, sections = elf_sections(blob)
-  header = getattr(libc, f"{ecls}_Ehdr").from_buffer_copy(blob)
-  out = bytearray(blob)
-  for section in sections:
-    if section.header.sh_type != libc.SHT_SYMTAB: continue
-    strings = bytearray(sections[section.header.sh_link].content)
-    symbols = _to_carray(section, getattr(libc, f"{ecls}_Sym"))
-    for sym in symbols:
-      if (name:=names.get(_strtab(sections[section.header.sh_link].content, sym.st_name))) is not None:
-        sym.st_name = len(strings)
-        strings += name.encode() + b'\0'
-    out[section.header.sh_offset:section.header.sh_offset+section.header.sh_size] = bytes(symbols)
-    str_header = sections[section.header.sh_link].header
-    str_header.sh_offset, str_header.sh_size = len(out), len(strings)
-    out += strings
-    offset = header.e_shoff + section.header.sh_link * header.e_shentsize
-    out[offset:offset+header.e_shentsize] = bytes(str_header)
-  return bytes(out)
-
 def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
-               exports:dict[int, int]|None=None, base:int=0) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+               exports:dict[int, int]|None=None, symbols:dict[str, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
   ecls, sections = elf_sections(blob)
 
   rel = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
   rela = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rela"))) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
   symtab = elf_symbols(ecls, sections)
-  progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC]
+  progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
   # Prealloc image for all fixed addresses.
   image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
@@ -72,32 +51,33 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
 
   if exports is not None:
     for idx, (_, sym) in enumerate(symtab):
-      if (0 < sym.st_shndx < len(sections) and sym.st_info >> 4 == libc.STB_GLOBAL and sym.st_info & 15 == libc.STT_FUNC
-          and sym.st_other & 3 != libc.STV_HIDDEN):
-        exports[idx] = base + sections[sym.st_shndx].header.sh_addr + sym.st_value
+      if 0 < sym.st_shndx < len(sections) and sym.st_info >> 4 == libc.STB_GLOBAL and sym.st_info & 15 == libc.STT_FUNC:
+        exports[idx] = sections[sym.st_shndx].header.sh_addr + sym.st_value
 
   # Relocations
   relocs = []
   for sh, c_rels in rel + rela:
-    if not sections[sh.header.sh_info].header.sh_flags & libc.SHF_ALLOC or sections[sh.header.sh_info].name == ".eh_frame": continue
+    if sections[sh.header.sh_info].name == ".eh_frame": continue
     target_image_off = sections[sh.header.sh_info].header.sh_addr
     for r in c_rels:
       name, sym = symtab[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)]
-      value = link_sym(name, link_libs or []) if sym.st_shndx == 0 else base + sections[sym.st_shndx].header.sh_addr + sym.st_value
+      value = (((symbols or {}).get(name) or link_sym(name, link_libs or [])) if sym.st_shndx == 0
+               else sections[sym.st_shndx].header.sh_addr + sym.st_value)
       relocs.append((target_image_off + r.r_offset, value, getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info), getattr(r, "r_addend", 0)))
 
   return memoryview(image), sections, relocs
 
 def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
-               exports:dict[int, int]|None=None) -> bytes:
-  image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports, base=base)
+               exports:dict[int, int]|None=None, symbols:dict[str, int]|None=None) -> bytes:
+  image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports, symbols=symbols)
+  if exports is not None: exports.update({idx:base+offset for idx,offset in exports.items()})
   image = bytearray(image_)
 
   def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int, addend: int):
     nonlocal image
     match r_type:
       # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
-      case libc.R_X86_64_PC32: return i2u(32, tgt-ploc-base)
+      case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
       case libc.R_X86_64_PLT32:
         if -2**31 <= tgt-ploc-base < 2**31: return i2u(32, tgt-ploc-base)
         # ext lib address is out of rel32 range, create a trampoline: JMP [RIP+0] .quad target
@@ -106,7 +86,7 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
       # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
       # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
       case libc.R_AARCH64_ADR_PREL_PG_HI21:
-        rel_pg = (tgt & ~0xFFF) - ((base+ploc) & ~0xFFF)
+        rel_pg = (tgt & ~0xFFF) - (ploc & ~0xFFF)
         return instr | (getbits(rel_pg, 12, 13) << 29) | (getbits(rel_pg, 14, 32) << 5)
       case libc.R_AARCH64_ADD_ABS_LO12_NC: return instr | (getbits(tgt, 0, 11) << 10)
       case libc.R_AARCH64_LDST16_ABS_LO12_NC: return instr | (getbits(tgt, 1, 11) << 10)
@@ -114,7 +94,7 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
       case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
       case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
       case libc.R_AARCH64_CALL26 | libc.R_AARCH64_JUMP26:
-        if -(2**27) <= tgt-ploc-base < 2**27: return instr | getbits(tgt-ploc-base, 2, 27)
+        if -(2**25) <= tgt-ploc-base and tgt-ploc-base <= (2**25 - 1) * 4: return instr | getbits(tgt-ploc-base, 2, 27)
         # create trampoline:         LDR x17, 8  BR x17
         image += bytes(-len(image) % 4) + struct.pack("<IIQ", 0x58000051, 0xD61F0220, tgt)
         return instr | getbits(len(image)-ploc-16, 2, 27)

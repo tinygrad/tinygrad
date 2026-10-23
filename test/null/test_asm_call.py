@@ -24,8 +24,7 @@ class TestCallJIT(unittest.TestCase):
             calls = (out[0].store(v).sink().call(out, name=name), out[1].store(value).sink().call(out, UOp.const(v+1, dtypes.int), name=name))
             programs.append(to_program(UOp.sink(*(c.sink().call(out, name=name) for c in calls), arg=KernelInfo(name)), renderer))
         self.assertEqual(programs[0].to_elf().name, programs[1].to_elf().name)
-        self.assertNotEqual(programs[0].src[3].arg, programs[1].src[3].arg)
-        self.assertTrue(all(not p.src[3].src for p in programs))
+        self.assertEqual(programs[0].src[3].arg, programs[1].src[3].arg)
         if backend == "CPU:CLANG": self.assertIn("extern void __tinygrad_call_", programs[0].src[2].arg)
         for prg, expected in zip(programs, (7, 19)):
           result = (ctypes.c_int * 2)()
