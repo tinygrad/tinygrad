@@ -271,7 +271,7 @@ def _out(layer:Linear, x:Tensor) -> Tensor:
 def _identity(x:Tensor) -> Tensor: return x
 
 # the experts of a few tokens are the ones of every token (a decode kernel each), more are grouped by expert (prefill)
-MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 48)
+MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 96)
 
 # batched decoding (Transformer.forward_batch): the rows are groups of a sequence each, group g (its rows the tokens at positions pos.. of the
 # sequence) in the state slot g: (pos, rows) of every group
@@ -281,15 +281,17 @@ def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|No
   """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
   return Tensor.stack(*[Tensor(p) for p, _ in groups]).cast(dtypes.int32).contiguous().to(device).contiguous()
 
-def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None) -> tuple[Tensor, list[Tensor]]:
+def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DType|None=None) -> tuple[Tensor, list[Tensor]]:
   """
-  n slots of a state like `like` (of shape, or like's) in one buffer of every device, made but not allocated (a jit captured before its
-  memory is holds it): the pool (n*shape[0], ...) and the n slots, views of it (buffers of their own: a kernel writes one in place)
+  n slots of a state like `like` (of shape, or like's, of dtype or like's) in one buffer of every device, made but not allocated (a jit
+  captured before its memory is holds it): the pool (n*shape[0], ...) and the n slots, views of it (buffers of their own: a kernel writes one
+  in place)
   """
   shape, devs, axis = tuple(int(x) for x in (shape or like.shape)), cast(str|tuple[str, ...], like.device), like.uop.axis
   local = tuple(x//len(devs) if isinstance(devs, tuple) and i == axis else x for i, x in enumerate(shape))
-  size, item = prod(local), like.dtype.itemsize
-  base = UOp.new_buffer(devs, n * size, like.dtype)
+  dtype = dtype or like.dtype
+  size, item = prod(local), dtype.itemsize
+  base = UOp.new_buffer(devs, n * size, dtype)
   def tensor(u:UOp, rows:int) -> Tensor:
     u = u.reshape((rows * local[0], *local[1:]))
     return Tensor(u.unshard(axis) if isinstance(devs, tuple) and axis is not None else u)
@@ -297,7 +299,7 @@ def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None) -> tuple
     if not isinstance(b:=base.buffer, MultiBuffer): return b.view(size * item, i * size * item)
     (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [x.view(size * item, i * size * item) for x in b.bufs]
     return mb
-  return tensor(base, n), [tensor(UOp.from_buffer(view(i), like.dtype, devs), 1) for i in range(n)]
+  return tensor(base, n), [tensor(UOp.from_buffer(view(i), dtype, devs), 1) for i in range(n)]
 
 def _unallocated(*sizes:int|UOp, dtype:DType, device:str|tuple[str, ...]|None, axis:int|None=None) -> Tensor:
   """a tensor whose buffer is made but not allocated: a jit captured before its memory is (it holds it, not an intermediate of its own)"""
@@ -1026,7 +1028,9 @@ class GatedDeltaNetBlock(FFNBlock):
     if len(getattr(self, "slot_rec", [])) >= n: return
     S = self.config.spec_drafts + 2
     # (in one buffer of every device: slot_store writes what a step reads)
-    self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]))
+    # (in half: the memory of more slots. the kernels compute in float)
+    self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]),
+                                              dtypes.half if getenv("SLOT_STATE_HALF", 1) else None)
     pools = [_slot_pool(n, c, (S, *c.shape[1:])) for c in self.conv_states]
     self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[i] for _, slots in pools] for i in range(n)]
 
@@ -1342,9 +1346,9 @@ class Transformer:
   # a sequence is prefilled as usual (the states of the model), then its states are copied into a free slot (slot_store); steps take the
   # sequences of the slots 0..n-1 (the rows of a step), the projections, experts and the head read their weights once for all of them
 
-  BATCH_SIZES = (1, 2, 4, 8, 16)
+  BATCH_SIZES = (1, 2, 4, 8, 16, 32)
   def batch_slots(self) -> int:
-    return min(getenv("BATCH_SLOTS", 16), max(self.BATCH_SIZES)) if self.has_recurrent_block and self.config.kv_lora_rank > 0 else 0
+    return min(getenv("BATCH_SLOTS", 32), max(self.BATCH_SIZES)) if self.has_recurrent_block and self.config.kv_lora_rank > 0 else 0
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
 
   def _init_slots(self, alloc:bool=True):
@@ -1397,7 +1401,8 @@ class Transformer:
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock):
         S = int(b.slot_rec[0].shape[0])
-        copies += [rows(d, slot*S + wp).assign(rows(c, rp)) for d, c in zip([b.pool_rec, *b.pool_conv], [b.recurrent_state, *b.conv_states])]
+        copies += [rows(d, slot*S + wp).assign(rows(c, rp).cast(d.dtype))
+                   for d, c in zip([b.pool_rec, *b.pool_conv], [b.recurrent_state, *b.conv_states])]
       if isinstance(b, MLATransformerBlock):
         ctx = int(b.slot_k[0].shape[2])
         copies.append(rows(b.pool_k, slot).assign(b.cache_k[:, :, :ctx]))

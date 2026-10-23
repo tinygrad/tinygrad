@@ -1690,25 +1690,28 @@ def _moe_bundle_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:in
   """
   the selections (sel: the expert of every (token, slot) row, first the device's first) in bundles of at most M rows of an expert: bexp the
   expert of every bundle, brow the M rows of every bundle (both filled with -1 before). a workgroup, a thread the experts tid+256*m: it counts
-  their rows, the bundles before them (a sum over the counts in LDS), then puts their rows in their bundles in order
+  their rows, the bundles before them (a sum over the counts in LDS), then puts their rows in their bundles in order. the loops take U
+  selections (or experts) at a time: their LDS loads in flight together
   """
-  N, THREADS = cast(int, sel.shape[0]), 256
-  per = (experts + THREADS - 1) // THREADS
+  N, THREADS, U = cast(int, sel.shape[0]), 256, 8
+  NP, per = round_up(N, U), (experts + THREADS - 1) // THREADS
   tid = UOp.range(THREADS, 0, AxisType.LOCAL)
   es = [tid + THREADS*m for m in range(per)]
   def ireg(dep:UOp|None=None) -> UOp:
     r = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
     return r.after((r if dep is None else r.after(dep))[0].store(UOp.const(0, dtypes.int32)))
-  # the local experts of the selections in LDS (the loops read them there)
-  staged = UOp.alloc((N,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  idx = [tid + THREADS*q for q in range((N + THREADS - 1) // THREADS)]
-  staged = staged.after(UOp.group(*(staged[i.valid(i < N)].store(sel[i.minimum(N-1)].load() - first[0].load()) for i in idx)).barrier())
-  def expert_of(i:UOp) -> UOp: return staged[i].load()
+  def isum(xs:list[UOp]) -> UOp: return functools.reduce(lambda a, b: a + b, xs)
+  # the local experts of the selections in LDS (the loops read them there), -1 past them
+  staged = UOp.alloc((NP,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  idx = [tid + THREADS*q for q in range((NP + THREADS - 1) // THREADS)]
+  staged = staged.after(UOp.group(*(staged[i.valid(i < NP)].store((i < N).where(sel[i.minimum(N-1)].load() - first[0].load(),
+                                                                             UOp.const(-1, dtypes.int32))) for i in idx)).barrier())
   # the rows of every expert of the thread
   counts = []
   for e in es:
-    c, i = ireg(), UOp.range(N, next(UOp.unique_num), AxisType.LOOP)
-    c = c.after(c[0].store(c.after(i)[0].load() + expert_of(i).eq(e).cast(dtypes.int32)).end(i))
+    c, i = ireg(), UOp.range(NP // U, next(UOp.unique_num), AxisType.LOOP)
+    hits = isum([staged[i*U + u].load().eq(e).cast(dtypes.int32) for u in range(U)])
+    c = c.after(c[0].store(c.after(i)[0].load() + hits).end(i))
     counts.append(c[0].load())
   nb = [(c + (M-1)) // M for c in counts]
   lds = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL).after(staged)
@@ -1716,15 +1719,19 @@ def _moe_bundle_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:in
   stores = []
   for e, n in zip(es, nb):
     # the bundles before the expert's
-    a, j = ireg(), UOp.range(experts, next(UOp.unique_num), AxisType.LOOP)
-    a = a.after(a[0].store(a.after(j)[0].load() + (j < e).where(lds[j].load(), UOp.const(0, dtypes.int32))).end(j))
+    a, j = ireg(), UOp.range((per*THREADS) // U, next(UOp.unique_num), AxisType.LOOP)
+    a = a.after(a[0].store(a.after(j)[0].load() + isum([(j*U + u < e).where(lds[j*U + u].load(), UOp.const(0, dtypes.int32))
+                                                         for u in range(U)])).end(j))
     start = a[0].load().cast(dtypes.weakint)
     ok = e < experts
     # its rows, in order
-    r, i = ireg(start), UOp.range(N, next(UOp.unique_num), AxisType.LOOP)
-    cur, hit = r.after(i)[0].load(), expert_of(i).eq(e) & ok
-    put = brow[(start*M + cur.cast(dtypes.weakint)).valid(hit)].store(i.cast(dtypes.int32))
-    stores.append(r.after(put)[0].store(cur + hit.cast(dtypes.int32)).end(i))
+    r, i = ireg(start), UOp.range(NP // U, next(UOp.unique_num), AxisType.LOOP)
+    cur, hit_list = r.after(i)[0].load(), [staged[i*U + u].load().eq(e) & ok for u in range(U)]
+    puts, at = [], cur
+    for u, h in enumerate(hit_list):
+      puts.append(brow[(start*M + at.cast(dtypes.weakint)).valid(h)].store((i*U + u).cast(dtypes.int32)))
+      at = at + h.cast(dtypes.int32)
+    stores.append(r.after(*puts)[0].store(at).end(i))
     # its bundles' expert
     b = UOp.range((N + M - 1) // M, next(UOp.unique_num), AxisType.LOOP)
     stores.append(bexp[(start + b).valid(ok & (b < n.cast(dtypes.weakint)))].store(e.cast(dtypes.int32)).end(b))
