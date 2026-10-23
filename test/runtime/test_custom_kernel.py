@@ -573,20 +573,19 @@ class TestCustomKernel(unittest.TestCase):
     assert_kernel_count(2 if x[0].uop.contiguous_view() is None else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
-  @unittest.skip("this shouldn't be expected to work")
   def test_inplace_transpose(self):
     def custom_assign_row_max_kernel(A:UOp) -> UOp:
       row = UOp.range(A.shape[0], 0)
       col = UOp.range(A.shape[1], 1)
-      return A[row, col].store(A[row].max(axis=0)).end(col).end(row).sink(arg=KernelInfo(name=f"assign_row_max_{A.numel()}"))
-    a = Tensor.arange(4).clone().realize()
-    a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_assign_row_max_kernel)[0]
-    self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
+      return A[row, col].store(A[row].max(axis=0)).end(col).end(row).sink(arg=KernelInfo(name=f"assign_row_max_{A.numel()}", opts_to_apply=()))
+    a = Tensor.arange(4).reshape(2, 2).clone().realize()
+    a = Tensor.custom_kernel(a.T, fxn=custom_assign_row_max_kernel)[0]
+    with self.assertRaises(AssertionError):
+      self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
   @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
-                       Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
-  @unittest.skipIf(ASM_CALL, "ASM_CALL doesn't support direct pc read and write")
+                       Device.DEFAULT != "WEBGPU" and not ASM_CALL, "binary not supported on this backend")
   def test_binary(self):
     payload = bytes(range(256))
     def kernel(out:UOp):
