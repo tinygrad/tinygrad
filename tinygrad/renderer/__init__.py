@@ -28,7 +28,7 @@ class Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
-    pending = [(sink, None, {})]
+    pending: list[tuple[UOp, sint|None, dict[UOp, UOp]]] = [(sink, None, {})]
 
     # traverse in reverse order to greedily ignore indexing ALU if necessary
     while pending:
