@@ -82,7 +82,7 @@ class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; b
 class ProfileGraphEntry: device:str; name:str|TracingKey; st_id:int; en_id:int; profile_key:bytes|None=None # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
+class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; sigs:list[decimal.Decimal] # noqa: E702
 
 # **************** Buffer + Allocators ****************
 
@@ -250,7 +250,6 @@ class Allocator(Generic[DeviceType]):
 
   def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
-    self.default_buffer_spec: BufferSpec = BufferSpec()
     self.cache:dict[tuple[int, BufferSpec|None], list[tuple[BufferStorage, dict[Compiled, int]]]] = defaultdict(list)
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
@@ -260,7 +259,7 @@ class Allocator(Generic[DeviceType]):
     if (c:=self.cache[(size, options)]) and all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
       return c.pop(0)[0]
 
-    spec = options if options is not None else self.default_buffer_spec
+    spec = options if options is not None else BufferSpec()
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError): self.free_cache()
     try: return self._alloc(size, spec)
@@ -268,7 +267,7 @@ class Allocator(Generic[DeviceType]):
                                                                f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
 
   def free(self, storage:BufferStorage, size:int, options:BufferSpec|None=None):
-    spec = options if options is not None else self.default_buffer_spec
+    spec = options if options is not None else BufferSpec()
     if not LRU or not self.lru or spec.nolru or spec.external_ptr is not None: return self.do_free(storage, spec)
 
     # add that buf to cache
@@ -278,7 +277,7 @@ class Allocator(Generic[DeviceType]):
 
   def free_cache(self):
     for (_, options), storages in self.cache.items():
-      for storage, _ in storages: self.do_free(storage, options if options is not None else self.default_buffer_spec)
+      for storage, _ in storages: self.do_free(storage, options if options is not None else BufferSpec())
       storages.clear()
 
   def do_free(self, storage:BufferStorage, options:BufferSpec):
@@ -478,7 +477,7 @@ class Compiled:
   def collect_prof(self):
     div = decimal.Decimal(self.timestamp_divider)
     for buf, g in itertools.groupby(self.prof_ents.items(), key=lambda x: x[0][0]) if PROFILE else []:
-      Compiled.profile_events.append(ProfileGraphEvent([e for _, e in g], [], [t/div for t in buf.host.view(fmt='Q')[:]]))
+      Compiled.profile_events.append(ProfileGraphEvent([e for _, e in g], [t/div for t in buf.host.view(fmt='Q')[:]]))
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
