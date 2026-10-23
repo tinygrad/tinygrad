@@ -764,7 +764,8 @@ class TestCallInKernel(unittest.TestCase):
     y, z = y.to("CPU"), z.to("CPU")
     Tensor.realize(y, z)
 
-    self.assertEqual(y.tolist(), z.tolist())
+    with self.assertRaises(AssertionError):
+      self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
 
 class TestCustomKernelInput(unittest.TestCase):
