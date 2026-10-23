@@ -265,12 +265,14 @@ def _exit_child(code:int):
   worker.terminate_worker_pool()
   os._exit(code)
 
-def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[], None]|None=None) -> list[bool]:
+def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[], None]|None=None,
+                     taken:Callable[[_TinyJit], None]|None=None) -> list[bool]:
   """
   the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
   jit is captured and compiled but nothing runs, the parent takes the compiled jit (linked and run on its first call there). the jits share
   their scratch (the biggest arena of each lane). a jit that can't be captured so is left to capture on its call. returns which were
-  meanwhile: the parent's work while they compile (e.g. the data the jits read, made in the buffers they use)
+  meanwhile: the parent's work while they compile (e.g. the data the jits read, made in the buffers they use). taken: called with every jit
+  taken (in the order they come), the parent's work while the others compile
   """
   todo = [k for k, (j, _) in enumerate(calls) if j.cnt == 1 and j.captured is None and j.fxn is not None]
   if not todo or not hasattr(os, "fork"):
@@ -290,7 +292,8 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       from tinygrad.engine import worker
       from tinygrad.helpers import PARALLEL
       device_mod.FORKED_COMPILE, worker.worker_pool = True, None
-      PARALLEL.value = max(1, PARALLEL.value // len(calls))
+      # (the compilers of a quarter of the cores at least: the last ones to finish compile while the others are done)
+      PARALLEL.value = max(1, PARALLEL.value // len(calls), PARALLEL.value // 4)
       UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)
       _forked_capture[:] = [jit, functools.partial(_send_capture, w, reg, jit), functools.partial(_send_arenas, w)]
       try: call()
@@ -361,5 +364,6 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     # (a jit whose memory isn't made yet is linked on its first call)
     if not getattr(jit, "link_later", False): jit.captured.linked()
     oks[k] = True
+    if taken is not None: taken(jit)
     if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

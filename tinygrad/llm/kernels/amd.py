@@ -2485,17 +2485,45 @@ def _mla_flash_wmma_kernel(out:UOp, q:UOp, cache:UOp, *mask:UOp, tokens:int, q_s
   return UOp.group(*stores).end(blk, wave, lane).sink(arg=KernelInfo(name="mla_flash_wmma", opts_to_apply=()))
 
 @functools.cache
-def _grouped_rows_kernel(buf:UOp, rows:UOp, positions:UOp, stride:int) -> UOp:
-  # the rows (G*T, D) of G sequences (T each) at their positions.. into their stride rows of buf
+def _grouped_rows_kernel(buf:UOp, rows:UOp, positions:UOp, *slots:UOp, stride:int) -> UOp:
+  # the rows (G*T, D) of G sequences (T each) at their positions.. into their stride rows of buf (of slot g, or slots[g])
   R, D, G = cast(int, rows.shape[0]), cast(int, rows.shape[1]), cast(int, positions.shape[0])
   t, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
   g = t // (R // G)
-  row = g * stride + (positions[g].load().cast(dtypes.weakint) + t % (R // G)).minimum(stride-1)
+  row = _slot_of(slots, g) * stride + (positions[g].load().cast(dtypes.weakint) + t % (R // G)).minimum(stride-1)
   return buf[row, d].store(rows[t, d].load().cast(buf.dtype)).end(t, d).sink(arg=KernelInfo(name="grouped_rows", opts_to_apply=()))
 
-def grouped_rows(buf:Tensor, rows:Tensor, positions:Tensor, stride:int) -> Tensor:
-  """writes rows (G*T, D) of G sequences (T each, the first at positions[g]) into their stride rows of buf (G*stride, D): buf after"""
-  return Tensor.custom_kernel(buf, rows.contiguous(), positions, fxn=functools.partial(_grouped_rows_kernel, stride=stride))[0]
+def grouped_rows(buf:Tensor, rows:Tensor, positions:Tensor, stride:int, slots:Tensor|None=None) -> Tensor:
+  """
+  writes rows (G*T, D) of G sequences (T each, the first at positions[g]) into their stride rows of buf (G*stride, D) (sequence g's the ones of
+  slot g, or of slots[g]): buf after
+  """
+  return Tensor.custom_kernel(buf, rows.contiguous(), positions, *([slots] if slots is not None else []),
+                              fxn=functools.partial(_grouped_rows_kernel, stride=stride))[0]
+
+@functools.cache
+def _slot_scatter_kernel(dst:UOp, src:UOp, slots:UOp, counts:UOp, S:int, shift:int) -> UOp:
+  # row slots[g]*S + counts[g]%S of dst (n*S, rows, F) <- rows shift*counts[g].. (rows of them) of src[g] (G, R, F), cast to dst's dtype
+  G, _, F = cast(tuple[int, int, int], src.shape)
+  rows = cast(int, dst.shape[1])
+  L = math.gcd(F, 256)
+  g, r, blk, lane = (UOp.range(G, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(F // L, 2, AxisType.GLOBAL),
+                     UOp.range(L, 3, AxisType.LOCAL))
+  f, cnt = blk * L + lane, counts[g].load().cast(dtypes.weakint)
+  value = src[g, shift * cnt + r, f].load().cast(dst.dtype)
+  store = dst[slots[g].load().cast(dtypes.weakint) * S + cnt % S, r, f].store(value)
+  return store.end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_scatter", opts_to_apply=()))
+
+def slot_scatter(pool:Tensor, src:Tensor, slots:Tensor, counts:Tensor, S:int, shift:int=0) -> Tensor:
+  """
+  the states of G sequences into their slots: pool (n*S, rows, F) row slots[g]*S + counts[g]%S (a slot's S rows, the one of position
+  counts[g]) is rows shift*counts[g].. (rows of them) of src[g] (G, R, F). returns pool after
+  """
+  return Tensor.custom_kernel(pool, src, slots, counts, fxn=functools.partial(_slot_scatter_kernel, S=S, shift=shift))[0]
+
+def _slot_of(slots:tuple[UOp, ...], g:UOp) -> UOp:
+  """the slot of sequence g of a grouped kernel: g, or slots[g]"""
+  return slots[0][g].load().cast(dtypes.weakint) if slots else g
 
 @functools.cache
 def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0) -> UOp:
@@ -2515,7 +2543,7 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, 
   off = UOp.const(0, dtypes.weakint)
   if grouped:
     g = tok // (T // cast(int, grouped[0].shape[0]))
-    valid_len, off = grouped[0][g].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]), g * stride
+    valid_len, off = grouped[0][g].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]), _slot_of(grouped[1:], g) * stride
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
   qfrag = [UOp.stack(*(q[tok*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
   count = index[tok, n_max].load().cast(dtypes.weakint).minimum(n_max)
@@ -2590,7 +2618,8 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
   vl = cast(UOp, _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len or 0, dtypes.weakint))
   if isinstance(valid_len, UOp): index = Tensor(index.uop.after(valid_len))
   # grouped (positions, stride): the tokens of G sequences (T//G each, the first at positions[g]), a sequence's keys stride rows of the cache
-  extra, stride = ((grouped[0],), int(grouped[1])) if grouped is not None else ((), 0)
+  # (and slots: the slot of every sequence, else slot g the g-th's)
+  extra, stride = ((grouped[0], *[x for x in grouped[2:] if x is not None]), int(grouped[1])) if grouped is not None else ((), 0)
   out = Tensor.custom_kernel(out, rows, cache.reshape(-1, D), index, *extra,
                              fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
@@ -2895,7 +2924,8 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), fxn=fxn)[0]
 
 @functools.cache
-def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos:UOp, T:UOp, stride:int=0, R:int=0) -> UOp:
+def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos:UOp, T:UOp, stride:int=0, R:int=0, slotted:bool=False,
+                      counted:bool=False) -> UOp:
   # the pooled key of every pool with a token of this call: the softmax of the gates (+ape) over the pool's tokens weighs their keys. the
   # tokens before start_pos in the first pool come from the ring (the last tokens), the others from kg (T rows of key and gate)
   # grouped (positions): G sequences (batched decoding), kg their rows (rows//G each, the first at positions[g]), their pools stride rows of pk
@@ -2906,8 +2936,11 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
   if grouped:
     g = UOp.range(G:=cast(int, grouped[0].shape[0]), 2, AxisType.GLOBAL)
     rows, P = rows // G, stride
-    start_pos, T, ends = grouped[0][g].load().cast(dtypes.weakint), UOp.const(rows, dtypes.weakint), [g]
-    off, ring_off, kg_off = g*stride, g*R, g*rows
+    # (slotted: the slots of the sequences, counted: their token counts, the rows past them aren't tokens)
+    sl = _slot_of(grouped[1:2] if slotted else (), g)
+    start_pos, ends = grouped[0][g].load().cast(dtypes.weakint), [g]
+    T = grouped[1 + slotted][g].load().cast(dtypes.weakint) if counted else UOp.const(rows, dtypes.weakint)
+    off, ring_off, kg_off = sl*stride, sl*R, g*rows
   else: R = cast(int, ring.shape[0])
   j, d = UOp.range(rows // kpool + 1, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
   first, end = start_pos // kpool, start_pos + T
@@ -2930,7 +2963,7 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
   return pk[row, d].store(pooled.cast(pk.dtype)).end(*ends, j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
 
 @functools.cache
-def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:int=0) -> UOp:
+def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:int=0, slotted:bool=False, counted:bool=False) -> UOp:
   # the last R tokens to the ring (the token at p in p%R): the first pool of the next call needs the ones before it, it can start at any
   # position of the last R-kpool+1 (the drafts of speculative decoding that weren't accepted are taken back). grouped (positions): G
   # sequences, their rings R rows each, their rows of kg rows//G each
@@ -2939,7 +2972,8 @@ def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:in
   if grouped:
     g = UOp.range(G:=cast(int, grouped[0].shape[0]), 3, AxisType.GLOBAL)
     rows = rows // G
-    start_pos, T, off, kg_off, ends = grouped[0][g].load().cast(dtypes.weakint), UOp.const(rows, dtypes.weakint), g*R, g*rows, [g]
+    T = grouped[1 + slotted][g].load().cast(dtypes.weakint) if counted else UOp.const(rows, dtypes.weakint)
+    start_pos, off, kg_off, ends = grouped[0][g].load().cast(dtypes.weakint), _slot_of(grouped[1:2] if slotted else (), g)*R, g*rows, [g]
   else: R = cast(int, ring.shape[0])
   r, i, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(2, 1, AxisType.GLOBAL), UOp.range(D, 2, AxisType.LOCAL)
   end = start_pos + T
@@ -2957,12 +2991,14 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp|None,
   rows of pk each, their rings R rows of ring each
   """
   if grouped is not None:
-    positions, stride, R = grouped
-    zero = UOp.const(0, dtypes.weakint)
-    pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), positions,
-                              fxn=functools.partial(_pool_keys_kernel, start_pos=zero, T=zero, stride=stride, R=R))[0]
-    ring = Tensor.custom_kernel(Tensor(ring.uop.after(pk.uop)), kg.contiguous(), positions,
-                                fxn=functools.partial(_pool_ring_kernel, start_pos=zero, T=zero, R=R))[0]
+    positions, stride, R, *more = grouped
+    slots, counts = (more + [None, None])[:2]
+    zero, srcs = UOp.const(0, dtypes.weakint), [x for x in (positions, slots, counts) if x is not None]
+    flags = dict(slotted=slots is not None, counted=counts is not None)
+    pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), *srcs,
+                              fxn=functools.partial(_pool_keys_kernel, start_pos=zero, T=zero, stride=stride, R=R, **flags))[0]
+    ring = Tensor.custom_kernel(Tensor(ring.uop.after(pk.uop)), kg.contiguous(), *srcs,
+                                fxn=functools.partial(_pool_ring_kernel, start_pos=zero, T=zero, R=R, **flags))[0]
     return Tensor(pk.uop.after(ring.uop))
   ints = [_unbind(x) if isinstance(x, UOp) else UOp.const(x or 0, dtypes.weakint) for x in (start_pos, T)]
   pk, ring = (Tensor(x.uop.after(*(v for v in (start_pos, T) if isinstance(v, UOp)))) for x in (pk, ring))
@@ -2989,7 +3025,7 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
   if grouped:
     seq = row // (T // cast(int, grouped[0].shape[0]))
     pools = (grouped[0][seq].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]) + kpool - 1) // kpool
-    koff = seq * stride
+    koff = _slot_of(grouped[1:], seq) * stride
   col, half = lane % 16, lane // 16
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 1, AxisType.LOOP)
@@ -3140,9 +3176,10 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
   the queries of G sequences (T//G each, the first at positions[g]), a sequence's pooled keys stride rows of k
   """
   if grouped is not None:
-    (positions, stride), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
+    (positions, stride, *slots), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
     scores = Tensor.custom_kernel(Tensor.empty(T, stride, dtype=dtypes.float32, device=q.device), q.half().contiguous(), k, w.float().contiguous(),
-                                  positions, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool))[0]
+                                  positions, *[x for x in slots if x is not None],
+                                  fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool))[0]
     out = Tensor.empty(T, top*kpool + kpool + 1, dtype=dtypes.int32, device=q.device)
     return Tensor.custom_kernel(out, scores, positions, fxn=functools.partial(_pool_index_kernel, q_start=zero, pools=zero, k=top, kpool=kpool))[0]
   assert q_start is not None and pools is not None

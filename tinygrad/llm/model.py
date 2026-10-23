@@ -1,13 +1,13 @@
 from __future__ import annotations
-import array, enum, functools, itertools, math, pathlib, re, time
-from dataclasses import dataclass, replace
+import array, enum, functools, gc, itertools, math, pathlib, re, time
+from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, _TinyJit
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
-  indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, \
+  indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, indexer_decode_index_rows, Q8_ROWS_I8, \
   MOE_TILE, grouped_rows, \
@@ -280,8 +280,21 @@ def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None e
 # sequence) in the state slot g: (pos, rows) of every group
 _batch_rows:list[list[tuple[UOp, int]]|None] = [None]
 
+@dataclass(frozen=True)
+class BatchPrefill:
+  """a step of prefills of G prompts into slots (Transformer.forward_batch_prefill): P rows each, their token counts and slots (tensors and the
+  variables they're of), the effects of the blocks (the states into the slots) realized with the step"""
+  P:int; counts:Tensor; slots:Tensor; count_vars:tuple[UOp, ...]; slot_vars:tuple[UOp, ...]; effects:list = field(default_factory=list) # noqa: E702
+  @property
+  def real(self) -> Tensor:
+    """(G*P,) the rows that are tokens (the others pad a prompt to P rows)"""
+    return (Tensor.arange(self.P).reshape(1, self.P).to(self.counts.device) < self.counts.reshape(-1, 1)).reshape(-1)
+_batch_prefill:list[BatchPrefill|None] = [None]
+
 def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|None) -> Tensor:
   """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
+  # (all at 0, the prefills of batch_prefill: zeros. a stack of constants as a custom kernel's input fails the kernel graph's spec)
+  if all(p.op is Ops.CONST and p.arg == 0 for p, _ in groups): return Tensor.zeros(len(groups), dtype=dtypes.int32, device=device).contiguous()
   return Tensor.stack(*[Tensor(p) for p, _ in groups]).cast(dtypes.int32).contiguous().to(device).contiguous()
 
 def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DType|None=None) -> tuple[Tensor, list[Tensor]]:
@@ -540,6 +553,7 @@ class FFNBlock:
     # sliced experts: every device runs its slices of the selected experts
     if self.ffn_gate_exps.slices and not local: sel, probs = self.ffn_gate_exps.select_slices(sel, probs)
     # (the padding rows of a prefill chunk select nothing: a short prompt's experts are the ones of its tokens)
+    if (pf:=_batch_prefill[0]) is not None: sel = pf.real.reshape(-1, 1).to(sel.device).where(sel, -1)
     if (T:=_ffn_rows[0]) is not None and sel.ndim >= 3 and isinstance(R:=sel.shape[-2], int) and getenv("MOE_SKIP_PAD", 1):
       sel = (Tensor.arange(R).reshape(R, 1) < (Tensor(T) if isinstance(T, UOp) else T)).to(sel.device).where(sel, -1)
     # many tokens: grouped by expert (prefill), a few (the drafts of speculative decoding) as decoding
@@ -585,7 +599,7 @@ class FFNBlock:
     if not isinstance(T, int): x, sel, probs = x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), probs.pad_to(probs.max_shape)
     gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
     # (batched decoding: a few rows an expert, small tiles)
-    tile = getenv("MOE_BATCH_TILE", 16) if _batch_rows[0] is not None else MOE_TILE
+    tile = getenv("MOE_BATCH_TILE", 16) if _batch_rows[0] is not None and _batch_prefill[0] is None else MOE_TILE
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
@@ -950,10 +964,12 @@ class MLATransformerBlock(FFNBlock):
     assert idx is not None and len({T for _, T in groups}) == 1, "batched decoding: the sparse attention of the indexer, groups of the same rows"
     scale, positions = 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
     ctx, D, P, R = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1]), int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
-    cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx)
-    pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R))
-    picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P))
-    attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx))[..., :self.config.kv_lora_rank]
+    # (prefills: the slots of the prompts, their token counts)
+    slots, counts = (pf.slots.to(x.device), pf.counts.to(x.device)) if (pf:=_batch_prefill[0]) is not None else (None, None)
+    cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx, slots)
+    pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R, slots, counts))
+    picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P, slots))
+    attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx, slots))[..., :self.config.kv_lora_rank]
     if tc: attn = attn.half().contiguous().matmul(self.attn_v_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
     else: attn = mla_bmm(attn, self.attn_v_b["weight"])
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
@@ -1007,8 +1023,53 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
+  def _prefill_batch(self, x:Tensor, pf:BatchPrefill) -> Tensor:
+    """
+    prefills of G prompts (P rows each, their first counts[g] the tokens) from position 0: the scan of a batch of G (rows past a prompt are no-ops),
+    the states after the tokens into the slots (the one of position count in a slot's S)
+    """
+    P, (Bt, Tq, Dm) = pf.P, x.shape
+    G, H, V, K, C = Tq // P, self.num_v_heads, self.head_v_dim, self.head_k_dim, self.ssm_conv_kernel
+    xg, real = x.reshape(G, P, Dm).half(), pf.real.reshape(G, P, 1).to(x.device)
+    out_gate = self.ssm_g_b(self.ssm_g_a(xg)).reshape(G, P, H, V)
+    beta = self.ssm_beta(xg).sigmoid().reshape(G, P, H)
+    g, a = (self.ssm_f_b(self.ssm_f_a(xg)).float() + self.ssm_dt["bias"]).reshape(G, P, H, -1), self.ssm_a.reshape(H, -1)
+    log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
+    beta, log_alpha = real.where(beta, 0), real.unsqueeze(-1).where(log_alpha, 0)
+    weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
+    # the windows of the prompts from position 0 (zeros before), the conv state of a slot the last C-1 inputs before its prompt's end
+    windows = [proj(xg).float().pad(((0, 0), (C-1, 0), (0, 0))).contiguous() for proj in (self.attn_q, self.attn_k, self.attn_v)]
+    if self.head_k_dim == self.head_v_dim and self.num_v_heads == self.num_k_heads and K % 32 == 0 and amd_custom_kernels_supported(x.device):
+      # the convolutions and norms of q, k and v in a kernel (as _attention's): the windows one after another, a prompt's output rows the ones
+      # of its window (the rows across two windows are dropped)
+      W = P + C - 1
+      flat = [w.reshape(1, G*W, -1) for w in windows]
+      outs = kda_conv([f[:, :C-1] for f in flat], [f[:, C-1:] for f in flat], weights, K, K**-0.5)
+      q, k, v, kq = (o.pad(((0, 0), (0, 0), (0, C-1)) + ((0, 0),)*(o.ndim-3)).reshape(H, G, W, *o.shape[3:])[:, :, :P]
+                     .transpose(0, 1).contiguous() for o in outs)
+    else:
+      convs = [functools.reduce(lambda acc, i: acc + w[:, i:i+P] * cw[:, i], range(1, C), w[:, 0:P] * cw[:, 0]).silu()
+               for w, cw in zip(windows, weights)]
+      q, k = ((z.reshape(G, P, self.num_k_heads, K).rmsnorm(eps=1e-6/K) / K**0.5).repeat(1, 1, H//self.num_k_heads, 1) for z in convs[:2])
+      v = convs[2].reshape(G, P, H, V)
+      q, k, v = (z.transpose(1, 2).float() for z in (q, k, v))
+      q, kq = q * K**-0.5, None
+    state = Tensor.empty(G, H, V, K, dtype=dtypes.float32, device=x.device, axis=self.recurrent_state.uop.axis and 1).zeros_like().contiguous()
+    core = gated_delta_prefill(q, k, v, beta.transpose(1, 2).float(), log_alpha.transpose(1, 2).exp(), state, kq=kq).transpose(1, 2)
+    # the states into the slots (the scan updated state in place: after it)
+    S = int(self.slot_rec[0].shape[0])
+    state = Tensor(state.uop.after(core.uop))
+    slots, counts = pf.slots.to(x.device), pf.counts.to(x.device)
+    pf.effects.append(slot_scatter(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), state.reshape(G, 1, -1), slots, counts, S))
+    # (a conv state: the window's rows count.. of the prompt, the C-1 inputs before its end)
+    pf.effects.extend(slot_scatter(pool.reshape(pool.shape[0], C-1, -1), window, slots, counts, S, shift=1)
+                      for pool, window in zip(self.pool_conv, windows))
+    z = (self.ssm_norm(core) * out_gate.sigmoid()).cast(x.dtype).contiguous()
+    return _out(self.ssm_out, z.reshape(Bt, Tq, -1))
+
   def _attention_batch(self, x:Tensor, groups:list[tuple[UOp, int]]) -> Tensor:
     """batched decoding: a group of rows a sequence, its states in its slot (the projections of all of them in one kernel each)"""
+    if (pf:=_batch_prefill[0]) is not None: return self._prefill_batch(x, pf)
     x = x.half()
     projs, gate = [self.attn_q(x), self.attn_k(x), self.attn_v(x)], self.ssm_g_b(self.ssm_g_a(x))
     alpha, beta = self.ssm_f_b(self.ssm_f_a(x)), self.ssm_beta(x)
@@ -1380,6 +1441,9 @@ class Transformer:
       tmv, self._batch_temp = _host_buffer(devs, 4*max(self.BATCH_SIZES), dtypes.float32)
       self._batch_host_temp = tmv.cast('f')
       self._batch_host_out, self._batch_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BATCH_SIZES))
+      # prefills in a step: the tokens of the prompts, the token after each
+      self._bpf_host_in, self._bpf_in = _host_ints(devs, self.BPF_G * self.BPF_P)
+      self._bpf_host_out, self._bpf_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, self.BPF_G)
     if alloc: self._alloc_slots()
 
   def _alloc_slots(self):
@@ -1536,6 +1600,76 @@ class Transformer:
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(n, k+1).cat(*[d.reshape(n, 1) for d in drafts], dim=1).reshape(1, n*(2*k+1)).cast(dtypes.int32)
     return self._bspec_out[:, :n*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
+
+  BPF_G, BPF_P = getenv("BPF_G", 8), getenv("BPF_P", 168)  # prefills in a step of them: prompts, their rows (at most)
+  def forward_batch_prefill(self, *vs:UOp) -> Tensor:
+    """
+    prefills of G prompts into slots (from position 0): vs the token counts and the slots of the G, their P tokens (padded) in _bpf_in, their
+    temperatures in _batch_temp. the model and the MTP layer on all of them (the caches and states of the slots), the token after every one's
+    last. returns (1, G) the tokens
+    """
+    G, P, devs, k = self.BPF_G, self.BPF_P, self.token_embd.weight.device, self.config.spec_drafts
+    cvars, svars = vs[:G], vs[G:2*G]
+    # (a stack of variables has no device: onto zeros of the devices)
+    def ints(xs:tuple[UOp, ...]) -> Tensor:
+      return (Tensor.zeros(len(xs), dtype=dtypes.int32, device=devs) + Tensor.stack(*[Tensor(x) for x in xs]).cast(dtypes.int32)).contiguous()
+    pf = BatchPrefill(P, ints(cvars), ints(svars), cvars, svars)
+    _batch_rows[0], _batch_prefill[0], Q8_ROWS_I8[0] = [(UOp.const(0, dtypes.weakint), P)] * G, pf, False
+    try:
+      emb = self.token_embd(self._bpf_in.to(devs)).float()
+      x = emb
+      if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
+      if hc is not None and self.sequence_parallel(G*P):
+        # sequence parallel (as a prefill chunk): every device the streams of its rows, the sublayers on all of them
+        x = all_gather(micro_batch_blocks(self.blk, [shard_rows(x, 1)], [0], [G*P])[0].mean(2), 1)
+      else:
+        for block in self.blk: x = block(x, 0)
+        if hc is not None: x = x.mean(2)
+      hn = self.output_norm(x).float()  # (1, G*P, D)
+      # the MTP layer on every prompt (its caches): a token's input is the hidden state of the one before (zero before the first)
+      before = hn.reshape(G, P, -1)[:, :P-1].pad(((0, 0), (1, 0), (0, 0))).reshape(1, G*P, -1)
+      if k: pf.effects.append(self.mtp(self.mtp.eh_proj(self.mtp.enorm(emb).cat(self.mtp.hnorm(before), dim=-1)), 0)[:, :1, :1].contiguous())
+      # the last token of every prompt: the next token, its hidden state the slot's (speculative decoding's row 0)
+      last = Tensor.cat(*[hn[0].shrink(((g*P + c - 1, g*P + c), None)) for g, c in enumerate(cvars)])
+      if k: pf.effects.extend([self.pool_spec_h.shrink(((sl*2*(k+1), sl*2*(k+1)+1), None)).assign(last[g:g+1]) for g, sl in enumerate(svars)])
+      tok = self._sample(last, self._batch_temp[:G].reshape(G, 1), self._bpf_in.device)
+    finally: _batch_rows[0], _batch_prefill[0] = None, None
+    q8_quantize_cache_clear()  # don't keep the graph alive
+    out = tok.reshape(1, G).cast(dtypes.int32)
+    ret = self._bpf_out[:, :G].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
+    Tensor.realize(ret, *pf.effects)
+    return ret
+  def batch_prefills(self) -> int:
+    """
+    the prompts prefilled together into slots (batch_prefill) at most: 0 if not (sequence parallel prefill of hybrid blocks). its memory: with a
+    context of 64K or less (as the slots of more sequences)
+    """
+    return self.BPF_G if self.batch_slots() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
+      self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
+  def _bpf_jit(self):
+    if not hasattr(self, "_bpf_jit_"): self._bpf_jit_ = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)
+    return self._bpf_jit_
+  def _bpf_vars(self, counts:list[int], slots:list[int]) -> list[UOp]:
+    return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
+           [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)]
+  def batch_prefill(self, prompts:list[tuple[list[int], int, float]]) -> list[int]:
+    """prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one"""
+    self._init_slots()
+    G, P, n = self.BPF_G, self.BPF_P, len(prompts)
+    assert 0 < n <= G and all(0 < len(t) <= P for t, _, _ in prompts)
+    # (the rest of the G: the last one again, the same writes)
+    prompts = prompts + [prompts[-1]] * (G - n)
+    for g, (toks, _, temp) in enumerate(prompts):
+      self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
+      self._batch_host_temp[g] = temp
+    self._bpf_host_out[:G] = array.array('i', [-1] * G)
+    self._bpf_jit()(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts]))
+    st = time.perf_counter()
+    while min(self._bpf_host_out[:G]) < 0:
+      if time.perf_counter() - st > 10:
+        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+        if min(self._bpf_host_out[:G]) < 0: raise RuntimeError("batched prefill: no tokens after the devices finished")
+    return list(self._bpf_host_out[:n])
 
   def _bspec_jit(self, m:int):
     if not hasattr(self, "_bspec_jits"): self._bspec_jits:dict[int, Any] = {}
@@ -1860,6 +1994,7 @@ class Transformer:
       if m > self.batch_slots(): continue
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
       else: self.batch_step([(0, 1, 0.0)] * m)
+    if self.batch_prefills(): self.batch_prefill([([0], 0, 0.0)])
     self._cached_tokens, self._ckpt_tokens = [], []
 
   def _capture_parallel(self, sizes:tuple[int, ...]):
@@ -1898,12 +2033,30 @@ class Transformer:
       calls += [(self._slot_jit, lambda: self._slot_jit(*self._slot_store_vars(0, 1, 0)))]
       if slots > 1: calls += [(self._slot_move_jit, lambda: self._slot_move_jit(*self._slot_move_vars(1, 0)))]
       for j in (self._slot_jit, self._slot_move_jit): setattr(j, "link_later", True)
+      # (and the prefills of several prompts)
+      if self.batch_prefills():
+        calls.append((bpf:=self._bpf_jit(), lambda: bpf(*self._bpf_vars([1]*self.BPF_G, [0]*self.BPF_G))))
+        bpf.link_later = True
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile():
       # (the jits of the computations left run after: they're compiled meanwhile)
       while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
       if self.has_recurrent_block and getenv("CHECKPOINT", 1): self._checkpoint([0], save=True), self._checkpoint([0], save=False)
-    capture_parallel(calls, meanwhile)
+    # the work left of loading as soon as its jits are taken, then the slots' memory (the memory loading used is free): the jits of batched
+    # decoding that come after are linked as they come (while the others compile)
+    loads, load_jits = {id(j) for j in self._pending_load if isinstance(j, _TinyJit)}, [j for j in self._pending_load if isinstance(j, _TinyJit)]
+    def taken(jit:_TinyJit):
+      loads.discard(id(jit))
+      if loads or not slots or getattr(self, "_slots_ready", False) or not getenv("SLOTS_EARLY", 1): return
+      self._finish_load()
+      # (run once: their graphs and the buffers they read are freed)
+      for j in load_jits: j.reset()
+      load_jits.clear()
+      gc.collect()
+      self._alloc_slots()
+      for j, _ in calls:
+        if j.captured is None and getattr(j, "link_later", False): j.link_later = False
+    capture_parallel(calls, meanwhile, taken)
 
   def _recurrent_states(self) -> list[tuple[Tensor, bool]]:
     # the state that isn't indexed by position: the recurrent and conv states (slotted: the ones of the last positions, a position p's in slot

@@ -214,6 +214,9 @@ class Request:
     """the slot's state after a prefill (or the model alone): the token at pos is the next step's input"""
     self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
 
+# short prompts prefilled together (Transformer.batch_prefill) from this many: a step of them costs about what three alone do
+BATCH_PREFILL_MIN = getenv("BATCH_PREFILL_MIN", 3)
+
 class BatchStats:
   """batched decoding's status line every few seconds while it runs: the requests decoding and waiting now, the tokens generated a second and
   the steps (the batch's) and prefills (of the requests that joined it) since the last line"""
@@ -346,8 +349,21 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               traceback.print_exc()
               self.finish(req, e)
             continue
-        # new requests into free slots: prefilled, their states copied into the slot
-        for req in [r for r in pending if self.batchable(r)]:
+        # new requests into free slots: short prompts prefilled together into theirs, (the others) prefilled, their states copied into the slot
+        def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]
+        # (with a step's worth waiting, they wait for that many free slots)
+        defer = bool(G:=model.batch_prefills()) and bool(active) and len(shorts()) >= G and slots - len(active) < G
+        while G and not defer and len(short:=shorts()[:min(G, slots - len(active))]) >= BATCH_PREFILL_MIN:
+          _p0 = time.perf_counter()
+          free = [i for i in range(slots) if i not in active][:len(short)]
+          firsts = model.batch_prefill([(r.ids, slot, r.temperature) for r, slot in zip(short, free)])
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + time.perf_counter() - _p0
+          for req, slot, first in zip(short, free, firsts):
+            pending.remove(req)
+            req.cache_start, req.pos = 0, len(req.ids)
+            req.spec_start(first, req.pos, k)
+            if self.emit(req, first): active[slot] = req
+        for req in [r for r in pending if self.batchable(r) and not (defer and r in shorts())]:
           if len(active) >= slots: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
