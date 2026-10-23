@@ -25,10 +25,11 @@ class Estimates:
 
   @staticmethod
   def from_uops(sink:UOp, ignore_indexing=False, enter_calls=True) -> Estimates:
+    flops: sint = 0
+    lds: sint = 0
+    mem: dict[tuple[UOp, Ops], sint] = {}
     def estimates_from_body(sink:UOp, caller_mult:sint|None=None, bindings:dict[UOp,UOp]={}) -> tuple[sint, sint, dict[tuple[UOp, Ops], sint]]:
-      flops: sint = 0
-      lds: sint = 0
-      mem: dict[tuple[UOp, Ops], sint] = {}
+      nonlocal flops, lds, mem
       uops, multcache, excluded = list(sink.toposort()), {}, set()
       if caller_mult is None: caller_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
 
@@ -47,31 +48,26 @@ class Estimates:
 
         # indexing alu is optional for flop estimates
         if ignore_indexing and u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+          excluded.update(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
         elif u.op is Ops.CALL and enter_calls:
           # pass bindings instead of resolving whole body because the bound ops shouldnt get double counted
           child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
             for p in u.body.backward_slice if p.op is Ops.PARAM and p.arg.slot >= 0}
-          child_flops, child_lds, child_mem = estimates_from_body(u.body, mult, child_bindings)
-
-          for (buf,op),accessed in child_mem.items():
-            mem[(buf,op)] = smin(mem.get((buf,op), 0) + accessed, buf.max_numel() * buf.dtype.itemsize)
-          flops += child_flops
-          lds += child_lds
+          estimates_from_body(u.body, mult, child_bindings)
         elif u.op in {Ops.LOAD, Ops.STORE}:
           buf = bindings.get(u.buf_uop, u.buf_uop).without_after
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
           if buf.op is Ops.PARAM:
             accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mult
             mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
+          if u.src[0].addrspace != AddrSpace.REG:
+            lds += mult * u.max_numel() * (u if u.op is Ops.LOAD else u.src[1]).dtype.itemsize
+        elif u.op in GroupOp.ALU and u not in excluded:
+          flops += (mult * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+        elif u.op is Ops.WMMA and u not in excluded:
+          flops += mult * (2 * prod(u.arg[0]) // u.arg[2])
 
-        if u.op in GroupOp.ALU and u not in excluded: flops += (mult * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
-        elif u.op is Ops.WMMA and u not in excluded: flops += mult * (2 * prod(u.arg[0]) // u.arg[2])
-        elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG: lds += mult * u.max_numel() * u.dtype.itemsize
-        elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG: lds += mult * u.max_numel() * u.src[1].dtype.itemsize
-      return flops, lds, mem
-
-    flops, lds, mem = estimates_from_body(sink)
+    estimates_from_body(sink)
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
