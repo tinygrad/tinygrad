@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Device
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.uop.spec import spec_tensor, spec_kernel_graph, type_verify
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.dtype import AddrSpace, dtypes
@@ -30,6 +31,21 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   return prog.sink(arg=KernelInfo(name=f"custom_gemm_{C.shape[0]}_{C.shape[1]}_{A.shape[1]}", opts_to_apply=()))
 
 class TestCustomKernel(unittest.TestCase):
+  def test_nested_duplicate_call_arg(self):
+    p, q = (UOp.param(i, dtypes.int, 2) for i in range(2))
+    body = p[0].store(q[0]+1).sink(arg=KernelInfo())
+    wrapper = body.call(p, q).sink()
+    for spec in (spec_tensor, spec_kernel_graph):
+      type_verify(wrapper.call(p, q), spec)
+      with self.assertRaisesRegex(AssertionError, "written CALL arguments must not alias other arguments"):
+        type_verify(wrapper.call(p, p), spec)
+
+  def test_duplicate_read_only_call_arg(self):
+    out, p, q = (UOp.param(i, dtypes.int, 2) for i in range(3))
+    body = out[0].store(p[0]+q[0]).sink(arg=KernelInfo())
+    for spec in (spec_tensor, spec_kernel_graph):
+      type_verify(body.call(out, p, p), spec)
+
   def test_gemm_group_refused(self):
     # k is a serial LOOP: custom_gemm has no Ops.REDUCE
     a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)

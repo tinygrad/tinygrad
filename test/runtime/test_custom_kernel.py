@@ -134,11 +134,14 @@ class TestCustomKernel(unittest.TestCase):
     assert all(x == 2 for x in out), "all 2"
 
   def test_duplicate_call_arg(self):
-    x = Tensor.arange(4).clone().realize()
-    x = Tensor.custom_kernel(x, x, fxn=custom_add_one_kernel)[0]
-    # webgpu silently errors when a kernel has duplicate buffer args, so the list stays the same.
-    # https://gpuweb.github.io/gpuweb/#abstract-opdef-encoder-bind-groups-alias-a-writable-resource
-    self.assertEqual(x.tolist(), [1, 2, 3, 4] if Device.DEFAULT != "WEBGPU" else [0, 1, 2, 3])
+    def kernel(out:UOp, A:UOp):
+      store = out[0].store(A[0]+1)
+      out, A = out.after(store), A.after(store)
+      return out[1].store(A[0]).sink(arg=KernelInfo(opts_to_apply=()))
+
+    x = Tensor([0, 0], dtype=dtypes.int).realize()
+    with self.assertRaises(AssertionError):
+      Tensor.custom_kernel(x, x, fxn=kernel)[0].realize()
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
@@ -768,6 +771,29 @@ class TestCallInKernel(unittest.TestCase):
     with self.assertRaises(AssertionError):
       self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
+
+  def test_nop_call(self):
+    @uopfunc
+    def reg():
+      tmp = UOp.alloc((1,), dtypes.int, addrspace=AddrSpace.REG)
+      return tmp[0].store(7).sink()
+    def kernel(C:UOp): return reg().sink(arg=KernelInfo())
+    out = Tensor([11], dtype=dtypes.int).realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [11])
+
+  def test_call_alias(self):
+    @uopfunc
+    def incr(out:UOp, A:UOp):
+      store = out[0].store(A[0]+1)
+      out, A = out.after(store), A.after(store)
+      return out[1].store(A[0]).sink()
+
+    def kernel(A:UOp):
+      return incr(A, A).sink(arg=KernelInfo(opts_to_apply=()))
+
+    a = Tensor([0, 0], dtype=dtypes.int).realize()
+    with self.assertRaises(AssertionError):
+      self.assertEqual(a.custom_kernel(fxn=kernel)[0].tolist(), [1, 1])
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

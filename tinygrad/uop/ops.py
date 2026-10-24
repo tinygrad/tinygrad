@@ -766,10 +766,23 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
   @recursive_property
   def _storage_base(self) -> UOp|None:
-    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: return self.src[0].storage_base
+    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD, Ops.INDEX}: return self.src[0].storage_base
     return None
   @property
   def storage_base(self) -> UOp: return self if (base:=self._storage_base) is None else base
+
+  def access_ptrs(self, op:Ops) -> tuple[UOp, ...]:
+    if self.op is op: return tuple(s for s in self.src[:1] if s.addrspace is AddrSpace.GLOBAL)
+    if self.op is not Ops.CALL: return ()
+    bases = set().union(*(u.read_buffers if op is Ops.LOAD else u.written_buffers for u in self.body.toposort()))
+    slots = {b.arg.slot for b in bases if b.op is Ops.PARAM}
+    return tuple(self.src[1+i] for i in sorted(slots))
+
+  @functools.cached_property
+  def read_buffers(self) -> set[UOp]: return {p.storage_base for p in self.access_ptrs(Ops.LOAD)}
+
+  @functools.cached_property
+  def written_buffers(self) -> set[UOp]: return {p.storage_base for p in self.access_ptrs(Ops.STORE)}
 
   # cached property here makes external_uop_gc fail, why?
   @property
@@ -1346,16 +1359,12 @@ class ProgramInfo:
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
     _params: list[UOp] = []
     _globals: list[int] = []
-    outs: list[int] = []
-    ins: list[int] = []
+    outs, ins = sink.written_buffers, sink.read_buffers
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
-      if u.op in (Ops.STORE, Ops.LOAD):
-        if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
-          if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].substitute(
         {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify())
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
