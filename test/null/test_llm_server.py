@@ -159,13 +159,25 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(contents), 0)
 
   def test_interrupted_stream_logs_tokens(self):
-    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
-         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+    # the threaded server checks cancellation between tokens, so gate the scheduler to synchronize:
+    # generation pauses after the first token until close() has set req.cancelled
+    gate, interrupted = threading.Event(), threading.Event()
+    def slow_generate(ids, **kwargs):
+      yield 300
+      gate.wait(2)
+      yield 301
+    def log(s):
+      if "total:" in s: interrupted.set()
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), \
+         patch("tinygrad.llm.serve.stderr_log", side_effect=log) as log_mock, \
+         patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
       stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
       next(stream)
       next(stream)
       stream.close()
-    interrupt = log.call_args.args[0]
+      gate.set()
+      self.assertTrue(interrupted.wait(2))
+    interrupt = log_mock.call_args.args[0]
     self.assertFalse(interrupt.startswith("\n"))
     self.assertTrue(interrupt.endswith("\n"))
     self.assertIn("gen:", interrupt)
@@ -236,6 +248,76 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(len(data["data"]), 1)
     self.assertEqual(data["data"][0]["id"], "test-model")
     self.assertEqual(data["data"][0]["object"], "model")
+
+  def test_concurrent_requests(self):
+    # the server accepts and tokenizes a second request while the first is generating, but the inference loop runs them one at a time
+    gate, generating, encoded, calls = threading.Event(), threading.Event(), threading.Event(), []
+    def gated_generate(ids, **kwargs):
+      calls.append(ids)
+      generating.set()
+      if len(calls) == 1: gate.wait(5)
+      yield from (300, 999)
+    def encode(text):
+      if generating.is_set(): encoded.set()
+      return [200, 201, 202]
+    results: dict[str, str] = {}
+    def chat(prompt):
+      resp = self.client.chat.completions.create(model="test-model", messages=[{"role":"user", "content":prompt}])
+      results[prompt] = resp.choices[0].message.content
+    first, second = (threading.Thread(target=chat, args=(p,)) for p in ("first", "second"))
+    with patch.object(self.mock_model, "generate", side_effect=gated_generate), patch.object(self.mock_tok, "encode", side_effect=encode):
+      first.start()
+      self.assertTrue(generating.wait(2))
+      second.start()
+      self.assertTrue(encoded.wait(2))
+      self.assertEqual(len(calls), 1)
+      gate.set()
+      first.join(5)
+      second.join(5)
+    self.assertEqual(results, {"first":"Hello", "second":"Hello"})
+
+  def test_disconnect_stops_generation(self):
+    # after the client goes away the inference loop must stop at the req.cancelled check
+    gate, done, generated_tokens = threading.Event(), threading.Event(), []
+    def gated_generate(ids, **kwargs):
+      for tid in (300, 301, 302, 999):
+        if tid == 302: gate.wait(5)
+        generated_tokens.append(tid)
+        yield tid
+    def log(s):
+      if "total:" in s: done.set()
+    with patch.object(self.mock_model, "generate", side_effect=gated_generate), patch("tinygrad.llm.serve.stderr_log", side_effect=log):
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
+      next(stream)
+      next(stream)
+      next(stream)
+      stream.close()
+      gate.set()
+      self.assertTrue(done.wait(2))
+    self.assertEqual(generated_tokens, [300, 301, 302])
+
+  def test_model_generation_failure(self):
+    from openai import APIError, InternalServerError
+    def failing_generate(ids, **kwargs):
+      yield 300
+      raise RuntimeError("fake generate error")
+    client = self.client.with_options(max_retries=0)  # the default client retries 500s, which would just rerun the failure
+    with patch.object(self.mock_model, "generate", side_effect=failing_generate):
+      # non-streaming: a 500 instead of a 200 with finish_reason "stop"
+      with self.assertRaises(InternalServerError):
+        client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}])
+      # streaming: the client raises on the error chunk instead of returning the partial text
+      with self.assertRaises(APIError):
+        for _ in client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}], stream=True): pass
+
+  def test_generate_runs_on_serving_thread(self):
+    threads = []
+    def generate(ids, **kwargs):
+      threads.append(threading.current_thread())
+      yield from (300, 999)
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      self.client.chat.completions.create(model="test-model", messages=[{"role":"user","content":"Hello"}])
+    self.assertEqual(threads, [self.server_thread])
 
 class TestLLMToolCalls(unittest.TestCase):
   """Tool calling through the OpenAI-compatible HTTP API."""
