@@ -140,10 +140,8 @@ class TestCustomKernel(unittest.TestCase):
       return out[1].store(A[0]).sink(arg=KernelInfo(opts_to_apply=()))
 
     x = Tensor([0, 0], dtype=dtypes.int).realize()
-    x = Tensor.custom_kernel(x, x, fxn=kernel)[0]
-    # webgpu silently errors when a kernel has duplicate buffer args, so the list stays the same.
-    # https://gpuweb.github.io/gpuweb/#abstract-opdef-encoder-bind-groups-alias-a-writable-resource
-    self.assertEqual(x.tolist(), [1, 1] if Device.DEFAULT != "WEBGPU" else [0, 0])
+    with self.assertRaises(AssertionError):
+      Tensor.custom_kernel(x, x, fxn=kernel)[0].realize()
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
@@ -794,7 +792,8 @@ class TestCallInKernel(unittest.TestCase):
       return incr(A, A).sink(arg=KernelInfo(opts_to_apply=()))
 
     a = Tensor([0, 0], dtype=dtypes.int).realize()
-    self.assertEqual(a.custom_kernel(fxn=kernel)[0].tolist(), [1, 1])
+    with self.assertRaises(AssertionError):
+      self.assertEqual(a.custom_kernel(fxn=kernel)[0].tolist(), [1, 1])
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

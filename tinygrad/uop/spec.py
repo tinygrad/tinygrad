@@ -31,6 +31,11 @@ def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> 
   rng = src[0]
   return rng.op is Ops.RANGE and rng.axis_type is AxisType.DEVICE and int(rng.vmax)+1 == len(device)
 
+def validate_call(x:UOp) -> bool:
+  bases = [s.storage_base for s in x.src_without_body]
+  assert all(bases.count(b) == 1 for b in x.written_buffers), "written CALL arguments must not alias other arguments"
+  return isinstance(x.arg, CallInfo)
+
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=False):
   lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
 
@@ -109,7 +114,7 @@ spec_shared = PatternMatcher([
   # a CUSTOM_FUNCTION names an external function: the arg is a CustomFunction stating the return dtype
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
-  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), validate_call),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
@@ -273,7 +278,7 @@ spec_kernel_graph = PatternMatcher([
   # open DEVICE ranges are bound per device at launch (e.g. the range on a multi-device BUFFER/ALLOC)
   (UPat(Ops.RANGE, name="r"), lambda r: r.axis_type is AxisType.DEVICE),
   # all calls are on opaque bodies
-  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), validate_call),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement|GroupOp.Defines|{Ops.AFTER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST}),), allow_any_len=True),
    lambda: True),

@@ -765,10 +765,23 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
   @recursive_property
   def _storage_base(self) -> UOp|None:
-    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: return self.src[0].storage_base
+    if self.op in GroupOp.Movement|{Ops.DETACH, Ops.BITCAST, Ops.AFTER, Ops.UNSHARD, Ops.INDEX}: return self.src[0].storage_base
     return None
   @property
   def storage_base(self) -> UOp: return self if (base:=self._storage_base) is None else base
+
+  def access_ptrs(self, op:Ops) -> tuple[UOp, ...]:
+    if self.op is op: return tuple(s for s in self.src[:1] if s.addrspace is AddrSpace.GLOBAL)
+    if self.op is not Ops.CALL: return ()
+    bases = set().union(*(u.read_buffers if op is Ops.LOAD else u.written_buffers for u in self.body.toposort()))
+    slots = {b.arg.slot for b in bases if b.op is Ops.PARAM}
+    return tuple(self.src[1+i] for i in sorted(slots))
+
+  @functools.cached_property
+  def read_buffers(self) -> set[UOp]: return {p.storage_base for p in self.access_ptrs(Ops.LOAD)}
+
+  @functools.cached_property
+  def written_buffers(self) -> set[UOp]: return {p.storage_base for p in self.access_ptrs(Ops.STORE)}
 
   # cached property here makes external_uop_gc fail, why?
   @property
