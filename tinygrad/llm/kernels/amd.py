@@ -1557,14 +1557,20 @@ def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_pack", opts_to_apply=()))
 
 @functools.cache
-def _q8_unpack_kernel(out:UOp, packed:UOp) -> UOp:
-  # the halves of the packed groups: a lane eight inputs (two words), times the group's scale
+def _q8_unpack_kernel(out:UOp, *parts:UOp) -> UOp:
+  # the halves of the packed groups: a lane eight inputs (two words), times the group's scale. parts: the rows in that many parts (the part of
+  # a row is the workgroup's: its loads from the others are skipped)
   T, D = cast(tuple[int, int], out.shape)
-  G = D // 32
+  G, rows = D // 32, T // len(parts)
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
-  d = packed[token, group, 8].load().bitcast(dtypes.float32)
-  words = [packed[token, group, sub*2 + w].load() for w in range(2)]
+  def load(w:int) -> UOp:
+    if len(parts) == 1: return parts[0][token, group, w].load()
+    pt, r = token // rows, token % rows
+    return functools.reduce(lambda a, b: a + b, [(pt.eq(i)).where(p.reshape(rows, G, 9)[r.valid(pt.eq(i)), group, w].load(), 0)
+                                                 for i, p in enumerate(parts)])
+  d = load(8).bitcast(dtypes.float32)
+  words = [load(sub*2 + w) for w in range(2)]
   vals = [((words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d).cast(dtypes.half) for i in range(8)]
   stores = [out[token, group*32 + sub*8 + i].store(vals[i]) for i in range(8)]
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_unpack", opts_to_apply=()))
@@ -1591,9 +1597,18 @@ def all_gather_q8(x:Tensor, axis:int) -> Tensor:
   devs, (T, D) = cast(tuple[str, ...], x.device), cast(tuple[int, int], x.shape[1:])
   packed = Tensor.empty(T, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0)
   packed = Tensor.custom_kernel(packed, x.reshape(T, D), fxn=_q8_pack_kernel)[0]
-  whole = all_gather(packed, 0)
-  out = Tensor.empty(T, D, dtype=dtypes.half, device=devs)
-  return Tensor.custom_kernel(out, whole, fxn=_q8_unpack_kernel)[0].reshape(1, T, D)
+  if not getenv("AG_Q8_PARTS", 1) or not getenv("AG_RING", 1):
+    out = Tensor.empty(T, D, dtype=dtypes.half, device=devs)
+    return Tensor.custom_kernel(out, all_gather(packed, 0), fxn=_q8_unpack_kernel)[0].reshape(1, T, D)
+  # the parts around the ring from the packed buffers, every device unpacks them as they are (no buffer of the whole packed)
+  local = _per_device(packed)
+  mine, n = [local.mselect(i) for i in range(len(devs))], len(devs)
+  sent = _ring(mine, devs)
+  def unpacked(j:int) -> UOp:
+    parts = [Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)]
+    return Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.half, device=devs[j]), *parts, fxn=_q8_unpack_kernel)[0].reshape(1, T, D).uop
+  outs = [unpacked(j) for j in range(n)]
+  return Tensor(UOp.mstack(*outs))
 
 def _ring(mine:list[UOp], devs:tuple[str, ...]) -> dict[tuple[int, int], UOp]:
   """
