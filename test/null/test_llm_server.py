@@ -159,13 +159,25 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(contents), 0)
 
   def test_interrupted_stream_logs_tokens(self):
-    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
-         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+    # the threaded server checks cancellation between tokens, so gate the scheduler to synchronize:
+    # generation pauses after the first token until close() has set req.cancelled
+    gate, interrupted = threading.Event(), threading.Event()
+    def slow_generate(ids, **kwargs):
+      yield 300
+      gate.wait(2)
+      yield 301
+    def log(s):
+      if "total:" in s: interrupted.set()
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), \
+         patch("tinygrad.llm.serve.stderr_log", side_effect=log) as log_mock, \
+         patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
       stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
       next(stream)
       next(stream)
       stream.close()
-    interrupt = log.call_args.args[0]
+      gate.set()
+      self.assertTrue(interrupted.wait(2))
+    interrupt = log_mock.call_args.args[0]
     self.assertFalse(interrupt.startswith("\n"))
     self.assertTrue(interrupt.endswith("\n"))
     self.assertIn("gen:", interrupt)
