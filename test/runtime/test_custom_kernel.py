@@ -783,6 +783,8 @@ class TestCallInKernel(unittest.TestCase):
     lin = x.schedule_linear()
     prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
     self.assertEqual(sum("plus2" in s for s in prg.src[2].arg.splitlines()), 2)  # declaration and call, no definition
+    helper = next(u.body for u in prg.src[1].src if u.op is Ops.CALL)
+    self.assertEqual(helper.op, Ops.PROGRAM)
     elf = prg.to_elf()
     run_linear(lin)
     self.assertListEqual(x.tolist(), Tensor.arange(4).add(2).tolist())
@@ -790,6 +792,7 @@ class TestCallInKernel(unittest.TestCase):
     x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=kernel)[0]
     lin = x.schedule_linear()
     prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
+    self.assertIs(helper, next(u.body for u in prg.src[1].src if u.op is Ops.CALL))
     self.assertEqual(elf.libraries[0].lib, prg.to_elf().libraries[0].lib)
     run_linear(lin)
     self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())

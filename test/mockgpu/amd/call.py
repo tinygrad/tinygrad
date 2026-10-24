@@ -1,7 +1,7 @@
 import itertools, struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc, AxisType
-from tinygrad.codegen import to_program, to_program_config, lower_call
+from tinygrad.codegen import to_program, to_program_config
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import AddrSpace, dtypes
@@ -57,11 +57,11 @@ pm_asm_call = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), lambda r: r.replace(arg=(AxisType.LOOP, *r.arg[1:])) if r.axis_type is not AxisType.LOOP else None),
 ])
 
-def lower_body(sink:UOp, renderer:Renderer, name:str) -> tuple[UOp, list[UOp]]:
+def lower_body(sink:UOp, name:str) -> tuple[UOp, list[UOp]]:
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", enter_calls=True)
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
-  return lower_call(renderer, body.call(*bufs, name=name)), bufs
+  return body.call(*bufs, name=name), bufs
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[InstructionCall|None, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
@@ -74,7 +74,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[Instructio
   ctx = _Ctx(inst.size(), _wave_size(arch), inst_addr=UOp.param(-1, dtypes.uint64, name="inst", addrspace=AddrSpace.ALU))
   sink = _get_handler(inst)(inst, ctx)
   base, mask, _, name = _canonical_info(inst, ctx, inst_bytes)
-  ret = lower_body(sink, renderer, name) if sink.src else None, ctx.branch_cond
+  ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
   entries.append((base, mask, ret))
   return ret
 
@@ -259,7 +259,7 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
       values = {taken:UOp.const(dsts[COND_TAKEN], dtypes.int), fallthrough:UOp.const(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
         else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
-      instructions.append((branch_pc, lower_body(route[0].store(target).sink(), renderer, "asm_branch")))
+      instructions.append((branch_pc, lower_body(route[0].store(target).sink(), "asm_branch")))
     if not instructions: return end
     off = instructions[0][0]
     body, bufs = instruction_block([(pc-off, info) for pc,info in instructions])
@@ -274,7 +274,7 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*buffers[b][1]) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args, *params[-3:-1], name="asm_block"), *gates, w).end(*gates).end(w).sink()
     block = graph_rewrite(block, pm_asm_call, name="pm_asm_call", enter_calls=True)
-    return lower_call(renderer, block.call(*args, name="asm_waves"))
+    return block.call(*args, name="asm_waves")
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:

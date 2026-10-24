@@ -12,12 +12,8 @@ def with_storage(x:UOp, dt:DType) -> UOp:
   if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
-def call_names(uops:Sequence[UOp], name:str) -> dict[UOp, str]:
-  names:dict[UOp, str] = {}
-  for body in dict.fromkeys(u.body for u in uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR):
-    n = sum(b.arg == body.arg for b in names) + (body.arg == name)
-    names[body] = body.arg + (f"_{n}" if n else "")
-  return names
+def call_names(uops:Sequence[UOp]) -> dict[UOp, str]:
+  return {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
 
 @dataclass(frozen=True)
 class Estimates:
