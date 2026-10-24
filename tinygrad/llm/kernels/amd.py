@@ -36,14 +36,12 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
     return (t:=getattr(Device[device], "target", None)) is not None and t[0] in (11, 12, 9) and isinstance(Device[device].renderer, HIPRenderer)
 
 @functools.cache
-def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
+def _gfx_major(device:str|tuple[str, ...]|None) -> int:
   if isinstance(device, tuple): device = device[0]
-  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[device], "target")[0] == 12
+  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[unwrap(device)], "target")[0]
 
-@functools.cache
-def _cdna(device:str|tuple[str, ...]) -> bool:
-  if isinstance(device, tuple): device = device[0]
-  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[device], "target")[0] == 9
+def _wmma_rdna4(device:str|tuple[str, ...]|None) -> bool: return _gfx_major(device) == 12
+def _cdna(device:str|tuple[str, ...]|None) -> bool: return _gfx_major(device) == 9
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
@@ -391,10 +389,7 @@ def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   result = Tensor.custom_kernel(out, layer.packed, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
   return result.reshape(B, T, slots, global_out)
 
-# the 16x16x16 fragment on a wave: (lanes, kgroups), kgroups lane groups of 16 split k (k bits in tc.py's frag_a lanes)
-# RDNA3 wave32 holds a copy of a and b in each half (1 group), RDNA4 wave32 2 groups (k2), CDNA wave64 4 groups (k2, k3)
-@functools.cache
-def _wmma_frag(device:str|tuple[str, ...]) -> tuple[int, int]: return (64, 4) if _cdna(device) else (32, 2) if _wmma_rdna4(device) else (32, 1)
+# kgroups: groups of 16 lanes that split k in a 16x16x16 fragment, RDNA3 copies a and b in both halves
 def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
   return tuple(range(4)) if kgroups == 1 else tuple(lane_group + kgroups*j for j in range(4//kgroups))
 
@@ -405,13 +400,13 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, la
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
   lane, wave = UOp.range(lanes, -1, axis_type=AxisType.WARP), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
-  col, lane_group, acc = lane % 16, lane // 16, 256 // lanes
+  col, lane_group, rows = lane % 16, lane // 16, 256 // lanes
   outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
   inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
-  tokens = tuple(tuple(token_block*token_tile + tile*16 + lane_group*acc + i for i in range(acc)) for tile in range(token_tile//16))
+  tokens = tuple(tuple(token_block*token_tile + tile*16 + lane_group*rows + i for i in range(rows)) for tile in range(token_tile//16))
   return output_waves, token_block, output_block, lane, wave, lane_group, outputs, inputs, tokens
 
-def _wmma_stores(out, outputs, tokens, accs, update, lane_group, lane, wave, output_waves, kgroups):
+def _wmma_stores(out, outputs, tokens, accs, update, lane, wave, output_waves, kgroups):
   # RDNA4 and CDNA (kgroups > 1) own consecutive rows per lane group, matching tokens directly.
   if kgroups > 1:
     return [out[token, output].store(acc.after(update)[i].load()) for output,output_accs in zip(outputs, accs)
@@ -424,14 +419,13 @@ def _wmma_stores(out, outputs, tokens, accs, update, lane_group, lane, wave, out
   def values(ai:int) -> tuple[UOp, ...]:
     own = tuple(lds[wave, lane, ai*8+i].load() for i in range(8))
     peer = tuple(lds[wave, lane ^ 16, ai*8+i].load() for i in range(8))
-    low = lane_group.eq(0)
+    low = (lane // 16).eq(0)
     return tuple(low.where(own[i], peer[i+4]) if j == 0 else low.where(peer[i], own[i+4]) for i in range(4) for j in range(2))
   tt = len(tokens)
   return [out[token, output].store(value) for ot,(output,output_accs) in enumerate(zip(outputs, accs))
           for tile,(tile_tokens,_acc) in enumerate(zip(tokens, output_accs)) for token,value in zip(tile_tokens, values(ot*tt+tile))]
 
-def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name, frag):
-  lanes, kgroups = frag
+def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name, kgroups, lanes):
   x = x.reshape(out.shape[0], in_features)
   output_waves, token_block, output_block, lane, wave, lane_group, outputs, input_tokens, tokens = layout
   token_tile, output_tiles = len(tokens)*16, len(outputs)
@@ -454,12 +448,11 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, WMMA_ARG[0], lanes)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
                        for acc,value in zip(output_accs, output_values))).end(group)
-  stores = _wmma_stores(out, outputs, tokens, accs, update, lane_group, lane, wave, output_waves, kgroups)
+  stores = _wmma_stores(out, outputs, tokens, accs, update, lane, wave, output_waves, kgroups)
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 @functools.cache
-def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, frag:tuple[int, int]=(32, 1)) -> UOp:
-  lanes, kgroups = frag
+def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, kgroups:int, lanes:int) -> UOp:
   token_tile, output_tiles = (64, 1 if out_features <= 1024 else 2) if out.shape[0] % 64 == 0 else \
     (32 if out.shape[0] % 32 == 0 else 16, 2)
   layout = _wmma_layout(out, out_features, token_tile, output_tiles, lanes)
@@ -471,11 +464,10 @@ def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
       (((raw[base+4+half*4+i] >> subgroup.cast(dtypes.uint32) & 0x01010101) << 4) if ggml_type == Q5_K else 0) for i in word_indices)
     return tuple(((word >> (byte*8) & 255).float()*d*scale-dmin*minimum).cast(dtypes.float16) for word in words for byte in range(4))
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[ggml_type]//4,
-                            layout, dequant, f"linear_q{4 if ggml_type == Q4_K else 5}_k_f16_wmma", frag)
+                            layout, dequant, f"linear_q{4 if ggml_type == Q4_K else 5}_k_f16_wmma", kgroups, lanes)
 
 @functools.cache
-def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:int, in_features:int, frag:tuple[int, int]=(32, 1)) -> UOp:
-  lanes, kgroups = frag
+def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:int, in_features:int, kgroups:int, lanes:int) -> UOp:
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else 64 if out.shape[0] % 64 == 0 and \
     out_features <= 6144 else 128 if out.shape[0] % 128 == 0 else \
     32 if out.shape[0] % 32 == 0 else 16
@@ -491,12 +483,11 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
     pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
                   for word in word_indices for byte in range(4))
     return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
-  return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[IQ4_XS]//4, layout, dequant, "linear_iq4_xs_f16_wmma", frag)
+  return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[IQ4_XS]//4, layout, dequant, "linear_iq4_xs_f16_wmma", kgroups, lanes)
 
 @functools.cache
 def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
-                                  out_features:int, in_features:int, ggml_type:int, frag:tuple[int, int]=(32, 1)) -> UOp:
-  lanes, kgroups = frag
+                                  out_features:int, in_features:int, ggml_type:int, kgroups:int, lanes:int) -> UOp:
   token_tile = 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
   layout = _wmma_layout(out, out_features, token_tile, 2, lanes)
   output_waves, _, _, lane, wave, lane_group, _, _, _ = layout
@@ -530,7 +521,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
     return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
                  for word in words for b in range(4))
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[ggml_type]//raw.dtype.itemsize,
-                            layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", frag)
+                            layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", kgroups, lanes)
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
@@ -543,16 +534,17 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
+  cdna = _cdna(x.device)
   if tokens % 16 == 0 and local_out % 16 == 0:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
-    fxn = functools.partial(fxn, frag=_wmma_frag(x.device))
+    fxn = functools.partial(fxn, kgroups=4 if cdna else 2 if _wmma_rdna4(x.device) else 1, lanes=64 if cdna else 32)
     srcs = (x.cast(dtypes.float16).contiguous(), *extra)
   else:
-    fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type, cdna=_cdna(x.device))
+    fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type, cdna=cdna)
     srcs = (*q8_quantize(x, tokens, in_features), *extra)
     out_shape += ((in_features+1023)//1024,)
   out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
@@ -830,8 +822,9 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
   decode = resolve(T_real == 1, False)
   # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
-  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode else not _cdna(q.device) and
+  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode else
     D >= 64 and 2*(2*BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
+  if not decode and _cdna(q.device): supported = False  # the prefill kernel is RDNA WMMA only
   if not supported:
     k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
     mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
