@@ -2230,7 +2230,7 @@ def _lanes(t:Tensor) -> list[UOp]:
   base = u.src[0].src[0].after(*u.src[1:]) if u.src[0].op is Ops.UNSHARD else u
   return [base.mselect(j) for j in range(len(devs))]
 
-def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None) -> Tensor:
+def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None, by_selection:bool=True) -> Tensor:
   """
   moe_combine by selection, its partial sums (every device's experts) summed over the devices and split on the tokens (1, tokens, D), around
   the ring with the combining: in step s device j combines its rows of the tokens of device t=j-s plus what it got (the sum of the devices
@@ -2261,11 +2261,11 @@ def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int
         buf = Tensor.empty(size, D, dtype=dtypes.float32, device=devs[j])
         if j in prev: buf = Tensor(buf.uop.after(prev[j].uop))
         local = Tensor.custom_kernel(buf, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]),
-                                     fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=True, row0=t*size))[0]
+                                     fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection, row0=t*size))[0]
         y = prev[j] = Tensor.custom_kernel(out, local, *adds, fxn=functools.partial(_add_rows_kernel, add_rows=add_rows, q8=q8))[0]
       else:
         y = Tensor.custom_kernel(out, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]), *adds, fxn=functools.partial(_moe_combine_kernel, k=k,
-                                 by_selection=True, row0=t*size, add_rows=add_rows))[0]
+                                 by_selection=by_selection, row0=t*size, add_rows=add_rows))[0]
       if step < n: got[(t, (j+1) % n)] = y.to(devs[(j+1) % n])
       else: final.append(y.reshape(1, size, D).uop)
   return Tensor(UOp.mstack(*final).unshard(1))

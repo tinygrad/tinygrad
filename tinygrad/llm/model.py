@@ -620,13 +620,16 @@ class FFNBlock:
     # down has a row per selection (in half if sliced: a token sums many; the selections of other devices' experts aren't written: fewer rows
     # than the sorted ones, padded to tiles), every token sums its rows weighed by their probabilities
     tokens, k = int(prod(sel_shape[:-1])), int(sel_shape[-1])
-    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=tokens*k, out_dtype=dtypes.half if down_exps.slices else dtypes.float32)
+    # (MOE_SORTED_DOWN: a row per sorted row, the selections read through pos: the rows written are together, not spread over every selection's)
+    sorted_down = bool(getenv("MOE_SORTED_DOWN", 1))
+    down = down_exps.grouped(act.contiguous(), entries, tiles, selections=tokens*k, out_dtype=dtypes.half if down_exps.slices else dtypes.float32,
+                             sorted_out=sorted_down)
     # sequence parallel: summed over the devices and split on the tokens around the ring as they're combined
     if half and gate_exps.expert_parallel and _sp_rows[0] is not None and isinstance(T, int) and tokens % len(cast(tuple, x.device)) == 0 and \
        tokens == T and getenv("MOE_SCATTER", 1):
-      return moe_combine_scatter(down, pos, probs, tokens, k, add)
+      return moe_combine_scatter(down, pos, probs, tokens, k, add, by_selection=not sorted_down)
     y = moe_combine(down, pos, probs, tokens, k, add, out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32,
-                    by_selection=True)
+                    by_selection=not sorted_down)
     y = y.reshape(-1, *sel_shape[:-1], D)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
 
