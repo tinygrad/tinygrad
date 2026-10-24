@@ -375,6 +375,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   outs_per_wave, slots = 32 // lanes, (group_count+lanes-1)//lanes
   per = (slots + 15) // 16
   if active is not None and getenv("MOE_PER", 4): per = min(getenv("MOE_PER", 4), slots)
+  elif active is None and (dp:=getenv("DEC_PER", 4 if group_count <= 48 and out_features >= 2048 else 0)): per = min(max(per, dp), slots)
   chunks = (slots + per-1) // per
   rows = math.gcd(out_features // outs_per_wave, getenv("MOE_ROWS", 4) if active is not None else 4)
   while rows > 1 and rows*chunks > (32 if active is not None else 16): rows //= 2
@@ -606,6 +607,35 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
   # a few tokens share the weight loads
   multi = int(out.shape[0]) if gate is None and xtoken is None and 1 < out.shape[0] <= DECODE_MULTI else 1
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=multi)
+
+def _is_buffer(x:Tensor) -> bool:
+  # x is a kernel's output (its views): every load of it in a kernel is a load, not a computation (each element is read by many outputs)
+  u = x.uop
+  while u.op in (Ops.RESHAPE, Ops.SHRINK, Ops.EXPAND, Ops.PERMUTE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype)): u = u.src[0]
+  return u.op in (Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.STAGE)
+
+@functools.cache
+def _q8_decode_f16_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int) -> UOp:
+  # Q8_0 weights times half activations (not quantized: no kernel for it): a group's bytes to halves without floats (the byte as the mantissa
+  # of 1024+u, minus 1152: exact), their dots with the activations by v_dot2_f32_f16 (summed in float), times the block's scale
+  x = x.reshape(-1, in_features)
+  H2 = "_Float16 __attribute__((ext_vector_type(2)))"
+  def packed(a:UOp, b:UOp) -> UOp: return a.bitcast(dtypes.uint16).cast(dtypes.uint32) | (b.bitcast(dtypes.uint16).cast(dtypes.uint32) << 16)
+  def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
+    base = (output*in_features//32 + group) * 17
+    hw = [_amd_load(raw[base + 1 + 8*h], 8, stream=True) for h in range(2)]
+    xs = [x[token, group*32 + k].load() for k in range(32)]
+    acc = UOp.const(0, dtypes.float)
+    for i in range(8):
+      word = (hw[i//4][(2*i) % 8].cast(dtypes.uint32) | (hw[i//4][(2*i+1) % 8].cast(dtypes.uint32) << 16)) ^ 0x80808080
+      for j, sel in enumerate((0x04010400, 0x04030402)):
+        pair = _amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), word, UOp.const(sel, dtypes.uint32))
+        k = 4*i + 2*j
+        acc = UOp(Ops.CUSTOMI, src=(pair, packed(xs[k], xs[k+1]), acc), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({H2}, {{0}}) - "
+                  f"({H2})((_Float16)1152.0f), __builtin_bit_cast({H2}, {{1}}), {{2}}, false)", dtypes.float))
+    return acc * _half(raw[base])
+  multi = int(out.shape[0]) if 1 < out.shape[0] <= DECODE_MULTI else 1
+  return _decode_linear(out, out_features, in_features//32, group_dot, "linear_q8_0_f16", multi=multi)
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None, waves:int=2):
   # grouped experts: the token blocks cover the sorted rows (group[0]), not the output. rows: the rows of out to cover (default all)
@@ -1172,6 +1202,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
                               ggml_type=layer.ggml_type)
     fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device))
     srcs = (x.cast(dtypes.float16).contiguous(), *extra)
+  elif layer.ggml_type == Q8_0 and xq is None and tokens <= 8 and in_features <= getenv("DEC_F16_K", 512) and in_features % 32 == 0 and \
+       layer.weight.dtype == dtypes.uint16 and _q8_key(x, tokens, in_features, False, False) not in _q8_cache and _is_buffer(x):
+    # a few rows of a narrow input (decoding): the activations in half, computed by the kernel from x (not quantized by a kernel of their own)
+    fxn, srcs = _q8_decode_f16_kernel, (x.reshape(tokens, x.shape[-1]).cast(dtypes.half),)
   else:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
     srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra)
@@ -1712,7 +1746,9 @@ def _p2p_half_sum(x:Tensor, W:int, pack:tuple[int, int]|None=None) -> Tensor:
   shape, p2p = p2p_ar_shape(n // W), p2p_allreduce(devs)
   assert shape is not None and p2p is not None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
-  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//W, T=shape[0], EP=shape[1], two_shot=True, half=pack is None, triple=W == 3,
+  # (one shot: a few rows, the values to every device, one round over the links: P2P_AR_HALF_ONESHOT words at most)
+  one = pack is None and n // W <= getenv("P2P_AR_HALF_ONESHOT", 0)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//W, T=shape[0], EP=shape[1], two_shot=not one, half=pack is None, triple=W == 3,
                           pack=pack)
   return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
 
