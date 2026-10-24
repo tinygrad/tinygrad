@@ -1294,7 +1294,7 @@ class Transformer:
         if sp: x = shard_rows(x, 1)
         for block in self.blk: x = block(x, start_pos, T)
         x = all_gather(x.mean(2), 1) if sp else x.mean(2)
-      if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T)
+      if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T, sp=bool(sp))
       x = x[:, :T]
     else:
       for block in self.blk: x = block(x, start_pos)
@@ -1342,7 +1342,7 @@ class Transformer:
     k = self.config.spec_drafts
     self._spec_row0_jit(UOp.variable("spec_row", 0, 2*k+1).bind(row), UOp.variable("spec_keep", 0, 1).bind(int(row != 0)))
 
-  def _mtp_prefill(self, emb:Tensor, x:Tensor, start_pos:UOp, T:UOp) -> Tensor:
+  def _mtp_prefill(self, emb:Tensor, x:Tensor, start_pos:UOp, T:UOp, sp:bool=False) -> Tensor:
     """
     the MTP layer on a prompt chunk (for its caches): emb (1, T, D) the embeddings of its tokens, x (1, rows, D) the model's (padded) output.
     the hidden state of the position before the chunk is row 0 of _spec_h, the one of its last token is written there. returns x
@@ -1350,8 +1350,15 @@ class Transformer:
     hn = self.output_norm(x).float()
     emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
     # the MTP layer reads the carry before it's written (the schedule orders an assign after the reads). realized with the call's output
-    m = self.mtp(self.mtp.eh_proj(self.mtp.enorm(emb).cat(self.mtp.hnorm(carry.cat(hn[:, :-1], dim=1)), dim=-1)), start_pos, T)
-    effects = [m[:, :1, :1].contiguous(), self._spec_h[0:1].assign(hn[0].shrink(((T-1, T), None)))]
+    inp = self.mtp.enorm(emb).cat(self.mtp.hnorm(carry.cat(hn[:, :-1], dim=1)), dim=-1)
+    if sp and getenv("MTP_SP", 1):
+      # sequence parallel (as the blocks): every device its rows (the projection of the input too), the sublayers on all of them
+      mtp, h = self.mtp, q8_linear(self.mtp.eh_proj, shard_rows(inp.contiguous(), 1), split=True)
+      h = h + mtp._phase_sub("attn", mtp.attn_norm(h), start_pos, T)
+      m = h + mtp._phase_sub("ffn", mtp.ffn_norm(h), start_pos, T)
+    else: m = self.mtp(self.mtp.eh_proj(inp), start_pos, T)
+    # (a column of every row: a row split over the devices isn't sliced)
+    effects = [m[:, :, :1].contiguous(), self._spec_h[0:1].assign(hn[0].shrink(((T-1, T), None)))]
     if self._effects is None: Tensor.realize(*effects)
     else: self._effects += effects
     return x

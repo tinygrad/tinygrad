@@ -1131,6 +1131,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   fxn:Callable[..., UOp]
   ksplits = 1  # the input groups split over workgroups, their partial outputs summed after
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
+  # (split: every device its rows, the kernels' tiles of them)
+  local_rows = tokens // len(x.device) if split and isinstance(x.device, tuple) else tokens
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
   # (Q8_0 and Q6_K (the output head) too for the rows of batched decoding, Q8_ROWS_I8: the weights are the time, the int8 tensor cores read
@@ -1149,7 +1151,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     srcs = (*xq[:3], *extra)
     out_shape = (ksplits*tokens, out_features)
   elif layer.ggml_type == Q8_0 and xq is None and (local_out % 128 == 0 or tokens >= 1024) and in_features % 32 == 0 and _wmma_rdna4(x.device) and \
-       (tt:=next((t for t in (96, 128, 64) if tokens % t == 0), 0)) and getenv("Q8_GEMM", 1):
+       (tt:=next((t for t in (96, 128, 64) if local_rows % t == 0), 0)) and getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt)
     srcs = (x.cast(dtypes.float16).contiguous(),)
