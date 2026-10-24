@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, cast, Sequence
+from typing import Callable, cast
 from dataclasses import dataclass, replace
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
@@ -12,7 +12,7 @@ def with_storage(x:UOp, dt:DType) -> UOp:
   if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
-def call_names(uops:Sequence[UOp]) -> dict[UOp, str]:
+def call_names(uops:list[UOp]) -> dict[UOp, str]:
   return {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
 
 @dataclass(frozen=True)

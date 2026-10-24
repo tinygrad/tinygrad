@@ -176,6 +176,7 @@ class LLVMRenderer(Renderer):
       (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
     ])
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
+    args = sorted(args, key=lambda x:x[1].arg.slot)
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
     sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
@@ -236,7 +237,6 @@ class CPULLVMRenderer(LLVMRenderer):
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str:
     return self._render_module(uops, args_struct=True)
-
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}

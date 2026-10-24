@@ -471,7 +471,7 @@ def do_compile(ctx:Renderer, prg:UOp, lin:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
   if DEBUG >= 7: ctx.compiler.disassemble(lib)
-  deps = tuple(body.src[3] for body in call_names(lin.src))
+  deps = tuple(body.src[3] for body in call_names(list(lin.src)))
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, src=deps, arg=lib),))
 
 pm_to_program = PatternMatcher([

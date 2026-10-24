@@ -169,15 +169,6 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     return regions
   return build(set(order))
 
-def decode_cfg(insts:dict[int, Inst]):
-  cfg = get_cfg(insts)
-  thread_branches(insts, cfg["blocks"], cfg["paths"])
-  try: return cfg, cfg_regions(cfg["paths"], 0)
-  except IrreducibleCFG:
-    # Sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
-    merge_branches(insts, cfg["blocks"], cfg["paths"])
-  return cfg, cfg_regions(cfg["paths"], 0)
-
 # ISA operand types and operations are independent of tensor construction and GPU lowering settings.
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1, LLVM_OPTNONE=1)
@@ -199,7 +190,13 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
     if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"ASM_CALL does not support {inst_st}")
-  cfg, regions = decode_cfg(insts)
+  cfg = get_cfg(insts)
+  thread_branches(insts, cfg["blocks"], cfg["paths"])
+  try: regions = cfg_regions(cfg["paths"], 0)
+  except IrreducibleCFG:
+    # Sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
+    merge_branches(insts, cfg["blocks"], cfg["paths"])
+    regions = cfg_regions(cfg["paths"], 0)
   # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
   unconditional:set[int] = set()
   possible:set[int]|None = {0}
