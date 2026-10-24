@@ -1,6 +1,6 @@
 import itertools, struct
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, rewrite_group, uopfunc, AxisType, PatternMatcher, UPat, graph_rewrite
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite, rewrite_group, uopfunc, AxisType
 from tinygrad.codegen import to_program, to_program_config, lower_call
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer
@@ -185,20 +185,14 @@ def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rs
          user_data_count:int=0, name:str="") -> UOp:
   dev, ren = ('AMD', 'HIP') if ASM_CALL > 1 else ('CPU', 'LLVM')
   with Context(DEV=DEV.target(dev, renderer=ren)):
-    view = to_mv(lib, lib_sz)
+    code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count)
     renderer = Device[dev].renderer
-    key = (lib_sz, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
-    entries = dispatch_cache.setdefault(key, [])
-    for code, prg in entries:
-      if bytes(view[:len(code)]) == code: return prg
-    insts = amd_decode(view, arch)
-    code = bytes(view)
-    prg = _lift(insts, arch, renderer, dispatch, name)
-    entries.append((code, prg))
-    return prg
+    key = (code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))
+    if key not in dispatch_cache: dispatch_cache[key] = _lift(amd_decode(code, arch), arch, renderer, dispatch, name)
+    return dispatch_cache[key]
 
-dispatch_cache:dict[tuple, list[tuple[bytes, UOp]]] = {}
+dispatch_cache:dict[tuple, UOp] = {}
 
 def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   for inst in insts.values():
@@ -248,7 +242,7 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
   init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
                                                  for i,u in enumerate(user_vars)}, walk=True), *init.src[1:], *user_vars))
   initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
-  def block_instructions(block_pc:int):
+  def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
     branch_pc = block_pc
     instructions = []
@@ -266,10 +260,6 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
       values = {taken:UOp.const(dsts[COND_TAKEN], dtypes.int), fallthrough:UOp.const(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
         else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
       instructions.append((branch_pc, lower_body(route[0].store(target).sink(), renderer, "asm_branch")))
-    return instructions, values
-
-  def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
-    instructions, values = block_instructions(block_pc)
     if not instructions: return end
     off = instructions[0][0]
     body, bufs = instruction_block([(pc-off, info) for pc,info in instructions])
