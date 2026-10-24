@@ -155,7 +155,7 @@ class TestBlockFP8(unittest.TestCase):
 
   def test_fnuz_conversion(self):
     bits = np.array([i for i in range(256) if i not in (127, 255)], np.uint8).reshape(2, 127)
-    scale = np.array([[0.125], [0.5]])
+    scale = np.array([[0.125], [0.5]], np.float32)
     w, s = e4m3fn_to_fnuz(Tensor(bits).bitcast(dtypes.fp8e4m3), Tensor(scale))
     converted = w.bitcast(dtypes.uint8).numpy()
     np.testing.assert_array_equal(converted, np.where(bits == 128, 0, bits))
