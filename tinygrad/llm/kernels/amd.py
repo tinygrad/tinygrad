@@ -1725,15 +1725,18 @@ def _ar_pack() -> tuple[int, int]|None:
 
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
-  n, words = prod(x.shape[1:]), ((pk[0],) if (pk:=_ar_pack()) else (3, 2))
-  if isinstance(x.device, tuple) and isinstance(n, int) and (rows:=prod(x.shape[1:-1])) > 4 and getenv("P2P_AR_HALF", 1) and \
+  # (a few rows (decoding): three halves a word, many: packed)
+  rows = prod(x.shape[1:-1])
+  pk = _ar_pack() if isinstance(rows, int) and rows >= getenv("P2P_AR_PACK_ROWS", 5) else None
+  n, words = prod(x.shape[1:]), ((pk[0],) if pk else (3, 2))
+  if isinstance(x.device, tuple) and isinstance(n, int) and rows >= getenv("P2P_AR_HALF_ROWS", 1) and getenv("P2P_AR_HALF", 1) and \
      (pw:=next(((p, w) for cap in (P2P_AR_PART, P2P_AR_MAXG*P2P_AR_MAXW) for p in (1, 2, 4, 8, 16) for w in words if rows % p == 0 and
                 n % (w*p) == 0 and n // (w*p) <= cap and p2p_ar_shape(n // (w*p)) is not None), None)) and p2p_allreduce(x.device):
     # many rows (batched decoding): packed (_ar_pack), or in half, three values a word (or two) (the copies would sum them in half too). the same bits
     # on every device. rows
     # that don't fit the mailbox in parts, an allreduce each (one of more workgroups than the devices run at once waits on the ones that don't)
     xr, (parts, W) = x.float().reshape(x.shape[0], rows, x.shape[-1]), pw
-    return Tensor.cat(*[_p2p_half_sum(xr[:, i*(rows//parts):(i+1)*(rows//parts)], W, _ar_pack()) for i in range(parts)]).reshape(x.shape[1:])
+    return Tensor.cat(*[_p2p_half_sum(xr[:, i*(rows//parts):(i+1)*(rows//parts)], W, pk) for i in range(parts)]).reshape(x.shape[1:])
   if isinstance(x.device, tuple) and isinstance(n, int) and (shape:=p2p_ar_shape(n)) is not None and (p2p:=p2p_allreduce(x.device)):
     # the devices write to each other's memory (two shot from P2P_AR_TWO_SHOT values: fewer bytes over the links)
     out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
