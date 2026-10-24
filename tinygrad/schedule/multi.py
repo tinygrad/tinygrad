@@ -278,7 +278,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.EXPAND, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), expand_multi),
   (UPat(Ops.PAD, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), pad_multi),
   (UPat(Ops.SHRINK, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
-  (UPat(Ops.PERMUTE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), permute_multi),
+  (UPat(Ops.PERMUTE, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), permute_multi),
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),

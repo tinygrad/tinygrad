@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
-               bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None):
+               bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
@@ -30,17 +30,18 @@ class SimpleTokenizer:
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     contr, r_l, r_n = "(?i:'s|'t|'re|'ve|'m|'ll|'d)", f"[^\\r\\n{r_p_N}{r_p_L}]?", f"[{r_p_N}]" if preset == "tekken" else f"[{r_p_N}]{{1,3}}"
     r_p, r_w, r_t = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*", f"{contr}|{r_l}[{r_p_L}]+", f"[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
-    if preset in ("tekken", "gpt-4o"):
+    if preset in ("tekken", "gpt-4o", "kimi-k2"):
       r_up, r_lo = ucat_range(("Lu","Lt","Lm","Lo","M")), ucat_range(("Ll","Lm","Lo","M"))
-      sfx = f"{contr}?" if preset == "gpt-4o" else ""
-      r_p, r_w = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*", f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+      sfx = "" if preset == "tekken" else f"{contr}?"
+      r_w = f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+      if preset != "kimi-k2": r_p = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*"
     self._split_to_word = re.compile(f"{r_w}|{r_n}|{r_p}|{r_t}")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
-    self.preset = preset
+    self.preset, self.chat_template = preset, chat_template
     self.bos_id, self.eos_id, self.eot_id, self.eom_id = bos_id, eos_id, eot_id, eom_id
 
   @staticmethod
@@ -52,7 +53,21 @@ class SimpleTokenizer:
     return SimpleTokenizer(dict(normal_tokens), special_tokens_dict, kv["tokenizer.ggml.pre"],
       bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
       eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id', special_tokens_dict.get('<|im_end|>')),
-      eom_id=kv.get('tokenizer.ggml.eom_token_id'))
+      eom_id=kv.get('tokenizer.ggml.eom_token_id'), chat_template=kv.get('tokenizer.chat_template'))
+
+  @staticmethod
+  def from_hf(path:str|pathlib.Path, preset:str):
+    path = pathlib.Path(path)
+    cfg, tok = (json.loads((path / name).read_text()) for name in ("config.json", "tokenizer.json"))
+    tok_cfg = json.loads((path / "tokenizer_config.json").read_text()) if (path / "tokenizer_config.json").exists() else {}
+    added = {t["content"]: t["id"] for t in tok.get("added_tokens", [])}
+    vocab = tok["model"]["vocab"]
+    eos = cfg.get("eos_token_id", 0)
+    eos = eos if isinstance(eos, list) else [eos]
+    return SimpleTokenizer({t: i for t, i in vocab.items() if t not in added}, added, preset,
+      bos_id=vocab.get(tok_cfg.get("bos_token")), eos_id=eos[0],
+      eot_id=eos[1] if len(eos) > 1 else None, eom_id=eos[2] if len(eos) > 2 else None,
+      chat_template=template.read_text() if (template:=path / "chat_template.jinja").exists() else tok_cfg.get("chat_template"))
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -167,7 +182,7 @@ def main():
 
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
-  if not args.no_chat_template and (ct := kv.get('tokenizer.chat_template')) is not None:
+  if not args.no_chat_template and (ct := tok.chat_template) is not None:
     try:
       import jinja2
       env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})

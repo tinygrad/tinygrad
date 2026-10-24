@@ -2,15 +2,16 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
+from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4)
+                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _is_rdna4, _is_cdna, Q4_K, IQ3_S, ExpertWeights)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_wmma_architecture_selection(self):
     if not amd_custom_kernels_supported(device:=Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    self.assertEqual(_wmma_rdna4(device), Device[device].target[0] == 12)
+    self.assertEqual(_is_rdna4(device), Device[device].target[0] == 12)
 
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -221,6 +222,30 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(out.numpy(), 32)
         np.testing.assert_array_equal(state.numpy(), 1)
 
+  def _test_moe_decode(self, typ:int):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    rng = np.random.default_rng(5)
+    E, T, K, IN, OUT, size = 4, 1, 2, 256, 16, QUANT_SIZES[typ]
+    blocks = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
+    blocks[:, :2] = np.array([0.001], np.float16).view(np.uint8)
+    blocks[:, 2:4] = np.array([0.0001], np.float16).view(np.uint8)
+    decoded = ggml_data_to_tensor(Tensor(blocks.flatten()).contiguous().realize(), E*OUT*IN, typ).reshape(E, OUT, IN)
+    w = decoded.numpy()
+    act = rng.standard_normal((1, T, K, IN)).astype(np.float32)
+    sel = np.stack([rng.choice(E, K, replace=False) for _ in range(T)])[None].astype(np.int32)
+    ew = ExpertWeights(E, IN, OUT)
+    ew.weight = decoded.half()
+    ew.set_quantized()
+    self.assertEqual(ew.ggml_type, typ)
+    got = ew(Tensor(sel), Tensor(act)).numpy()[0]
+    for t in range(T):
+      for j in range(K):
+        ref = w[sel[0, t, j]] @ act[0, t, j]
+        np.testing.assert_allclose(got[t, j], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
+
+  def test_moe_decode(self): self._test_moe_decode(Q4_K)
+  def test_moe_decode_iq3_s(self): self._test_moe_decode(IQ3_S)
+
   def test_gated_delta_random_scan(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(42)
@@ -343,7 +368,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           np.testing.assert_allclose(run(q, kv, end).numpy(), expected, rtol=1e-3, atol=1e-3)
 
   def test_prefill_attention_random(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device) or _is_cdna(d): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(42)
     cases = ((2, 4, 2, 32, 64, 45, 64, False), (1, 3, 1, 64, 128, 83, 128, False),
              (1, 2, 1, 96, 256, 149, 192, False), (1, 4, 2, 17, 128, 128, 128, True), (1, 2, 1, 3, 64, 33, 64, True),
@@ -411,7 +436,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     np.testing.assert_allclose(flash_attention(q, cache, valid_kv_len).numpy(), 5500, rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_unaligned_start(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device): self.skipTest("RDNA3/4 or CDNA3/4 required")
+    if _is_cdna(d) and DEV.interface.startswith("MOCK"): self.skipTest("too slow on the CDNA emulator")
     rng = np.random.default_rng(42)
     start_pos = 1718
     q = Tensor.zeros(1, 8, 32, 128)
