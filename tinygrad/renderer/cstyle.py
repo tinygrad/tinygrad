@@ -70,7 +70,7 @@ base_rewrite = PatternMatcher([
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{ctx.fn_names[body]}("
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src[1].src if u.op is Ops.PARAM))});"),
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -288,25 +288,6 @@ class CStyleLanguage(Renderer):
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
 class ClangRenderer(CStyleLanguage):
-  def _call_declarations(self, uops:list[UOp]) -> list[str]:
-    self.fn_names = call_names(uops)
-    return [*(f"extern void {name}(" + ', '.join(self.param_type(p) for p in sorted((u for u in b.src[1].src if u.op is Ops.PARAM),
-                                                                               key=lambda p:p.arg.slot)) + ");"
-              for b,name in self.fn_names.items()),
-            *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
-
-  def render(self, uops:list[UOp]) -> str:
-    prefix = self._call_declarations(uops)
-    return self.render_kernel(*self._render(uops), uops, prefix)
-
-  def render_function(self, body:UOp) -> str:
-    uops = list(body.src)
-    prefix = self._call_declarations(uops)
-    _, lines, bufs = self._render(uops)
-    params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
-    return '\n'.join(self._render_defines(uops) + prefix + [
-      f"{self.kernel_typedef} {body.arg}({params}) {{\n" + '\n'.join(lines) + "\n}"])
-
   float4 = "(float4)"
   float4_style = ('{', '}')
   gep_arr_threshold = 0
@@ -350,6 +331,24 @@ class ClangRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
+
+  def _call_declarations(self, uops:list[UOp]) -> list[str]:
+    self.fn_names = call_names(uops)
+    return [*(f"extern void {name}(" + ', '.join(self.param_type(p) for p in b.arg.params) + ");"
+              for b,name in self.fn_names.items()),
+            *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
+
+  def render(self, uops:list[UOp]) -> str:
+    prefix = self._call_declarations(uops)
+    return self.render_kernel(*self._render(uops), uops, prefix)
+
+  def render_function(self, body:UOp) -> str:
+    uops = list(body.src)
+    prefix = self._call_declarations(uops)
+    _, lines, bufs = self._render(uops)
+    params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
+    return '\n'.join(self._render_defines(uops) + prefix + [
+      f"{self.kernel_typedef} {body.arg}({params}) {{\n" + '\n'.join(lines) + "\n}"])
 
 class OpenCLRenderer(CStyleLanguage):
   # language options

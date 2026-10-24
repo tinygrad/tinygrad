@@ -64,8 +64,6 @@ class Estimates:
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
-  def render_function(self, body:UOp) -> str: raise NotImplementedError
-
   target: Target
   suffix: str = ""
   # TODO: make this generic with a list of supported types
@@ -90,3 +88,5 @@ class Renderer:
   def supported_dtypes(self) -> set[DType]:
     # double can't be bitcast to anything without long support
     return set(dtypes.all) - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())
+
+  def render_function(self, body:UOp) -> str: raise NotImplementedError

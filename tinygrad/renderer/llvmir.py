@@ -153,8 +153,8 @@ base_rewrite = PatternMatcher([
   # calls
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
    f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
-   ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
+   ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.arg.params) + ")"),
 ])
 
 pm_widen_uidx = PatternMatcher([
@@ -233,27 +233,14 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-      f"  call void {ctx[body]}(" + ', '.join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}"
-        for p in body.src[1].src if p.op is Ops.PARAM) + f") ; {body.src[0].arg.name}"),
-  ]) + base_rewrite
+  string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str:
     return self._render_module(uops, args_struct=True)
-
-  def render_function(self, body:UOp) -> str:
-    return self._render_module(list(body.src), name=body.arg)
-
-  def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
-    name = next((u.arg.function_name for u in uops if u.op is Ops.SINK and u.arg is not None), name)
-    self.fn_names = {b:f"@{n}" for b,n in call_names(uops).items()}
-    k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct)
-    return "\n".join((*k[0], k[1], self._render_footer(uops)))
 
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
-    decls.update({name:f"declare void {name}({', '.join(ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in b.src[1].src if p.op is Ops.PARAM)})"
+    decls.update({name:f"declare void @{name}({', '.join(ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in b.arg.params)})"
                   for b,name in self.fn_names.items()})
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
@@ -267,6 +254,14 @@ class CPULLVMRenderer(LLVMRenderer):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if
             (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
+
+  def render_function(self, body:UOp) -> str:
+    return self._render_module(list(body.src), name=body.arg)
+
+  def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
+    self.fn_names = call_names(uops)
+    k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct)
+    return "\n".join((*k[0], k[1], self._render_footer(uops)))
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
