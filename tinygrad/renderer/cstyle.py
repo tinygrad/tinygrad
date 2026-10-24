@@ -6,7 +6,7 @@ from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str,
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
-from tinygrad.renderer import Renderer, call_bodies
+from tinygrad.renderer import Renderer, call_names
 
 base_rewrite = PatternMatcher([
   # local/reg buffers
@@ -288,24 +288,24 @@ class CStyleLanguage(Renderer):
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
 
 class ClangRenderer(CStyleLanguage):
-  def _call_declarations(self, uops:list[UOp]) -> list[str]:
-    self.fn_names = {b:f"__tinygrad_call_{i}" for i,b in enumerate(call_bodies(uops))}
+  def _call_declarations(self, uops:list[UOp], name:str) -> list[str]:
+    self.fn_names = call_names(uops, name)
     return [*(f"extern void {name}(" + ', '.join(self.param_type(p) for p in sorted((u for u in b.src if u.op is Ops.PARAM),
                                                                                key=lambda p:p.arg.slot)) + ");"
               for b,name in self.fn_names.items()),
             *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
 
   def render(self, uops:list[UOp]) -> str:
-    prefix = self._call_declarations(uops)
+    prefix = self._call_declarations(uops, uops[-1].arg.function_name)
     return self.render_kernel(*self._render(uops), uops, prefix)
 
   def render_function(self, body:UOp) -> str:
     uops = list(body.src)
-    prefix = self._call_declarations(uops)
+    prefix = self._call_declarations(uops, body.arg)
     _, lines, bufs = self._render(uops)
     params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
     return '\n'.join(self._render_defines(uops) + prefix + [
-      f"{self.kernel_typedef} __tinygrad_entry({params}) {{\n" + '\n'.join(lines) + "\n}"])
+      f"{self.kernel_typedef} {body.arg}({params}) {{\n" + '\n'.join(lines) + "\n}"])
 
   float4 = "(float4)"
   float4_style = ('{', '}')

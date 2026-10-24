@@ -25,7 +25,7 @@ class TestCallJIT(unittest.TestCase):
             programs.append(to_program(UOp.sink(*(c.sink().call(out, name=name) for c in calls), arg=KernelInfo(name)), renderer))
         self.assertEqual(programs[0].to_elf().name, programs[1].to_elf().name)
         self.assertEqual(programs[0].src[3].arg, programs[1].src[3].arg)
-        if backend == "CPU:CLANG": self.assertIn("extern void __tinygrad_call_", programs[0].src[2].arg)
+        if backend == "CPU:CLANG": self.assertIn(f"extern void {name}_1", programs[0].src[2].arg)
         for prg, expected in zip(programs, (7, 19)):
           result = (ctypes.c_int * 2)()
           get_runtime("CPU", prg)(ctypes.addressof(result))
@@ -42,7 +42,7 @@ class TestCallJIT(unittest.TestCase):
     lib = lib.replace(b"asm_fn_entry\x00", b"asm_fn_local\x00")
     runtime = Device["CPU"].runtime(TinyELF(lib, "asm_fn_entry", Device["CPU"].renderer.target, ()))
     symbols = elf_symbols(*elf_sections(lib))
-    self.assertEqual([symbols[i][0] for i in runtime.exports], ["asm_fn_local"])
+    self.assertEqual(list(runtime.exports), ["asm_fn_local"])
     self.assertEqual(sum(name == "asm_fn_local" for name,_ in symbols), 2)
     result = ctypes.c_int()
     ctypes.CFUNCTYPE(None, ctypes.c_void_p)(runtime.entry)(ctypes.addressof(result))

@@ -769,6 +769,31 @@ class TestCallInKernel(unittest.TestCase):
       self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
 
+  def test_compile_cache(self):
+    @uopfunc
+    def plus2(out:UOp, A:UOp): return out[0].store(A[0]+2).sink()
+
+    def kernel(A:UOp):
+      A = A.flatten()
+      i = UOp.range(A.shape[0], 0)
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      return A[i].store(tmp[i].after(plus2(tmp[i], A[i]))).end(i).sink(arg=KernelInfo(name="test_kernel", opts_to_apply=()))
+
+    x = Tensor.custom_kernel(Tensor.arange(4).clone().realize(), fxn=kernel)[0]
+    lin = x.schedule_linear()
+    prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
+    self.assertEqual(sum("plus2" in s for s in prg.src[2].arg.splitlines()), 2)  # declaration and call, no definition
+    elf = prg.to_elf()
+    run_linear(lin)
+    self.assertListEqual(x.tolist(), Tensor.arange(4).add(2).tolist())
+
+    x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=kernel)[0]
+    lin = x.schedule_linear()
+    prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
+    self.assertEqual(elf.libraries[0].lib, prg.to_elf().libraries[0].lib)
+    run_linear(lin)
+    self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER

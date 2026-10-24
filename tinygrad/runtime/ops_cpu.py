@@ -17,13 +17,17 @@ class CPUProgram(Program['CPUDevice']):
   entry:int
 
   def _load(self, lib, base=0):
+    symbols:dict[str, int] = {}
+    for dep in self.libraries:
+      for name,addr in dep.exports.items():
+        assert symbols.setdefault(name, addr) == addr, f"conflicting CALL definitions: {name}"
     return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()), exports=self.exports,
-                                                                 symbols={f"__tinygrad_call_{i}":lib.entry for i,lib in enumerate(self.libraries)})
+                                                                 symbols=symbols)
 
   def __init__(self, dev:CPUDevice, obj:TinyELF, libraries:tuple[CPUProgram, ...]|None=None):
     self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
     self.lvp = obj.target.renderer == "LVP"
-    self.exports:dict[int, int] = {}
+    self.exports:dict[str, int] = {}
     loaded_libraries:dict[int, CPUProgram] = {}
     self.libraries = tuple(dev.load_library(lib, loaded_libraries) for lib in obj.libraries) if libraries is None else libraries
     if dev.remote is not None:

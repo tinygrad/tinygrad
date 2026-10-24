@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UP
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
-from tinygrad.renderer import Renderer, Estimates, call_bodies
+from tinygrad.renderer import Renderer, Estimates, call_names
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -459,7 +459,8 @@ def do_compile(ctx:Renderer, prg:UOp, lin:UOp, source:UOp) -> UOp|None:
   lib = ctx.compiler.compile_cached(source.arg)
   if DEBUG >= 7: ctx.compiler.disassemble(lib)
   call_binaries:list[UOp] = []
-  for body in call_bodies(lin.src):
+  for body,name in call_names(lin.src, prg.src[0].arg.function_name).items():
+    body = body.replace(arg=name)
     key = ("function", *to_program_key(body, ctx))
     if (obj:=to_program_cache.get(key)) is None:
       to_program_cache[key] = obj = do_compile_function(ctx, body)

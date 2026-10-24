@@ -33,7 +33,7 @@ def elf_symbols(ecls:str, sections:list[ElfSection]) -> list[tuple[str, libc.Elf
   return [(_strtab(strings, sym.st_name), sym) for sym in _to_carray(symsec, getattr(libc, f"{ecls}_Sym"))]
 
 def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
-               exports:dict[int, int]|None=None, symbols:dict[str, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+               exports:dict[str, int]|None=None, symbols:dict[str, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
   ecls, sections = elf_sections(blob)
 
   rel = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
@@ -50,9 +50,9 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
       sh.header.sh_addr = len(image) - len(sh.content)
 
   if exports is not None:
-    for idx, (_, sym) in enumerate(symtab):
+    for name, sym in symtab:
       if 0 < sym.st_shndx < len(sections) and sym.st_info >> 4 == libc.STB_GLOBAL and sym.st_info & 15 == libc.STT_FUNC:
-        exports[idx] = sections[sym.st_shndx].header.sh_addr + sym.st_value
+        exports[name] = sections[sym.st_shndx].header.sh_addr + sym.st_value
 
   # Relocations
   relocs = []
@@ -68,9 +68,9 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
   return memoryview(image), sections, relocs
 
 def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
-               exports:dict[int, int]|None=None, symbols:dict[str, int]|None=None) -> bytes:
+               exports:dict[str, int]|None=None, symbols:dict[str, int]|None=None) -> bytes:
   image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports, symbols=symbols)
-  if exports is not None: exports.update({idx:base+offset for idx,offset in exports.items()})
+  if exports is not None: exports.update({name:base+offset for name,offset in exports.items()})
   image = bytearray(image_)
 
   def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int, addend: int):
