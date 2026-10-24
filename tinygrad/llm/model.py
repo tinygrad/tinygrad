@@ -128,6 +128,8 @@ def expert_slice_table(units:list[int], experts:int, slices:int) -> list[list[in
   w = max(len(t) for t in table)
   return [t + [-1]*(w-len(t)) for t in table]
 
+INLINE_ACT = getenv("INLINE_ACT", 1)  # a decoding activation computed in the kernel that quantizes it (not a kernel of its own)
+
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
   # TODO: remove the need for this contiguous (gate and up from the custom kernels: one kernel)
@@ -582,14 +584,17 @@ class FFNBlock:
       else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
       # (batched decoding: a row a selection of a slice, in half as the grouped experts' (their weighted sum in float))
-      x_down = self.ffn_down_exps(sel, act.contiguous(), dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices else dtypes.float32)
+      # (the activation computed by the kernel that quantizes it: custom kernel inputs are inlined)
+      x_down = self.ffn_down_exps(sel, act if INLINE_ACT else act.contiguous(),
+                                  dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices else dtypes.float32)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
     keep = partial and _partial_out[0]  # the partial sums are returned (sequence parallel)
     if shexp is not None:
       if partial and not keep: out = partial_sum(out)
     elif hasattr(self, 'ffn_gate_shexp'):
-      shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
+      shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit)
+      if not INLINE_ACT: shexp_act = shexp_act.contiguous()
       # a row parallel shared expert adds its partial sums to the ones of the experts: one allreduce for both
       shexp = self.ffn_down_shexp.partial(shexp_act) if partial else self.ffn_down_shexp(shexp_act)
       if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()

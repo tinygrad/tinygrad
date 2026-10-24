@@ -2464,8 +2464,9 @@ def hc_post_quant(out:Tensor, coef:Tensor, xs:Tensor, count:int) -> Tensor:
   q = Tensor.empty(rows, G, 8, dtype=dtypes.uint32, device=out.device)
   scale, sq = (Tensor.empty(rows, G, dtype=dtypes.float32, device=out.device) for _ in range(2))
   xsum = Tensor.empty(rows, G, 2, dtype=dtypes.float32, device=out.device)
-  outs = Tensor.custom_kernel(xs_new, q, scale, xsum, sq, out.reshape(rows, D).contiguous(), coef.reshape(rows, -1).contiguous(),
-                              xs.reshape(rows, count, D).contiguous(), fxn=functools.partial(_hc_post_quant_kernel, count=count))
+  # (the inputs as they are: a custom kernel's inputs are materialized only if they aren't buffers or elementwise ops of them)
+  outs = Tensor.custom_kernel(xs_new, q, scale, xsum, sq, out.reshape(rows, D), coef.reshape(rows, -1), xs.reshape(rows, count, D),
+                              fxn=functools.partial(_hc_post_quant_kernel, count=count))
   ret = outs[0].reshape(B, T, count, D)
   q8_quantize_known(ret.flatten(2), rows, count*int(D), True, (outs[1], outs[2], outs[3], outs[4]))
   return ret
