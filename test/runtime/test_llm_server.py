@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 import numpy as np
 from unittest.mock import patch
 from tinygrad import Tensor, UOp, Device
@@ -218,6 +219,26 @@ class TestTransformerGenerate(unittest.TestCase):
       gen = model.generate([1, 2, 3], temperature=0.6)
       next(gen)
     self.assertAlmostEqual(captured_temps[-1], 0.6, places=5)
+
+  def test_spec_accepts_drafts_until_mismatch(self):
+    # a spec step yields its accepted drafts and the token verified after them, the next step starts after them
+    model, calls = Transformer(replace(TEST_CONFIG, spec_drafts=2)), []
+    model._spec_carry = Tensor.zeros(1, 1, TEST_CONFIG.dim).contiguous().realize()
+    # verified tokens then drafts: both drafts accepted, the second rejected, the first rejected
+    steps = [[7, 8, 9, 7, 8], [10, 11, 12, 10, 5], [13, 14, 15, 6, 14]]
+    def spec_jit(mtp_pos, j, temperature):
+      calls.append((mtp_pos.unbind()[1], j.unbind()[1], temperature.item()))
+      model._spec_hn.assign(Tensor.arange(1, 4).float().reshape(1, 3, 1).expand(model._spec_hn.shape)).realize()
+      return Tensor([steps[len(calls)-1]])
+    model.spec_jit = spec_jit
+    with patch.object(Transformer, '__call__', return_value=Tensor([[6]])):
+      gen = model.generate([1, 2, 3], temperature=0.5)
+      self.assertEqual([next(gen) for _ in range(7)], [6, 7, 8, 9, 10, 11, 13])
+      gen.close()
+    self.assertEqual(calls, [(3, 0, 0.5), (4, 2, 0.5), (7, 1, 0.5)])
+    # the last token was verified at row 0 of its step: the next turn continues from that row's hidden state
+    self.assertEqual(model._cached_tokens, [1, 2, 3, 6, 7, 8, 9, 10, 11])
+    np.testing.assert_equal(model._spec_carry.numpy(), 1.0)
 
 if __name__ == '__main__':
   unittest.main()
