@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, nn
+from tinygrad import Tensor, UOp, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
   HyperConnection, HCConfig,
@@ -338,6 +338,22 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+
+  def test_spec_slots_match_decode(self):
+    # a spec step runs from slot src and leaves the state after each of its tokens in that token's slot
+    config = self._make_config(max_context=8)
+    block, x = self._make_block(config), self._tensor_linspace(-1, 1, (1, 4, config.dim))
+    outs, convs, recurrents = self._naive_attention(block, x)
+    x_norm = self._rms_norm_np(x.numpy(), block.attn_norm.weight.numpy(), block.attn_norm.eps)
+    pos, src = UOp.variable("start_pos", 0, 7), UOp.variable("spec_j", 0, 1)
+    block._init_state(Tensor(x_norm))
+    Tensor.realize(*block.spec_seed(2))
+    # the first step starts from the seeded state, the second after its draft was accepted
+    for start in (0, 2):
+      out = block._attention(Tensor(x_norm[:, start:start+2]), pos.bind(start), src=src.bind(1)).numpy()
+      np.testing.assert_allclose(out, np.concatenate(outs[start:start+2], axis=1), rtol=1e-3, atol=1e-3)
+      for slots, expected in ((block.conv_slots.numpy(), convs), (block.state_slots.numpy(), recurrents)):
+        for t in range(2): np.testing.assert_allclose(slots[t], expected[start+t], rtol=1e-3, atol=1e-3)
 
   def test_start_zero_resets_realized_state(self):
     config = self._make_config(max_context=3)
