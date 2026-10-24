@@ -896,11 +896,10 @@ class TestSchedule(unittest.TestCase):
     check_schedule(self._copy_call(out, y.reshape(8, 8).reshape(64)), 1)
 
   def test_custom_kernel_elementwise_src(self):
-    # a computed input is not a buffer state: the call args are unwrapped to their base buffer,
-    # so the compute would be silently dropped. this must raise instead of producing wrong results
+    # a computed input that is elementwise ops of buffers is computed by the custom kernel's loads (schedule/custom_inline): one kernel
     y = Tensor.ones(64).contiguous().realize()
     out = Tensor.empty_like(y)
-    check_schedule(self._copy_call(out, y + y), 2)
+    check_schedule(self._copy_call(out, y + y), 1)
 
   def test_custom_kernel_lazy_const_src(self):
     # a lazy const expression above the call has no buffer at all. this used to crash rangeify with a KeyError
@@ -915,10 +914,11 @@ class TestSchedule(unittest.TestCase):
     check_schedule(self._copy_call(out, y[16:80]), 2)
 
   def test_custom_kernel_computed_src_api(self):
-    # the supported way to pass computed inputs: Tensor.custom_kernel makes inputs contiguous (one realize kernel)
+    # computed inputs of Tensor.custom_kernel: elementwise ones are computed in the custom kernel, others get a realize kernel (a reduce here)
     y = Tensor.ones(64).contiguous().realize()
     out = Tensor.empty_like(y)
-    check_schedule(Tensor.custom_kernel(out, y + y, fxn=self._copy_fxn())[0], 2)
+    check_schedule(Tensor.custom_kernel(out, y + y, fxn=self._copy_fxn())[0], 1)
+    check_schedule(Tensor.custom_kernel(Tensor.empty(8), y.reshape(8, 8).sum(1), fxn=self._copy_fxn())[0], 2)
 
   def test_custom_kernel_on_custom_kernel(self):
     # the output of a custom kernel is a buffer state, chaining custom kernels must not add kernels

@@ -8,6 +8,7 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.uop.symbolic import loads_as_variables
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
+from tinygrad.schedule.custom_inline import pm_inline_custom_srcs
 
 def forward_call_outputs(sink:UOp) -> UOp:
   placed:dict[UOp, UOp] = {}
@@ -323,5 +324,6 @@ def prepare_rangeify(sink:UOp) -> UOp:
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
   tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
+  tsink = graph_rewrite(tsink, pm_inline_custom_srcs, name="inline custom kernel inputs")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
