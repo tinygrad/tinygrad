@@ -424,19 +424,15 @@ def lower_call(ctx:LowerCallsCtx, call:UOp) -> UOp:
       name = f"{to_function_name(call.arg.name)}_{i}"
     ctx.names[identity] = name
   name = ctx.names[identity]
-  key = (*to_program_key(call.body, ctx.renderer), name)
-  if (prg:=to_program_cache.get(key)) is None:
-    body = graph_rewrite(call.body, pm_lower_calls, ctx=LowerCallsCtx(ctx.renderer, name), name="lower calls", walk=True)
-    if body.op is Ops.SINK:
-      sink = full_rewrite_to_sink(body, ctx.renderer, optimize=False)
-      body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)))
-    else: sink = UOp.sink(*body.src)
-    prg = do_to_program(UOp(Ops.PROGRAM, src=(sink.replace(arg=KernelInfo(name)), body.replace(arg=name))), ctx.renderer)
-    to_program_cache[key] = prg
+  info = KernelInfo(name, optimized=True, is_function=True)
+  body = call.body.replace(src=(call.body.src[0].replace(arg=info), *call.body.src[1:])) if call.body.op is Ops.PROGRAM else \
+    call.body.replace(arg=info)
+  prg = to_program(body, ctx.renderer)
   return call.replace(src=(prg,)+call.src[1:])
 
 pm_lower_calls = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR)),), allow_any_len=True, name="call"), lower_call),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))),), allow_any_len=True, name="call"), lower_call),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
@@ -468,7 +464,7 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp|None:
   return prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
-  src = ctx.render_function(lin) if lin.arg is not None else ctx.render(list(lin.src))
+  src = ctx.render_function(lin.replace(arg=prg.src[0].arg.function_name)) if prg.src[0].arg.is_function else ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
 def do_compile(ctx:Renderer, prg:UOp, lin:UOp, source:UOp) -> UOp|None:
@@ -499,11 +495,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
+  if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  info = ast.src[0].arg if ast.op is Ops.PROGRAM else ast.arg
+  ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer, info.function_name), name="lower calls", walk=True)
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
-    if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-    ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer, ast.arg.function_name), name="lower calls", walk=True)
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.arg is None or not ast.arg.optimized)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection

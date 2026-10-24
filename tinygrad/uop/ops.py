@@ -1327,6 +1327,7 @@ class KernelInfo:
   estimates: Estimates|None = None
   beam: int = 0
   optimized: bool = False       # the AST has been through the optimizer, skip re-optimization
+  is_function: bool = False     # direct function arguments rather than the kernel entry ABI
   @property
   def function_name(self): return to_function_name(self.name)
 
