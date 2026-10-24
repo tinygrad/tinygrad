@@ -3,7 +3,7 @@ import enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Callable, TypeVar
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_parse, gguf_shard
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up
@@ -35,14 +35,22 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return (freqs.cos() * concentration).cat(freqs.sin() * concentration, dim=-1).clone(device)
 
+def e4m3fn_to_fnuz(weight:Tensor, scale:Tensor) -> tuple[Tensor, Tensor]:
+  bits = weight.bitcast(dtypes.uint8)
+  return bits.eq(0x80).where(0, bits).contiguous().bitcast(dtypes.fp8e4m3fnuz), scale * 2
+
 class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
+  weight_scale_inv:Tensor|None = None
+  weight_block_size:tuple[int, int] = (128, 128)
   def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
     if bias: self.bias = Tensor.zeros(num_experts, out_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
-    ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    if self.weight_scale_inv is not None:
+      ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
+    else: ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
