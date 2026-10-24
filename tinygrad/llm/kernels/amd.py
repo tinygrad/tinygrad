@@ -2522,13 +2522,36 @@ def _mla_bmm_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
   acc = acc.after(acc[0].store(functools.reduce(lambda a, b: a + b, prods, acc.after(i)[0].load())).end(i))
   return out[h, t, o].store(acc[0].load()).end(e, tl).sink(arg=KernelInfo(name="mla_bmm", opts_to_apply=()))
 
+@functools.cache
+def _mla_bmm_wave_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
+  # out[h, t, o] = sum over i of x[h, t, i] * w[h, o, i] (half products summed in float): a wave a row (h, o) of w, a lane 8 inputs of it
+  # a load (coalesced), the dots of all the tokens summed over the lanes
+  H, T, I = cast(tuple[int, int, int], x.shape)
+  O = cast(int, w.shape[1])
+  W = 4  # waves a workgroup
+  per = I // (WARP_SIZE * 8)
+  blk, wave, lane = UOp.range(H*O // W, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  row = blk * W + wave
+  h, o = row // O, row % O
+  wv = [_amd_load(w[h, o, (p*WARP_SIZE + lane)*8], 8) for p in range(per)]
+  sums = []
+  for t in range(T):
+    xv = [_amd_load(x[h, t, (p*WARP_SIZE + lane)*8], 8) for p in range(per)]
+    acc = functools.reduce(lambda a, b: a + b, [(xv[p][j] * wv[p][j]).cast(dtypes.float) for p in range(per) for j in range(8)])
+    sums.append(warp_reduce(acc, full_wave=True))
+  stores = [out[h, t, o.valid(lane.eq(0))].store(sums[t]) for t in range(T)]
+  return UOp.group(*stores).end(blk, wave, lane).sink(arg=KernelInfo(name="mla_bmm", opts_to_apply=()))
+
 def mla_bmm(x:Tensor, w:Tensor) -> Tensor:
   """(B=1, H, T, I) @ (H, O, I)^T in half products summed in float, (1, H, T, O): x.half().matmul(w.transpose(-1, -2), dtype=float)'s values"""
   B, H, T, I = x.shape
   O = w.shape[1]
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   out = Tensor.empty(int(H), int(T), int(O), dtype=dtypes.float32, device=x.device, axis=None if axis is None else 0)
-  return Tensor.custom_kernel(out, x.reshape(H, T, I).contiguous(), w, fxn=_mla_bmm_kernel)[0].reshape(B, H, T, O)
+  wave = getenv("MLA_BMM_WAVE", 1) and int(I) % (WARP_SIZE*8) == 0 and (int(H)*int(O)) % 4 == 0 and int(T) <= 8 and w.dtype == dtypes.half
+  fxn = _mla_bmm_wave_kernel if wave else _mla_bmm_kernel
+  xin = x.reshape(H, T, I).cast(dtypes.half) if wave else x.reshape(H, T, I).contiguous()
+  return Tensor.custom_kernel(out, xin, w, fxn=fxn)[0].reshape(B, H, T, O)
 
 # ******** tiny dense fp16 gemv ********
 
