@@ -1479,6 +1479,26 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
   size = S[axis] // n
   def part(j:int, i:int) -> UOp:
     return local.mselect(j).reshape(S).shrink(tuple((0, s) if a != axis else (i*size, (i+1)*size) for a, s in enumerate(S)))
+  if getenv("RS_Q8", 1) and getenv("RS_RING", 1) and len(S) == 3 and S[0] == 1 and axis == 1 and S[2] % 256 == 0:
+    # around the ring as below, the sums sent as int8 groups of 32 with their scale (q8_pack, a bit over half the bytes): a step adds its
+    # part to what it got and quantizes the sum, the device of the rows adds its own (exact) to the sum of the others
+    T, D = S[1], S[2]
+    pieces = getenv("RS_SPLIT", 2) if size % (getenv("RS_SPLIT", 2) * 16) == 0 else 1
+    rows = size // pieces
+    xs = [Tensor(local.mselect(j)).reshape(T, D) for j in range(n)]
+    outs_q:list[list[UOp]] = []
+    for pc in range(pieces):
+      gq:dict[tuple[int, int], Tensor] = {}
+      for k in range(1, n):
+        for j in range(n):
+          t = (j - k) % n
+          pk = Tensor.empty(rows, D//32, 9, dtype=dtypes.uint32, device=devs[j])
+          pk = Tensor.custom_kernel(pk, xs[j], *([gq[(t, j)]] if k > 1 else []), fxn=functools.partial(_q8_pack_kernel, row0=t*size + pc*rows))[0]
+          gq[(t, (j+1) % n)] = pk.to(devs[(j+1) % n])
+      outs_q.append([Tensor.custom_kernel(Tensor.empty(rows, D, dtype=dtypes.float32, device=devs[t]), xs[t], gq[(t, t)],
+                                          fxn=functools.partial(_q8_sum_kernel, row0=t*size + pc*rows))[0].uop for t in range(n)])
+    whole = [functools.reduce(lambda a, b: a.cat(b, dim=0), [Tensor(o[t]) for o in outs_q]) if pieces > 1 else Tensor(outs_q[0][t]) for t in range(n)]
+    return Tensor(UOp.mstack(*[w.reshape(1, size, D).contiguous().uop for w in whole]).unshard(axis))
   if getenv("RS_RING", 1):
     # around the ring: in step k device j adds its part of the sum of device t=j-k to what it got (the sum of the parts of t+1..j-1) and
     # sends it to j+1 (the links between neighbours are the fast ones). device t adds its own last. the parts in pieces (RS_SPLIT), a ring
@@ -1503,13 +1523,21 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
            for i in range(n)]
   return Tensor(UOp.mstack(*[x.contiguous() for x in parts]).unshard(axis))
 
+def _q8_unpacked(pk:UOp, token:UOp, group:UOp, sub:UOp) -> list[UOp]:
+  # a lane's eight values of a packed group (q8_pack)
+  d = pk[token, group, 8].load().bitcast(dtypes.float32)
+  words = [pk[token, group, sub*2 + w].load() for w in range(2)]
+  return [(words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d for i in range(8)]
+
 @functools.cache
-def _q8_pack_kernel(out:UOp, x:UOp) -> UOp:
-  # a row's groups of 32 as q8_quantize's int8 words (rounded the same), the float scale the ninth word: a lane eight neighboring inputs
+def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
+  # a row's groups of 32 as q8_quantize's int8 words (rounded the same), the float scale the ninth word: a lane eight neighboring inputs.
+  # x from row row0 (plus the packed add)
   T, G = cast(tuple[int, int, int], out.shape)[:2]
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
-  values = [x.reshape(T, G*32)[token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  values = [x.reshape(-1, G*32)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  if add: values = [a + b for a, b in zip(_q8_unpacked(add[0], token, group, sub), values)]
   mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
   for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
   d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
@@ -1531,6 +1559,19 @@ def _q8_unpack_kernel(out:UOp, packed:UOp) -> UOp:
   vals = [((words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d).cast(dtypes.half) for i in range(8)]
   stores = [out[token, group*32 + sub*8 + i].store(vals[i]) for i in range(8)]
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_unpack", opts_to_apply=()))
+
+@functools.cache
+def _q8_sum_kernel(out:UOp, mine:UOp, *packed:UOp, row0:int=0) -> UOp:
+  # the packed groups (q8_pack) of the others plus mine (from row row0), in float: a lane eight inputs
+  T, D = cast(tuple[int, int], out.shape)
+  G = D // 32
+  tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
+  acc = [UOp.const(0, dtypes.float)]*8
+  for pk in packed: acc = [a + b for a, b in zip(acc, _q8_unpacked(pk, token, group, sub))]
+  acc = [acc[i] + mine.reshape(-1, D)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  stores = [out[token, group*32 + sub*8 + i].store(acc[i].cast(out.dtype)) for i in range(8)]
+  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_sum", opts_to_apply=()))
 
 def all_gather_q8(x:Tensor, axis:int) -> Tensor:
   """
