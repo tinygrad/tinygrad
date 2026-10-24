@@ -28,7 +28,7 @@ def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp
 @functools.cache
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   if getenv("DISABLE_AMD_KERNELS"): return False
-  # Wave32 and WMMA kernels support RDNA3/4 and CDNA3/4 (on CDNA a 32-lane kernel runs in half a wave64, ds_swizzle stays within 32 lanes).
+  # Wave32 and WMMA kernels support RDNA3/4 and CDNA3/4 (CDNA packs the 32-lane groups into wave64s, ds_swizzle stays within 32 lanes).
   if isinstance(device, tuple): device = device[0]
   if device is None or device.split(":")[0] != "AMD": return False
   # @function contexts set ALLOW_DEVICE_USAGE=0 (scheduling must not open devices); the device is always open here
@@ -36,12 +36,12 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
     return (t:=getattr(Device[device], "target", None)) is not None and t[0] in (11, 12, 9) and isinstance(Device[device].renderer, HIPRenderer)
 
 @functools.cache
-def _gfx_major(device:str|tuple[str, ...]|None) -> int:
+def _gfx_version(device:str|tuple[str, ...]|None) -> tuple[int, ...]:
   if isinstance(device, tuple): device = device[0]
-  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[unwrap(device)], "target")[0]
+  with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[unwrap(device)], "target")
 
-def _wmma_rdna4(device:str|tuple[str, ...]|None) -> bool: return _gfx_major(device) == 12
-def _cdna(device:str|tuple[str, ...]|None) -> bool: return _gfx_major(device) == 9
+def _is_rdna4(device:str|tuple[str, ...]|None) -> bool: return _gfx_version(device)[0] == 12
+def _is_cdna(device:str|tuple[str, ...]|None) -> bool: return _gfx_version(device)[0] == 9
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
@@ -384,7 +384,7 @@ def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   xq, xd, xs = q8_quantize(x.contiguous(), B*T*x_slots, in_features)
   out = Tensor.empty(B*T*slots, global_out, splits*((in_features+1023)//1024), dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
   fxn = functools.partial(_moe_decode_kernel, out_features=local_out, in_features=in_features, ggml_type=ggml_type, x_share=slots//x_slots,
-                          cdna=_cdna(x.device))
+                          cdna=_is_cdna(x.device))
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   result = Tensor.custom_kernel(out, layer.packed, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
   return result.reshape(B, T, slots, global_out)
@@ -534,14 +534,14 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
-  cdna = _cdna(x.device)
+  cdna = _is_cdna(x.device)
   if tokens % 16 == 0 and local_out % 16 == 0:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
-    fxn = functools.partial(fxn, kgroups=4 if cdna else 2 if _wmma_rdna4(x.device) else 1, lanes=64 if cdna else 32)
+    fxn = functools.partial(fxn, kgroups=4 if cdna else 2 if _is_rdna4(x.device) else 1, lanes=64 if cdna else 32)
     srcs = (x.cast(dtypes.float16).contiguous(), *extra)
   else:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type, cdna=cdna)
@@ -824,7 +824,7 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
   supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode else
     D >= 64 and 2*(2*BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
-  if not decode and _cdna(q.device): supported = False  # the prefill kernel is RDNA WMMA only
+  if not decode and _is_cdna(q.device): supported = False  # the prefill kernel is RDNA WMMA only
   if not supported:
     k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
     mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
@@ -837,7 +837,7 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     q, q_start = q.pad_to((*q.shape[:2], T_pad, q.shape[3])), valid_end - T_real
   B, H, T, D = q.shape
   out = Tensor.empty(B, H, T, D, dtype="float32", device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
-  fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_wmma_rdna4(q.device))
+  fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_is_rdna4(q.device))
   if isinstance(valid_end, UOp): assigned_kv = Tensor(assigned_kv.uop.after(valid_end))
   out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)
   return out if q_start is None else out[:, :, :T_real]
