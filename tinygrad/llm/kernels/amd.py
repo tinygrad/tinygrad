@@ -1093,10 +1093,19 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
   for gi in range(GS):
     base = (((output_block * 128 + tid).minimum(N - 1)) * groups + g + gi) * 17
     scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
-    for w in range(16):
-      word = raw[base + 1 + w].load().cast(dtypes.uint32)
-      for b in range(2):
-        st.append(lds_w[tid, gi * 32 + w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
+    if getenv("Q8_FAST_CVT", 1):
+      # the bytes to halves without floats (as F16_FAST_CVT): with the sign bit flipped a byte is the mantissa of the half 1024+u, minus 1152 the
+      # signed byte (exact), times the scale rounds once: the same halves
+      for w in range(8):
+        u = (raw[base + 1 + 2*w].load().cast(dtypes.uint32) | (raw[base + 2 + 2*w].load().cast(dtypes.uint32) << 16)) ^ 0x80808080
+        pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), u, UOp.const(sel, dtypes.uint32)) for sel in (0x04010400, 0x04030402)]
+        halves = [((p >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p in pairs for sh in (0, 16)]
+        st += [lds_w[tid, gi * 32 + w * 4 + i].store((h - 1152) * scale) for i, h in enumerate(halves)]
+    else:
+      for w in range(16):
+        word = raw[base + 1 + w].load().cast(dtypes.uint32)
+        for b in range(2):
+          st.append(lds_w[tid, gi * 32 + w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
   staged = UOp.group(*st).barrier()
   lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
   ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8))
