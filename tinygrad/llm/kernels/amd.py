@@ -1503,6 +1503,48 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
            for i in range(n)]
   return Tensor(UOp.mstack(*[x.contiguous() for x in parts]).unshard(axis))
 
+@functools.cache
+def _q8_pack_kernel(out:UOp, x:UOp) -> UOp:
+  # a row's groups of 32 as q8_quantize's int8 words (rounded the same), the float scale the ninth word: a lane eight neighboring inputs
+  T, G = cast(tuple[int, int, int], out.shape)[:2]
+  tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
+  values = [x.reshape(T, G*32)[token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
+  for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
+  d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
+  words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
+  stores = [out[token, group, sub*2 + w].store(words[w]) for w in range(2)]
+  stores.append(out[token, group, (sub*0+8).valid(sub.eq(0))].store(d.bitcast(dtypes.uint32)))
+  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_pack", opts_to_apply=()))
+
+@functools.cache
+def _q8_unpack_kernel(out:UOp, packed:UOp) -> UOp:
+  # the halves of the packed groups: a lane eight inputs (two words), times the group's scale
+  T, D = cast(tuple[int, int], out.shape)
+  G = D // 32
+  tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
+  d = packed[token, group, 8].load().bitcast(dtypes.float32)
+  words = [packed[token, group, sub*2 + w].load() for w in range(2)]
+  vals = [((words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d).cast(dtypes.half) for i in range(8)]
+  stores = [out[token, group*32 + sub*8 + i].store(vals[i]) for i in range(8)]
+  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_unpack", opts_to_apply=()))
+
+def all_gather_q8(x:Tensor, axis:int) -> Tensor:
+  """
+  all_gather of x (1, T, D) split on its rows (axis 1) in half, sent as int8 groups of 32 with their scale (as q8_quantize: the activations
+  the quantized layers' kernels would make), a bit over half the bytes. every device's own rows are quantized too (the same values everywhere)
+  """
+  assert axis == 1 and x.ndim == 3 and x.shape[0] == 1
+  devs, (T, D) = cast(tuple[str, ...], x.device), cast(tuple[int, int], x.shape[1:])
+  packed = Tensor.empty(T, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0)
+  packed = Tensor.custom_kernel(packed, x.reshape(T, D), fxn=_q8_pack_kernel)[0]
+  whole = all_gather(packed, 0)
+  out = Tensor.empty(T, D, dtype=dtypes.half, device=devs)
+  return Tensor.custom_kernel(out, whole, fxn=_q8_unpack_kernel)[0].reshape(1, T, D)
+
 def _ring(mine:list[UOp], devs:tuple[str, ...]) -> dict[tuple[int, int], UOp]:
   """
   part i (on device i) on every other device j, around the ring: in step k device j sends the part it got in step k-1 to device j+1 (the

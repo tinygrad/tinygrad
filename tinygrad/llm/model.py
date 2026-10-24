@@ -9,8 +9,8 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, indexer_decode_index_rows, Q8_ROWS_I8, \
-  MOE_TILE, grouped_rows, \
+  all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
+  indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, \
   mla_bmm
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
@@ -661,7 +661,8 @@ class FFNBlock:
   def _phase_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     @function(precompile=True, allow_implicit=True)
     def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
-      x = all_gather(hn, 1, dtypes.half)
+      # (AG_Q8: sent as int8 groups of 32, as the quantized layers would make them)
+      x = all_gather_q8(hn, 1) if getenv("AG_Q8", 1) and hn.shape[-1] % 256 == 0 else all_gather(hn, 1, dtypes.half)
       _partial_out[0], _sp_rows[0] = True, hn
       # (in half: the layers' kernels read it so, a cast to float and back is two copies)
       xin = x if getenv("SUB_HALF_IN", 1) else x.float()
