@@ -1,12 +1,44 @@
 from __future__ import annotations
 import time, functools, tinygrad.runtime.autogen.nv_regs
-from tinygrad.helpers import getenv, DEBUG, getbits, round_up
+from typing import cast
+from tinygrad.helpers import getenv, DEBUG, getbits, round_up, ceildiv
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace, MMIOInterface
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, VirtMapping, AddrSpace, MMIOInterface
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
-from tinygrad.runtime.support.system import PCIDevice
+from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System
+from tinygrad.runtime.support.usb import SLOT
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
+
+class NVUSBPCIDevice(USBPCIDevice):
+  def __init__(self, dev, pcibus):
+    super().__init__("NV", dev, pcibus, gpu_bus=2)
+    if (pci_id:=self.read_config(pci.PCI_VENDOR_ID, 4)) != 0x220410DE: raise RuntimeError(f"Expected RTX 3090, found PCI ID {pci_id:#010x}")
+
+  def reset(self) -> None:
+    self.usb.set_pcie_power(False)
+    self.usb.set_pcie_power(True)
+    self._bar_info = System.pci_setup_usb_bars(self.usb, self.gpu_bus, mem_base=0x10000000, pref_mem_base=(32 << 30))
+
+  def stream_gsp_boot(self, flcn:NV_FLCN, base:int) -> None:
+    image = flcn.nvdev.gsp.gsp_image
+    ring_start, slots, total = flcn.nvdev.gsp.boot_layout[0], flcn.nvdev.gsp.boot_layout[1] // SLOT, ceildiv(len(image), SLOT)
+    sent, armed = 0, 0
+
+    while armed < min(slots, total): self.usb.usb.control_write(0xF2, SLOT//512, (ring_start//SLOT + ((armed:=armed+1)-1) % slots) | (1<<8))
+    flcn.start_cpu(base)
+    while sent < total:
+      while sent < (armed if armed == total else armed - 1): # retain one active slot gate
+        self.usb.usb.bulk_write(image[sent*SLOT:(sent:=sent+1)*SLOT].ljust(SLOT, b'\x00'))
+      if sent == total: break
+      while True:
+        self.usb._f0_out(0x05, 0x0F, self.gpu_bus << 24, 0) # a config read stalls when the GPU reaches the gate
+        if not self.usb.read(0xB296, 1)[0] & 3: break
+        self.usb._f0_in()
+      # Recycle preceding slots before releasing the gate.
+      while armed < min(total, slots + sent): self.usb.usb.control_write(0xF2, SLOT//512, (ring_start//SLOT + ((armed:=armed+1)-1) % slots) | (1<<8))
+      self.usb.usb.bulk_write(image[sent*SLOT:(sent:=sent+1)*SLOT].ljust(SLOT, b'\x00'))
+      self.usb._f0_in()
 
 class NVReg:
   def __init__(self, nvdev, base, off, fields=None): self.nvdev, self.base, self.off, self.fields = nvdev, base, off, fields
@@ -68,13 +100,37 @@ class NVPageTableEntry:
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 44), base=0x1000000000)
 
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.cpu_visible_pa_allocator = None
+    if self.dev.is_usb:
+      pa_base, cpu_visible_limit = self.pa_allocator.base, self.dev.pci_dev.bar_info(1)[1]
+      self.cpu_visible_pa_allocator = TLSFAllocator(cpu_visible_limit - pa_base, base=pa_base)
+      self.pa_allocator = TLSFAllocator(self.vram_size - cpu_visible_limit, base=cpu_visible_limit)
+
+  def palloc_cpu_visible(self, size:int, zero=True) -> int:
+    paddr = cast(TLSFAllocator, self.cpu_visible_pa_allocator).alloc(round_up(size, 0x1000), 0x1000)
+    if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
+    return paddr
+
+  def valloc_cpu_visible(self, size:int, uncached=False, zero=True) -> VirtMapping:
+    palloc = self.palloc_cpu_visible if self.cpu_visible_pa_allocator is not None else self.palloc
+    va = self.alloc_vaddr(size:=round_up(size, 0x1000))
+    paddr = palloc(size, zero=zero)
+    return self.map_range(va, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
+
+  def pfree(self, paddr:int, ptable=False):
+    cpu_visible = self.cpu_visible_pa_allocator
+    if cpu_visible is not None and cpu_visible.base <= paddr < cpu_visible.base + cpu_visible.size: cpu_visible.free(paddr)
+    else: super().pfree(paddr, ptable)
+
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev:
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
-
-    self.smi_dev, self.is_booting, self.is_err_state = False, True, False
+    self.is_usb = isinstance(pci_dev, NVUSBPCIDevice)
+    self.smi_dev, self.is_booting, self.is_err_state, self.finalized = False, True, False, False
     self._early_ip_init()
     self._early_mmu_init()
 
@@ -85,7 +141,9 @@ class NVDev:
     for ip in [self.flcn, self.gsp]: ip.init_hw()
 
   def fini(self):
+    if self.finalized: return
     for ip in [self.gsp, self.flcn]: ip.fini_hw()
+    self.finalized = True
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
   def wreg(self, addr:int, value:int):
@@ -144,11 +202,11 @@ class NVDev:
 
   def _alloc_boot_mem(self, size:int, data:bytes|None=None, contiguous:bool=False, sysmem:bool|None=None) -> tuple[MMIOInterface,int|None,list[int]]:
     sz = round_up(size, 0x1000)
-    if sysmem is True or (sysmem is None and not self.large_bar):
+    if sysmem is True or (sysmem is None and not self.large_bar and not self.is_usb):
       view, sysaddr = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
       paddr = None
     else:
-      paddr = self.mm.palloc(sz, boot=False)
+      paddr = self.mm.palloc_cpu_visible(sz) if self.is_usb else self.mm.palloc(sz, boot=False)
       view = self.vram.view(paddr, sz)
       sysaddr = [self.pci_dev.bar_info(1)[0] + paddr + i * 0x1000 for i in range(sz // 0x1000)]
     if data is not None: view[:size] = data
