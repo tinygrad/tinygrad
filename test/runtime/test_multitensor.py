@@ -716,6 +716,13 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual((u.device, u.shape, u.buffer), (buf.device, (2,), buf))
     self.assertEqual(Tensor(u.unshard(0)).to(Device.DEFAULT).tolist(), [0, 1, 1, 2])
 
+  def test_mstack_of_buffers_read_elsewhere(self):
+    # the buffers of a stack also read by another kernel: the stack still takes them whole
+    bs = [Tensor([[i, i+1], [i+2, i+3]], dtype=dtypes.float32, device=d).realize() for i,d in enumerate((d0, d1))]
+    stack, doubled = Tensor(UOp.mstack(*[b.uop for b in bs])), Tensor(UOp.mstack(*[(b*2).contiguous().uop for b in bs]))
+    out = (stack + doubled).contiguous().realize()
+    for i,b in enumerate(bs): np.testing.assert_equal(Tensor(out.uop.mselect(i)).numpy(), b.numpy()*3)
+
   def test_broadcast_symbolic(self):
     data = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     x = Tensor(data)[:, :Variable('rows', 1, 3).bind(2)].contiguous().realize()

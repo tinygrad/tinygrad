@@ -138,6 +138,14 @@ pm_apply_rangeify = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
 ])
 
+def mstack_reshape_after(m:UOp) -> UOp|None:
+  if not all_same([x.src[0].shape for x in m.src]): return None
+  return m.replace(src=tuple(x.src[0] for x in m.src)).reshape(m.shape)
+
+# an MSTACK takes its srcs whole: RESHAPEs of them move after it. a RESHAPE shared with a consumer that indexes it would get that consumer's
+# ranges, and be replaced by its INDEX in the MSTACK too
+pm_mstack_reshape = PatternMatcher([(UPat(Ops.MSTACK, src=UPat(Ops.RESHAPE), name="m"), mstack_reshape_after)])
+
 pm_fix_deviceless = PatternMatcher([
   (UPat(Ops.STAGE, name="b"),
     lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.device is None else None),
@@ -181,6 +189,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
 def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   if debug: print("**************************")
   rctx = IndexingContext()
+  tsink = graph_rewrite(tsink, pm_mstack_reshape, name="reshapes after mstack")
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx, name="get realize")
