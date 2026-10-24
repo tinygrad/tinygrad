@@ -56,7 +56,7 @@ def jit_model(model, *args) -> Tuple[UOp, List[Buffer]]:
   # run twice to trigger JIT capture
   for _ in range(2): the_output = run(*args)
   assert run.captured is not None
-  return run.captured.linear, [o.uop.base.realized for o in the_output]
+  return run.captured._linears[()][0], [o.uop.base.realized for o in the_output]
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]],
   bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name="model", symbolic_vars={}, wasm=False) -> str:

@@ -5,23 +5,23 @@ from tinygrad.uop.ops import PatternMatcher, UPat
 
 class TestPatternMatcher(unittest.TestCase):
   def test_simple_match(self):
-    matcher = PatternMatcher([(UPat(Ops.CONST, name="x", dtype=dtypes.weakfloat), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(Ops.CONST, name="x", dtype=dtypes.weakfloat), lambda x: x.sink())])
     c1 = UOp.const(1.0)
     c2 = UOp.const(1)
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_upat_any(self):
     def test(a, x=None, y=None, z=None):
       #print(x,y,z)
-      if y is not None: return (a+y).rtag()
+      if y is not None: return (a+y).sink()
     matcher = PatternMatcher([
       (UPat.var("a")+UPat.any(UPat.var("x"), UPat.var("y"), UPat.var("z")), test),
     ])
     v1 = UOp.variable("a", 0, 10)
     v2 = UOp.variable("b", 0, 10)
     c1 = v1+v2
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
 
   def test_minimum_len(self):
     matcher = PatternMatcher([
@@ -60,43 +60,43 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(len(ctx), 1)
 
   def test_uop(self):
-    matcher = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: x.sink())])
     c1 = UOp.const(1.0)
     c2 = UOp(Ops.ADD, src=(c1, c1))
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_uop_set(self):
-    matcher = PatternMatcher([(UPat((Ops.CONST, Ops.CAST), name="x"), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat((Ops.CONST, Ops.CAST), name="x"), lambda x: x.sink())])
     c1 = UOp.const(False)
     c2 = UOp(Ops.CAST, arg=dtypes.int, src=(c1,))
     c3 = UOp.const(1.0)
     c4 = UOp(Ops.ADD, src=(c3, c3))
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
-    self.assertEqual(matcher.rewrite(c2), c2.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
+    self.assertEqual(matcher.rewrite(c2), c2.sink())
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_arg(self):
     matcher = PatternMatcher([
-      (UPat(Ops.CONST, arg=0, name="x"), lambda x: x.rtag()),
-      (UPat(Ops.CONST, arg=False, name="x"), lambda x: x.rtag()),
-      (UPat(Ops.MAX, name="x"), lambda x: x.rtag()),
+      (UPat(Ops.CONST, arg=0, name="x"), lambda x: x.sink()),
+      (UPat(Ops.CONST, arg=False, name="x"), lambda x: x.sink()),
+      (UPat(Ops.MAX, name="x"), lambda x: x.sink()),
     ])
     c1 = UOp.const(0.0)
     c2 = UOp.const(False)
     c3 = UOp(Ops.MAX, src=(c1, c1))
     c4 = UOp(Ops.MUL, src=(c1, c1))
     c5 = UOp.const(-1)
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
-    self.assertEqual(matcher.rewrite(c2), c2.rtag())
-    self.assertEqual(matcher.rewrite(c3), c3.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
+    self.assertEqual(matcher.rewrite(c2), c2.sink())
+    self.assertEqual(matcher.rewrite(c3), c3.sink())
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
 
   def test_filter_arg(self):
     matcher = PatternMatcher([
       (UPat(Ops.MUL, src=[UPat(Ops.CONST, name="c"), UPat(Ops.CONST, arg=2)], name="x"),
-       lambda x,c: x.rtag() if c.val in {1, -1} else None)
+       lambda x,c: x.sink() if c.val in {1, -1} else None)
     ])
     y1 = UOp.const(1)
     y2 = UOp.const(2)
@@ -106,46 +106,46 @@ class TestPatternMatcher(unittest.TestCase):
     c3 = UOp(Ops.MUL, src=(y3, y2))
     c4 = UOp(Ops.MUL, src=(y2, y1))
     c5 = UOp(Ops.MUL, src=(y2, y3))
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
     self.assertEqual(matcher.rewrite(c2), None)
-    self.assertEqual(matcher.rewrite(c3), c3.rtag())
-    self.assertEqual(matcher.rewrite(c4), c4.rtag())
-    self.assertEqual(matcher.rewrite(c5), c5.rtag())
+    self.assertEqual(matcher.rewrite(c3), c3.sink())
+    self.assertEqual(matcher.rewrite(c4), c4.sink())
+    self.assertEqual(matcher.rewrite(c5), c5.sink())
 
   def test_dup_name(self):
-    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=(UPat(Ops.CONST, name="y"), UPat(Ops.CONST, name="y"))), lambda x, y: x.rtag())])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=(UPat(Ops.CONST, name="y"), UPat(Ops.CONST, name="y"))), lambda x, y: x.sink())])
     y1 = UOp.const(1.0)
     y2 = UOp.const(1.0)
     c1 = UOp(Ops.ADD, src=(y1, y1))
     c2 = UOp(Ops.ADD, src=(y1, y2))
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
-    self.assertEqual(matcher.rewrite(c2), c1.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
+    self.assertEqual(matcher.rewrite(c2), c1.sink())
 
   def test_dtype(self):
     # a concrete const dtype lives on the pair's CAST
-    matcher = PatternMatcher([(UPat(Ops.CAST, name="x", dtype=dtypes.float32), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(Ops.CAST, name="x", dtype=dtypes.float32), lambda x: x.sink())])
     c1 = UOp.const(1.0).cast(dtypes.float32)
     c2 = UOp.const(1.0).cast(dtypes.float64)
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_dtype_set(self):
-    matcher = PatternMatcher([(UPat(Ops.CAST, name="x", dtype={dtypes.float32, dtypes.float64}), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(Ops.CAST, name="x", dtype={dtypes.float32, dtypes.float64}), lambda x: x.sink())])
     c1 = UOp.const(1.0).cast(dtypes.float32)
     c2 = UOp.const(1.0).cast(dtypes.float64)
     c3 = UOp.const(1.0).cast(dtypes.float16)
     c4 = UOp.const(1).cast(dtypes.int)
-    self.assertEqual(matcher.rewrite(c1), c1.rtag())
-    self.assertEqual(matcher.rewrite(c2), c2.rtag())
+    self.assertEqual(matcher.rewrite(c1), c1.sink())
+    self.assertEqual(matcher.rewrite(c2), c2.sink())
     self.assertEqual(matcher.rewrite(c3), None)
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_src_one(self):
-    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=(UPat(Ops.CONST), UPat(Ops.CONST))), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=(UPat(Ops.CONST), UPat(Ops.CONST))), lambda x: x.sink())])
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     c3 = UOp(Ops.ADD, src=(c1,c2))
-    self.assertEqual(matcher.rewrite(c3), c3.rtag())
+    self.assertEqual(matcher.rewrite(c3), c3.sink())
     self.assertEqual(matcher.rewrite(c2), None)
     # that CONST/ALU -> ALU/CONST rewrite is now instant
     """
@@ -158,7 +158,7 @@ class TestPatternMatcher(unittest.TestCase):
     """
 
   def test_src_permutations(self):
-    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=[UPat(Ops.CONST), UPat(GroupOp.ALU)]), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=[UPat(Ops.CONST), UPat(GroupOp.ALU)]), lambda x: x.sink())])
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     c3 = UOp(Ops.ADD, src=(c1,c2))
@@ -166,21 +166,21 @@ class TestPatternMatcher(unittest.TestCase):
     c5 = UOp(Ops.ADD, src=(c2,c3))
     c6 = UOp(Ops.ADD, src=(c3,c4))
     self.assertEqual(matcher.rewrite(c3), None)
-    self.assertEqual(matcher.rewrite(c4), c4.rtag())
-    self.assertEqual(matcher.rewrite(c5), c5.rtag())
+    self.assertEqual(matcher.rewrite(c4), c4.sink())
+    self.assertEqual(matcher.rewrite(c5), c5.sink())
     self.assertEqual(matcher.rewrite(c6), None)
 
   def test_src_repeat(self):
-    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=UPat(Ops.CONST)), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=UPat(Ops.CONST)), lambda x: x.sink())])
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     c3 = UOp(Ops.ADD, src=(c1,c2))
     c4 = UOp(Ops.ADD, src=(c2,c3))
-    self.assertEqual(matcher.rewrite(c3), c3.rtag())
+    self.assertEqual(matcher.rewrite(c3), c3.sink())
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_allow_len(self):
-    matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.rtag())])
+    matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     c3 = UOp.const(3.0)
@@ -189,7 +189,7 @@ class TestPatternMatcher(unittest.TestCase):
     c6 = UOp(Ops.MULACC, src=(c1,c2,c3))
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
-    self.assertEqual(matcher.rewrite(c6), c6.rtag())
+    self.assertEqual(matcher.rewrite(c6), c6.sink())
 
   def test_deep_src_permutations(self):
     c1 = UOp.const(1.0)
