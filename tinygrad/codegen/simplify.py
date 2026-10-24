@@ -1,6 +1,6 @@
 import itertools
 from typing import Callable
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType, identity_element
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
@@ -79,16 +79,15 @@ pm_split_ranges = PatternMatcher([
 def no_range(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
-  if red.arg[0] not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
+  if red.arg[0] not in GroupOp.Reduce: return None
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
-  for r in reduce_unparented:
-    # an idempotent op (MAX, and bool ADD/MUL which are OR/AND) applied N times is the op once, or the identity when N is 0
-    if red.arg[0] is Ops.MAX or red.dtype is dtypes.bool: ret = (r.src[0] > 0).where(ret, ret.const_like(identity_element(red.arg[0], red.dtype)))
-    else: ret = ret * r.src[0] if red.arg[0] is Ops.ADD else ret ** r.src[0]
-  return ret
+  # the op applied n times, MAX and bool ADD/MUL (OR/AND) are idempotent. an empty range is the identity
+  n, op = UOp.uprod(*[r.src[0] for r in reduce_unparented]), red.arg[0]
+  if op is not Ops.MAX and red.dtype is not dtypes.bool: ret = ret*n if op is Ops.ADD else ret**n
+  return (n > 0).where(ret, ret.const_like(identity_element(op, red.dtype)))
 
 pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
@@ -134,7 +133,7 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
-        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: continue
+        if s in included or s in replaces or s.op in GroupOp.Defines|{Ops.CONST}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")

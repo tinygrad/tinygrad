@@ -97,7 +97,7 @@ def store_hazard_boundary(s:UOp):
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(): return None
+  base = target.base
   # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE} | ({Ops.SHRINK} if any(u.op is Ops.SHRINK for u in target.toposort(gate=lambda u: u is not base)) else set())
   view = target

@@ -479,6 +479,7 @@ class TestOps(TensorTestCase):
     helper_test_op([], lambda: torch.tensor(1)+0.5, lambda: Tensor(1)+0.5, forward_only=True)
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y)
     helper_test_op([(), ()], lambda x,y: x+y)
+    helper_test_op([], lambda: torch.tensor([5])+8, lambda: Tensor([5], dtype=dtypes.int64)+8, forward_only=True)
   def test_add3(self):
     helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: x+y+z)
   def test_broadcasted_add(self):
@@ -1961,6 +1962,11 @@ class TestOps(TensorTestCase):
     x = Tensor.ones(3,3)
     with self.assertRaises(ValueError): x.pad((None,(0,1),(3,0)))
     with self.assertRaises(ValueError): x.pad(((0,1),))
+
+  def test_pad_value_after_cast(self):
+    for v in [1.5, 3e9, -math.inf, math.nan]:
+      helper_test_op(None, lambda x: torch.nn.functional.pad(x.float(), (0,3), value=v), lambda x: x.float().pad((0,3), value=v),
+                     forward_only=True, vals=[[1,2,3,4,5]])
 
   def test_pad_reflect_mode(self):
     helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,2,3,2), mode="reflect"), lambda x: x.pad((0,2,3,2), mode="reflect"))

@@ -193,7 +193,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.variable('x', 3e9, 4e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.variable('x', -4e9, -3e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.variable('x', 200, 300, dtypes.int).cast(dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
-    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
+    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (44, 44))
     self.assertEqual(UOp.const(math.inf).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.const(math.nan, dtypes.float)._min_max, (-math.inf, math.inf))
     # a weak destination has no width to clamp to
