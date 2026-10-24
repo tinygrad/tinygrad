@@ -874,7 +874,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, key_dim))
   assert key_dim % 32 == 0 and value_dim % 4 == 0
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
-  assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
+  assert state.uop.without_after.contiguous_view_offset() is not None, "recurrent state must be contiguous"
   if start_pos is not None:
     assert start_pos.uop.is_bound_var
     state = Tensor(state.uop.after(start_pos.uop))
