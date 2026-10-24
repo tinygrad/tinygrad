@@ -52,6 +52,18 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
   ret = UOp.alloc(shape, dtypes.float, addrspace=AddrSpace.REG)
   return ret.after((ret if dep is None else ret.after(dep)).store(ret.const_like(value)))
 
+def fp8_matmul(x:Tensor, weight:Tensor, scale:Tensor, block_size:tuple[int, int]) -> Tensor:
+  block_n, block_k = block_size
+  n, k = weight.shape[-2:]
+  x_blocks = x.float().pad((0, -k % block_k)).unflatten(-1, (-1, block_k)).rearrange("... t g k -> ... g t k")
+  w_blocks = weight.pad((0, -k % block_k)).unflatten(-1, (-1, block_k)).rearrange("... n g k -> ... g k n")
+  limit = 224.0 if weight.dtype == dtypes.fp8e4m3fnuz else 448.0
+  x_scale = x_blocks.abs().max(-1, keepdim=True).clamp(min_=1e-10) / limit
+  quantized = (x_blocks / x_scale).clamp(-limit, limit).cast(weight.dtype).contiguous()
+  partials = (quantized.float() @ w_blocks.float()).contiguous()
+  w_scale = scale.transpose(-1, -2).repeat_interleave(block_n, -1)[..., None, :n]
+  return (partials * x_scale * w_scale).sum(-3).cast(x.dtype)
+
 # ******** quant linear: q8-activation kernels over packed ggml weights ********
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
@@ -87,6 +99,8 @@ class Linear(nn.Linear):
   ggml_type:int|None = None
   use_custom_quant = True
   shard_axis:int|None = None
+  weight_scale_inv:Tensor|None = None
+  weight_block_size:tuple[int, int] = (128, 128)
   def __init__(self, in_features:int, out_features:int, bias=True):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
@@ -95,6 +109,9 @@ class Linear(nn.Linear):
     self.ggml_type, self.weight = found
     self.shard_axis = decoded.uop.axis
   def __call__(self, x:Tensor) -> Tensor:
+    if self.weight_scale_inv is not None:
+      out = fp8_matmul(x, self.weight, self.weight_scale_inv, self.weight_block_size)
+      return out + self.bias if self.bias is not None else out
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
       self.set_quantized(self.weight)
@@ -119,6 +136,8 @@ class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   ggml_type:int|None = None
   use_custom_quant = True
+  weight_scale_inv:Tensor|None = None
+  weight_block_size:tuple[int, int] = (128, 128)
   def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
     self.in_features = in_features
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
@@ -128,6 +147,9 @@ class ExpertWeights:
     self.ggml_type, self.packed = found
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
+    if self.weight_scale_inv is not None:
+      ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
+      return ret + self.bias[sel] if hasattr(self, 'bias') else ret
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
       self.set_quantized()

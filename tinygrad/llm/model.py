@@ -35,6 +35,10 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return (freqs.cos() * concentration).cat(freqs.sin() * concentration, dim=-1).clone(device)
 
+def e4m3fn_to_fnuz(weight:Tensor, scale:Tensor) -> tuple[Tensor, Tensor]:
+  bits = weight.bitcast(dtypes.uint8)
+  return bits.eq(0x80).where(0, bits).contiguous().bitcast(dtypes.fp8e4m3fnuz), scale * 2
+
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
   # TODO: remove the need for this contiguous
