@@ -1963,6 +1963,11 @@ class TestOps(TensorTestCase):
     with self.assertRaises(ValueError): x.pad((None,(0,1),(3,0)))
     with self.assertRaises(ValueError): x.pad(((0,1),))
 
+  def test_pad_value_after_cast(self):
+    for v in [1.5, 3e9, -math.inf, math.nan]:
+      helper_test_op(None, lambda x: torch.nn.functional.pad(x.float(), (0,3), value=v), lambda x: x.float().pad((0,3), value=v),
+                     forward_only=True, vals=[[1,2,3,4,5]])
+
   def test_pad_reflect_mode(self):
     helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,2,3,2), mode="reflect"), lambda x: x.pad((0,2,3,2), mode="reflect"))
     helper_test_op([(5,5,5)], lambda x: torch.nn.functional.pad(x, (0,2), mode="reflect"), lambda x: x.pad((0,2), mode="reflect"))

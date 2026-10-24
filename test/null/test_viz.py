@@ -630,7 +630,6 @@ class TestVizProfiler(unittest.TestCase):
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1),
                                     ProfileGraphEntry(device='NV:1:SDMA:0', name='NV -> NV:1', st_id=2, en_id=3)],
-                              deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
     j = load_profile(prof)
@@ -654,7 +653,6 @@ class TestVizProfiler(unittest.TestCase):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV:1:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st_id=0, en_id=1)],
-                              deps=[[]],
                               sigs=[decimal.Decimal(1004), decimal.Decimal(1004+dur)])]
 
     j = load_profile(prof)
@@ -669,7 +667,7 @@ class TestVizProfiler(unittest.TestCase):
             ProfileRangeEvent(device='NV:1', name='E_3', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
             ProfileRangeEvent(device='NV:SDMA:0', name='COPY', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_2', st_id=0, en_id=1)],
-                              deps=[[]], sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
+                              sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
     j = load_profile(prof)
     # memory at the end
     self.assertListEqual(list(j['layout']), ['NV', 'NV:SDMA:0', 'NV:1'])
@@ -694,7 +692,7 @@ class TestVizProfiler(unittest.TestCase):
             # graph spanning compute + copy on GPU 0
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='AMD', name='E_1', st_id=0, en_id=1),
                                     ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
-                              deps=[[], [0]], sigs=[St, En, St, En]),
+                              sigs=[St, En, St, En]),
             # memory alloc on both GPUs
             ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"nbytes":4096}, ts=St),
             ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"nbytes":2048}, ts=St)]
