@@ -10,7 +10,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
-  indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, \
+  indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
   mla_bmm
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
@@ -128,6 +128,7 @@ def expert_slice_table(units:list[int], experts:int, slices:int) -> list[list[in
   w = max(len(t) for t in table)
   return [t + [-1]*(w-len(t)) for t in table]
 
+_block_q8:list[tuple[UOp, tuple[Tensor, ...]]|None] = [None]  # a decoding block's output and its quantization (the next block's input's)
 INLINE_ACT = getenv("INLINE_ACT", 1)  # a decoding activation computed in the kernel that quantizes it (not a kernel of its own)
 
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
@@ -648,16 +649,31 @@ class FFNBlock:
     # T (hyper-connections): x has static padded rows of which the first T are the tokens, the output too
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
+    # (decoding: the output's quantization made by its last kernel is returned too, the next block's input's: BLOCK_Q8_OUT)
+    q8_out = T is None and self.config.hc is not None and bool(getenv("BLOCK_Q8_OUT", 1))
+    # (the block before's output's quantization, if x is that output: its function's arguments, the quantization of x in it)
+    xq = _block_q8[0][1] if q8_out and _block_q8[0] is not None and _block_q8[0][0] is x.uop else ()
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None):
+    def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None, *xq:Tensor):
+      if xq:
+        fx = x.flatten(2)
+        q8_quantize_known(fx, int(prod(fx.shape[:-1])), int(fx.shape[-1]), True, tuple(xq))
       if self.config.hc is not None:
         xs = self.hc_attn(x, lambda h: self._attention(h, start_pos, *(() if T is None else (T,))), self.attn_norm, rows=T is not None)
         _ffn_rows[0] = T
-        try: return self.hc_ffn(xs, self._feed_forward, self.ffn_norm, rows=T is not None).contiguous()
+        try:
+          out = self.hc_ffn(xs, self._feed_forward, self.ffn_norm, rows=T is not None)
+          if not q8_out: return out.contiguous()
+          flat = out.flatten(2)
+          return (out.contiguous(), *q8_quantize(flat, int(prod(flat.shape[:-1])), int(flat.shape[-1]), sumsq=True))
         finally: _ffn_rows[0] = None
       h =     x + self._attention(self.attn_norm(x), start_pos, *(() if T is None else (T,)))
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
-    return _run(x, start_pos, T)
+    ret = _run(x, start_pos, T, *xq)
+    if not q8_out: return ret
+    out, *q = ret
+    _block_q8[0] = (out.uop, tuple(q))
+    return out
 
   # the phases of a sublayer on a micro batch (see micro_batch_blocks): functions, scheduled once
   def _phase_pre(self, hc:HyperConnection, norm:nn.RMSNorm, xs:Tensor) -> tuple[Tensor, Tensor, Tensor]:
