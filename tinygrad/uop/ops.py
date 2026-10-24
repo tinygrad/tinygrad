@@ -188,6 +188,37 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
+def _forward_outputs(values:tuple[UOp, ...], params:tuple[UOp, ...]) -> list[UOp]:
+  """
+  the body's effects storing the values into the output params. a value that is a view (reshapes) of a buffer the body allocates and writes
+  with kernels (an AFTER on an ALLOC) is made in the output itself: the ALLOC is replaced by the param, no copy into it
+  """
+  from tinygrad.helpers import getenv, prod
+  fwd:dict[UOp, UOp] = {}
+  made:set[int] = set()  # the outputs made in place
+  if getenv("FORWARD_OUTPUTS", 1):
+    # (the states of the buffers: one written in place more than once is the last state's, not forwarded)
+    def base(x:UOp) -> UOp:
+      while x.op is Ops.RESHAPE: x = x.src[0]
+      return x
+    afters:dict[UOp, set[UOp]] = {}
+    for x in UOp.sink(*values).toposort():
+      if x.op is Ops.AFTER: afters.setdefault(base(x.src[0]), set()).add(x)
+    for i, (v, p) in enumerate(zip(values, params)):
+      u = v
+      while u.op in (Ops.STAGE, Ops.RESHAPE): u = u.src[0]
+      if u.op is not Ops.AFTER or (a:=base(u.src[0])).op is not Ops.ALLOC or a in fwd or a.dtype != v.dtype or a.device != p.device: continue
+      # (written by kernels only: the output of a nested call stays its STORE, autograd differentiates through it)
+      if afters[a] != {u} or not all(c.op is Ops.CALL and c.src[0].op is Ops.SINK and c.src[0].arg is not None for c in u.src[1:]): continue
+      if a.axis is not None or v.axis is not None or not all(isinstance(x, int) for x in (*a.shape, *p.shape)): continue
+      if prod(a.shape) != prod(p.shape): continue
+      fwd[a] = p.reshape(a.shape)
+      made.add(i)
+  if not fwd: return [p.store(v) for v, p in zip(values, params)]
+  # (an allocation used by a value that isn't forwarded keeps its own: only the forwarded values sink their writes)
+  subbed = UOp.sink(*values).substitute(fwd).src
+  return [sv if i in made else p.store(sv) for i, (sv, p) in enumerate(zip(subbed, params))]
+
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, src:tuple[UOp,...]=tuple(), arg:Any=None):
@@ -1320,7 +1351,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return UOp.alloc(shp, o.dtype, slot=buf.buf_uop.arg.slot, device=dev, axis=axis), buf.param_like(p)
     outputs = tuple(mint(o, p) for o, p in zip(values, pos))
     rets = tuple(r for r, _ in outputs)
-    body = UOp.sink(*[p.store(v) for v, (_, p) in zip(values, outputs)])
+    body = UOp.sink(*_forward_outputs(values, tuple(p for _, p in outputs)))
     args: list[UOp|None] = [None] * (len(srcs) + len(values))
     for p, r in zip(pos, rets): args[p] = r
     it = iter(x.contiguous() if precompile else x for x in srcs)
