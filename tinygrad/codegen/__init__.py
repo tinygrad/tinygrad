@@ -454,20 +454,17 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
-def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
+def do_compile(ctx:Renderer, prg:UOp, lin:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
   if DEBUG >= 7: ctx.compiler.disassemble(lib)
-  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib, src=compile_calls(ctx, prg.src[1])),))
-
-def compile_calls(ctx:Renderer, linear:UOp) -> tuple[UOp, ...]:
-  deps = []
-  for body in call_bodies(linear.src):
+  call_binaries:list[UOp] = []
+  for body in call_bodies(lin.src):
     key = ("function", *to_program_key(body, ctx))
     if (obj:=to_program_cache.get(key)) is None:
       to_program_cache[key] = obj = do_compile_function(ctx, body)
-    deps.append(obj)
-  return tuple(deps)
+    call_binaries.append(obj)
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, src=tuple(call_binaries), arg=lib),))
 
 @rewrite_group(name=lambda ctx,body,ret: TracingKey(body.arg, (ret.key, body.arg), ret=ctx))
 def do_compile_function(ctx:Renderer, body:UOp) -> UOp:
@@ -481,7 +478,7 @@ pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.LINEAR, name="lin")), name="prg"), do_estimates),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin"), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
 
 @rewrite_group(name=lambda ast,renderer,ret,**_: TracingKey((k:=ret.src[0].arg).name,(ret.key, k.function_name),ret=renderer), replay=True)

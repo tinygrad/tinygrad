@@ -282,7 +282,7 @@ class CStyleLanguage(Renderer):
     for body in (u for u in topo if u.op is Ops.LINEAR):
       self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
       _, call, bufs = self._render(body.src)
-      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in sorted(bufs, key=lambda b:b[1][0].arg.slot))
+      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
       prefix.append(f"static inline {self.fn_prefix} void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
       call_bodies.extend(body.src)
     return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
