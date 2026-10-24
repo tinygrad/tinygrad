@@ -156,7 +156,7 @@ class ExpertWeights:
       if self.ggml_type is None: self.use_custom_quant = supported = False  # not a supported quant format
     if self.weight_scale_inv is not None:
       ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
-    elif self.ggml_type is not None and supported and isinstance(x.shape[1], int) and x.shape[1] == 1: ret = moe_linear(self, sel, x)
+    elif self.ggml_type is not None and supported and isinstance(x.shape[1], int) and x.shape[1] <= 8: ret = moe_linear(self, sel, x)
     else: ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
