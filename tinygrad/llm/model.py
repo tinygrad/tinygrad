@@ -679,7 +679,10 @@ class FFNBlock:
     return _sub(hn, start_pos, T)
   def _phase_post(self, hc:HyperConnection, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
     @function(precompile=True, allow_implicit=True)
-    def _post(out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor: return hc.post_split(out, post, comb, xs).contiguous()
+    def _post(out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
+      # (HC_STREAMS_HALF: the streams kept in half, their kernels read half the bytes)
+      ret = hc.post_split(out, post, comb, xs)
+      return (ret.cast(dtypes.half) if getenv("HC_STREAMS_HALF", 1) else ret).contiguous()
     return _post(out, post, comb, xs)
 
 def _on_queue(ts:tuple[Tensor, ...], queue:str) -> tuple[Tensor, ...]:

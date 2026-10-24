@@ -2404,7 +2404,7 @@ def _hc_pre_kernel(coef:UOp, hn:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, xs:UO
   per = D // (W * 32)
   t = wave * 32 + lane
   cols = [t * per + i for i in range(per)]
-  h = [functools.reduce(lambda a, b: a + b, [pre[st] * xs[token, st, d].load() for st in range(count)]) for d in cols]
+  h = [functools.reduce(lambda a, b: a + b, [pre[st] * xs[token, st, d].load().float() for st in range(count)]) for d in cols]
   part = functools.reduce(lambda a, b: a + b, [x * x for x in h])
   lds_s = UOp.alloc((W,), dtypes.float32, addrspace=AddrSpace.LOCAL)
   lds_s = lds_s.after(lds_s[wave.valid(lane.eq(0))].store(warp_reduce(part, full_wave=True)).barrier())
