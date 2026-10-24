@@ -22,42 +22,53 @@ class Estimates:
   mem:sint = 0
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
+
   @staticmethod
-  def from_uops(uops:tuple[UOp, ...], ignore_indexing=False) -> Estimates:
+  def from_uops(sink:UOp, ignore_indexing=False, enter_calls=True) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
-    mults: sint = 1
-    mult_stack: list[sint] = []
-    excluded: set[UOp] = set()
-    if ignore_indexing:
-      for u in uops:
-        if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
-    for u in uops:
-      if u.op in {Ops.LOAD, Ops.STORE}:
-        buf = u
-        while len(buf.src) and buf.op not in GroupOp.Defines: buf = buf.src[0]
-        if buf.op is Ops.PARAM:
+    pending: list[tuple[UOp, sint|None, dict[UOp, UOp]]] = [(sink, None, {})]
+
+    # traverse in reverse order to greedily ignore indexing ALU if necessary
+    while pending:
+      sink, caller_mult, bindings = pending.pop()
+      uops, multcache, excluded = list(sink.toposort()), {}, set()
+      if caller_mult is None: caller_mult = prod([cast(sint, s.src[0].ssimplify()) for s in uops if s.op is Ops.SPECIAL])
+
+      for u in reversed(uops):
+        # compute compile time known multiplicity of op over RANGEs and CALL context
+        if (rngs:=tuple(u.ranges)) not in multcache:
+          resolved = tuple(r.substitute(bindings) for r in rngs)
+          bnds = [cast(sint, r.src[0].without_after.ssimplify()) for r in resolved if r.dtype != dtypes.void and
+            not any(u.addrspace is not AddrSpace.ALU for u in r.src[0].without_after.backward_slice_with_self)]
+          local_mult = prod(bnds)
+          if isinstance(local_mult, UOp):
+            local_mult = local_mult.substitute({x:x.const_like(0) for x in local_mult.toposort() if x.op is Ops.SPECIAL})
+          multcache[rngs] = local_mult * caller_mult
+        mult = multcache[rngs]
+
+        # indexing alu is optional for flop estimates
+        if ignore_indexing and u.op in {Ops.INDEX, Ops.SHRINK}:
+          excluded.update(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+        elif u.op is Ops.CALL and enter_calls:
+          # pass bindings instead of resolving whole body because the bound ops shouldnt get double counted
+          child_bindings = {p:u.src_without_body[p.arg.slot].substitute(bindings,walk=True)
+            for p in u.body.backward_slice if p.op is Ops.PARAM and p.arg.slot >= 0}
+          pending.append((u.body, mult, child_bindings))
+        elif u.op in {Ops.LOAD, Ops.STORE}:
+          buf = bindings.get(u.buf_uop, u.buf_uop).without_after
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults
-          mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
-      if u.op is Ops.RANGE:
-        mult_stack.append(mults)
-        if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          mults *= cast(sint, u.src[0].without_after.ssimplify())
-          # SPECIAL are already counted in mults
-          mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
-      elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
-      elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.dtype.itemsize * mults
-      elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.src[1].dtype.itemsize * mults
-      elif u.op in GroupOp.ALU and u not in excluded:
-        flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
-      elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults
+          if buf.op is Ops.PARAM:
+            accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mult
+            mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
+          if u.src[0].addrspace != AddrSpace.REG:
+            lds += mult * u.max_numel() * (u if u.op is Ops.LOAD else u.src[1]).dtype.itemsize
+        elif u.op in GroupOp.ALU and u not in excluded:
+          flops += (mult * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+        elif u.op is Ops.WMMA and u not in excluded:
+          flops += mult * (2 * prod(u.arg[0]) // u.arg[2])
+
     return Estimates(ssimplify(flops), lds, sum(mem.values()))
 
 class Renderer:
