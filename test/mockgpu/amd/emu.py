@@ -1972,7 +1972,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
       for p in prg.kernel_params:
         if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(vals[p.arg.name])
-      run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)))
+      run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), update_stats=False)
     return 0
 
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
