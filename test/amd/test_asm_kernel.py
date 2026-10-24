@@ -1,14 +1,15 @@
 import unittest
 import functools
+import ctypes
 from dataclasses import dataclass
 from typing import Callable
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
+from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile, get_runtime
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, DEV
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -138,6 +139,7 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
     isa.v_cndmask_b32_e32(v[5], v[4], v[3]),
     isa.v_lshlrev_b32_e32(v[6], 2, v[0]),
     *global_store,
+    *barrier,
     isa.s_endpgm(),
   ]
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
@@ -211,6 +213,29 @@ class TestAsmKernel(unittest.TestCase):
     self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
     self.enterContext(Context(ASM_CALL=max(ASM_CALL.value, 1)))
 
+  def test_lift_cache(self):
+    from test.mockgpu.amd import call
+    from test.mockgpu.amd.emu import run_asm
+    out = ctypes.c_uint32()
+    args = ctypes.c_uint64(ctypes.addressof(out))
+    def code(value):
+      return b"".join(inst.to_bytes() for inst in [s_load_b64(s[0:1], s[0:1], soffset=NULL),
+        s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], value),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm()])
+    lib = ctypes.create_string_buffer(code(4), len(code(4)))
+    other = ctypes.create_string_buffer(code(4), len(code(4)))
+    programs = {}
+    for buf, value in ((lib, 4), (lib, 4), (other, 4), (lib, 5), (other, 4)):
+      buf.raw, out.value = code(value), 0
+      run_asm(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, ctypes.addressof(args), arch="rdna3")
+      self.assertEqual(out.value, value)
+      prg = call.lift(ctypes.addressof(buf), len(buf), 1, 1, 1, 1, 1, 1, 0x19c, 0, "rdna3", 0)
+      self.assertIs(prg, programs.setdefault(value, prg))
+    # Operands are read from the current code allocation, so these share the compiled graph too.
+    self.assertIs(programs[4], programs[5])
+    with Context(NOOPT=1, EMULATED_DTYPES="float16"):
+      self.assertTrue(prg is call.lift(ctypes.addressof(other), len(other), 1, 1, 1, 1, 1, 1, 0x19c, 0, "rdna3", 0))
+
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
@@ -221,6 +246,57 @@ class TestAsmKernel(unittest.TestCase):
     self.assertEqual(est.mem, a.nbytes()*2)
     run_linear(linear)
     self.assertTrue((a.numpy() == 2.).all())
+
+  def test_workgroup_coordinates_low_precision_default(self):
+    def kernel(out:UOp):
+      idx = UOp.special(17, "gidx0") + 17*UOp.special(19, "gidx1") + 17*19*UOp.special(2, "gidx2")
+      return out.index(idx).store(idx).sink(arg=KernelInfo(opts_to_apply=()))
+    with Context(DEFAULT_FLOAT="bfloat16"):
+      out = Tensor.full((17*19*2,), -1, dtype=dtypes.int32).contiguous().realize()
+      self.assertEqual(out.custom_kernel(fxn=kernel)[0].tolist(), list(range(17*19*2)))
+
+  def test_jit_entry_mixed_width_args(self):
+    from tinygrad.codegen import to_program
+    # Enough uint32 arguments to spill onto the stack before the final uint64 argument.
+    values = [0x80000000+i for i in range(12)] + [0x123456789abcdef0]
+    variables = [UOp.variable(f"arg_{i:02d}", 0, dt.max, dt) for i,dt in enumerate([dtypes.uint32]*12+[dtypes.uint64])]
+    out = UOp.param(0, dtypes.uint64, (len(values),), name="out")
+    sink = UOp.sink(*(out.index(i).store(v.cast(dtypes.uint64)) for i,v in enumerate(variables)),
+                    arg=KernelInfo(name="asm_call_mixed_width_args", opts_to_apply=()))
+    with Context(DEV=DEV.target('CPU', renderer='LLVM')): prg = to_program(sink, Device['CPU'].renderer)
+    result = (ctypes.c_uint64*len(values))()
+    vals = dict(zip((v.arg.name for v in variables), values))
+    get_runtime("CPU", prg)(*[vals[p.arg.name] if p.addrspace is AddrSpace.ALU else ctypes.addressof(result) for p in prg.kernel_params])
+    self.assertEqual(list(result), values)
+
+  def test_jit_call_reuse(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    libraries = Device["CPU"].libraries
+    def kernel(out:UOp, second=False):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL),
+        s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        v_lshlrev_b32_e32(v[0], 2, v[0]),
+      ] + ([
+        v_mov_b32_e32(v[4], 9),
+        v_add_nc_u32_e32(v[5], 11, v[4]),
+        v_xor_b32_e32(v[6], 3, v[5]),
+        global_store_b32(addr=v[0], data=v[6], saddr=s[0:1]),
+      ] if second else [
+        v_mov_b32_e32(v[1], 5),
+        v_add_nc_u32_e32(v[2], 3, v[1]),
+        v_add_nc_u32_e32(v[3], 7, v[2]),
+        global_store_b32(addr=v[0], data=v[3], saddr=s[0:1]),
+      ]) + [s_endpgm()]
+      sink = UOp.sink(out.base, UOp.special(32, "lidx0"), UOp.special(1, "gidx0"), arg=KernelInfo(f"external_call_reuse_{second}"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(inst, dtypes.void)) for inst in insts))))
+    a = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
+    self.assertEqual(a.tolist(), [15]*32)
+    functions = dict(libraries)
+    b = Tensor.empty(32, dtype=dtypes.uint32).custom_kernel(fxn=lambda out: kernel(out, second=True))[0]
+    self.assertEqual(b.tolist(), [23]*32)
+    self.assertTrue(functions.keys() < libraries.keys())
+    for lib, runtime in functions.items(): self.assertIs(libraries[lib], runtime)
 
   def test_variable(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
@@ -241,6 +317,63 @@ class TestAsmKernel(unittest.TestCase):
     ref[127] = -1
     self.assertListEqual(a.tolist(), ref.tolist())
 
+  def test_lds_sync_loop(self):
+    self._test_lds_sync_loop()
+
+  def test_lds_sync_nested_loop(self):
+    self._test_lds_sync_loop(outer_iterations=2)
+
+  def test_lds_sync_divergent_loop(self):
+    self._test_lds_sync_loop(divergent=True)
+
+  def _test_lds_sync_loop(self, outer_iterations=1, divergent=False):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(v_lshlrev_b32_e32(v[1], 2, v[0]))
+      k.emit(v_xor_b32_e32(v[2], 128, v[1]))  # read the corresponding lane in the neighboring wave
+      k.emit(v_mov_b32_e32(v[3], v[0]))
+      k.emit(s_mov_b32(s[3], outer_iterations))
+      k.label("outer")
+      k.emit(s_mov_b32(s[2], 3))
+      k.label("loop")
+      if divergent:
+        k.emit(v_readfirstlane_b32_e32(s[4], v[0]))
+        k.emit(s_lshr_b32(s[4], s[4], 5))
+        k.emit(s_sub_u32(s[4], 4, s[4]))  # wave zero runs longest, wave three finishes first
+        k.emit(s_mov_b32(s[5], 0))
+        k.label("local_loop")
+        k.emit(s_add_u32(s[5], s[5], 1))
+        k.emit(s_sub_u32(s[4], s[4], 1))
+        k.emit(s_cmp_gt_i32(s[4], 0))
+        k.emit(s_cbranch_scc1(), target="local_loop")
+        k.emit(v_add_nc_u32_e32(v[3], s[5], v[3]))
+      k.emit(v_add_nc_u32_e32(v[3], 1, v[3]))
+      k.emit(ds_store_b32(addr=v[1], data0=v[3]))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_barrier())
+      k.emit(ds_load_b32(vdst=v[3], addr=v[2]))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_barrier())  # finish every read before the next round overwrites LDS
+      k.emit(s_sub_u32(s[2], s[2], 1))
+      k.emit(s_cmp_gt_i32(s[2], 0))
+      k.emit(s_cbranch_scc1(), target="loop")
+      k.emit(s_sub_u32(s[3], s[3], 1))
+      k.emit(s_cmp_gt_i32(s[3], 0))
+      k.emit(s_cbranch_scc1(), target="outer")
+      k.emit(global_store_b32(addr=v[1], data=v[3], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      lds = UOp.placeholder((128,), dtypes.uint32, 0, AddrSpace.LOCAL)
+      sink = UOp.sink(out.base, lds, UOp.special(128, "lidx0"), UOp.special(1, "gidx0"), arg=KernelInfo("lds_sync_loop"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in k.finalize()))))
+    out = Tensor.empty(128, dtype=dtypes.uint32).custom_kernel(fxn=kernel)[0]
+    expected = list(range(128))
+    for _ in range(3*outer_iterations):
+      expected = [expected[i ^ 32] + 1 + (4-((i ^ 32)//32) if divergent else 0) for i in range(128)]
+    self.assertListEqual(out.tolist(), expected)
+
   def test_handwritten(self):
     if self.arch != "rdna4": self.skipTest("only tested on rdna4")
     a = Tensor.empty(1024, dtype=dtypes.int32).contiguous().realize()
@@ -254,7 +387,6 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
-  @unittest.expectedFailure
   def test_cfg_branch_diamond(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):
@@ -280,6 +412,26 @@ class TestAsmKernel(unittest.TestCase):
     out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
 
+  def test_cfg_wave_early_exit(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(v_readfirstlane_b32_e32(s[2], v[0]))
+      k.emit(s_cmp_ge_u32(s[2], 32))
+      k.emit(s_cbranch_scc1(), target="store")
+      k.emit(s_endpgm())
+      k.label("store")
+      k.emit(v_lshlrev_b32_e32(v[1], 2, v[0]))
+      k.emit(v_mov_b32_e32(v[2], 7))
+      k.emit(global_store_b32(addr=v[1], data=v[2], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      sink = UOp.sink(out.base, UOp.special(64, "lidx0"), arg=KernelInfo())
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in k.finalize()))))
+    out = Tensor.zeros(64, dtype=dtypes.uint32).contiguous().realize().custom_kernel(fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [0]*32 + [7]*32)
+
   def test_cfg_loop(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):
@@ -300,6 +452,72 @@ class TestAsmKernel(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
+
+  def test_cfg_rotated_loop(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def kernel(out:UOp, reverse:bool):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_load_b32(s[2], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_mov_b32(s[3], 0))
+      k.emit(s_cmp_lt_i32(s[2], 2))
+      k.emit(s_cbranch_scc1(), target="body")
+      k.label("padding")
+      k.emit(s_add_u32(s[3], s[3], 1))
+      k.emit(s_branch(), target="increment")
+      k.label("body")
+      k.emit(s_add_u32(s[3], s[3], 10))
+      k.label("increment")
+      k.emit(s_add_u32(s[2], s[2], 1))
+      k.emit(s_cmp_lt_i32(s[2], 4))
+      k.emit(s_cbranch_scc0(), target="exit")
+      k.emit(s_cmp_lt_i32(s[2], 2))
+      k.emit(s_cbranch_scc0() if reverse else s_cbranch_scc1(), target="padding" if reverse else "body")
+      k.emit(s_branch(), target="body" if reverse else "padding")
+      k.label("exit")
+      k.emit(v_mov_b32_e32(v[0], 0))
+      k.emit(v_mov_b32_e32(v[1], s[3]))
+      k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      sink = UOp.sink(out.base, arg=KernelInfo("cfg_rotated_loop"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in k.finalize()))))
+    for reverse in (False, True):
+      for start, expected in ((0, 22), (2, 2)):
+        out = Tensor([start], dtype=dtypes.uint32).realize().custom_kernel(fxn=functools.partial(kernel, reverse=reverse))[0]
+        self.assertListEqual(out.tolist(), [expected])
+
+  def test_cfg_backward(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def cfg_kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(s_mov_b32(s[2], 0))
+      k.label("header")
+      k.emit(s_cmp_ge_i32(s[2], 4))
+      k.emit(s_cbranch_scc1(), target="exit")
+      k.emit(v_mov_b32_e32(v[0], s[2]))
+      k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
+      k.emit(s_and_b32(s[3], s[2], 1))
+      k.emit(s_cbranch_scc1(), target="odd")
+      k.emit(v_mov_b32_e32(v[1], 20))
+      k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
+      k.emit(s_branch(), target="increment")
+      k.label("odd")
+      k.emit(v_mov_b32_e32(v[1], 10))
+      k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
+      k.label("increment")
+      k.emit(s_add_u32(s[2], s[2], 1))
+      k.emit(s_branch(), target="header")
+      k.label("exit")
+      k.emit(s_endpgm())
+      insts = k.finalize()
+      sink = UOp.sink(out.base, arg=KernelInfo("cfg_backward_kernel"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+    out = Tensor.empty(4, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
+    self.assertListEqual(out.tolist(), [20, 10, 20, 10])
 
   def test_store_offset2(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")

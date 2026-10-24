@@ -12,21 +12,33 @@ def link_sym(sym:str, libs:list[ctypes.CDLL]) -> int:
     except (OSError, AttributeError, TypeError): pass
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 
-def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+def _strtab(blob:bytes, idx:int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
+
+def elf_sections(blob:bytes) -> tuple[str, list[ElfSection]]:
   assert blob[:4] == libc.ELFMAG.encode(), "blob is not an ELF, missing magic bytes"
   ecls = {libc.ELFCLASS32: "Elf32", libc.ELFCLASS64: "Elf64"}[blob[libc.EI_CLASS]]
-
-  def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = getattr(libc, f"{ecls}_Ehdr").from_buffer_copy(blob)
   section_headers = (getattr(libc, f"{ecls}_Shdr") * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
   sh_strtab = blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size]
   sections = [ElfSection(_strtab(sh_strtab, sh.sh_name), sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
+  return ecls, sections
 
-  def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
-  rel = [(sh, sh.name[4:], _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
-  rela = [(sh, sh.name[5:], _to_carray(sh, getattr(libc, f"{ecls}_Rela"))) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
-  symtab = next((_to_carray(sh, getattr(libc, f"{ecls}_Sym")) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB), None)
+def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
+
+def elf_symbols(ecls:str, sections:list[ElfSection]) -> list[tuple[str, libc.Elf64_Sym|libc.Elf32_Sym]]:
+  symsec = next((sh for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB), None)
+  if symsec is None: return []
+  strings = sections[symsec.header.sh_link].content
+  return [(_strtab(strings, sym.st_name), sym) for sym in _to_carray(symsec, getattr(libc, f"{ecls}_Sym"))]
+
+def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
+               exports:dict[str, int]|None=None, symbols:dict[str, int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+  ecls, sections = elf_sections(blob)
+
+  rel = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
+  rela = [(sh, _to_carray(sh, getattr(libc, f"{ecls}_Rela"))) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
+  symtab = elf_symbols(ecls, sections)
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
   # Prealloc image for all fixed addresses.
@@ -37,20 +49,28 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
       image += b'\0' * (((align:=max(sh.header.sh_addralign, force_section_align)) - len(image) % align) % align) + sh.content
       sh.header.sh_addr = len(image) - len(sh.content)
 
+  if exports is not None:
+    for name, sym in symtab:
+      if 0 < sym.st_shndx < len(sections) and sym.st_info >> 4 == libc.STB_GLOBAL and sym.st_info & 15 == libc.STT_FUNC:
+        exports[name] = sections[sym.st_shndx].header.sh_addr + sym.st_value
+
   # Relocations
   relocs = []
-  for sh, trgt_sh_name, c_rels in rel + rela:
-    if trgt_sh_name == ".eh_frame": continue
-    target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
-    rels = [(r.r_offset, unwrap(symtab)[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)], getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
-             getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, link_sym(_strtab(sh_strtab, sym.st_name), link_libs or []) if sym.st_shndx == 0 else
-                sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
+  for sh, c_rels in rel + rela:
+    if sections[sh.header.sh_info].name == ".eh_frame": continue
+    target_image_off = sections[sh.header.sh_info].header.sh_addr
+    for r in c_rels:
+      name, sym = symtab[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)]
+      value = (((symbols or {}).get(name) or link_sym(name, link_libs or [])) if sym.st_shndx == 0
+               else sections[sym.st_shndx].header.sh_addr + sym.st_value)
+      relocs.append((target_image_off + r.r_offset, value, getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info), getattr(r, "r_addend", 0)))
 
   return memoryview(image), sections, relocs
 
-def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) -> bytes:
-  image_, _, relocs = elf_loader(obj, link_libs=link_libs)
+def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None,
+               exports:dict[str, int]|None=None, symbols:dict[str, int]|None=None) -> bytes:
+  image_, _, relocs = elf_loader(obj, link_libs=link_libs, exports=exports, symbols=symbols)
+  if exports is not None: exports.update({name:base+offset for name,offset in exports.items()})
   image = bytearray(image_)
 
   def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int, addend: int):

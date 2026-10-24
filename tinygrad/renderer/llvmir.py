@@ -1,11 +1,11 @@
 import struct
 from tinygrad.renderer import tc
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, call_names
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target
+from tinygrad.helpers import prod, Target, LLVM_OPTNONE
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
@@ -108,6 +108,8 @@ base_rewrite = PatternMatcher([
                f" = insertelement {ldt(x.dtype, x.max_numel())} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
+  (UPat(Ops.MULACC, dtype=dtypes.floats, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.fma.{ldt(x.dtype)}({', '.join(f'{ldt(s.dtype)} {ctx[s]}' for s in x.src)})"),
   (UPat(tuple(llvm_intrinsics), name="x"),
    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
@@ -151,8 +153,8 @@ base_rewrite = PatternMatcher([
   # calls
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
    f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
-   ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
+   ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.arg.params) + ")"),
 ])
 
 pm_widen_uidx = PatternMatcher([
@@ -170,7 +172,11 @@ class LLVMRenderer(Renderer):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
+    self.extra_matcher += PatternMatcher([
+      (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
+    ])
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
+    args = sorted(args, key=lambda x:x[1].arg.slot)
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
     sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
@@ -229,17 +235,17 @@ class CPULLVMRenderer(LLVMRenderer):
   global_max = (1, 0, 0)
   abi = None
   string_rewrite = base_rewrite
-  def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
-    fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
-    defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
-    return "\n".join((k:=self._render_kernel(uops, fns=fns, args_struct=True))[0] + (k[1], *defs, self._render_footer(topo)))
+  def render(self, uops: list[UOp]) -> str:
+    return self._render_module(uops, args_struct=True)
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+    decls.update({name:f"declare void @{name}({', '.join(ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in b.arg.params)})"
+                  for b,name in self.fn_names.items()})
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
-    return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
+    return "\n".join([*decls.values(), *blobs.values(),
+                     'attributes #0 = { ' + ('optnone noinline ' if LLVM_OPTNONE else '') + 'nounwind "no-builtins" "no-trapping-math"="true" }'])
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
@@ -248,6 +254,14 @@ class CPULLVMRenderer(LLVMRenderer):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if
             (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
+
+  def render_function(self, body:UOp) -> str:
+    return self._render_module(list(body.src), name=body.arg)
+
+  def _render_module(self, uops:list[UOp], name="test", args_struct=False) -> str:
+    self.fn_names = call_names(uops)
+    k = self._render_kernel(uops, name=name, fns=self.fn_names, args_struct=args_struct)
+    return "\n".join((*k[0], k[1], self._render_footer(uops)))
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",

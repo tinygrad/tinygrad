@@ -12,6 +12,9 @@ def with_storage(x:UOp, dt:DType) -> UOp:
   if x.op in GroupOp.Defines: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
+def call_names(uops:list[UOp]) -> dict[UOp, str]:
+  return {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
+
 @dataclass(frozen=True)
 class Estimates:
   # number of FLOPS used in the Kernel
@@ -85,3 +88,5 @@ class Renderer:
   def supported_dtypes(self) -> set[DType]:
     # double can't be bitcast to anything without long support
     return set(dtypes.all) - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())
+
+  def render_function(self, body:UOp) -> str: raise NotImplementedError

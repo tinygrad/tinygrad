@@ -218,6 +218,11 @@ class TestHostCalls(unittest.TestCase):
     def both(o:UOp, a:UOp, b:UOp): return UOp.sink(addr_of(o[0:1], a), addr_of(o[1:2], b))
     a, b = self._buf(16, dtypes.uint8), self._buf(16, dtypes.uint8)
     self.assertEqual(self._run(both, self._buf(2), a, b), [a.buffer.get_buf("CPU"), b.buffer.get_buf("CPU")])
+    first = lower_and_compile(lower_hcq(both(self._buf(2), a, b))).src[0].without_after.body
+    second = lower_and_compile(lower_hcq(addr_of(self._buf(1), a))).src[0].without_after.body
+    # Different parents share the compiled helper, not just its lowered graph.
+    shared = set(first.src[3].toposort()) & set(second.src[3].toposort())
+    self.assertTrue(any(u.op is Ops.BINARY for u in shared))
 
   def test_nested_placeholders(self): # storage a function keeps for itself
     @uopfunc

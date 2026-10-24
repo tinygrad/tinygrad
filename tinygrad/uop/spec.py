@@ -92,7 +92,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
-  (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
+  (UPat(Ops.BINARY, dtypes.uint8, name="x"), lambda x: isinstance(x.arg, bytes) and all(s.op is Ops.BINARY for s in x.src)),
 
   # AFTER on Movement Op, a define, STAGE, or another AFTER
   # CONST/CAST/NOOP are range bounds: RANGE(AFTER(CONST, other_range)) orders a loop after a sibling
