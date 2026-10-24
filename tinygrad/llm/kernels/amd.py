@@ -344,7 +344,7 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids
                        out_features:int, in_features:int, ggml_type:int, x_share:int) -> UOp:
   # out rows are (token, slot): the slot's expert reads its weight rows, x_share slots share an activation row
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
-  def gate(row:UOp, base:UOp) -> UOp: return base + sel[row].maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
+  def gate(row:UOp, base:UOp) -> UOp: return base + sel[row].cast(dtypes.weakint).maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
   def xtoken(row:UOp) -> UOp: return row // x_share
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_")
 
