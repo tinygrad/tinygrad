@@ -47,7 +47,7 @@ class NullProgram(Program['NullDevice']):
       if op == TIMESTAMP: MMIOInterface(addr, 8, fmt='Q')[0] = int((st + done) * 1000)
     descs = [list(null_events)[event] for op, event in zip(words[0::4], words[3::4]) if op in (EXEC, COPY)] if PROFILE else []
     sigs = [st + sum(x[0] == d[0] for x in descs[:i]) + k for i, d in enumerate(descs) for k in (0, 1)]
-    if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
+    if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], sigs))
 
 class NullAllocator(HostAllocator):
   def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage:

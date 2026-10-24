@@ -112,6 +112,15 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
+  def test_index_collapse_no_valid_lane(self):
+    x = Tensor.arange(4).cast(dtypes.float32)
+    data = Tensor([1., 2., 3., 4.]).realize()
+    for val, expected in ((2., 0.), (1., 2.), (9., 4.), (16., 0.)):
+      with self.subTest(val=val):
+        self.assertEqual(((x*x) == val).where(data, 0.).sum().item(), expected)
+    self.assertEqual(((x*x) == 2.).where(data, 0.).tolist(), [0.]*4)
+    self.assertEqual(((x*x) == 2.).reshape(2, 2).where(data.reshape(2, 2), 0.).sum(axis=1).tolist(), [0.]*2)
+
   def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
