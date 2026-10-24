@@ -2243,6 +2243,9 @@ def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int
       adds = ([Tensor(al[j])] if al is not None else []) + ([got[(t, j)]] if step > 1 else [])
       add_rows = ((t*size,) if al is not None else ()) + ((0,) if step > 1 else ())
       out = Tensor.empty(size, D, dtype=dtypes.half if step < n else dtypes.float32, device=devs[j])
+      if q8 := (split and D % 256 == 0 and bool(getenv("MOE_RS_Q8", 1))):
+        # the sums sent as int8 groups of 32 with their scale (q8_pack): a step adds what came (unpacked) and quantizes, the last in float
+        if step < n: out = Tensor.empty(size, D//32, 9, dtype=dtypes.uint32, device=devs[j])
       if split:
         # the weighted sum of its rows doesn't wait for the ring (the step adds it to what came, as the kernel does: the same values)
         # (after the step before's add on the device: the queue alternates them, a sum runs while the copy before it is on its way)
@@ -2250,7 +2253,7 @@ def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int
         if j in prev: buf = Tensor(buf.uop.after(prev[j].uop))
         local = Tensor.custom_kernel(buf, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]),
                                      fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=True, row0=t*size))[0]
-        y = prev[j] = Tensor.custom_kernel(out, local, *adds, fxn=functools.partial(_add_rows_kernel, add_rows=add_rows))[0]
+        y = prev[j] = Tensor.custom_kernel(out, local, *adds, fxn=functools.partial(_add_rows_kernel, add_rows=add_rows, q8=q8))[0]
       else:
         y = Tensor.custom_kernel(out, Tensor(dl[j]), Tensor(pl[j]), Tensor(wl[j]), *adds, fxn=functools.partial(_moe_combine_kernel, k=k,
                                  by_selection=True, row0=t*size, add_rows=add_rows))[0]
@@ -2259,7 +2262,8 @@ def moe_combine_scatter(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int
   return Tensor(UOp.mstack(*final).unshard(1))
 
 @functools.cache
-def _add_rows_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -> UOp:
+def _add_rows_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=(), q8:bool=False) -> UOp:
+  if q8: return _add_rows_q8_kernel(y, acc, *add, add_rows=add_rows)
   # y = acc + (the sum of the adds, each from its row), in float: the end of _moe_combine_kernel on its sum
   T, D = cast(tuple[int, int], y.shape)
   threads = 256
@@ -2270,6 +2274,29 @@ def _add_rows_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -> U
                             UOp.const(0, dtypes.float))
   return UOp.group(*[y[t, th * per + c].store((acc[t, th * per + c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
     arg=KernelInfo(name="moe_combine_add", opts_to_apply=()))
+
+def _add_rows_q8_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -> UOp:
+  # _add_rows_kernel with the sum before (the add from row 0) packed (q8_pack), y packed too (3D) or in float: a lane eight inputs
+  T, D = cast(int, acc.shape[0]), cast(int, acc.shape[1])
+  G = D // 32
+  tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
+  vals = [acc[token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  for a, r in zip(add, add_rows):
+    if len(a.shape) == 3: vals = [v + u for v, u in zip(vals, _q8_unpacked(a, token + r, group, sub))]
+    else: vals = [v + a[token + r, group*32 + sub*8 + i].load().float() for i, v in enumerate(vals)]
+  if len(y.shape) == 2:
+    stores = [y[token, group*32 + sub*8 + i].store(vals[i].cast(y.dtype)) for i in range(8)]
+  else:
+    mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in vals])
+    for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
+    d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+    quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in vals]
+    words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)])
+             for w in range(2)]
+    stores = [y[token, group, sub*2 + w].store(words[w]) for w in range(2)]
+    stores.append(y[token, group, (sub*0+8).valid(sub.eq(0))].store(d.bitcast(dtypes.uint32)))
+  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="moe_combine_add", opts_to_apply=()))
 
 # ******** manifold-constrained hyper-connections: the mixing coefficients ********
 
