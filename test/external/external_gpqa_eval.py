@@ -8,6 +8,8 @@ from tinygrad.helpers import fetch, colored
 TEMPLATE = "Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' " \
            "(without quotes) where LETTER is one of ABCD. Think step by step before answering.\n\n{Question}\n\nA) {A}\nB) {B}\nC) {C}\nD) {D}"
 ANSWER = r"(?i)Answer[ \t]*:[ \t]*\$?([A-D])\$?"
+# (an answer in markdown, "**Answer:** D", isn't simple-evals' format: the last one of these, reported as lenient)
+LENIENT = r"(?i)answer\W{0,6}\(?([A-D])\b"
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -38,8 +40,10 @@ if __name__ == "__main__":
     resp = client.chat.completions.create(model="test", messages=[{"role": "user", "content": prompt}], max_tokens=args.max_tokens,
                                           temperature=args.temperature)
     text = resp.choices[0].message.content or ""
-    m = re.search(ANSWER, text)
-    return {"question": i, "repeat": rep, "correct": correct, "given": m.group(1).upper() if m else None, "finish": resp.choices[0].finish_reason,
+    m, lenient = re.search(ANSWER, text), None
+    if m is None and (ms:=re.findall(LENIENT, text)): lenient = ms[-1].upper()
+    return {"question": i, "repeat": rep, "correct": correct, "given": m.group(1).upper() if m else lenient, "lenient": lenient is not None,
+            "tail": text[-300:], "finish": resp.choices[0].finish_reason,
             "tokens": resp.usage.completion_tokens if resp.usage else None, "seconds": time.perf_counter() - t0, "domain": row["High-level domain"]}
 
   results = [json.loads(l) for l in open(args.out)] if os.path.exists(args.out) else []
