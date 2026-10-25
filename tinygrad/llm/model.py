@@ -1132,9 +1132,9 @@ class GatedDeltaNetBlock(FFNBlock):
     if len(getattr(self, "slot_rec", [])) >= n: return
     S, SC = slot_states(self.config.spec_drafts)
     # (in one buffer of every device: slot_store writes what a step reads)
-    # (in float as the model's: a step reads and writes it, in half its rounding adds up over a long reply (copied code goes wrong). in half for
-    # many slots (SLOT_STATE_HALF, default past 32): their memory)
-    half = getenv("SLOT_STATE_HALF", -1) == 1 or (getenv("SLOT_STATE_HALF", -1) == -1 and n > 32)
+    # (in float as the model's: a step reads and writes it, in half its rounding adds up over a long reply. in half for many slots
+    # (SLOT_STATE_HALF, default past 8): their memory, a long context's model and 32 slots of it don't fit)
+    half = getenv("SLOT_STATE_HALF", -1) == 1 or (getenv("SLOT_STATE_HALF", -1) == -1 and n > 8)
     self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]), dtypes.half if half else None)
     pools = [_slot_pool(n, c, (SC, *c.shape[1:])) for c in self.conv_states]
     self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[i] for _, slots in pools] for i in range(n)]

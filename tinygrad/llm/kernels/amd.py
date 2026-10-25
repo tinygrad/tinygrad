@@ -1405,9 +1405,11 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   W = pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
   assert not triple or half, "three values a word are in half"
   assert pack is None or (two_shot and pack[0]*pack[1] <= 48), "packed: two shot, the values and the power of two in 56 bits"
-  def h(v:UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
+  # (in half saturated: a value past its range is the largest, not inf (inf - inf is NaN: the sums, the model's states after them))
+  def sat(v:UOp) -> UOp: return v.maximum(-65504.0).minimum(65504.0)
+  def h(v:UOp) -> UOp: return sat(v).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
   def unh(b:UOp) -> UOp: return b.cast(dtypes.uint16).bitcast(dtypes.half).float()
-  vals = [[(x[0, e*W + c].load().float().cast(dtypes.half).float() if half else x[0, e*W + c].load().float()) for c in range(W)] for e in els]
+  vals = [[(sat(x[0, e*W + c].load().float()).cast(dtypes.half).float() if half else x[0, e*W + c].load().float()) for c in range(W)] for e in els]
   def pow2(k:UOp) -> UOp: return ((k + 127).maximum(1).minimum(254).cast(dtypes.uint32) << 23).bitcast(dtypes.float32)
   def word(v:list[UOp]) -> UOp:
     if pack is not None:
@@ -1471,7 +1473,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     sums = [[ordered_sum([mine(s, v, got[s*EP + i])[c] for s in range(N)]) for c in range(W)] for i, v in enumerate(vals)]
     # (half: the sums in half on the owner too, packed: the packed ones)
     if pack is not None: sums = [value(word(sm)) for sm in sums]
-    elif half: sums = [[x.cast(dtypes.half).float() for x in sm] for sm in sums]
+    elif half: sums = [[sat(x).cast(dtypes.half).float() for x in sm] for sm in sums]
     published = push([mb[k][reg(N, l).valid(is_owner)].store(word(sm)) for k in range(1, N) for l, sm in zip(li, sums)], sent)
     got2 = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li])
     stores = [out[e*W + c].store(is_owner.where(sm[c], value(g)[c])) for e, sm, g in zip(els, sums, got2) for c in range(W)]

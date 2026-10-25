@@ -568,6 +568,21 @@ class TestStash(unittest.TestCase):
     ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
 
+  def test_corrupt_reply_fails(self):
+    # token 0 again and again (NaN logits) or an odd special token: the reply fails, the caches are dropped
+    from tinygrad.llm.serve import Request
+    from tinygrad.llm.serve import BatchStats
+    self.server.tok, self.server.stats, self.server.odd_ids, self.server.inflight = Mock(is_end=lambda t: False), BatchStats(), {999}, 0
+    self.server.stash, self.model._cached_tokens = {0: ([1, 2], 0)}, [1, 2, 3]
+    with patch("tinygrad.llm.serve.stderr_log"):
+      req = Request([1], "", None, 0.0)
+      self.assertTrue(all(self.server.emit(req, 0) for _ in range(15)))
+      self.assertFalse(self.server.emit(req, 0))
+      self.assertIsNotNone(req.error)
+      self.assertEqual((self.server.stash, self.model._cached_tokens), ({}, []))
+      req = Request([1], "", None, 0.0)
+      self.assertFalse(self.server.emit(req, 999))
+
   def test_kept_past_busy_slots(self):
     self.model._cached_tokens = list(range(50))
     self.server.stash_main({0, 1})

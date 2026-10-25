@@ -344,7 +344,7 @@ class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
   def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float):
     self.ids, self.log, self.max_tokens, self.temperature, self.rid = ids, log, max_tokens, temperature, next(_rids)
-    self.cancelled, self.finish_reason, self.checked = False, "stop", 0.0
+    self.cancelled, self.finish_reason, self.checked, self.zeros = False, "stop", 0.0, 0
     self.error: Exception|None = None
     self.out: queue.Queue[int|None] = queue.Queue()
     self.generated: list[int] = []
@@ -398,6 +398,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # the conversations kept in the free slots (their tokens, the slot's row of the last one's hidden state): a request that continues one is
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
+    specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
+    self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
     super().__init__(server_address, Handler)
 
   def serve_forever(self, poll_interval:float=0.5):
@@ -413,6 +415,14 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       stderr_log(req.log + f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
                  f"prefill:{(len(req.ids)-req.cache_start)/(req.pt-req.st):5.0f} tok/s\n" if self.verbose_prefill else "")
     if req.cancelled or self.tok.is_end(tok): return self.finish(req)
+    # (the model's states gone wrong (NaN: its argmax is token 0, again and again), or a special token no reply has: the reply fails, the
+    # caches are dropped, the client's retry is prefilled from the start)
+    req.zeros = req.zeros + 1 if tok == 0 else 0
+    if req.zeros >= getenv("CORRUPT_ZEROS", 16) or tok in self.odd_ids:
+      stderr_log(req.log + colored(f"the model went wrong after {len(req.generated)} tokens: the reply fails, the caches are dropped\n", "red"))
+      trace(f"corrupt req {req.rid} after {len(req.generated)}")
+      self.drop_caches()
+      return self.finish(req, RuntimeError("the model's states went wrong (dropped: retry)"))
     req.generated.append(tok)
     req.out.put(tok)
     self.stats.tokens += 1
@@ -507,6 +517,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not self.slots: return 0
     return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
                                                   len(t) < len(ids) and ids[:len(t)] == t])
+  def drop_caches(self):
+    """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
+    self.stash.clear()
+    if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
   def slot_taken(self, *slots:int):
     for i in slots: self.stash.pop(i, None)
   def slot_done(self, i:int, req:Request, active:dict):
@@ -515,7 +529,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     its last step's rows were its tokens at start..start+k, the first j+1 real ones: the states of its tokens up to the last of them it has
     """
     k = self.spec
-    if not k or not getenv("STASH", 1) or i <= max(active, default=-1): return
+    if not k or not getenv("STASH", 1) or i <= max(active, default=-1) or req.error is not None: return
     start = req.mtp - 1
     n = min(len(req.ids) + len(req.generated), req.pos)
     if n < max(self.STASH_MIN, start + 1) or n >= self.model.batch_ctx() - k - 2: return
