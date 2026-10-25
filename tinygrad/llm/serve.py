@@ -410,6 +410,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # the conversations kept in the free slots (their tokens, the slot's row of the last one's hidden state): a request that continues one is
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
+    # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
+    self.host: list[tuple[list[int], list[typing.Any]]] = []  # (the tokens, Transformer.host_save's buffers)
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
     super().__init__(server_address, Handler)
@@ -476,24 +478,38 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     before its last one (rows of nothing), a request takes the first free one
     """
     model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
-    if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or len(tokens) >= model.batch_ctx() or \
-       any(t == tokens for t, _ in self.stash.values()): return
+    if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
+       any(t == tokens for t, _ in self.host): return
+    if len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
     free = list(range(max(busy, default=-1)+1, self.slots))
-    # (an empty one, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the next one used)
+    # (an empty one, else host memory, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the
+    # next one used)
     kept = [i for i in self.stash if i in free]
+    if not [i for i in free if i not in self.stash] and getenv("HOST_STASH", 0.0) > 0: return self.host_save(tokens)
     if not (victims := [i for i in free if i not in self.stash] or ([random.choice(kept)] if kept else [])): return
     trace(f"stash_main victim {victims[0]} len {len(tokens)} busy {sorted(busy)}")
     model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
     self.stash.pop(victims[0], None)
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
+  def host_save(self, tokens:list[int]):
+    """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
+    if (budget:=getenv("HOST_STASH", 0.0) * 1e9) <= 0: return
+    st = time.perf_counter()
+    saved = self.model.host_save(len(tokens), getattr(self.model, "_spec_row", 0))
+    self.host = [(t, s) for t, s in self.host if tokens[:len(t)] != t] + [(tokens, saved)]
+    while len(self.host) > 1 and sum(m.nbytes for _, s in self.host for m in s) > budget: self.host.pop(0)
+    trace(f"host_save len {len(tokens)} {sum(m.nbytes for m in saved)/1e9:.2f} GB in {time.perf_counter()-st:.2f} s, {len(self.host)} kept")
+  def kept(self) -> list[list[int]]:
+    """the kept conversations' tokens: the model's, the slots', the host's"""
+    model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
+    return [list(model)] + [t for t, _ in list(self.stash.values())] + [t for t, _ in list(self.host)]
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation (the model's, or one in a slot) as its text but not its tokens (the model's reply
     tokenized again differently): the kept ones and the rest's, so the cache holds it
     """
     if not getenv("REUSE_TOKENS", 1): return ids
-    kept = [list(t) for t in ([getattr(self.model, "_cached_tokens", [])] + [t for t, _ in list(self.stash.values())]) if isinstance(t, list)]
-    for t in sorted(kept, key=len, reverse=True):
+    for t in sorted(self.kept(), key=len, reverse=True):
       if len(t) < 1000 or len(t) >= len(ids) + 1000 or ids[:len(t)] == t: continue
       if next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), len(t)) < len(t) // 2: continue
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
@@ -502,7 +518,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def miss_log(self, ids:list[int], start:int):
     """(CACHE_LOG) a request prefilled from much less than it shares with a kept conversation: where they differ"""
     if not self.slots or not getenv("CACHE_LOG", 1): return
-    kept = [list(getattr(self.model, "_cached_tokens", []))] + [t for t, _ in self.stash.values()]
+    kept = self.kept()
     def lcp(t:list[int]) -> int: return next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), min(len(t), len(ids)))
     n, t = max(((lcp(t), t) for t in kept), key=lambda x: x[0], default=(0, []))
     if n - start < 2000: return
@@ -519,7 +535,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model, have = self.model, self.model.get_start_pos(ids)
     best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and ids[:len(t)] == t),
                default=(0, -1))
-    if best[0] >= have + self.STASH_MIN:
+    host = max(((len(t), j) for j, (t, _) in enumerate(self.host) if len(t) < len(ids) and ids[:len(t)] == t), default=(0, -1))
+    if host[0] > best[0] and host[0] >= have + self.STASH_MIN:
+      self.stash_main(busy)
+      tokens, saved = self.host.pop(host[1])
+      self.host.append((tokens, saved))  # (the most recently used last)
+      st = time.perf_counter()
+      model.host_load(saved, len(tokens))
+      model._cached_tokens = list(tokens)
+      trace(f"host_load len {len(tokens)} in {time.perf_counter()-st:.2f} s")
+    elif best[0] >= have + self.STASH_MIN:
       self.stash_main(busy | {best[1]})
       tokens, hrow = self.stash[best[1]]
       trace(f"stash_load slot {best[1]} len {best[0]} hrow {hrow} busy {sorted(busy)} target {target}")
@@ -530,7 +555,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """the tokens of ids the model or a kept conversation has (where its prefill starts)"""
     if not self.slots: return 0
     return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
-                                                  len(t) < len(ids) and ids[:len(t)] == t])
+                                                  len(t) < len(ids) and ids[:len(t)] == t] +
+               [len(t) for t, _ in self.host if len(t) < len(ids) and ids[:len(t)] == t])
   # requests waiting this long are taken in turn, before the others the cache has more of
   STARVE = getenv("STARVE", 120.0)
   def next_alone(self, pending:list[Request]) -> int:
@@ -544,6 +570,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
+    self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
   def slot_taken(self, *slots:int):
     for i in slots: self.stash.pop(i, None)

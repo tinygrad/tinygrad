@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, _TinyJit
+from tinygrad.engine.realize import run_linear
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -1602,6 +1603,58 @@ class Transformer:
     self._slot_jits()
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
     self._slot_load_jit(*self._slot_store_vars(i, length, hrow))
+    self._ckpt_tokens, self._spec_row = [], 0
+
+  # ** a conversation's states in host memory (HOST_STASH in the server: the ones longer than a slot): its bytes copied, no kernel
+  def _host_parts(self, length:int, hrow:int) -> list[tuple[Buffer, int, int]]:
+    """
+    the bytes of the model's states at the end of its `length` tokens: (a device's buffer, offset, size) each. hrow: the row of _spec_h of the
+    last token's hidden state (row 0 when loaded)
+    """
+    parts:list[tuple[Buffer, int, int]] = []
+    def add(t:Tensor, axis:int, start:int, n:int):
+      # (the rows start..start+n of axis, a prefix of every device's buffer past the axes of one before it)
+      bufs = [u.buffer for u in t.uop.toposort() if u.op is Ops.BUFFER]
+      assert len(bufs) == 1, f"a state of {len(bufs)} buffers"
+      per = bufs[0].bufs if isinstance(bufs[0], MultiBuffer) else [bufs[0]]
+      shape = list(t.shape)
+      if isinstance(t.device, tuple) and (sa:=t.uop.axis) is not None: shape[sa] //= len(t.device)
+      assert prod(shape[:axis]) == 1 and per[0].nbytes == prod(shape) * t.dtype.itemsize, f"{t.shape} isn't rows of a buffer on axis {axis}"
+      row = int(prod(shape[axis+1:])) * t.dtype.itemsize
+      parts.extend((b, start*row, n*row) for b in per)
+    if self.config.spec_drafts: add(self._spec_h, 0, hrow, 1)
+    rp = length % (self.config.rewind + 1)
+    for b in self._slot_blocks():
+      if isinstance(b, GatedDeltaNetBlock):
+        for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t, 0, rp, 1)
+      if isinstance(b, MLATransformerBlock):
+        add(b.cache_k, 2, 0, length)
+        if (idx:=b.indexer) is not None:
+          pools = (length + idx.idx.kpool - 1) // idx.idx.kpool
+          if idx.sparse: add(idx.cache_pk, 0, 0, pools), add(idx.ring, 0, 0, int(idx.ring.shape[0]))
+          else: add(idx.cache_pk, 1, 0, pools), add(idx.cache_kg, 1, 0, pools * idx.idx.kpool)
+    return parts
+
+  def _host_copy(self, pairs:list[tuple[Buffer, Buffer]]):
+    # (in one go: the devices copy at once, CPU memory is the devices' to copy to (none staged))
+    run_linear(UOp(Ops.LINEAR, src=tuple(UOp.from_buffer(d, dtypes.uint8).store_call(UOp.from_buffer(s, dtypes.uint8)) for d, s in pairs)),
+               update_stats=False)
+    for d in dedup([b.device for p in pairs for b in p]): Device[d].synchronize()
+
+  def host_save(self, length:int, hrow:int=0) -> list[Buffer]:
+    """the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory (CPU buffers)"""
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
+    parts = [(b.view(n, off).ensure_allocated(), Buffer("CPU", n, options=BufferSpec(nolru=True)).allocate()) for b, off, n in
+             self._host_parts(length, hrow)]
+    self._host_copy([(h, b) for b, h in parts])
+    return [h for _, h in parts]
+
+  def host_load(self, saved:list[Buffer], length:int):
+    """the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them). sets no _cached_tokens"""
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
+    parts = self._host_parts(length, 0)
+    assert [n for _, _, n in parts] == [h.nbytes for h in saved], "saved by another model"
+    self._host_copy([(b.view(n, off).ensure_allocated(), h) for (b, off, n), h in zip(parts, saved)])
     self._ckpt_tokens, self._spec_row = [], 0
 
   def forward_batch(self, *positions:UOp) -> Tensor:

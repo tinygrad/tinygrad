@@ -1,4 +1,4 @@
-import unittest, threading, time, json
+import unittest, threading, time, json, os
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
 from tinygrad.llm.serve import StreamRouter, parse_tool_call
@@ -536,7 +536,33 @@ class TestStash(unittest.TestCase):
     def start(ids): return len(model._cached_tokens) if ids[:len(model._cached_tokens)] == model._cached_tokens else 0
     model.get_start_pos = Mock(side_effect=start)
     self.model, self.server = model, LLMServer.__new__(LLMServer)
-    self.server.model, self.server.slots, self.server.stash, self.server.STASH_MIN = model, 3, {}, 4
+    self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
+
+  def test_host(self):
+    # (HOST_STASH) one longer than a slot into host memory, loaded back when continued. a later turn replaces its older one, past the GB the
+    # least recently used is out
+    a, b, c = list(range(20000)), list(range(30000, 50000)), list(range(60000, 80000))
+    self.model.host_save = Mock(side_effect=lambda n, row: [Mock(nbytes=n)])
+    with patch.dict(os.environ, {"HOST_STASH": "0.000028"}):
+      self.model._cached_tokens = a[:15000]
+      self.server.stash_load(b, set())
+      self.model.host_save.assert_called_once_with(15000, 0)
+      self.model.slot_store.assert_not_called()
+      self.model._cached_tokens = b[:12000]
+      self.server.stash_load(a, set())  # a continues: b kept, a loaded back
+      self.model.host_load.assert_called_once()
+      self.assertEqual(self.model.host_load.call_args.args[1], 15000)
+      self.assertEqual((self.model._cached_tokens, [len(t) for t, _ in self.server.host]), (a[:15000], [12000, 15000]))
+      self.assertEqual(self.server.stash_hit(b, set()), 12000)
+      self.model._cached_tokens = a[:18000]
+      self.server.stash_load(c, set())  # a's later turn replaces its older one, b is out (the GB)
+      self.assertEqual([len(t) for t, _ in self.server.host], [18000])
+      # the slots full: one that fits a slot goes to host memory too
+      self.server.stash = {i: (list(range(100*i+1000, 100*i+1050)), 0) for i in range(3)}
+      self.model._cached_tokens = c[:5000]
+      self.server.stash_load(a, set())
+      self.model.slot_store.assert_not_called()
+      self.assertEqual([len(t) for t, _ in self.server.host], [5000, 18000])  # (a loaded: the most recently used)
 
   def test_switch_conversations(self):
     a, b = list(range(100)), list(range(1000, 1100))
