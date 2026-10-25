@@ -462,7 +462,8 @@ class TestLLMToolCalls(unittest.TestCase):
     except urllib.error.HTTPError as e: return e.code, e.read()
 
   @staticmethod
-  def anthropic_tools(): return [{"name":"read", "description":"Read a file", "input_schema":{"type":"object", "properties":{"path":{"type":"string"}}}}]
+  def anthropic_tools():
+    return [{"name":"read", "description":"Read a file", "input_schema":{"type":"object", "properties":{"path":{"type":"string"}}}}]
 
   def test_anthropic_stream_tool_use(self):
     self.set_output('<think>plan</think>before<tool_call>{"name":"read","arguments":{"path":"README.md"}}</tool_call>')
