@@ -535,8 +535,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     tokenized again differently): the kept ones and the rest's, so the cache holds it
     """
     if not getenv("REUSE_TOKENS", 1): return ids
-    for t in sorted(self.kept(), key=len, reverse=True):
-      if len(t) < 1000 or len(t) >= len(ids) + 1000 or ids[:len(t)] == t: continue
+    # (the conversations, and their checkpoints: the text after one can be different, a reply before it tokenized differently)
+    ck = c if isinstance(c:=getattr(self.model, "_ckpt_tokens", None), list) else []
+    for t in sorted(self.kept() + [list(ck)] + [t[:c] for t, _, c in list(self.host) if c], key=len, reverse=True):
+      if len(t) < 1000 or len(t) >= len(ids) + 1000: continue
+      if ids[:len(t)] == t: return ids
       if next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), len(t)) < len(t) // 2: continue
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids

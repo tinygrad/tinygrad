@@ -618,6 +618,13 @@ class TestStash(unittest.TestCase):
     rendered = "a" * 1500 + "bc" + "xyz"
     ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
+    # the text past a checkpoint different (the reply there came back changed): the tokens up to the checkpoint kept
+    self.model._cached_tokens, self.model._ckpt_tokens = kept + [ord("q")] * 50, kept
+    ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+    self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
+    # a prompt that continues one as it is: its tokens
+    self.model._ckpt_tokens = []
+    self.assertEqual(self.server.reuse_tokens("a" * 1500 + "q", [ord("a")] * 1500 + [ord("q")]), [ord("a")] * 1500 + [ord("q")])
 
   def test_corrupt_reply_fails(self):
     # token 0 again and again (NaN logits) or an odd special token: the reply fails, the caches are dropped
