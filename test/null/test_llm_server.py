@@ -544,9 +544,10 @@ class TestStash(unittest.TestCase):
     # use again), past the GB the free buffers then the least recently used are out
     a, b, c = list(range(20000)), list(range(30000, 50000)), list(range(60000, 80000))
     m = self.model
-    m.host_size = Mock(side_effect=lambda n: n)
+    m.host_size = Mock(side_effect=lambda n, ckpt: n)
     m.host_alloc = Mock(side_effect=lambda n: Mock(nbytes=n))
-    m.host_save = Mock(side_effect=lambda n, row, buf: buf)
+    m.host_save = Mock(side_effect=lambda n, row, buf, ckpt: buf)
+    m.host_ckpt = Mock(return_value=0)
     self.server.host_free = []
     with patch.dict(os.environ, {"HOST_STASH": "0.000045"}):
       m._cached_tokens = a[:15000]
@@ -557,11 +558,11 @@ class TestStash(unittest.TestCase):
       self.server.stash_load(a, set())  # a continues: b kept, a loaded back
       m.host_load.assert_called_once()
       self.assertEqual(m.host_load.call_args.args[1], 15000)
-      self.assertEqual((m._cached_tokens, [len(t) for t, _ in self.server.host]), (a[:15000], [12000, 15000]))
+      self.assertEqual((m._cached_tokens, [len(t) for t, _, _ in self.server.host]), (a[:15000], [12000, 15000]))
       self.assertEqual(self.server.stash_hit(b, set()), 12000)
       m._cached_tokens = a[:18000]
       self.server.stash_load(c, set())  # a's later turn replaces its older one, b is out (the GB)
-      self.assertEqual([len(t) for t, _ in self.server.host], [18000])
+      self.assertEqual([len(t) for t, _, _ in self.server.host], [18000])
       # the slots full: one that fits a slot goes to host memory too, in a free buffer it fits
       self.server.host_free = [Mock(nbytes=7000), Mock(nbytes=6000)]
       self.server.stash = {i: (list(range(100*i+1000, 100*i+1050)), 0) for i in range(3)}
@@ -570,7 +571,15 @@ class TestStash(unittest.TestCase):
       self.server.stash_load(a, set())
       m.slot_store.assert_not_called()
       self.assertEqual((m.host_alloc.call_count, m.host_save.call_args.args[2].nbytes), (allocs, 6000))
-      self.assertEqual([len(t) for t, _ in self.server.host], [5000, 18000])  # (a loaded: the most recently used)
+      self.assertEqual([len(t) for t, _, _ in self.server.host], [5000, 18000])  # (a loaded: the most recently used)
+      # a request that continues the prompt of a's last reply, not the reply: from its checkpoint
+      self.server.host = [(a[:18000], Mock(nbytes=1), 16000)]
+      m._cached_tokens = c[:5000]
+      ids = a[:16000] + [7, 8, 9]
+      self.assertEqual(self.server.stash_hit(ids, set()), 16000)
+      self.server.stash_load(ids, set())
+      self.assertEqual(m.host_load.call_args.kwargs, {"ckpt": True})
+      self.assertEqual((len(m._cached_tokens), m._ckpt_tokens), (18000, a[:16000]))
 
   def test_switch_conversations(self):
     a, b = list(range(100)), list(range(1000, 1100))

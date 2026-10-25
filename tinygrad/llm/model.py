@@ -1617,10 +1617,11 @@ class Transformer:
     self._ckpt_tokens, self._spec_row = [], 0
 
   # ** a conversation's states in host memory (HOST_STASH in the server: the ones longer than a slot): its bytes copied, no kernel
-  def _host_parts(self, length:int, hrow:int) -> list[tuple[Buffer, int, int]]:
+  def _host_parts(self, length:int, hrow:int, ckpt:bool=False) -> list[tuple[Buffer, int, int]]:
     """
     the bytes of the model's states at the end of its `length` tokens: (a device's buffer, offset, size) each. hrow: the row of _spec_h of the
-    last token's hidden state (row 0 when loaded)
+    last token's hidden state (row 0 when loaded). ckpt: and the checkpoint's (the states at the end of its prompt, _checkpoint: the caches
+    up to it are the conversation's)
     """
     parts:list[tuple[Buffer, int, int]] = []
     def add(t:Tensor, axis:int, start:int, n:int):
@@ -1644,6 +1645,8 @@ class Transformer:
           pools = (length + idx.idx.kpool - 1) // idx.idx.kpool
           if idx.sparse: add(idx.cache_pk, 0, 0, pools), add(idx.ring, 0, 0, int(idx.ring.shape[0]))
           else: add(idx.cache_pk, 1, 0, pools), add(idx.cache_kg, 1, 0, pools * idx.idx.kpool)
+    if ckpt:
+      for t in self._ckpt: add(t, 0, 0, int(t.shape[0]))
     return parts
 
   def _host_copy(self, pairs:list[tuple[Buffer, Buffer]]):
@@ -1655,31 +1658,38 @@ class Transformer:
   @staticmethod
   def _host_offsets(parts:list[tuple[Buffer, int, int]]) -> list[int]:
     return [round_up(o, 256) for o in itertools.accumulate((round_up(n, 256) for _, _, n in parts), initial=0)]
-  def host_size(self, length:int) -> int:
-    """the bytes of host memory host_save needs for a conversation of `length` tokens"""
-    return self._host_offsets(self._host_parts(length, 0))[-1]
+  def host_size(self, length:int, ckpt:bool=False) -> int:
+    """the bytes of host memory host_save needs for a conversation of `length` tokens (and its checkpoint)"""
+    return self._host_offsets(self._host_parts(length, 0, ckpt))[-1]
+  def host_ckpt(self, tokens:list[int]) -> int:
+    """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save can keep it)"""
+    ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
+    return len(ck) if 0 < len(ck) < len(tokens) and tokens[:len(ck)] == ck else 0
   @staticmethod
   def host_alloc(nbytes:int) -> Buffer:
     """host memory for host_save (CPU memory: the devices copy to it, mapped once)"""
     return Buffer("CPU", nbytes, options=BufferSpec(nolru=True)).allocate()
 
-  def host_save(self, length:int, hrow:int=0, into:Buffer|None=None) -> Buffer:
+  def host_save(self, length:int, hrow:int=0, into:Buffer|None=None, ckpt:bool=False) -> Buffer:
     """
     the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory: into (host_alloc'd, at least
-    host_size bytes: reused, the devices' mappings of it too) or a new one
+    host_size bytes: reused, the devices' mappings of it too) or a new one. ckpt: and its checkpoint's (see host_ckpt)
     """
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
-    parts = self._host_parts(length, hrow)
+    parts = self._host_parts(length, hrow, ckpt)
     offs = self._host_offsets(parts)
     buf = into if into is not None else self.host_alloc(offs[-1])
     assert buf.nbytes >= offs[-1], f"{buf.nbytes} bytes for {offs[-1]}"
     self._host_copy([(buf.view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), off in zip(parts, offs)])
     return buf
 
-  def host_load(self, saved:Buffer, length:int):
-    """the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them). sets no _cached_tokens"""
+  def host_load(self, saved:Buffer, length:int, ckpt:bool=False):
+    """
+    the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them, or from its checkpoint).
+    sets no _cached_tokens, _ckpt_tokens
+    """
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
-    parts = self._host_parts(length, 0)
+    parts = self._host_parts(length, 0, ckpt)
     offs = self._host_offsets(parts)
     assert saved.nbytes >= offs[-1], "saved by another model"
     self._host_copy([(b.view(n, o).ensure_allocated(), saved.view(n, off).ensure_allocated()) for (b, o, n), off in zip(parts, offs)])

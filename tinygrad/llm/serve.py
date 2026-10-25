@@ -415,8 +415,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
     # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
-    # (the tokens, Transformer.host_save's buffer). the buffers of the ones out are used again (new memory and its devices' mappings are slow)
-    self.host: list[tuple[list[int], typing.Any]] = []
+    # (the tokens, Transformer.host_save's buffer, the tokens of its checkpoint (the prompt of its last reply: a request can continue that one,
+    # its reply came back different) or 0). the buffers of the ones out are used again (new memory and its devices' mappings are slow)
+    self.host: list[tuple[list[int], typing.Any, int]] = []
     self.host_free: list[typing.Any] = []
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
@@ -485,7 +486,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
     if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
-       any(t == tokens for t, _ in self.host): return
+       any(t == tokens for t, _, _ in self.host): return
     if len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
     free = list(range(max(busy, default=-1)+1, self.slots))
     # (an empty one, else host memory, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the
@@ -500,28 +501,34 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def host_save(self, tokens:list[int]):
     """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
     if (budget:=getenv("HOST_STASH", 0.0) * 1e9) <= 0: return
-    st, need = time.perf_counter(), self.model.host_size(len(tokens))
+    ckpt = self.model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
+    st, need = time.perf_counter(), self.model.host_size(len(tokens), bool(ckpt))
     # (a free buffer it fits the best, else a new one with room for later turns)
     fits = [b for b in self.host_free if b.nbytes >= need]
     if fits: self.host_free.remove(buf:=min(fits, key=lambda b: b.nbytes))
     else:
       self.host_trim(budget - (cap:=round_up(need * 5 // 4, 4096)))
       buf = self.model.host_alloc(cap)
-    saved = self.model.host_save(len(tokens), getattr(self.model, "_spec_row", 0), buf)
-    self.host_free += [b for t, b in self.host if tokens[:len(t)] == t]
-    self.host = [(t, b) for t, b in self.host if tokens[:len(t)] != t] + [(tokens, saved)]
+    saved = self.model.host_save(len(tokens), getattr(self.model, "_spec_row", 0), buf, ckpt=bool(ckpt))
+    self.host_free += [b for t, b, _ in self.host if tokens[:len(t)] == t]
+    self.host = [(t, b, c) for t, b, c in self.host if tokens[:len(t)] != t] + [(tokens, saved, ckpt)]
     self.host_trim(budget)
-    trace(f"host_save len {len(tokens)} {need/1e9:.2f} GB in {time.perf_counter()-st:.2f} s, {len(self.host)} kept {len(self.host_free)} free "
-          f"{'new' if not fits else 'reused'}")
+    trace(f"host_save len {len(tokens)} ckpt {ckpt} {need/1e9:.2f} GB in {time.perf_counter()-st:.2f} s, {len(self.host)} kept "
+          f"{len(self.host_free)} free {'new' if not fits else 'reused'}")
   def host_trim(self, budget:float):
     """the host memory past the budget freed: the free buffers, the least recently used conversations"""
-    def total() -> int: return sum(b.nbytes for _, b in self.host) + sum(b.nbytes for b in self.host_free)
+    def total() -> int: return sum(b.nbytes for _, b, _ in self.host) + sum(b.nbytes for b in self.host_free)
     while self.host_free and total() > budget: self.host_free.pop(0)
     while len(self.host) > 1 and total() > budget: self.host.pop(0)
+  @staticmethod
+  def host_hit(e:tuple[list[int], typing.Any, int], ids:list[int]) -> int:
+    """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
+    t, _, ckpt = e
+    return next((n for n in (len(t), ckpt) if 0 < n < len(ids) and ids[:n] == t[:n]), 0)
   def kept(self) -> list[list[int]]:
     """the kept conversations' tokens: the model's, the slots', the host's"""
     model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
-    return [list(model)] + [t for t, _ in list(self.stash.values())] + [t for t, _ in list(self.host)]
+    return [list(model)] + [t for t, _ in list(self.stash.values())] + [t for t, _, _ in list(self.host)]
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation (the model's, or one in a slot) as its text but not its tokens (the model's reply
@@ -554,16 +561,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model, have = self.model, self.model.get_start_pos(ids)
     best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and ids[:len(t)] == t),
                default=(0, -1))
-    host = max(((len(t), j) for j, (t, _) in enumerate(self.host) if len(t) < len(ids) and ids[:len(t)] == t), default=(0, -1))
+    host = max(((self.host_hit(e, ids), j) for j, e in enumerate(self.host)), default=(0, -1))
     if host[0] > best[0] and host[0] >= have + self.STASH_MIN:
       # (out of the list while the model's is saved: not the one it frees memory of. back as the most recently used)
-      tokens, saved = self.host.pop(host[1])
+      tokens, saved, ckpt = self.host.pop(host[1])
       self.stash_main(busy)
-      self.host.append((tokens, saved))
+      self.host.append((tokens, saved, ckpt))
       st = time.perf_counter()
-      model.host_load(saved, len(tokens))
-      model._cached_tokens = list(tokens)
-      trace(f"host_load len {len(tokens)} in {time.perf_counter()-st:.2f} s")
+      model.host_load(saved, len(tokens), ckpt=bool(ckpt))
+      model._cached_tokens, model._ckpt_tokens = list(tokens), list(tokens[:ckpt])
+      trace(f"host_load len {len(tokens)} ckpt {ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")
     elif best[0] >= have + self.STASH_MIN:
       self.stash_main(busy | {best[1]})
       tokens, hrow = self.stash[best[1]]
@@ -576,7 +583,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not self.slots: return 0
     return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
                                                   len(t) < len(ids) and ids[:len(t)] == t] +
-               [len(t) for t, _ in self.host if len(t) < len(ids) and ids[:len(t)] == t])
+               [self.host_hit(e, ids) for e in self.host])
   # requests waiting this long are taken in turn, before the others the cache has more of
   STARVE = getenv("STARVE", 120.0)
   def next_alone(self, pending:list[Request]) -> int:
@@ -590,7 +597,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
-    self.host_free += [b for _, b in self.host]
+    self.host_free += [b for _, b, _ in self.host]
     self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
   def slot_taken(self, *slots:int):
