@@ -1465,6 +1465,9 @@ class Transformer:
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
     return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
+  def batch_sizes(self) -> tuple[int, ...]:
+    """the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size)"""
+    return tuple(sorted({s for s in self.BATCH_SIZES if s < n} | {n})) if (n:=self.batch_slots()) else ()
 
   def _init_slots(self, alloc:bool=True):
     """the slots of batched decoding (alloc: their memory too, else when the jits using them are linked: after the peak of loading)"""
@@ -1593,7 +1596,7 @@ class Transformer:
     """a step of batched decoding: rows (token, position, temperature) of the slots 0..len(rows)-1, their sampled tokens"""
     self._init_slots()
     n = len(rows)
-    m = next(s for s in self.BATCH_SIZES if s >= n)
+    m = next(s for s in self.batch_sizes() if s >= n)
     assert m <= self.batch_slots(), f"{n} rows, {self.batch_slots()} slots"
     # (the rows past n are the free slots' at position 0: what they write is overwritten when a sequence takes the slot)
     rows = rows + [(0, 0, 0.0)] * (m - n)
@@ -1734,7 +1737,7 @@ class Transformer:
     """
     self._init_slots()
     k, n = self.config.spec_drafts, len(seqs)
-    m = next(s for s in self.BATCH_SIZES if s >= n)
+    m = next(s for s in self.batch_sizes() if s >= n)
     assert m <= self.batch_slots(), f"{n} sequences, {self.batch_slots()} slots"
     # (the groups past n are the free slots' at position 0: what they write is overwritten when a sequence takes the slot)
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
@@ -2038,7 +2041,7 @@ class Transformer:
     self._alloc_slots()
     if self.batch_slots(): self.slot_store(0, 1)
     if self.batch_slots() > 1: self.slot_move(1, 0)
-    for m in self.BATCH_SIZES:
+    for m in self.batch_sizes():
       if m > self.batch_slots(): continue
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
       else: self.batch_step([(0, 1, 0.0)] * m)
@@ -2078,7 +2081,7 @@ class Transformer:
       def step(m:int) -> Callable[[], Any]:
         if self.config.spec_drafts: return lambda: self._bspec_jit(m)(*self._bspec_vars([(0, 0, 1)]*m))
         return lambda: self._batch_jit(m)(*self._batch_positions([0]*m))
-      for m in self.BATCH_SIZES:
+      for m in self.batch_sizes():
         jit = self._bspec_jit(m) if self.config.spec_drafts else self._batch_jit(m)
         if m <= slots: calls.append((jit, step(m)))
         jit.link_later = True

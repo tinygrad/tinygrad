@@ -409,8 +409,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             del active[i]
             pending.insert(0, req)
         # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
-        while active and (hi:=max(active)) >= len(active) and next(m for m in model.BATCH_SIZES if m >= hi+1) > \
-                         next(m for m in model.BATCH_SIZES if m >= len(active)):
+        while active and (hi:=max(active)) >= len(active) and next(m for m in model.batch_sizes() if m >= hi+1) > \
+                         next(m for m in model.batch_sizes() if m >= len(active)):
           lo = next(i for i in range(slots) if i not in active)
           model.slot_move(hi, lo)
           active[lo] = active.pop(hi)
