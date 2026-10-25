@@ -89,6 +89,7 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
   return msgs, tools or None
 
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
+ODD_TOKENS = ("[gMASK]", "[sMASK]", "[MASK]", "<sop>", "<eop>")
 
 def anthropic_events(chunks:typing.Iterator[dict], model:str, input_tokens:int) -> typing.Iterator[dict]:
   """the chat completion chunks of a reply as the Anthropic stream's events (thinking, text and tool_use content blocks)"""
@@ -195,8 +196,12 @@ class Handler(VizHandler):
     self.server.waiting.put(req)
     try:
       yield chunk({"role":"assistant", "content":""})
+      # (special tokens no reply has: the sign of a model gone wrong, logged)
+      specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
+      odd = {i for t, i in specials.items() if t in ODD_TOKENS}
       while (next_id := Handler.next_token(self, req)) is not None:
         out.append(next_id)
+        if next_id in odd: stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
         for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)): yield chunk({field:delta})
       if req.error is not None:
         yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
