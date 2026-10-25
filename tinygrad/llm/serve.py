@@ -504,6 +504,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
     model = self.model
     if (most:=int(getenv("HOST_STASH", 0.0) * 1e9) // model.HOST_CHUNK) <= 0: return
+    # (a short one is prefilled again about as fast as it's saved and loaded, ~0.5 s)
+    if len(tokens) < getenv("HOST_MIN", 4096): return
     st = time.perf_counter()
     ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
     k = model.host_chunks(len(tokens), bool(ckpt))
