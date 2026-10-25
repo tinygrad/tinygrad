@@ -577,11 +577,13 @@ class TestStash(unittest.TestCase):
     self.server.stash_main({0, 1, 2})  # no free slot past the busy ones
     self.model.slot_store.assert_not_called()
 
-  def test_oldest_replaced(self):
+  def test_one_replaced(self):
     for i in range(4):
       self.model._cached_tokens = list(range(i*100, i*100+50))
       self.server.stash_main(set())
-    self.assertEqual(sorted(t[0] for t, _ in self.server.stash.values()), [100, 200, 300])
+    firsts = sorted(t[0] for t, _ in self.server.stash.values())
+    self.assertEqual(len(firsts), 3)
+    self.assertIn(300, firsts)  # the newest is kept, one of the others replaced
 
   def test_batched_done(self):
     # a request done in slot 2 (its last step's rows at 100..102, two drafts accepted, an end token after them): the states of its tokens

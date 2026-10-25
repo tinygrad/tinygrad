@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, queue, re, select, socket, socketserver, threading, time, traceback, typing, uuid
+import json, pathlib, queue, random, re, select, socket, socketserver, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -455,7 +455,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or len(tokens) >= model.batch_ctx() or \
        any(t == tokens for t, _ in self.stash.values()): return
     free = list(range(max(busy, default=-1)+1, self.slots))
-    if not (victims := [i for i in free if i not in self.stash] or [i for i in self.stash if i in free]): return
+    # (an empty one, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the next one used)
+    kept = [i for i in self.stash if i in free]
+    if not (victims := [i for i in free if i not in self.stash] or ([random.choice(kept)] if kept else [])): return
     trace(f"stash_main victim {victims[0]} len {len(tokens)} busy {sorted(busy)}")
     model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
     self.stash.pop(victims[0], None)
