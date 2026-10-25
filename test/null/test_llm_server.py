@@ -548,7 +548,10 @@ class TestStash(unittest.TestCase):
     m.host_chunks = Mock(side_effect=lambda n, ckpt: (n + 999) // 1000)
     m.host_alloc = Mock(side_effect=lambda: Mock())
     m.host_ckpt = Mock(return_value=0)
+    from tinygrad.helpers import getenv
+    self.addCleanup(getenv.cache_clear)  # (getenv is cached: the patched one not past this test)
     with patch.dict(os.environ, {"HOST_STASH": "0.000045"}):  # (45 chunks)
+      getenv.cache_clear()
       m._cached_tokens = a[:15000]
       self.server.stash_load(b, set())
       self.assertEqual((m.host_save.call_args.args[:2], len(m.host_save.call_args.args[2])), ((15000, 0), 15))

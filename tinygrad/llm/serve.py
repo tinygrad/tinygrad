@@ -522,6 +522,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.host.append((tokens, chunks, ckpt))
     trace(f"host_save len {len(tokens)} ckpt {ckpt} {k} chunks ({made} new) in {time.perf_counter()-st:.2f} s, {len(self.host)} kept, "
           f"{len(self.host_free)} free")
+  def host_prepare(self):
+    """(HOST_STASH) idle: a chunk of host memory made ahead (its memory and its mappings on the devices, ~0.7 s a GB: not a request's wait)"""
+    if self.host_made < int(getenv("HOST_STASH", 0.0) * 1e9) // getattr(self.model, "HOST_CHUNK", 1 << 30) and getenv("HOST_PREPARE", 1):
+      self.host_free.append(self.model.host_alloc())
+      self.host_made += 1
   @staticmethod
   def host_hit(e:tuple[list[int], typing.Any, int], ids:list[int]) -> int:
     """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
@@ -668,7 +673,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # (a wait of a while at a time: a Ctrl-C stops the server, a lock's wait without a timeout doesn't see it)
         while not active and not pending:
           try: pending.append(self.waiting.get(timeout=0.2))
-          except queue.Empty: pass
+          except queue.Empty: self.host_prepare()
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
         self.inflight = len(active) + len(pending)

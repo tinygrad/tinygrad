@@ -1677,8 +1677,10 @@ class Transformer:
     ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
     return len(ck) if 0 < len(ck) < len(tokens) and tokens[:len(ck)] == ck else 0
   def host_alloc(self) -> Buffer:
-    """a chunk of host memory for host_save (CPU memory: the devices copy to it, mapped once: used again, not made again)"""
-    return Buffer("CPU", self.HOST_CHUNK, options=BufferSpec(nolru=True)).allocate()
+    """a chunk of host memory for host_save (CPU memory: the devices copy to it, mapped on them here once: used again, not made again)"""
+    buf = Buffer("CPU", self.HOST_CHUNK, options=BufferSpec(nolru=True)).allocate()
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): buf.get_buf(d)
+    return buf
 
   def host_save(self, length:int, hrow:int, chunks:list[Buffer], ckpt:bool=False):
     """
