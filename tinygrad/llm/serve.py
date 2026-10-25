@@ -529,6 +529,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not self.slots: return 0
     return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
                                                   len(t) < len(ids) and ids[:len(t)] == t])
+  # requests waiting this long are taken in turn, before the others the cache has more of
+  STARVE = getenv("STARVE", 120.0)
+  def next_alone(self, pending:list[Request]) -> int:
+    """
+    the next request alone: the one whose conversation the model or a slot has the most of (agents taking turns: one's next request often comes
+    while the others wait, taking it first keeps its cache), but the first one if it has waited too long
+    """
+    if len(pending) == 1 or not self.slots or time.perf_counter() - pending[0].st > self.STARVE: return 0
+    return max(range(len(pending)), key=lambda i: (self.stash_hit(pending[i].ids + pending[i].generated, set()), -i))
+
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
@@ -603,7 +613,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if not active and pending:
           # one request (or one that doesn't fit a slot): alone
           if len(pending) == 1 or not self.batchable(pending[0]):
-            req = pending.pop(0)
+            req = pending.pop(self.next_alone(pending))
             try:
               if self.run_alone(req): active[0] = req
             except Exception as e:

@@ -591,6 +591,15 @@ class TestStash(unittest.TestCase):
       req = Request([1], "", None, 0.0)
       self.assertFalse(self.server.emit(req, 999))
 
+  def test_next_alone(self):
+    # the request whose conversation the model has goes first, unless the first has waited too long
+    from tinygrad.llm.serve import Request
+    self.model._cached_tokens = list(range(50))
+    reqs = [Request(list(range(1000, 1060)), "", None, 0.0), Request(list(range(60)), "", None, 0.0)]
+    self.assertEqual(self.server.next_alone(reqs), 1)
+    reqs[0].st -= 1000
+    self.assertEqual(self.server.next_alone(reqs), 0)
+
   def test_kept_past_busy_slots(self):
     self.model._cached_tokens = list(range(50))
     self.server.stash_main({0, 1})
