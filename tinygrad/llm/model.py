@@ -1535,10 +1535,13 @@ class Transformer:
     Tensor.realize(*copies)
 
   def _slot_load_copy(self, slot:UOp, rp:UOp, wp:UOp, wpc:UOp, hrow:UOp):
-    """the reverse of _slot_copy: a slot's states back into the model's (a sequence stored there continues alone)"""
+    """
+    the reverse of _slot_copy: a slot's states back into the model's (a sequence stored there continues alone). speculative decoding: the hidden
+    state of the last token is the slot's row hrow (0 if stored by _slot_copy, a batched step's last verified row else), the model's row 0
+    """
     copies:list[Tensor] = []
     def rows(t:Tensor, start:UOp|int, n:int=1) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
-    if (k:=self.config.spec_drafts): copies.append(rows(self._spec_h, hrow).assign(rows(self.pool_spec_h, slot*2*(k+1))))
+    if (k:=self.config.spec_drafts): copies.append(rows(self._spec_h, 0).assign(rows(self.pool_spec_h, slot*2*(k+1) + hrow)))
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock):
         S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
@@ -1590,15 +1593,15 @@ class Transformer:
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
     self._slot_jit(*self._slot_store_vars(i, length, hrow))
 
-  def slot_load(self, i:int, length:int):
+  def slot_load(self, i:int, length:int, hrow:int=0):
     """
-    the states of slot i (a sequence of `length` tokens stored by slot_store) back into the model's: it continues alone from them (the cache of
-    a conversation kept in a slot). the caller sets _cached_tokens
+    the states of slot i (a sequence of `length` tokens, stored by slot_store or decoded batched there) back into the model's: it continues alone
+    from them (the cache of a conversation kept in a slot). hrow: the slot's row of the last token's hidden state. the caller sets _cached_tokens
     """
     self._init_slots()
     self._slot_jits()
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
-    self._slot_load_jit(*self._slot_store_vars(i, length, 0))
+    self._slot_load_jit(*self._slot_store_vars(i, length, hrow))
     self._ckpt_tokens, self._spec_row = [], 0
 
   def forward_batch(self, *positions:UOp) -> Tensor:

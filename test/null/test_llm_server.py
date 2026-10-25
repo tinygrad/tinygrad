@@ -532,13 +532,13 @@ class TestStash(unittest.TestCase):
     self.model._cached_tokens = a[:50]
     self.server.stash_load(b, set())  # b overwrites a: a is kept
     self.model.slot_store.assert_called_once_with(0, 50, 0)
-    self.assertEqual(self.server.stash, {0: a[:50]})
+    self.assertEqual(self.server.stash, {0: (a[:50], 0)})
     self.model._cached_tokens = b[:60]
     self.server.stash_load(a, set())  # a continues: b kept, a loaded back
     self.model.slot_store.assert_called_with(1, 60, 0)
-    self.model.slot_load.assert_called_once_with(0, 50)
+    self.model.slot_load.assert_called_once_with(0, 50, 0)
     self.assertEqual(self.model._cached_tokens, a[:50])
-    self.assertEqual(self.server.stash, {0: a[:50], 1: b[:60]})
+    self.assertEqual(self.server.stash, {0: (a[:50], 0), 1: (b[:60], 0)})
 
   def test_kept_past_busy_slots(self):
     self.model._cached_tokens = list(range(50))
@@ -553,7 +553,19 @@ class TestStash(unittest.TestCase):
     for i in range(4):
       self.model._cached_tokens = list(range(i*100, i*100+50))
       self.server.stash_main(set())
-    self.assertEqual(sorted(t[0] for t in self.server.stash.values()), [100, 200, 300])
+    self.assertEqual(sorted(t[0] for t, _ in self.server.stash.values()), [100, 200, 300])
+
+  def test_batched_done(self):
+    # a request done in slot 2 (its last step's rows at 100..102, two drafts accepted, an end token after them): the states of its tokens
+    from tinygrad.llm.serve import Request
+    self.server.spec = 2
+    req = Request(list(range(90)), "", None, 0.0)
+    req.generated = list(range(1000, 1012))  # positions 90..101, the end token (not kept) at 102
+    req.mtp, req.j, req.par, req.pos = 101, 2, 0, 103
+    self.server.slot_done(2, req, {0: None})
+    self.assertEqual(self.server.stash, {2: (list(range(90)) + list(range(1000, 1012)), 3 + 1)})
+    self.server.slot_done(1, req, {0: None, 2: None})  # a slot a step writes (before an active one): not kept
+    self.assertNotIn(1, self.server.stash)
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
