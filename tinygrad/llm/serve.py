@@ -90,6 +90,7 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
   return msgs, tools or None
 
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
+PING = -1  # (Handler.next_token: no token for a while)
 ODD_TOKENS = ("[gMASK]", "[sMASK]", "[MASK]", "<sop>", "<eop>")
 
 def anthropic_events(chunks:typing.Iterator[dict], model:str, input_tokens:int) -> typing.Iterator[dict]:
@@ -103,6 +104,9 @@ def anthropic_events(chunks:typing.Iterator[dict], model:str, input_tokens:int) 
     if kind == "thinking": yield {"type": "content_block_delta", "index": index, "delta": {"type": "signature_delta", "signature": ""}}
     if kind is not None: yield {"type": "content_block_stop", "index": index}
   for c in chunks:
+    if c.get("ping"):
+      yield {"type": "ping"}
+      continue
     if "error" in c:
       yield {"type": "error", "error": {"type": "api_error", "message": c["error"]["message"]}}
       return
@@ -134,6 +138,7 @@ def anthropic_message(events:typing.Iterator[dict]) -> dict:
   msg:dict[str, typing.Any] = {}
   for e in events:
     if e["type"] == "error": return e
+    if e["type"] == "ping": continue
     if e["type"] == "message_start": msg = e["message"]
     elif e["type"] == "content_block_start": msg["content"].append(dict(e["content_block"]))
     elif e["type"] == "content_block_delta":
@@ -183,7 +188,7 @@ class Handler(VizHandler):
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False, log:str=""):
+                reasoning:bool=False, log:str="", keepalive:float|None=None):
     tok = self.server.tok
     prompt_tokens = len(ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
@@ -200,7 +205,10 @@ class Handler(VizHandler):
       # (special tokens no reply has: the sign of a model gone wrong, logged)
       specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
       odd = {i for t, i in specials.items() if t in ODD_TOKENS}
-      while (next_id := Handler.next_token(self, req)) is not None:
+      while (next_id := Handler.next_token(self, req, keepalive)) is not None:
+        if next_id == PING:
+          yield {"ping": True}
+          continue
         out.append(next_id)
         if next_id in odd:
           stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
@@ -238,9 +246,12 @@ class Handler(VizHandler):
       readable, _, _ = select.select([self.connection], [], [], 0)
       return bool(readable) and not self.connection.recv(1, socket.MSG_PEEK)
     except (OSError, ValueError, TypeError): return False
-  def next_token(self, req:Request) -> int|None:
+  def next_token(self, req:Request, keepalive:float|None=None) -> int|None:
     # (the client is checked a second at most apart, also while tokens come: one gone mid reply stops the model, not its end)
+    # (keepalive: PING after that long without a token, a request waiting for the model: a stream idle that long the client gives up on)
+    st = time.perf_counter()
     while True:
+      if keepalive is not None and time.perf_counter() - st > keepalive: return PING
       if time.perf_counter() - req.checked > 1.0:
         req.checked = time.perf_counter()
         if Handler.client_gone(self):
@@ -314,7 +325,8 @@ class Handler(VizHandler):
                                         "message": f"prompt is too long: {len(ids)} tokens > {n-1} maximum"}}).encode(), status_code=400)
     # (the API's default temperature is 1)
     chunks = self.run_model(ids, body.get("model", self.server.model_name), True, max_tokens=body.get("max_tokens"),
-                            temperature=float(body.get("temperature", 1.0)), reasoning=rendered.rstrip().endswith("<think>"), log=log)
+                            temperature=float(body.get("temperature", 1.0)), reasoning=rendered.rstrip().endswith("<think>"), log=log,
+                            keepalive=getenv("KEEPALIVE", 15.0) if body.get("stream") else None)
     events = anthropic_events(chunks, body.get("model", self.server.model_name), len(ids))
     try:
       if body.get("stream"):

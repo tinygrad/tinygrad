@@ -515,6 +515,14 @@ class TestLLMToolCalls(unittest.TestCase):
     for content in ("update", [{"type":"text", "text":"update"}]):
       self.assertEqual(anthropic_messages({"messages":[{"role":"system", "content":content}]})[0], [{"role":"system", "content":"update"}])
 
+  def test_anthropic_ping(self):
+    # a request waiting for the model: ping events in the stream, nothing in the reply
+    from tinygrad.llm.serve import anthropic_events, anthropic_message
+    chunk = lambda d: {"choices":[{"index":0, "delta":d, "finish_reason":None}]}
+    chunks = [chunk({"role":"assistant", "content":""}), {"ping":True}, {"ping":True}, chunk({"content":"hi"})]
+    self.assertEqual([e["type"] for e in anthropic_events(iter(chunks), "m", 3)][:4], ["message_start", "ping", "ping", "content_block_start"])
+    self.assertEqual(anthropic_message(anthropic_events(iter(chunks), "m", 3))["content"], [{"type":"text", "text":"hi"}])
+
   def test_anthropic_count_tokens(self):
     status, data = self.anthropic({"model":"m", "messages":[{"role":"user", "content":"hi"}]}, "/v1/messages/count_tokens")
     self.assertEqual((status, json.loads(data)), (200, {"input_tokens":3}))
