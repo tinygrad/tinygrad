@@ -524,7 +524,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           f"{len(self.host_free)} free")
   def host_prepare(self):
     """(HOST_STASH) idle: a chunk of host memory made ahead (its memory and its mappings on the devices, ~0.7 s a GB: not a request's wait)"""
-    if self.host_made < int(getenv("HOST_STASH", 0.0) * 1e9) // getattr(self.model, "HOST_CHUNK", 1 << 30) and getenv("HOST_PREPARE", 1):
+    if (gb:=getenv("HOST_STASH", 0.0)) > 0 and getenv("HOST_PREPARE", 1) and self.host_made < int(gb * 1e9) // self.model.HOST_CHUNK:
       self.host_free.append(self.model.host_alloc())
       self.host_made += 1
   @staticmethod
