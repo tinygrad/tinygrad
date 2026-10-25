@@ -1173,9 +1173,12 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
   splits = layer.in_features // in_features
-  if Q8_ROWS_I8[0] and tokens > 64 and tokens % 64 and tokens % 16 == 0 and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
-    # (the rows of batched decoding that aren't whole tiles of the kernels (80 sequences: 240): padded to tiles of 64, the extra rows sliced off)
-    out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, round_up(tokens, 64) - tokens), (0, 0))), reduce, None, split, half_out)
+  # (the rows of batched decoding that aren't whole tiles of the kernels (80 sequences: 240) padded to tiles of 64, a few more than a decode
+  # kernel's (8 sequences: 24 rows) to the 16 rows of the int8 tensor cores, the extra rows sliced off)
+  pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 and tokens % 16 == 0 else \
+        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
+  if Q8_ROWS_I8[0] and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
+    out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
     out = out[:, :tokens] if splits > 1 and not reduce else out[:tokens]
     return out.reshape(*((splits,) if splits > 1 and not reduce else ()), *x.shape[:-1], out_features)
   assert (layer.shard_axis == 1) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.shard_axis}"
@@ -2561,7 +2564,9 @@ def mla_bmm(x:Tensor, w:Tensor) -> Tensor:
   O = w.shape[1]
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   out = Tensor.empty(int(H), int(T), int(O), dtype=dtypes.float32, device=x.device, axis=None if axis is None else 0)
-  wave = getenv("MLA_BMM_WAVE", 1) and int(I) % (WARP_SIZE*8) == 0 and (int(H)*int(O)) % 4 == 0 and int(T) <= 8 and w.dtype == dtypes.half
+  # (a wave a row up to MLA_BMM_WAVE_T tokens: speculative decoding, batched too)
+  wave = getenv("MLA_BMM_WAVE", 1) and int(I) % (WARP_SIZE*8) == 0 and (int(H)*int(O)) % 4 == 0 and int(T) <= getenv("MLA_BMM_WAVE_T", 32) and \
+    w.dtype == dtypes.half
   fxn = _mla_bmm_wave_kernel if wave else _mla_bmm_kernel
   xin = x.reshape(H, T, I).cast(dtypes.half) if wave else x.reshape(H, T, I).contiguous()
   return Tensor.custom_kernel(out, xin, w, fxn=fxn)[0].reshape(B, H, T, O)
