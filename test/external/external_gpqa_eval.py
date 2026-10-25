@@ -51,6 +51,7 @@ if __name__ == "__main__":
         with open(args.out, "a") as f: f.write(json.dumps(r) + "\n")
         acc = sum(x["given"] == x["correct"] for x in results) / len(results)
         toks = sum(x["tokens"] or 0 for x in results)
-        print(f"{len(results):4d}/{len(rows)*args.repeats}  q {r['question']:3d}  {r['correct']} {colored(str(r['given']), 'green' if r['given'] == r['correct'] else 'red')}"
+        given = colored(str(r['given']), 'green' if r['given'] == r['correct'] else 'red')
+        print(f"{len(results):4d}/{len(rows)*args.repeats}  q {r['question']:3d}  {r['correct']} {given}"
               f"  {r['finish']:6s} {r['tokens'] or 0:6d} tok  acc {acc*100:5.1f}%  mean {toks/len(results):6.0f} tok  "
               f"{(time.perf_counter()-st)/60:6.1f} min", flush=True)
