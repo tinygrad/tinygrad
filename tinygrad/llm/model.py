@@ -1478,7 +1478,11 @@ class Transformer:
     return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
   def batch_sizes(self) -> tuple[int, ...]:
-    """the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size)"""
+    """
+    the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size). none with
+    BATCH_DECODE=0 (no batched decoding, the slots only keep conversations: its steps aren't captured)
+    """
+    if not getenv("BATCH_DECODE", 1): return ()
     return tuple(sorted({s for s in self.BATCH_SIZES if s < n} | {n})) if (n:=self.batch_slots()) else ()
 
   def _init_slots(self, alloc:bool=True):
@@ -1655,44 +1659,48 @@ class Transformer:
                update_stats=False)
     for d in dedup([b.device for p in pairs for b in p]): Device[d].synchronize()
 
-  @staticmethod
-  def _host_offsets(parts:list[tuple[Buffer, int, int]]) -> list[int]:
-    return [round_up(o, 256) for o in itertools.accumulate((round_up(n, 256) for _, _, n in parts), initial=0)]
-  def host_size(self, length:int, ckpt:bool=False) -> int:
-    """the bytes of host memory host_save needs for a conversation of `length` tokens (and its checkpoint)"""
-    return self._host_offsets(self._host_parts(length, 0, ckpt))[-1]
+  HOST_CHUNK = getenv("HOST_CHUNK", 1 << 30)  # the bytes of a buffer of host memory (host_alloc): a conversation takes as many as it needs
+  def _host_layout(self, parts:list[tuple[Buffer, int, int]]) -> list[tuple[int, int]]:
+    """every part's (chunk, offset): one after the other, the next chunk when it doesn't fit (aligned to 256 bytes)"""
+    out, chunk, off = [], 0, 0
+    for _, _, n in parts:
+      assert n <= self.HOST_CHUNK, f"a part of {n} bytes, chunks of {self.HOST_CHUNK}"
+      if off + n > self.HOST_CHUNK: chunk, off = chunk + 1, 0
+      out.append((chunk, off))
+      off = round_up(off + n, 256)
+    return out
+  def host_chunks(self, length:int, ckpt:bool=False) -> int:
+    """the chunks of host memory (host_alloc) host_save needs for a conversation of `length` tokens (and its checkpoint)"""
+    return self._host_layout(self._host_parts(length, 0, ckpt))[-1][0] + 1
   def host_ckpt(self, tokens:list[int]) -> int:
     """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save can keep it)"""
     ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
     return len(ck) if 0 < len(ck) < len(tokens) and tokens[:len(ck)] == ck else 0
-  @staticmethod
-  def host_alloc(nbytes:int) -> Buffer:
-    """host memory for host_save (CPU memory: the devices copy to it, mapped once)"""
-    return Buffer("CPU", nbytes, options=BufferSpec(nolru=True)).allocate()
+  def host_alloc(self) -> Buffer:
+    """a chunk of host memory for host_save (CPU memory: the devices copy to it, mapped once: used again, not made again)"""
+    return Buffer("CPU", self.HOST_CHUNK, options=BufferSpec(nolru=True)).allocate()
 
-  def host_save(self, length:int, hrow:int=0, into:Buffer|None=None, ckpt:bool=False) -> Buffer:
+  def host_save(self, length:int, hrow:int, chunks:list[Buffer], ckpt:bool=False):
     """
-    the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory: into (host_alloc'd, at least
-    host_size bytes: reused, the devices' mappings of it too) or a new one. ckpt: and its checkpoint's (see host_ckpt)
+    the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory: chunks (host_alloc'd, as many
+    as host_chunks). ckpt: and its checkpoint's (see host_ckpt)
     """
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
     parts = self._host_parts(length, hrow, ckpt)
-    offs = self._host_offsets(parts)
-    buf = into if into is not None else self.host_alloc(offs[-1])
-    assert buf.nbytes >= offs[-1], f"{buf.nbytes} bytes for {offs[-1]}"
-    self._host_copy([(buf.view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), off in zip(parts, offs)])
-    return buf
+    layout = self._host_layout(parts)
+    assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
+    self._host_copy([(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)])
 
-  def host_load(self, saved:Buffer, length:int, ckpt:bool=False):
+  def host_load(self, chunks:list[Buffer], length:int, ckpt:bool=False):
     """
     the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them, or from its checkpoint).
     sets no _cached_tokens, _ckpt_tokens
     """
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
     parts = self._host_parts(length, 0, ckpt)
-    offs = self._host_offsets(parts)
-    assert saved.nbytes >= offs[-1], "saved by another model"
-    self._host_copy([(b.view(n, o).ensure_allocated(), saved.view(n, off).ensure_allocated()) for (b, o, n), off in zip(parts, offs)])
+    layout = self._host_layout(parts)
+    assert len(chunks) > layout[-1][0], "saved by another model"
+    self._host_copy([(b.view(n, o).ensure_allocated(), chunks[c].view(n, off).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)])
     self._ckpt_tokens, self._spec_row = [], 0
 
   def forward_batch(self, *positions:UOp) -> Tensor:
@@ -1821,7 +1829,7 @@ class Transformer:
     the prompts prefilled together into slots (batch_prefill) at most: 0 if not (sequence parallel prefill of hybrid blocks). its memory: with a
     context of 64K or less (as the slots of more sequences)
     """
-    return self.BPF_G if self.batch_slots() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
+    return self.BPF_G if self.batch_sizes() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
       self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
   def _bpf_jit(self):
     if not hasattr(self, "_bpf_jit_"): self._bpf_jit_ = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)

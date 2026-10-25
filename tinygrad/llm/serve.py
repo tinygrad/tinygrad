@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, pathlib, queue, random, re, select, socket, socketserver, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
-from tinygrad.helpers import DEBUG, colored, stderr_log, getenv, round_up
+from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
@@ -415,10 +415,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
     # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
-    # (the tokens, Transformer.host_save's buffer, the tokens of its checkpoint (the prompt of its last reply: a request can continue that one,
-    # its reply came back different) or 0). the buffers of the ones out are used again (new memory and its devices' mappings are slow)
-    self.host: list[tuple[list[int], typing.Any, int]] = []
+    # (the tokens, the chunks of host memory of Transformer.host_save, the tokens of its checkpoint (the prompt of its last reply: a request can
+    # continue that one, its reply came back different) or 0). the chunks of the ones out are used again (new memory and its devices' mappings
+    # are slow, ~1 s a GB)
+    self.host: list[tuple[list[int], list[typing.Any], int]] = []
     self.host_free: list[typing.Any] = []
+    self.host_made = 0  # (the chunks made: never freed, used again)
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
     super().__init__(server_address, Handler)
@@ -500,26 +502,26 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
   def host_save(self, tokens:list[int]):
     """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
-    if (budget:=getenv("HOST_STASH", 0.0) * 1e9) <= 0: return
-    ckpt = self.model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
-    st, need = time.perf_counter(), self.model.host_size(len(tokens), bool(ckpt))
-    # (a free buffer it fits the best, else a new one with room for later turns)
-    fits = [b for b in self.host_free if b.nbytes >= need]
-    if fits: self.host_free.remove(buf:=min(fits, key=lambda b: b.nbytes))
-    else:
-      self.host_trim(budget - (cap:=round_up(need * 5 // 4, 4096)))
-      buf = self.model.host_alloc(cap)
-    saved = self.model.host_save(len(tokens), getattr(self.model, "_spec_row", 0), buf, ckpt=bool(ckpt))
-    self.host_free += [b for t, b, _ in self.host if tokens[:len(t)] == t]
-    self.host = [(t, b, c) for t, b, c in self.host if tokens[:len(t)] != t] + [(tokens, saved, ckpt)]
-    self.host_trim(budget)
-    trace(f"host_save len {len(tokens)} ckpt {ckpt} {need/1e9:.2f} GB in {time.perf_counter()-st:.2f} s, {len(self.host)} kept "
-          f"{len(self.host_free)} free {'new' if not fits else 'reused'}")
-  def host_trim(self, budget:float):
-    """the host memory past the budget freed: the free buffers, the least recently used conversations"""
-    def total() -> int: return sum(b.nbytes for _, b, _ in self.host) + sum(b.nbytes for b in self.host_free)
-    while self.host_free and total() > budget: self.host_free.pop(0)
-    while len(self.host) > 1 and total() > budget: self.host.pop(0)
+    model = self.model
+    if (most:=int(getenv("HOST_STASH", 0.0) * 1e9) // model.HOST_CHUNK) <= 0: return
+    st = time.perf_counter()
+    ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
+    k = model.host_chunks(len(tokens), bool(ckpt))
+    # (an older turn of it out first: its chunks are this one's. then free ones, new ones up to the GB, the least recently used one's)
+    self.host_free += [c for t, cs, _ in self.host if tokens[:len(t)] == t for c in cs]
+    self.host = [e for e in self.host if tokens[:len(e[0])] != e[0]]
+    made = 0
+    while len(self.host_free) < k:
+      if self.host_made < most:
+        self.host_free.append(model.host_alloc())
+        self.host_made, made = self.host_made + 1, made + 1
+      elif self.host: self.host_free += self.host.pop(0)[1]
+      else: return
+    chunks = [self.host_free.pop() for _ in range(k)]
+    model.host_save(len(tokens), getattr(model, "_spec_row", 0), chunks, ckpt=bool(ckpt))
+    self.host.append((tokens, chunks, ckpt))
+    trace(f"host_save len {len(tokens)} ckpt {ckpt} {k} chunks ({made} new) in {time.perf_counter()-st:.2f} s, {len(self.host)} kept, "
+          f"{len(self.host_free)} free")
   @staticmethod
   def host_hit(e:tuple[list[int], typing.Any, int], ids:list[int]) -> int:
     """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
@@ -571,7 +573,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.stash_main(busy)
       self.host.append((tokens, saved, ckpt))
       st = time.perf_counter()
-      model.host_load(saved, len(tokens), ckpt=bool(ckpt))
+      model.host_load(saved, len(tokens), ckpt=bool(ckpt))  # (saved: its chunks)
       model._cached_tokens, model._ckpt_tokens = list(tokens), list(tokens[:ckpt])
       trace(f"host_load len {len(tokens)} ckpt {ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")
     elif best[0] >= have + self.STASH_MIN:
@@ -600,7 +602,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
-    self.host_free += [b for _, b, _ in self.host]
+    self.host_free += [c for _, cs, _ in self.host for c in cs]
     self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
   def slot_taken(self, *slots:int):

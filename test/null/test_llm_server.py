@@ -537,22 +537,21 @@ class TestStash(unittest.TestCase):
     model.get_start_pos = Mock(side_effect=start)
     self.model, self.server = model, LLMServer.__new__(LLMServer)
     self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
-    self.server.host_free = []
+    self.server.host_free, self.server.host_made = [], 0
 
   def test_host(self):
-    # (HOST_STASH) one longer than a slot into host memory, loaded back when continued. a later turn replaces its older one (its buffer free to
-    # use again), past the GB the free buffers then the least recently used are out
-    a, b, c = list(range(20000)), list(range(30000, 50000)), list(range(60000, 80000))
+    # (HOST_STASH) one longer than a slot into host memory (chunks of it), loaded back when continued. a later turn replaces its older one (its
+    # chunks are its), past the GB the least recently used one's chunks are used
+    a, b, c = list(range(30000)), list(range(30000, 50000)), list(range(60000, 80000))
     m = self.model
-    m.host_size = Mock(side_effect=lambda n, ckpt: n)
-    m.host_alloc = Mock(side_effect=lambda n: Mock(nbytes=n))
-    m.host_save = Mock(side_effect=lambda n, row, buf, ckpt: buf)
+    m.HOST_CHUNK = 1000
+    m.host_chunks = Mock(side_effect=lambda n, ckpt: (n + 999) // 1000)
+    m.host_alloc = Mock(side_effect=lambda: Mock())
     m.host_ckpt = Mock(return_value=0)
-    self.server.host_free = []
-    with patch.dict(os.environ, {"HOST_STASH": "0.000045"}):
+    with patch.dict(os.environ, {"HOST_STASH": "0.000045"}):  # (45 chunks)
       m._cached_tokens = a[:15000]
       self.server.stash_load(b, set())
-      self.assertEqual(m.host_save.call_args.args[:2], (15000, 0))
+      self.assertEqual((m.host_save.call_args.args[:2], len(m.host_save.call_args.args[2])), ((15000, 0), 15))
       m.slot_store.assert_not_called()
       m._cached_tokens = b[:12000]
       self.server.stash_load(a, set())  # a continues: b kept, a loaded back
@@ -560,20 +559,15 @@ class TestStash(unittest.TestCase):
       self.assertEqual(m.host_load.call_args.args[1], 15000)
       self.assertEqual((m._cached_tokens, [len(t) for t, _, _ in self.server.host]), (a[:15000], [12000, 15000]))
       self.assertEqual(self.server.stash_hit(b, set()), 12000)
-      m._cached_tokens = a[:18000]
-      self.server.stash_load(c, set())  # a's later turn replaces its older one, b is out (the GB)
-      self.assertEqual([len(t) for t, _, _ in self.server.host], [18000])
-      # the slots full: one that fits a slot goes to host memory too, in a free buffer it fits
-      self.server.host_free = [Mock(nbytes=7000), Mock(nbytes=6000)]
-      self.server.stash = {i: (list(range(100*i+1000, 100*i+1050)), 0) for i in range(3)}
-      m._cached_tokens = c[:5000]
-      allocs = m.host_alloc.call_count
-      self.server.stash_load(a, set())
-      m.slot_store.assert_not_called()
-      self.assertEqual((m.host_alloc.call_count, m.host_save.call_args.args[2].nbytes), (allocs, 6000))
-      self.assertEqual([len(t) for t, _, _ in self.server.host], [5000, 18000])  # (a loaded: the most recently used)
+      m._cached_tokens = a[:25000]
+      self.server.stash_load(c, set())  # a's later turn replaces its older one (its 15 chunks and 10 more: 37 > 45 - 12)
+      self.assertEqual(([len(t) for t, _, _ in self.server.host], m.host_alloc.call_count), ([12000, 25000], 37))
+      m._cached_tokens = c[:10000]
+      self.server.stash_load(a, set())  # past the GB: b's chunks are c's
+      self.assertEqual(([len(t) for t, _, _ in self.server.host], m.host_alloc.call_count), ([10000, 25000], 45))
+      self.assertEqual(len(self.server.host_free), 10)
       # a request that continues the prompt of a's last reply, not the reply: from its checkpoint
-      self.server.host = [(a[:18000], Mock(nbytes=1), 16000)]
+      self.server.host = [(a[:18000], [Mock()], 16000)]
       m._cached_tokens = c[:5000]
       ids = a[:16000] + [7, 8, 9]
       self.assertEqual(self.server.stash_hit(ids, set()), 16000)
