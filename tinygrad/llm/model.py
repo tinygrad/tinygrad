@@ -2053,6 +2053,7 @@ class Transformer:
     # (the device memory the jits use is made here: not in the processes)
     if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
+    self._token_prev:list[int]|None = None  # (the captures write the buffer: the next generate writes all of it)
     temp = Tensor([0.0]).to(devs).realize()
     v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), cast(list[tuple[Any, Callable[[], Any]]], [])
     for n in sizes:
@@ -2169,7 +2170,12 @@ class Transformer:
       if not hasattr(self, "_token_buf"):
         self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self.max_context+1)
       for d in devs: Device[d].synchronize()  # a step run ahead by the last generate may still use it
-      self._token_host[:] = array.array('i', tokens + [-1] * (self.max_context + 1 - len(tokens)))
+      # the prompt, then -1 (not sampled yet) up to the tokens the last generate wrote (its list grew with them, steps run ahead write a few
+      # more): the whole buffer only the first time (a write of max_context ints takes ~20 ms)
+      n, prev = self.max_context + 1, getattr(self, "_token_prev", None)
+      end = n if prev is None else min(n, max(len(prev), len(tokens)) + 2*self.config.spec_drafts + 64)
+      self._token_host[:end] = array.array('i', tokens + [-1] * (end - len(tokens)))
+      self._token_prev = tokens
       t = self._token_buf
     else:
       # assign all input tokens once, then slice from start_pos for the model call

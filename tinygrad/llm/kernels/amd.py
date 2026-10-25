@@ -462,7 +462,9 @@ def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
   # sign bit i to bit 0 of byte i (the shifted copies of the 4 bits don't overlap: no carries), all of the byte's bits for the mask
   ones = ((signs & 15) * 0x00204081) & 0x01010101
   # Grid magnitudes are nonzero and <128, so each byte can be negated without a carry into its neighbor.
-  return (word ^ (ones * 255)) + ones
+  # (ones*255 by a byte permute, selector 12 a 0x00 byte, 13 a 0xff one: a 32 bit multiply is quarter rate)
+  mask = _amd_byte_perm(UOp.const(0, dtypes.uint32), UOp.const(0, dtypes.uint32), ones + 0x0C0C0C0C)
+  return (word ^ mask) + ones
 
 def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:UOp|None) -> UOp:
   # Four packed weight bytes, shared by integer-dot decode and FP16 WMMA prefill.
@@ -502,8 +504,11 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
     signs = byte(34+subgroup*4+i//2)
   return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)))
 
-def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, grid:UOp|None) -> list[tuple[UOp, UOp]]:
-  """the words of a WMMA fragment's lane (half ph) of a group: (_quant_word h*4+ph, h*4+ph+2) for h 0, 1, the bytes they share loaded once (IQ3_S)"""
+def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, grid:UOp|None, signed:bool=False) -> list[tuple[UOp, UOp]]:
+  """
+  the words of a WMMA fragment's lane (half ph) of a group: (_quant_word h*4+ph, h*4+ph+2) for h 0, 1, the bytes they share loaded once (IQ3_S).
+  signed: grid is the IQ3_S grid words with their signs applied (index | signs << 9, _signed_grid)
+  """
   if ggml_type == IQ3_S and raw.dtype.itemsize == 2 and grid is not None:
     # words i = 2j+ph (j 0..3): index byte ph of qs halfword j, its 9th bit bit i of qh, its signs nibble ph of signs byte j
     sh = (ph * 8).cast(dtypes.uint32)
@@ -513,6 +518,7 @@ def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, gr
     def word(j:int) -> UOp:
       index = qs[j] | (((qh >> (ph.cast(dtypes.uint32) + 2*j)) & 1) << 8)
       signs = (sg[j//2] >> (8*(j % 2))) & 255
+      if signed: return grid[index | (((signs >> (4*ph).cast(dtypes.uint32)) & 15) << 9)]
       return _iq_signed_word(grid[index], signs >> (4*ph).cast(dtypes.uint32))
     return [(word(2*h), word(2*h+1)) for h in range(2)]
   return [tuple(_quant_word(raw, base, subgroup, h*4 + i, ggml_type, grid) for i in (ph, ph+2)) for h in range(2)]  # type: ignore[misc]
@@ -864,8 +870,14 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   token_block, output_block = UOp.range(rows.shape[0] // TOK, 0, AxisType.GLOBAL), UOp.range(out_features // OUTB, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   col, ph, tid = lane % 16, lane // 16, wave * 32 + lane
-  grid = None
-  if grid_src is not None:
+  grid, signed = None, ggml_type == IQ3_S and bool(getenv("K256_SGRID", 1))
+  if grid_src is not None and signed:
+    # the grid words with every one of the 16 sign patterns applied (index | signs << 9): a lookup instead of the sign math
+    n = int(grid_src.numel())
+    grid = UOp.alloc((n*16,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    entries = [tid + i*256 for i in range(n*16 // 256)]
+    grid = grid.after(UOp.group(*(grid[e].store(_iq_signed_word(grid_src[e % n].load(), (e // n).cast(dtypes.uint32))) for e in entries)).barrier())
+  elif grid_src is not None:
     grid = UOp.alloc((int(grid_src.numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
     grid = grid.after(UOp.group(*(grid[tid + i*256].store(grid_src[tid + i*256]) for i in range(int(grid.numel()) // 256))).barrier())
   expert = tiles[token_block].load()
@@ -904,14 +916,14 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   sums = []
   for o, base in enumerate(bases):
     sub = sub_scale(base, sb)
-    bfr = [_i8_frag(w) for w in _quant_frag_words(raw, base, sb, ph, ggml_type, grid)]
+    bfr = [_i8_frag(w) for w in _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed)]
     for t in range(TT):
       dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
       dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
       dreg = dreg.after(dreg.store(dot))
       prev = ints[o][t].after(sb)
       sums.append(ints[o][t].store(UOp.stack(*[UOp(Ops.CUSTOMI, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32))
-                                                for j in range(8)])))
+                                              for j in range(8)])))
   done = UOp.group(*sums).end(sb)
   new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + ints[o][t].after(done)[j].load().float() * (dws[o] * lds_d[t*16 + ph*8 + j].load())
                       for j in range(8))) for t in range(TT)] for o in range(OT)]
