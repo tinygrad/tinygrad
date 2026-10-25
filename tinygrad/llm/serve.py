@@ -381,6 +381,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.slots = n if isinstance(n:=getattr(model, "batch_slots", lambda: 0)(), int) else 0
     # batched decoding is speculative (the drafts of every sequence verified in the step) when the model drafts
     self.spec = k if self.slots and isinstance(k:=getattr(getattr(model, "config", None), "spec_drafts", 0), int) else 0
+    # the conversations kept in the free slots (their tokens): a request that continues one is prefilled from its states (agents taking turns)
+    self.stash: dict[int, list[int]] = {}
     super().__init__(server_address, Handler)
 
   def serve_forever(self, poll_interval:float=0.5):
@@ -425,9 +427,39 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     room = min(1024, req.max_tokens - len(req.generated)) if req.max_tokens is not None else 1024
     return len(req.ids) + len(req.generated) + room < self.model.batch_ctx()
 
-  def prefill(self, req:Request) -> int:
+  # ** the conversations kept in slots (STASH): the model's states hold one conversation, a request of another one overwrites them. the one
+  # there is stored in a free slot first, a request that continues a stored one takes its states back (an agent's turn isn't prefilled again)
+  STASH_MIN = getenv("STASH_MIN", 512)  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
+  def stash_main(self, busy:set[int]):
+    """
+    the model's conversation into a free slot (an empty one, else the oldest kept) past the busy ones: a batched step writes the free slots
+    before its last one (rows of nothing), a request takes the first free one
+    """
+    model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
+    if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or len(tokens) >= model.batch_ctx() or \
+       tokens in self.stash.values(): return
+    free = list(range(max(busy, default=-1)+1, self.slots))
+    if not (victims := [i for i in free if i not in self.stash] or [i for i in self.stash if i in free]): return
+    model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
+    self.stash.pop(victims[0], None)
+    self.stash[victims[0]] = tokens  # (the newest last: the oldest is the next victim)
+  def stash_load(self, ids:list[int], busy:set[int]):
+    """before a prefill of ids: the kept conversation it continues the most into the model (if more than the model's own), the model's kept"""
+    if not self.slots or not getenv("STASH", 1): return
+    model, have = self.model, self.model.get_start_pos(ids)
+    best = max(((len(t), i) for i, t in self.stash.items() if i not in busy and len(t) < len(ids) and ids[:len(t)] == t), default=(0, -1))
+    if best[0] >= have + self.STASH_MIN:
+      self.stash_main(busy | {best[1]})
+      model.slot_load(best[1], best[0])
+      model._cached_tokens = list(self.stash[best[1]])
+    elif have < self.STASH_MIN: self.stash_main(busy)  # (ids overwrite the model's conversation)
+  def slot_taken(self, *slots:int):
+    for i in slots: self.stash.pop(i, None)
+
+  def prefill(self, req:Request, busy:set[int]|None=None) -> int:
     """the prompt (and what req generated, a continuation) through the model: the first sampled token"""
     ids = req.ids + req.generated
+    self.stash_load(ids, busy or set())
     req.cache_start = self.model.get_start_pos(ids)
     g = self.model.generate(list(ids), temperature=req.temperature)
     try: return next(g)
@@ -437,6 +469,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """req alone on the model: speculative decoding until its end, or until another request comes (it goes on in slot 0: returns True)"""
     model = self.model
     ids = req.ids + req.generated
+    self.stash_load(ids, set())
     req.cache_start = model.get_start_pos(ids)
     spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
     g = model.generate(list(ids), temperature=req.temperature)
@@ -447,6 +480,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # another request: this one goes on batched (the model's states after its last token's position are the slot's)
           _close(g)
           req.pos = len(model._cached_tokens)
+          self.slot_taken(0)
           model.slot_store(0, req.pos, getattr(model, "_spec_row", 0))
           req.spec_start(req.generated[-1], req.pos, self.spec)
           return True
@@ -485,6 +519,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         while G and not defer and len(short:=shorts()[:min(G, slots - len(active))]) >= BATCH_PREFILL_MIN:
           _p0 = time.perf_counter()
           free = [i for i in range(slots) if i not in active][:len(short)]
+          self.slot_taken(*free)
           firsts = model.batch_prefill([(r.ids, slot, r.temperature) for r, slot in zip(short, free)])
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + time.perf_counter() - _p0
           for req, slot, first in zip(short, free, firsts):
@@ -496,7 +531,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if len(active) >= slots: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
-          first = self.prefill(req)
+          first = self.prefill(req, set(active) | {slot})
+          self.slot_taken(slot)
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
           pending.remove(req)
           req.pos = len(req.ids) + len(req.generated)
@@ -538,6 +574,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         while active and (hi:=max(active)) >= len(active) and next(m for m in model.batch_sizes() if m >= hi+1) > \
                          next(m for m in model.batch_sizes() if m >= len(active)):
           lo = next(i for i in range(slots) if i not in active)
+          self.slot_taken(lo)
           model.slot_move(hi, lo)
           active[lo] = active.pop(hi)
         # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster

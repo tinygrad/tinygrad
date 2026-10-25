@@ -1533,6 +1533,24 @@ class Transformer:
           copies += [rows(idx.pool_pk, slot*P, P).assign(idx.cache_pk[:P]), rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
     Tensor.realize(*copies)
 
+  def _slot_load_copy(self, slot:UOp, rp:UOp, wp:UOp, wpc:UOp, hrow:UOp):
+    """the reverse of _slot_copy: a slot's states back into the model's (a sequence stored there continues alone)"""
+    copies:list[Tensor] = []
+    def rows(t:Tensor, start:UOp|int, n:int=1) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
+    if (k:=self.config.spec_drafts): copies.append(rows(self._spec_h, hrow).assign(rows(self.pool_spec_h, slot*2*(k+1))))
+    for b in self._slot_blocks():
+      if isinstance(b, GatedDeltaNetBlock):
+        S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
+        copies.append(rows(b.recurrent_state, rp).assign(rows(b.pool_rec, slot*S + wp).cast(b.recurrent_state.dtype)))
+        copies += [rows(c, rp).assign(rows(d, slot*SC + wpc).cast(c.dtype)) for d, c in zip(b.pool_conv, b.conv_states)]
+      if isinstance(b, MLATransformerBlock):
+        ctx = int(b.slot_k[0].shape[2])
+        copies.append(b.cache_k[:, :, :ctx].assign(rows(b.pool_k, slot)))
+        if (idx:=b.indexer) is not None:
+          P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
+          copies += [idx.cache_pk[:P].assign(rows(idx.pool_pk, slot*P, P)), idx.ring.assign(rows(idx.pool_ring, slot*R, R))]
+    Tensor.realize(*copies)
+
   def _slot_pools(self) -> list[tuple[Tensor, int]]:
     """every pool of the slots' states and the rows of a slot in it"""
     pools:list[tuple[Tensor, int]] = [(self.pool_spec_h, int(self.slot_spec_h[0].shape[0]))] if hasattr(self, "pool_spec_h") else []
@@ -1549,6 +1567,7 @@ class Transformer:
   def _slot_jits(self):
     if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True)
     if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True)
+    if not hasattr(self, "_slot_load_jit"): self._slot_load_jit = TinyJit(self._slot_load_copy, capture_first=True)
   def _slot_move_vars(self, src:int, dst:int) -> tuple[UOp, ...]:
     v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
     return v("slot_src").bind(src), v("slot_dst").bind(dst)
@@ -1569,6 +1588,17 @@ class Transformer:
     self._slot_jits()
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
     self._slot_jit(*self._slot_store_vars(i, length, hrow))
+
+  def slot_load(self, i:int, length:int):
+    """
+    the states of slot i (a sequence of `length` tokens stored by slot_store) back into the model's: it continues alone from them (the cache of
+    a conversation kept in a slot). the caller sets _cached_tokens
+    """
+    self._init_slots()
+    self._slot_jits()
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+    self._slot_load_jit(*self._slot_store_vars(i, length, 0))
+    self._ckpt_tokens, self._spec_row = [], 0
 
   def forward_batch(self, *positions:UOp) -> Tensor:
     """a step of batched decoding: row i the sequence of slot i at positions[i], its token in _batch_in, its temperature in _batch_temp"""
@@ -2085,11 +2115,12 @@ class Transformer:
         jit = self._bspec_jit(m) if self.config.spec_drafts else self._batch_jit(m)
         if m <= slots: calls.append((jit, step(m)))
         jit.link_later = True
-      # (and the copies into a slot and between two)
+      # (and the copies into a slot, back from one and between two)
       self._slot_jits()
-      calls += [(self._slot_jit, lambda: self._slot_jit(*self._slot_store_vars(0, 1, 0)))]
+      calls += [(self._slot_jit, lambda: self._slot_jit(*self._slot_store_vars(0, 1, 0))),
+                (self._slot_load_jit, lambda: self._slot_load_jit(*self._slot_store_vars(0, 1, 0)))]
       if slots > 1: calls += [(self._slot_move_jit, lambda: self._slot_move_jit(*self._slot_move_vars(1, 0)))]
-      for j in (self._slot_jit, self._slot_move_jit): setattr(j, "link_later", True)
+      for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit): setattr(j, "link_later", True)
       # (and the prefills of several prompts)
       if self.batch_prefills():
         calls.append((bpf:=self._bpf_jit(), lambda: bpf(*self._bpf_vars([1]*self.BPF_G, [0]*self.BPF_G))))

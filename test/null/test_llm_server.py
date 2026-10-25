@@ -516,6 +516,45 @@ class TestLLMToolCalls(unittest.TestCase):
     status, data = self.anthropic({"model":"m", "messages":[{"role":"user", "content":"hi"}]}, "/v1/messages/count_tokens")
     self.assertEqual((status, json.loads(data)), (200, {"input_tokens":3}))
 
+class TestStash(unittest.TestCase):
+  """the conversations kept in the free slots (LLMServer.stash_main, stash_load)"""
+  def setUp(self):
+    from tinygrad.llm.serve import LLMServer
+    model = Mock()
+    model.batch_slots, model.batch_ctx, model._cached_tokens, model._spec_row = Mock(return_value=3), Mock(return_value=10000), [], 0
+    def start(ids): return len(model._cached_tokens) if ids[:len(model._cached_tokens)] == model._cached_tokens else 0
+    model.get_start_pos = Mock(side_effect=start)
+    self.model, self.server = model, LLMServer.__new__(LLMServer)
+    self.server.model, self.server.slots, self.server.stash, self.server.STASH_MIN = model, 3, {}, 4
+
+  def test_switch_conversations(self):
+    a, b = list(range(100)), list(range(1000, 1100))
+    self.model._cached_tokens = a[:50]
+    self.server.stash_load(b, set())  # b overwrites a: a is kept
+    self.model.slot_store.assert_called_once_with(0, 50, 0)
+    self.assertEqual(self.server.stash, {0: a[:50]})
+    self.model._cached_tokens = b[:60]
+    self.server.stash_load(a, set())  # a continues: b kept, a loaded back
+    self.model.slot_store.assert_called_with(1, 60, 0)
+    self.model.slot_load.assert_called_once_with(0, 50)
+    self.assertEqual(self.model._cached_tokens, a[:50])
+    self.assertEqual(self.server.stash, {0: a[:50], 1: b[:60]})
+
+  def test_kept_past_busy_slots(self):
+    self.model._cached_tokens = list(range(50))
+    self.server.stash_main({0, 1})
+    self.model.slot_store.assert_called_once_with(2, 50, 0)
+    self.model.slot_store.reset_mock()
+    self.model._cached_tokens = list(range(500, 550))
+    self.server.stash_main({0, 1, 2})  # no free slot past the busy ones
+    self.model.slot_store.assert_not_called()
+
+  def test_oldest_replaced(self):
+    for i in range(4):
+      self.model._cached_tokens = list(range(i*100, i*100+50))
+      self.server.stash_main(set())
+    self.assertEqual(sorted(t[0] for t in self.server.stash.values()), [100, 200, 300])
+
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
