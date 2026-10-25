@@ -551,6 +551,23 @@ class TestStash(unittest.TestCase):
     self.model.slot_load.assert_called_once_with(1, 50, 0)
     self.assertEqual(self.model._cached_tokens, a[:50])
 
+  def test_reuse_tokens(self):
+    # a prompt that continues the model's conversation as text, tokenized differently ("bc" one token): the kept tokens and the rest's
+    class Tok:
+      def encode(self, text:str) -> list[int]:
+        out, i = [], 0
+        while i < len(text):
+          if text[i:i+2] == "bc": out, i = out + [999], i + 2
+          else: out, i = out + [ord(text[i])], i + 1
+        return out
+      def decode(self, ids:list[int]) -> str: return "".join("bc" if i == 999 else chr(i) for i in ids)
+    self.server.tok = Tok()
+    kept = [ord("a")] * 1500 + [ord("b"), ord("c")]  # as the model generated it: "b", "c"
+    self.model._cached_tokens = kept
+    rendered = "a" * 1500 + "bc" + "xyz"
+    ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+    self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
+
   def test_kept_past_busy_slots(self):
     self.model._cached_tokens = list(range(50))
     self.server.stash_main({0, 1})

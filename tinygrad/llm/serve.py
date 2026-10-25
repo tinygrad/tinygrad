@@ -260,7 +260,7 @@ class Handler(VizHandler):
       # render and tokenize
       normalize_messages(body["messages"])
       rendered = self.render(body["messages"], body.get("tools"), body)
-      ids: list[int] = self.server.tok.encode(rendered)
+      ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
         stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
@@ -304,7 +304,7 @@ class Handler(VizHandler):
     msgs, tools = anthropic_messages(body)
     normalize_messages(msgs)
     rendered = self.render(msgs, tools, body)
-    ids: list[int] = self.server.tok.encode(rendered)
+    ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     if path.endswith("count_tokens"): return self.send_data(json.dumps({"input_tokens": len(ids)}).encode())
     log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
     if len(ids) >= (n:=self.server.model.max_context):
@@ -460,6 +460,19 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
     self.stash.pop(victims[0], None)
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
+  def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
+    """
+    the tokens of a prompt that continues a kept conversation (the model's, or one in a slot) as its text but not its tokens (the model's reply
+    tokenized again differently): the kept ones and the rest's, so the cache holds it
+    """
+    if not getenv("REUSE_TOKENS", 1): return ids
+    kept = [list(t) for t in ([getattr(self.model, "_cached_tokens", [])] + [t for t, _ in list(self.stash.values())]) if isinstance(t, list)]
+    for t in sorted(kept, key=len, reverse=True):
+      if len(t) < 1000 or len(t) >= len(ids) + 1000 or ids[:len(t)] == t: continue
+      if next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), len(t)) < len(t) // 2: continue
+      if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
+    return ids
+
   def miss_log(self, ids:list[int], start:int):
     """(CACHE_LOG) a request prefilled from much less than it shares with a kept conversation: where they differ"""
     if not self.slots or not getenv("CACHE_LOG", 1): return
