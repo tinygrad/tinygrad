@@ -201,7 +201,9 @@ class Handler(VizHandler):
       odd = {i for t, i in specials.items() if t in ODD_TOKENS}
       while (next_id := Handler.next_token(self, req)) is not None:
         out.append(next_id)
-        if next_id in odd: stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
+        if next_id in odd:
+          stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
+          trace(f"odd token req {req.rid} after {len(out)}")
         for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)): yield chunk({field:delta})
       if req.error is not None:
         yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
@@ -331,10 +333,16 @@ class Handler(VizHandler):
 def _close(g:typing.Iterator) -> None:
   if (close:=getattr(g, "close", None)) is not None: close()  # (a generator: the model stops where it is)
 
+_rids = iter(range(1, 1 << 62))
+def trace(msg:str):
+  """(SERVE_TRACE: a file) the model's operations of the scheduler, in order: to tell what came before a reply went wrong"""
+  if (path:=getenv("SERVE_TRACE", "")):
+    with open(path, "a") as f: f.write(f"{time.time():.3f} {msg}\n")
+
 class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
   def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float):
-    self.ids, self.log, self.max_tokens, self.temperature = ids, log, max_tokens, temperature
+    self.ids, self.log, self.max_tokens, self.temperature, self.rid = ids, log, max_tokens, temperature, next(_rids)
     self.cancelled, self.finish_reason, self.checked = False, "stop", 0.0
     self.error: Exception|None = None
     self.out: queue.Queue[int|None] = queue.Queue()
@@ -429,7 +437,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # ** the model
   def batchable(self, req:Request) -> bool:
     """req can be decoded in a slot: its prompt and room for a reply fit (a reply that fills the slot goes on alone)"""
-    if not self.slots: return False
+    # (BATCH_DECODE=0: every request alone, in turn, the slots keep the conversations)
+    if not self.slots or not getenv("BATCH_DECODE", 1): return False
     room = min(1024, req.max_tokens - len(req.generated)) if req.max_tokens is not None else 1024
     return len(req.ids) + len(req.generated) + room < self.model.batch_ctx()
 
@@ -446,6 +455,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
        any(t == tokens for t, _ in self.stash.values()): return
     free = list(range(max(busy, default=-1)+1, self.slots))
     if not (victims := [i for i in free if i not in self.stash] or [i for i in self.stash if i in free]): return
+    trace(f"stash_main victim {victims[0]} len {len(tokens)} busy {sorted(busy)}")
     model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
     self.stash.pop(victims[0], None)
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
@@ -472,6 +482,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if best[0] >= have + self.STASH_MIN:
       self.stash_main(busy | {best[1]})
       tokens, hrow = self.stash[best[1]]
+      trace(f"stash_load slot {best[1]} len {best[0]} hrow {hrow} busy {sorted(busy)} target {target}")
       model.slot_load(best[1], best[0], hrow)
       model._cached_tokens = list(tokens)
     elif have < self.STASH_MIN: self.stash_main(busy)  # (ids overwrite the model's conversation)
@@ -494,10 +505,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if n < max(self.STASH_MIN, start + 1) or n >= self.model.batch_ctx() - k - 2: return
     self.stash.pop(i, None)
     self.stash[i] = ((req.ids + req.generated)[:n], (1 - req.par) * (k + 1) + n - start - 1)
+    trace(f"slot_done req {req.rid} slot {i} len {n} hrow {self.stash[i][1]} active {sorted(active)}")
 
   def prefill(self, req:Request, busy:set[int]|None=None, target:int|None=None) -> int:
     """the prompt (and what req generated, a continuation) through the model (into slot target): the first sampled token"""
     ids = req.ids + req.generated
+    trace(f"prefill req {req.rid} ids {len(ids)} target {target} busy {sorted(busy or set())}")
     self.miss_log(ids, self.stash_hit(ids, busy or set(), target))
     self.stash_load(ids, busy or set(), target)
     req.cache_start = self.model.get_start_pos(ids)
@@ -509,6 +522,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """req alone on the model: speculative decoding until its end, or until another request comes (it goes on in slot 0: returns True)"""
     model = self.model
     ids = req.ids + req.generated
+    trace(f"alone req {req.rid} ids {len(ids)}")
     self.miss_log(ids, self.stash_hit(ids, set()))
     self.stash_load(ids, set())
     req.cache_start = model.get_start_pos(ids)
@@ -522,6 +536,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           _close(g)
           req.pos = len(model._cached_tokens)
           self.slot_taken(0)
+          trace(f"alone to batch req {req.rid} slot 0 pos {req.pos} row {getattr(model, '_spec_row', 0)}")
           model.slot_store(0, req.pos, getattr(model, "_spec_row", 0))
           req.spec_start(req.generated[-1], req.pos, self.spec)
           return True
@@ -577,6 +592,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
           pending.remove(req)
           req.pos = len(req.ids) + len(req.generated)
+          trace(f"slot_store req {req.rid} slot {slot} pos {req.pos}")
           model.slot_store(slot, req.pos)
           req.spec_start(first, req.pos, k)
           if self.emit(req, first): active[slot] = req
@@ -585,6 +601,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         _t0 = time.perf_counter()
         # a step of every slot up to the last one used (the free ones in between are rows of nothing)
         self.inflight = len(active) + len(pending) + self.waiting.qsize()
+        trace("step " + " ".join(f"{i}:{r.rid}@{r.pos}" for i, r in sorted(active.items())))
         if k:
           spec = model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, active[i].temperature) if i in active else
                                         ([0]*(k+1), 0, 0, 1, 0.0) for i in range(max(active)+1)])
@@ -618,6 +635,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                          next(m for m in model.batch_sizes() if m >= len(active)):
           lo = next(i for i in range(slots) if i not in active)
           self.slot_taken(lo)
+          trace(f"slot_move req {active[hi].rid} {hi} -> {lo}")
           model.slot_move(hi, lo)
           active[lo] = active.pop(hi)
         # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster
