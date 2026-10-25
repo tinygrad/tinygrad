@@ -188,7 +188,7 @@ class Handler(VizHandler):
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False, log:str="", keepalive:float|None=None):
+                reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None):
     tok = self.server.tok
     prompt_tokens = len(ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
@@ -198,7 +198,8 @@ class Handler(VizHandler):
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
     router = StreamRouter(reasoning, tags)
     # the model runs on the server's thread (LLMServer.serve_forever): the request waits there, its tokens come back here
-    req = Request(ids, log, max_tokens, temperature)
+    # (no top_p: the model's own, general.sampling.top_p)
+    req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p)
     self.server.waiting.put(req)
     try:
       yield chunk({"role":"assistant", "content":""})
@@ -283,7 +284,8 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"), log=log)
+                              reasoning=rendered.rstrip().endswith("<think>"), log=log,
+                              top_p=float(tp) if (tp:=body.get("top_p")) is not None else None)
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
@@ -326,7 +328,8 @@ class Handler(VizHandler):
     # (the API's default temperature is 1)
     chunks = self.run_model(ids, body.get("model", self.server.model_name), True, max_tokens=body.get("max_tokens"),
                             temperature=float(body.get("temperature", 1.0)), reasoning=rendered.rstrip().endswith("<think>"), log=log,
-                            keepalive=getenv("KEEPALIVE", 15.0) if body.get("stream") else None)
+                            keepalive=getenv("KEEPALIVE", 15.0) if body.get("stream") else None,
+                            top_p=float(tp) if (tp:=body.get("top_p")) is not None else None)
     events = anthropic_events(chunks, body.get("model", self.server.model_name), len(ids))
     try:
       if body.get("stream"):
@@ -354,8 +357,8 @@ def trace(msg:str):
 
 class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
-  def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float):
-    self.ids, self.log, self.max_tokens, self.temperature, self.rid = ids, log, max_tokens, temperature, next(_rids)
+  def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float, top_p:float=1.0):
+    self.ids, self.log, self.max_tokens, self.temperature, self.top_p, self.rid = ids, log, max_tokens, temperature, top_p, next(_rids)
     self.cancelled, self.finish_reason, self.checked, self.zeros = False, "stop", 0.0, 0
     self.error: Exception|None = None
     self.out: queue.Queue[int|None] = queue.Queue()
@@ -398,8 +401,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   """
   daemon_threads = True
   request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
-    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0):
+    # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf)
+    self.model, self.model_name, self.tok, self.template, self.top_p = model, model_name, tok, template, top_p
     self.waiting: queue.Queue[Request] = queue.Queue()
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.stats = BatchStats()
@@ -595,7 +599,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.miss_log(ids, self.stash_hit(ids, busy or set(), target))
     self.stash_load(ids, busy or set(), target)
     req.cache_start = self.model.get_start_pos(ids)
-    g = self.model.generate(list(ids), temperature=req.temperature)
+    g = self.model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
     try: return next(g)
     finally: _close(g)
 
@@ -608,7 +612,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.stash_load(ids, set())
     req.cache_start = model.get_start_pos(ids)
     spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
-    g = model.generate(list(ids), temperature=req.temperature)
+    g = model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
     try:
       for tok in g:
         if not self.emit(req, tok): return False
@@ -657,7 +661,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           _p0 = time.perf_counter()
           free = [i for i in range(slots) if i not in active][:len(short)]
           self.slot_taken(*free)
-          firsts = model.batch_prefill([(r.ids, slot, r.temperature) for r, slot in zip(short, free)])
+          firsts = model.batch_prefill([(r.ids, slot, (r.temperature, r.top_p)) for r, slot in zip(short, free)])
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + time.perf_counter() - _p0
           for req, slot, first in zip(short, free, firsts):
             pending.remove(req)
@@ -684,9 +688,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         self.inflight = len(active) + len(pending) + self.waiting.qsize()
         trace("step " + " ".join(f"{i}:{r.rid}@{r.pos}" for i, r in sorted(active.items())))
         if k:
-          spec = model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, active[i].temperature) if i in active else
+          spec = model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p))
+                                        if i in active else
                                         ([0]*(k+1), 0, 0, 1, 0.0) for i in range(max(active)+1)])
-        else: out = model.batch_step([(active[i].generated[-1], active[i].pos, active[i].temperature) if i in active else (0, 0, 0.0)
+        else: out = model.batch_step([(active[i].generated[-1], active[i].pos, (active[i].temperature, active[i].top_p)) if i in active else
+                                      (0, 0, 0.0)
                                       for i in range(max(active)+1)])
         self.stats.step_time += time.perf_counter() - _t0
         for i, req in list(active.items()):

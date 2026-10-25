@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm
+  mla_bmm, nucleus
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -399,6 +399,10 @@ def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   """n int32 in host memory that the host polls: a (1, n) tensor every device reads and writes directly"""
   mv, t = _host_buffer(devs, 4*n, dtypes.int32)
   return mv.cast('i'), t[None]
+
+def _temp_pair(t:float|tuple[float, float]) -> array.array:
+  """a row's temperature and top_p (a temperature alone: top_p 1) for a step's host buffer"""
+  return array.array('f', t if isinstance(t, tuple) else (t, 1.0))
 
 def _argmax_rows(x:Tensor, cols:int=256) -> Tensor:
   """
@@ -1338,11 +1342,17 @@ class Transformer:
     return tok
 
   def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None) -> Tensor:
-    """the token (B, 1) after every normed hidden state h (B, D), sampled (greedy without a temperature). on device unless the output is split"""
+    """
+    the token (B, 1) after every normed hidden state h (B, D), sampled (greedy without a temperature). on device unless the output is split.
+    temperature: (rows, 1) the temperature of every row (or one), or (rows, 2) and its top_p (only the tokens of the top_p nucleus are sampled)
+    """
     logits = self.output(h)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     if temperature is not None:
-      logits = logits / temperature.to(logits.device).maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()
+      tp = temperature.to(logits.device).reshape(-1, temperature.shape[-1])
+      z = logits.float() / tp[:, :1].maximum(1e-12)
+      logits = z - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()
+      if tp.shape[1] == 2: logits = nucleus(z, self.config.vocab_size, tp[:, 1:]).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
     return _argmax_rows(logits.to(device)[:, :self.config.vocab_size])
@@ -1488,6 +1498,7 @@ class Transformer:
         self._bspec_host_out, self._bspec_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BATCH_SIZES)*(2*k+1))
       # in host memory: the tokens and temperatures of a step's rows (the host writes them), the sampled tokens (one device writes them)
       self._batch_host_in, self._batch_in = _host_ints(devs, max(self.BATCH_SIZES))
+      # (a row's temperature and top_p)
       tmv, self._batch_temp = _host_buffer(devs, 4*max(self.BATCH_SIZES), dtypes.float32)
       self._batch_host_temp = tmv.cast('f')
       self._batch_host_out, self._batch_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BATCH_SIZES))
@@ -1666,7 +1677,7 @@ class Transformer:
       if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
       for block in self.blk: x = block(x, 0)
       if hc is not None: x = x.mean(2)
-      tok = self._sample(self.output_norm(x)[0].float(), self._batch_temp[:n].reshape(n, 1), self._batch_in.device)
+      tok = self._sample(self.output_norm(x)[0].float(), self._batch_temp[:2*n].reshape(n, 2), self._batch_in.device)
     finally: _batch_rows[0], Q8_ROWS_I8[0] = None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(1, n).cast(dtypes.int32)
@@ -1679,15 +1690,17 @@ class Transformer:
   def _batch_positions(self, positions:list[int]) -> list[UOp]:
     return [UOp.variable(f"batch_pos{i}", 0, self.batch_ctx()-1).bind(pos) for i, pos in enumerate(positions)]
 
-  def batch_step(self, rows:list[tuple[int, int, float]]) -> list[int]:
-    """a step of batched decoding: rows (token, position, temperature) of the slots 0..len(rows)-1, their sampled tokens"""
+  def batch_step(self, rows:list[tuple[int, int, float|tuple[float, float]]]) -> list[int]:
+    """
+    a step of batched decoding: rows (token, position, temperature (or temperature and top_p)) of the slots 0..len(rows)-1, their sampled tokens
+    """
     self._init_slots()
     n = len(rows)
     m = next(s for s in self.batch_sizes() if s >= n)
     assert m <= self.batch_slots(), f"{n} rows, {self.batch_slots()} slots"
     # (the rows past n are the free slots' at position 0: what they write is overwritten when a sequence takes the slot)
     rows = rows + [(0, 0, 0.0)] * (m - n)
-    for i, (tok, _, temp) in enumerate(rows): self._batch_host_in[i], self._batch_host_temp[i] = tok, temp
+    for i, (tok, _, temp) in enumerate(rows): self._batch_host_in[i], self._batch_host_temp[2*i:2*i+2] = tok, _temp_pair(temp)
     self._batch_host_out[:m] = array.array('i', [-1] * m)
     self._batch_jit(m)(*self._batch_positions([pos for _, pos, _ in rows]))
     st = time.perf_counter()
@@ -1731,7 +1744,7 @@ class Transformer:
       hn = self.output_norm(x)[0].float()
       hn = Tensor.cat(*[self.slot_spec_h[g].shrink(((par*(k+1), (par+1)*(k+1)), None)).assign(hn[g*(k+1):(g+1)*(k+1)])
                         for g, (_, _, par) in enumerate(groups)])
-      temps = self._batch_temp[:n].reshape(n, 1).expand(n, k+1).reshape(n*(k+1), 1)
+      temps = self._batch_temp[:2*n].reshape(n, 1, 2).expand(n, k+1, 2).reshape(n*(k+1), 2)
       tok = self._sample(hn, temps, y.device)
     finally: _batch_rows[0], Q8_ROWS_I8[0] = None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
@@ -1769,7 +1782,7 @@ class Transformer:
       # the last token of every prompt: the next token, its hidden state the slot's (speculative decoding's row 0)
       last = Tensor.cat(*[hn[0].shrink(((g*P + c - 1, g*P + c), None)) for g, c in enumerate(cvars)])
       if k: pf.effects.extend([self.pool_spec_h.shrink(((sl*2*(k+1), sl*2*(k+1)+1), None)).assign(last[g:g+1]) for g, sl in enumerate(svars)])
-      tok = self._sample(last, self._batch_temp[:G].reshape(G, 1), self._bpf_in.device)
+      tok = self._sample(last, self._batch_temp[:2*G].reshape(G, 2), self._bpf_in.device)
     finally: _batch_rows[0], _batch_prefill[0] = None, None
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(1, G).cast(dtypes.int32)
@@ -1789,7 +1802,7 @@ class Transformer:
   def _bpf_vars(self, counts:list[int], slots:list[int]) -> list[UOp]:
     return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
            [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)]
-  def batch_prefill(self, prompts:list[tuple[list[int], int, float]]) -> list[int]:
+  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]]) -> list[int]:
     """prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one"""
     self._init_slots()
     G, P, n = self.BPF_G, self.BPF_P, len(prompts)
@@ -1798,7 +1811,7 @@ class Transformer:
     prompts = prompts + [prompts[-1]] * (G - n)
     for g, (toks, _, temp) in enumerate(prompts):
       self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
-      self._batch_host_temp[g] = temp
+      self._batch_host_temp[2*g:2*g+2] = _temp_pair(temp)
     self._bpf_host_out[:G] = array.array('i', [-1] * G)
     self._bpf_jit()(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts]))
     st = time.perf_counter()
@@ -1817,7 +1830,7 @@ class Transformer:
     return [v for g, (mp, j, par) in enumerate(seqs) for v in (UOp.variable(f"bspec_mtp{g}", 0, ctx-1).bind(mp),
             UOp.variable(f"bspec_j{g}", 0, k).bind(j), UOp.variable(f"bspec_par{g}", 0, 1).bind(par))]
 
-  def batch_spec_step(self, seqs:list[tuple[list[int], int, int, int, float]]) -> list[tuple[list[int], list[int]]]:
+  def batch_spec_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
     """
     a step of batched speculative decoding of the slots 0..len(seqs)-1: seqs (the k+1 tokens of the last step, mtp_pos, j, par, temperature)
     of every one (see _spec_steps), their k+1 sampled tokens and k drafts
@@ -1830,7 +1843,7 @@ class Transformer:
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
     for g, (y, _, _, _, temp) in enumerate(seqs):
       self._bspec_host_in[g*(k+1):(g+1)*(k+1)] = array.array('i', y)
-      self._batch_host_temp[g] = temp
+      self._batch_host_temp[2*g:2*g+2] = _temp_pair(temp)
     self._bspec_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
     self._bspec_jit(m)(*self._bspec_vars([(mp, j, par) for _, mp, j, par, _ in seqs]))
     st = time.perf_counter()
@@ -2149,7 +2162,7 @@ class Transformer:
     for d in to_tuple(devs):
       key, ctr = Tensor._next_counter(d, 0)
       Tensor.realize(key, ctr, Tensor._device_rng_counters[d])
-    temp = Tensor([0.0]).to(devs).realize()
+    temp = Tensor([0.0, 1.0]).to(devs).realize()  # (temperature, top_p)
     v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), cast(list[tuple[Any, Callable[[], Any]]], [])
     for n in sizes:
       if n not in self.jits: self.jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
@@ -2248,7 +2261,7 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
+  def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0, top_p:float=1.0):
     self._finish_load()
     # the prefill jits are specialized for one chunk size each
     sizes = self.prefill_chunks(chunk_size)
@@ -2257,10 +2270,10 @@ class Transformer:
     v_toks = {n: UOp.variable("toks", 1, n) for n in sizes}
     # TODO: use UOp.variable for temperature once float variables are supported
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
-    # (made once a temperature: a realize outside a jit walks every tensor of the model)
-    if not hasattr(self, "_temps"): self._temps:dict[float, Tensor] = {}
-    if (temp:=self._temps.get(temperature)) is None:
-      temp = self._temps[temperature] = Tensor([temperature]).to(self.token_embd.weight.device).realize()
+    # (made once a temperature and top_p: a realize outside a jit walks every tensor of the model)
+    if not hasattr(self, "_temps"): self._temps:dict[tuple[float, float], Tensor] = {}
+    if (temp:=self._temps.get((temperature, top_p))) is None:
+      temp = self._temps[(temperature, top_p)] = Tensor([temperature, top_p]).to(self.token_embd.weight.device).realize()
     if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
       # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
       if not hasattr(self, "_token_buf"):

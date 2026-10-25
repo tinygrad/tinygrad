@@ -201,7 +201,7 @@ def main():
     with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, top_p=float(kv.get("general.sampling.top_p", 1.0))).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
