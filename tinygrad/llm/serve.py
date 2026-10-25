@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, pathlib, queue, random, re, select, socket, socketserver, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
-from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
+from tinygrad.helpers import DEBUG, colored, stderr_log, getenv, round_up
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
@@ -415,7 +415,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
     # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
-    self.host: list[tuple[list[int], list[typing.Any]]] = []  # (the tokens, Transformer.host_save's buffers)
+    # (the tokens, Transformer.host_save's buffer). the buffers of the ones out are used again (new memory and its devices' mappings are slow)
+    self.host: list[tuple[list[int], typing.Any]] = []
+    self.host_free: list[typing.Any] = []
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
     super().__init__(server_address, Handler)
@@ -498,11 +500,24 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def host_save(self, tokens:list[int]):
     """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
     if (budget:=getenv("HOST_STASH", 0.0) * 1e9) <= 0: return
-    st = time.perf_counter()
-    saved = self.model.host_save(len(tokens), getattr(self.model, "_spec_row", 0))
-    self.host = [(t, s) for t, s in self.host if tokens[:len(t)] != t] + [(tokens, saved)]
-    while len(self.host) > 1 and sum(m.nbytes for _, s in self.host for m in s) > budget: self.host.pop(0)
-    trace(f"host_save len {len(tokens)} {sum(m.nbytes for m in saved)/1e9:.2f} GB in {time.perf_counter()-st:.2f} s, {len(self.host)} kept")
+    st, need = time.perf_counter(), self.model.host_size(len(tokens))
+    # (a free buffer it fits the best, else a new one with room for later turns)
+    fits = [b for b in self.host_free if b.nbytes >= need]
+    if fits: self.host_free.remove(buf:=min(fits, key=lambda b: b.nbytes))
+    else:
+      self.host_trim(budget - (cap:=round_up(need * 5 // 4, 4096)))
+      buf = self.model.host_alloc(cap)
+    saved = self.model.host_save(len(tokens), getattr(self.model, "_spec_row", 0), buf)
+    self.host_free += [b for t, b in self.host if tokens[:len(t)] == t]
+    self.host = [(t, b) for t, b in self.host if tokens[:len(t)] != t] + [(tokens, saved)]
+    self.host_trim(budget)
+    trace(f"host_save len {len(tokens)} {need/1e9:.2f} GB in {time.perf_counter()-st:.2f} s, {len(self.host)} kept {len(self.host_free)} free "
+          f"{'new' if not fits else 'reused'}")
+  def host_trim(self, budget:float):
+    """the host memory past the budget freed: the free buffers, the least recently used conversations"""
+    def total() -> int: return sum(b.nbytes for _, b in self.host) + sum(b.nbytes for b in self.host_free)
+    while self.host_free and total() > budget: self.host_free.pop(0)
+    while len(self.host) > 1 and total() > budget: self.host.pop(0)
   def kept(self) -> list[list[int]]:
     """the kept conversations' tokens: the model's, the slots', the host's"""
     model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
@@ -541,9 +556,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                default=(0, -1))
     host = max(((len(t), j) for j, (t, _) in enumerate(self.host) if len(t) < len(ids) and ids[:len(t)] == t), default=(0, -1))
     if host[0] > best[0] and host[0] >= have + self.STASH_MIN:
-      self.stash_main(busy)
+      # (out of the list while the model's is saved: not the one it frees memory of. back as the most recently used)
       tokens, saved = self.host.pop(host[1])
-      self.host.append((tokens, saved))  # (the most recently used last)
+      self.stash_main(busy)
+      self.host.append((tokens, saved))
       st = time.perf_counter()
       model.host_load(saved, len(tokens))
       model._cached_tokens = list(tokens)
@@ -574,6 +590,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
+    self.host_free += [b for _, b in self.host]
     self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
   def slot_taken(self, *slots:int):

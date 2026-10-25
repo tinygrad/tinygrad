@@ -1652,20 +1652,37 @@ class Transformer:
                update_stats=False)
     for d in dedup([b.device for p in pairs for b in p]): Device[d].synchronize()
 
-  def host_save(self, length:int, hrow:int=0) -> list[Buffer]:
-    """the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory (CPU buffers)"""
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
-    parts = [(b.view(n, off).ensure_allocated(), Buffer("CPU", n, options=BufferSpec(nolru=True)).allocate()) for b, off, n in
-             self._host_parts(length, hrow)]
-    self._host_copy([(h, b) for b, h in parts])
-    return [h for _, h in parts]
+  @staticmethod
+  def _host_offsets(parts:list[tuple[Buffer, int, int]]) -> list[int]:
+    return [round_up(o, 256) for o in itertools.accumulate((round_up(n, 256) for _, _, n in parts), initial=0)]
+  def host_size(self, length:int) -> int:
+    """the bytes of host memory host_save needs for a conversation of `length` tokens"""
+    return self._host_offsets(self._host_parts(length, 0))[-1]
+  @staticmethod
+  def host_alloc(nbytes:int) -> Buffer:
+    """host memory for host_save (CPU memory: the devices copy to it, mapped once)"""
+    return Buffer("CPU", nbytes, options=BufferSpec(nolru=True)).allocate()
 
-  def host_load(self, saved:list[Buffer], length:int):
+  def host_save(self, length:int, hrow:int=0, into:Buffer|None=None) -> Buffer:
+    """
+    the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory: into (host_alloc'd, at least
+    host_size bytes: reused, the devices' mappings of it too) or a new one
+    """
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
+    parts = self._host_parts(length, hrow)
+    offs = self._host_offsets(parts)
+    buf = into if into is not None else self.host_alloc(offs[-1])
+    assert buf.nbytes >= offs[-1], f"{buf.nbytes} bytes for {offs[-1]}"
+    self._host_copy([(buf.view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), off in zip(parts, offs)])
+    return buf
+
+  def host_load(self, saved:Buffer, length:int):
     """the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them). sets no _cached_tokens"""
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
     parts = self._host_parts(length, 0)
-    assert [n for _, _, n in parts] == [h.nbytes for h in saved], "saved by another model"
-    self._host_copy([(b.view(n, off).ensure_allocated(), h) for (b, off, n), h in zip(parts, saved)])
+    offs = self._host_offsets(parts)
+    assert saved.nbytes >= offs[-1], "saved by another model"
+    self._host_copy([(b.view(n, o).ensure_allocated(), saved.view(n, off).ensure_allocated()) for (b, o, n), off in zip(parts, offs)])
     self._ckpt_tokens, self._spec_row = [], 0
 
   def forward_batch(self, *positions:UOp) -> Tensor:
