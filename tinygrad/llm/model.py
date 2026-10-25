@@ -2054,6 +2054,11 @@ class Transformer:
     if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
     self._token_prev:list[int]|None = None  # (the captures write the buffer: the next generate writes all of it)
+    # the random state of every device (sampling's noise) made here: one made in a capture's process isn't the one the jits run with, its
+    # counter wouldn't advance (every step and request the same noise)
+    for d in to_tuple(devs):
+      key, ctr = Tensor._next_counter(d, 0)
+      Tensor.realize(key, ctr, Tensor._device_rng_counters[d])
     temp = Tensor([0.0]).to(devs).realize()
     v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), cast(list[tuple[Any, Callable[[], Any]]], [])
     for n in sizes:
