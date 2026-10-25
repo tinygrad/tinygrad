@@ -511,6 +511,9 @@ class TestLLMToolCalls(unittest.TestCase):
                                                                                "function":{"name":"read", "arguments":{"path":"x"}}}]},
                             {"role":"tool", "tool_call_id":"t1", "content":"r"}])
     self.assertEqual([t["function"]["name"] for t in tools or []], ["read"])
+    # a system message in the conversation is one, as blocks or a string
+    for content in ("update", [{"type":"text", "text":"update"}]):
+      self.assertEqual(anthropic_messages({"messages":[{"role":"system", "content":content}]})[0], [{"role":"system", "content":"update"}])
 
   def test_anthropic_count_tokens(self):
     status, data = self.anthropic({"model":"m", "messages":[{"role":"user", "content":"hi"}]}, "/v1/messages/count_tokens")

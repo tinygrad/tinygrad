@@ -68,8 +68,9 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
   if (system:=body.get("system")): msgs.append({"role": "system", "content": text_of(system)})
   for m in body.get("messages", []):
     content = m.get("content")
-    if isinstance(content, str):
-      msgs.append({"role": m["role"], "content": content})
+    if isinstance(content, str) or m["role"] == "system":
+      # (a system message in the conversation (Claude Code's environment updates): its blocks or string the same message)
+      msgs.append({"role": m["role"], "content": text_of(content)})
     elif m["role"] == "assistant":
       msg:dict[str, typing.Any] = {"role": "assistant", "content": "".join(b.get("text", "") for b in content if b.get("type") == "text")}
       if (reasoning:="".join(b.get("thinking", "") for b in content if b.get("type") == "thinking")): msg["reasoning_content"] = reasoning
