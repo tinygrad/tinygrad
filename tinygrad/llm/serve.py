@@ -431,7 +431,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # caches are dropped, the client's retry is prefilled from the start)
     req.zeros = req.zeros + 1 if tok == 0 else 0
     if req.zeros >= getenv("CORRUPT_ZEROS", 16) or tok in self.odd_ids:
-      stderr_log(req.log + colored(f"the model went wrong after {len(req.generated)} tokens: the reply fails, the caches are dropped\n", "red"))
+      why = "token 0 again and again" if req.zeros else f"token {tok}"
+      stderr_log(req.log + colored(f"the model went wrong after {len(req.generated)} tokens ({why}, {req.cache_start} of {len(req.ids)} cached): "
+                                   "the reply fails, the caches are dropped\n", "red") + f"  ...{self.tok.decode(req.generated[-60:])!r}\n")
       trace(f"corrupt req {req.rid} after {len(req.generated)}")
       self.drop_caches()
       return self.finish(req, RuntimeError("the model's states went wrong (dropped: retry)"))
