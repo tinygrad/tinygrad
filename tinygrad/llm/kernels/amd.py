@@ -1754,35 +1754,41 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   # the lowest index of the max
   return vals.eq(vals.max(0, keepdim=True)).where(idxs, n).min(0).reshape(B, 1)
 
-def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int=3, G:int=64) -> Tensor:
+def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None) -> Tensor:
   """
   the tokens (B, V) of the top_p nucleus of softmax(z[:, :n]) (top-p sampling): the ones at least as likely as a threshold t, the largest with
   the probability of the ones at or above it at least top_p (B, 1). t is found by `rounds` searches of G thresholds (to 50/G**rounds of a log
   probability: the next ones as likely as the last in, to that). z split on its last axis over the devices: every device sums its part, the sums
   are exchanged (host_allgather). top_p >= 1: every token
   """
+  rounds, G = rounds or getenv("NUCLEUS_ROUNDS", 2), G or getenv("NUCLEUS_G", 256)
   B, V = int(z.shape[0]), int(z.shape[1])
   z = (Tensor.arange(V).to(z.device) < n).where(z, -math.inf)
   split = isinstance(devs:=z.device, tuple) and z.uop.axis == 1
   N = len(devs) if isinstance(devs, tuple) and split else 1
   zl = z.reshape(B, N, V // N)
-  def vreduce(x:Tensor, op:str) -> Tensor:
-    # x (B, N, ..., L): the sum or max over N and L, (B, ...) on every device
-    part = (x.sum(-1) if op == "sum" else x.max(-1))
-    if not split: return part.sum(1) if op == "sum" else part.max(1)
-    rest = part.shape[2:]
+  # (the sums of a device's part in two steps, chunks of 256 then theirs: one sum over all of them is a few workgroups)
+  c = 256
+  zc = zl.pad((None, None, (0, round_up(V // N, c) - V // N)), value=-math.inf).reshape(B, N, -1, c)
+  def vsum(x:Tensor, op:str="sum") -> Tensor: return (x.sum(-1).contiguous().sum(-1) if op == "sum" else x.max(-1).contiguous().max(-1))
+  def parts(part:Tensor) -> Tensor:
+    # part (B, N, ...) a device's in its row of N: every device's (N, B, ...) on every device
+    if not split: return part.permute(1, 0, *range(2, part.ndim))
     g = host_allgather(part.permute(1, 0, *range(2, part.ndim)).reshape(N, -1))
     assert g is not None, "no host_allgather on these devices"
-    g = g.reshape(N, B, *rest)
-    return g.sum(0) if op == "sum" else g.max(0)
-  m = vreduce(zl, "max").reshape(B, 1)
-  e = (zl - m.reshape(B, 1, 1)).exp()
-  mass = vreduce(e, "sum").reshape(B, 1) * top_p.reshape(-1, 1)
+    return g.reshape(N, *part.shape[:1], *part.shape[2:])
+  # the max and the sum of exp past it of every device's part, at once: the max, the sum of all
+  pm = vsum(zc, "max")
+  g = parts(pm.stack(vsum((zc - pm.reshape(B, N, 1, 1)).exp()), dim=-1))  # (N, B, 2)
+  m = g[..., 0].max(0)
+  mass = ((g[..., 1] * (g[..., 0] - m).exp()).sum(0) * top_p.reshape(-1)).reshape(B, 1)
+  m = m.reshape(B, 1)
+  e = (zc - m.reshape(B, 1, 1, 1)).exp().contiguous()  # (once, not a round's every threshold)
   steps = Tensor.arange(G).float().reshape(1, G).to(z.device) / G
   lo, w = m - 50.0, 50.0
   for _ in range(rounds):
     t = lo + w * steps  # (B, G) up from lo: the mass at or above them goes down
-    above = vreduce(e.unsqueeze(2) * (zl.unsqueeze(2) >= t.reshape(B, 1, G, 1)), "sum")  # (B, G)
+    above = parts(vsum(e.unsqueeze(2) * (zc.unsqueeze(2) >= t.reshape(B, 1, G, 1, 1)))).sum(0)  # (B, G)
     k = (above >= mass).sum(-1, keepdim=True).maximum(1)  # (the first is lo: at least the mass)
     lo, w = lo + w * (k - 1).float() / G, w / G
   return ((zl >= lo.reshape(B, 1, 1)) | (top_p.reshape(-1, 1, 1) >= 1)).reshape(B, V)
