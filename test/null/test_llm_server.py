@@ -540,6 +540,14 @@ class TestStash(unittest.TestCase):
     self.assertEqual(self.model._cached_tokens, a[:50])
     self.assertEqual(self.server.stash, {0: (a[:50], 0), 1: (b[:60], 0)})
 
+  def test_load_from_target(self):
+    # the conversation kept in the slot a request goes to is loaded before the prefill writes the slot
+    a = list(range(100))
+    self.server.stash = {1: (a[:50], 0)}
+    self.server.stash_load(a, {0, 1}, target=1)
+    self.model.slot_load.assert_called_once_with(1, 50, 0)
+    self.assertEqual(self.model._cached_tokens, a[:50])
+
   def test_kept_past_busy_slots(self):
     self.model._cached_tokens = list(range(50))
     self.server.stash_main({0, 1})

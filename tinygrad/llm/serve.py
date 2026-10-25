@@ -460,22 +460,26 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
                        f"vs {dec(ids[max(0,n-30):n+30])!r}\n", "yellow"))
 
-  def stash_load(self, ids:list[int], busy:set[int]):
-    """before a prefill of ids: the kept conversation it continues the most into the model (if more than the model's own), the model's kept"""
+  def stash_load(self, ids:list[int], busy:set[int], target:int|None=None):
+    """
+    before a prefill of ids (into slot target): the kept conversation it continues the most into the model (if more than the model's own), the
+    model's kept. (the target's own is loaded before the prefill writes the slot)
+    """
     if not self.slots or not getenv("STASH", 1): return
     model, have = self.model, self.model.get_start_pos(ids)
-    best = max(((len(t), i) for i, (t, _) in self.stash.items() if i not in busy and len(t) < len(ids) and ids[:len(t)] == t), default=(0, -1))
+    best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and ids[:len(t)] == t),
+               default=(0, -1))
     if best[0] >= have + self.STASH_MIN:
       self.stash_main(busy | {best[1]})
       tokens, hrow = self.stash[best[1]]
       model.slot_load(best[1], best[0], hrow)
       model._cached_tokens = list(tokens)
     elif have < self.STASH_MIN: self.stash_main(busy)  # (ids overwrite the model's conversation)
-  def stash_hit(self, ids:list[int], busy:set[int]) -> int:
+  def stash_hit(self, ids:list[int], busy:set[int], target:int|None=None) -> int:
     """the tokens of ids the model or a kept conversation has (where its prefill starts)"""
     if not self.slots: return 0
-    return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if i not in busy and len(t) < len(ids) and
-                                                  ids[:len(t)] == t])
+    return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
+                                                  len(t) < len(ids) and ids[:len(t)] == t])
   def slot_taken(self, *slots:int):
     for i in slots: self.stash.pop(i, None)
   def slot_done(self, i:int, req:Request, active:dict):
@@ -491,11 +495,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.stash.pop(i, None)
     self.stash[i] = ((req.ids + req.generated)[:n], (1 - req.par) * (k + 1) + n - start - 1)
 
-  def prefill(self, req:Request, busy:set[int]|None=None) -> int:
-    """the prompt (and what req generated, a continuation) through the model: the first sampled token"""
+  def prefill(self, req:Request, busy:set[int]|None=None, target:int|None=None) -> int:
+    """the prompt (and what req generated, a continuation) through the model (into slot target): the first sampled token"""
     ids = req.ids + req.generated
-    self.miss_log(ids, self.stash_hit(ids, busy or set()))
-    self.stash_load(ids, busy or set())
+    self.miss_log(ids, self.stash_hit(ids, busy or set(), target))
+    self.stash_load(ids, busy or set(), target)
     req.cache_start = self.model.get_start_pos(ids)
     g = self.model.generate(list(ids), temperature=req.temperature)
     try: return next(g)
@@ -568,7 +572,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if len(active) >= slots: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
-          first = self.prefill(req, set(active) | {slot})
+          first = self.prefill(req, set(active) | {slot}, slot)
           self.slot_taken(slot)
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
           pending.remove(req)
