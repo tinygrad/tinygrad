@@ -1,14 +1,11 @@
-import unittest, struct, contextlib, statistics
+import unittest, struct, contextlib
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, flatten, ansistrip, perf_counter_us
-from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
-from extra.hcq1.hcq import HCQCompiled
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS
+from tinygrad.helpers import Context, ProfileRangeEvent, cpu_profile, cpu_events, flatten, ansistrip, perf_counter_us
+from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent, HCQ_DEVS
 from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen import to_program
 
-MOCKGPU = DEV.interface.startswith("MOCK")
 def _dev_base(d):
   p = d.split(":")
   return p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
@@ -39,7 +36,7 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT], HCQCompiled) or Device.DEFAULT in HCQ_DEVS | {"CPU"}, "Dev not supported")
+@unittest.skipUnless(Device.DEFAULT in HCQ_DEVS | {"CPU"}, "Dev not supported")
 class TestSimpleProfiler(unittest.TestCase):
   def test_profiler(self):
     with helper_collect_profile(Device[Device.DEFAULT]) as profile:
@@ -47,11 +44,7 @@ class TestSimpleProfiler(unittest.TestCase):
     profile = filter_ranges(profile)
     self.assertTrue(any(e.device == Device.DEFAULT for e in profile))
 
-# TODO: support in HCQCompiled
-is_cpu_hcq = Device.DEFAULT in {"CPU"}
-
-@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in HCQ_DEVS,
-                     "Dev not supported")
+@unittest.skipUnless(Device.DEFAULT in HCQ_DEVS, "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -170,47 +163,9 @@ class TestProfiler(unittest.TestCase):
     _, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     _, _ = helper_profile_filter_device(profile, d1.device)
 
-    if Device.DEFAULT in HCQ_DEVS:
-      ents = flatten(e.ents for e in graph_evs)
-      assert len(ents) == 6, "three kernel runs and three copies are expected"
-      assert sum(ansistrip(e.name).startswith("copy") for e in ents) == 3, "three copies are expected"
-    else:
-      assert len(graph_evs) == 2, "2 graph events are expected"
-      assert len(graph_evs[0].ents) == 2, "two entities are expected"
-
-  @unittest.skipIf(MOCKGPU, "skip MOCKGPU")
-  @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "must be HCQ")
-  def test_dev_jitter_matrix(self):
-    dev_cnt = 6
-    try: devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]
-    except Exception as e: self.skipTest(f"multiple devices not available {e}")
-
-    for dev in devs: dev.synchronize()
-    for dev in devs: dev._at_profile_finalize()
-
-    def _sync_d2d(d1:HCQCompiled, d2:HCQCompiled):
-      d1.hw_compute_queue_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
-                             .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
-      d2.hw_compute_queue_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
-                             .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
-      d1.timeline_value += 2
-      d2.timeline_value += 2
-      d1.timeline_signal.wait(d1.timeline_value - 1)
-      d2.timeline_signal.wait(d2.timeline_value - 1)
-      return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
-
-    # then test it by timing the GPU to GPU times
-    dev_evs = {x.device:x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent)}
-    jitter_matrix = [[float('nan')] * len(devs) for _ in range(len(devs))]
-    pairs = [(p1, p2) for p1 in enumerate(devs) for p2 in enumerate(devs) if p1 != p2]
-    for (i1, d1), (i2, d2) in pairs:
-      cpu_diff = dev_evs[d1.device].tdiff - dev_evs[d2.device].tdiff
-      jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
-
-    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
-
-    for (i1, d1), (i2, d2) in pairs:
-      assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5us"
+    ents = flatten(e.ents for e in graph_evs)
+    assert len(ents) == 6, "three kernel runs and three copies are expected"
+    assert sum(ansistrip(e.name).startswith("copy") for e in ents) == 3, "three copies are expected"
 
   def test_cpu_profile(self):
     def test_fxn(err=False):
