@@ -144,12 +144,15 @@ class Handler(VizHandler):
       return bool(readable) and not self.connection.recv(1, socket.MSG_PEEK)
     except (OSError, ValueError, TypeError): return False
   def next_token(self, req:Request) -> int|None:
+    # (the client is checked a second at most apart, also while tokens come: one gone mid reply stops the model, not its end)
     while True:
-      try: return req.out.get(timeout=1.0)
-      except queue.Empty:
+      if time.perf_counter() - req.checked > 1.0:
+        req.checked = time.perf_counter()
         if Handler.client_gone(self):
           req.cancelled = True
           return None
+      try: return req.out.get(timeout=1.0)
+      except queue.Empty: pass
 
   def do_POST(self):
     request_st = time.perf_counter()
@@ -201,7 +204,7 @@ class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
   def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float):
     self.ids, self.log, self.max_tokens, self.temperature = ids, log, max_tokens, temperature
-    self.cancelled, self.finish_reason = False, "stop"
+    self.cancelled, self.finish_reason, self.checked = False, "stop", 0.0
     self.error: Exception|None = None
     self.out: queue.Queue[int|None] = queue.Queue()
     self.generated: list[int] = []
