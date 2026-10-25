@@ -57,6 +57,93 @@ def normalize_messages(messages:list[dict]) -> None:
     if m.get("content", "") is None: m["content"] = ""
     elif isinstance(c := m.get("content"), list) and all(p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
 
+# ** the Anthropic Messages API (/v1/messages): requests as the chat completions' messages and tools, replies as its content blocks and events
+
+def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
+  """an Anthropic request's system, messages and tools as chat completions' (thinking blocks: reasoning_content, tool results: tool messages)"""
+  def text_of(c) -> str:
+    if isinstance(c, str): return c
+    return "".join(b.get("text", "") if b.get("type") == "text" else "[image]" if b.get("type") == "image" else "" for b in c or [])
+  msgs:list[dict] = []
+  if (system:=body.get("system")): msgs.append({"role": "system", "content": text_of(system)})
+  for m in body.get("messages", []):
+    content = m.get("content")
+    if isinstance(content, str):
+      msgs.append({"role": m["role"], "content": content})
+    elif m["role"] == "assistant":
+      msg:dict[str, typing.Any] = {"role": "assistant", "content": "".join(b.get("text", "") for b in content if b.get("type") == "text")}
+      if (reasoning:="".join(b.get("thinking", "") for b in content if b.get("type") == "thinking")): msg["reasoning_content"] = reasoning
+      if (calls:=[{"id": b["id"], "type": "function", "function": {"name": b["name"], "arguments": b.get("input") or {}}}
+                  for b in content if b.get("type") == "tool_use"]): msg["tool_calls"] = calls
+      msgs.append(msg)
+    else:
+      # (a user turn: its tool results are tool messages, in order, its text a user message after them)
+      text:list[str] = []
+      for b in content:
+        if b.get("type") == "tool_result":
+          msgs.append({"role": "tool", "tool_call_id": b.get("tool_use_id"), "content": text_of(b.get("content", ""))})
+        else: text.append(text_of([b]))
+      if text: msgs.append({"role": "user", "content": "".join(text)})
+  tools = [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""), "parameters": t["input_schema"]}}
+           for t in body.get("tools") or [] if "input_schema" in t]
+  return msgs, tools or None
+
+STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
+
+def anthropic_events(chunks:typing.Iterator[dict], model:str, input_tokens:int) -> typing.Iterator[dict]:
+  """the chat completion chunks of a reply as the Anthropic stream's events (thinking, text and tool_use content blocks)"""
+  msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+  yield {"type": "message_start", "message": {"id": msg_id, "type": "message", "role": "assistant", "model": model, "content": [],
+         "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": input_tokens, "output_tokens": 0}}}
+  index, finish, output_tokens = -1, "stop", 0
+  kind:str|None = None  # the open content block's
+  def stop() -> typing.Iterator[dict]:
+    if kind == "thinking": yield {"type": "content_block_delta", "index": index, "delta": {"type": "signature_delta", "signature": ""}}
+    if kind is not None: yield {"type": "content_block_stop", "index": index}
+  for c in chunks:
+    if "error" in c:
+      yield {"type": "error", "error": {"type": "api_error", "message": c["error"]["message"]}}
+      return
+    if not c["choices"]:
+      output_tokens = c.get("usage", {}).get("completion_tokens", output_tokens)
+      continue
+    delta, finish = c["choices"][0].get("delta", {}), c["choices"][0].get("finish_reason") or finish
+    for field, block, dtype in (("reasoning_content", "thinking", "thinking_delta"), ("content", "text", "text_delta")):
+      if not delta.get(field): continue
+      if kind != block:
+        yield from stop()
+        index, kind = index + 1, block
+        yield {"type": "content_block_start", "index": index, "content_block": {"type": block, block: ""}}
+      yield {"type": "content_block_delta", "index": index, "delta": {"type": dtype, block: delta[field]}}
+    for tc in delta.get("tool_calls", []):
+      yield from stop()
+      index, kind = index + 1, None
+      yield {"type": "content_block_start", "index": index, "content_block": {"type": "tool_use", "id": tc["id"], "name": tc["function"]["name"],
+                                                                                "input": {}}}
+      yield {"type": "content_block_delta", "index": index, "delta": {"type": "input_json_delta", "partial_json": tc["function"]["arguments"]}}
+      yield {"type": "content_block_stop", "index": index}
+  yield from stop()
+  yield {"type": "message_delta", "delta": {"stop_reason": STOP_REASONS.get(finish, "end_turn"), "stop_sequence": None},
+         "usage": {"output_tokens": output_tokens}}
+  yield {"type": "message_stop"}
+
+def anthropic_message(events:typing.Iterator[dict]) -> dict:
+  """the Anthropic stream's events as the reply of a request that doesn't stream"""
+  msg:dict[str, typing.Any] = {}
+  for e in events:
+    if e["type"] == "error": return e
+    if e["type"] == "message_start": msg = e["message"]
+    elif e["type"] == "content_block_start": msg["content"].append(dict(e["content_block"]))
+    elif e["type"] == "content_block_delta":
+      block, d = msg["content"][e["index"]], e["delta"]
+      if d["type"] == "input_json_delta": block["input"] = json.loads(d["partial_json"] or "{}")
+      elif d["type"] == "signature_delta": block["signature"] = d["signature"]
+      else: block[block["type"]] += d[block["type"]]
+    elif e["type"] == "message_delta":
+      msg.update(e["delta"])
+      msg["usage"]["output_tokens"] = e["usage"]["output_tokens"]
+  return msg
+
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse. tags: the string of every tag
   def __init__(self, reasoning:bool=False, tags:dict[str, str]=TEXT_TAGS):
@@ -160,10 +247,11 @@ class Handler(VizHandler):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
+    if (path:=self.path.split("?")[0]) in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
     if self.path == "/v1/chat/completions":
       # render and tokenize
       normalize_messages(body["messages"])
-      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
+      rendered = self.render(body["messages"], body.get("tools"), body)
       ids: list[int] = self.server.tok.encode(rendered)
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
@@ -196,6 +284,44 @@ class Handler(VizHandler):
           "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
+
+  def render(self, messages:list[dict], tools:list[dict]|None, body:dict) -> str:
+    # (a reasoning effort asked for is the template's, else its default)
+    effort = body.get("reasoning_effort") or (body.get("output_config") or {}).get("effort")
+    return self.server.template.render(messages=messages, tools=tools, add_generation_prompt=True, preserve_thinking=True,
+                                       **({"reasoning_effort": effort} if effort else {}))
+
+  def anthropic(self, path:str, body:dict, log:str, request_st:float):
+    """the Anthropic Messages API: the request as chat completions' messages, the reply's chunks as its content blocks (and stream events)"""
+    msgs, tools = anthropic_messages(body)
+    normalize_messages(msgs)
+    rendered = self.render(msgs, tools, body)
+    ids: list[int] = self.server.tok.encode(rendered)
+    if path.endswith("count_tokens"): return self.send_data(json.dumps({"input_tokens": len(ids)}).encode())
+    log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
+    if len(ids) >= (n:=self.server.model.max_context):
+      # (the message Anthropic's clients know: Claude Code compacts its conversation)
+      stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{n:5d}\n")
+      return self.send_data(json.dumps({"type": "error", "error": {"type": "invalid_request_error",
+                                        "message": f"prompt is too long: {len(ids)} tokens > {n-1} maximum"}}).encode(), status_code=400)
+    # (the API's default temperature is 1)
+    chunks = self.run_model(ids, body.get("model", self.server.model_name), True, max_tokens=body.get("max_tokens"),
+                            temperature=float(body.get("temperature", 1.0)), reasoning=rendered.rstrip().endswith("<think>"), log=log)
+    events = anthropic_events(chunks, body.get("model", self.server.model_name), len(ids))
+    try:
+      if body.get("stream"):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        for e in events:
+          self.wfile.write(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode("utf-8"))
+          self.wfile.flush()
+      else:
+        reply = anthropic_message(events)
+        self.send_data(json.dumps(reply).encode(), status_code=500 if reply.get("type") == "error" else 200)
+    except (BrokenPipeError, ConnectionResetError): pass
+    finally: chunks.close()
 
 def _close(g:typing.Iterator) -> None:
   if (close:=getattr(g, "close", None)) is not None: close()  # (a generator: the model stops where it is)

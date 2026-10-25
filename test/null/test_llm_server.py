@@ -453,6 +453,68 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual(second.choices[0].message.content, "done")
     self.assertEqual(second.choices[0].finish_reason, "stop")
 
+  # ** the Anthropic Messages API
+  def anthropic(self, body:dict, path:str="/v1/messages") -> tuple[int, bytes]:
+    import urllib.request, urllib.error
+    req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=json.dumps(body).encode(), headers={"Content-Type":"application/json"})
+    try:
+      with urllib.request.urlopen(req) as resp: return resp.status, resp.read()
+    except urllib.error.HTTPError as e: return e.code, e.read()
+
+  @staticmethod
+  def anthropic_tools(): return [{"name":"read", "description":"Read a file", "input_schema":{"type":"object", "properties":{"path":{"type":"string"}}}}]
+
+  def test_anthropic_stream_tool_use(self):
+    self.set_output('<think>plan</think>before<tool_call>{"name":"read","arguments":{"path":"README.md"}}</tool_call>')
+    status, data = self.anthropic({"model":"m", "max_tokens":100, "stream":True, "tools":self.anthropic_tools(),
+                                   "messages":[{"role":"user", "content":"Read README.md"}]})
+    self.assertEqual(status, 200)
+    events = [json.loads(l[len("data: "):]) for l in data.decode().splitlines() if l.startswith("data: ")]
+    names = [l[len("event: "):] for l in data.decode().splitlines() if l.startswith("event: ")]
+    self.assertEqual(names, [e["type"] for e in events])
+    self.assertEqual(events[0]["type"], "message_start")
+    self.assertEqual(events[-1]["type"], "message_stop")
+    blocks = [e["content_block"]["type"] for e in events if e["type"] == "content_block_start"]
+    self.assertEqual(blocks, ["thinking", "text", "tool_use"])
+    deltas = [e["delta"] for e in events if e["type"] == "content_block_delta"]
+    self.assertEqual("".join(d.get("thinking", "") for d in deltas), "plan")
+    self.assertEqual("".join(d.get("text", "") for d in deltas), "before")
+    self.assertEqual([json.loads(d["partial_json"]) for d in deltas if d["type"] == "input_json_delta"], [{"path":"README.md"}])
+    self.assertEqual(next(e for e in events if e["type"] == "message_delta")["delta"]["stop_reason"], "tool_use")
+
+  def test_anthropic_round_trip(self):
+    # the tool_use and tool_result blocks go back as the chat's tool calls and tool messages
+    self.set_output("done")
+    status, data = self.anthropic({"model":"m", "max_tokens":100, "system":[{"type":"text", "text":"be brief"}], "tools":self.anthropic_tools(),
+      "messages":[{"role":"user", "content":"Read README.md"},
+                  {"role":"assistant", "content":[{"type":"thinking", "thinking":"t", "signature":""},
+                                                  {"type":"tool_use", "id":"toolu_1", "name":"read", "input":{"path":"README.md"}}]},
+                  {"role":"user", "content":[{"type":"tool_result", "tool_use_id":"toolu_1", "content":"file contents"},
+                                             {"type":"text", "text":"go on"}]}]})
+    self.assertEqual(status, 200)
+    reply = json.loads(data)
+    self.assertEqual(reply["type"], "message")
+    self.assertEqual(reply["role"], "assistant")
+    self.assertEqual(reply["content"], [{"type":"text", "text":"done"}])
+    self.assertEqual(reply["stop_reason"], "end_turn")
+    self.assertEqual(reply["usage"]["output_tokens"], 4)
+
+  def test_anthropic_messages_conversion(self):
+    from tinygrad.llm.serve import anthropic_messages
+    msgs, tools = anthropic_messages({"system":"sys", "tools":self.anthropic_tools() + [{"type":"web_search_20250305", "name":"web_search"}],
+      "messages":[{"role":"user", "content":"q"},
+                  {"role":"assistant", "content":[{"type":"text", "text":"a"}, {"type":"tool_use", "id":"t1", "name":"read", "input":{"path":"x"}}]},
+                  {"role":"user", "content":[{"type":"tool_result", "tool_use_id":"t1", "content":[{"type":"text", "text":"r"}]}]}]})
+    self.assertEqual(msgs, [{"role":"system", "content":"sys"}, {"role":"user", "content":"q"},
+                            {"role":"assistant", "content":"a", "tool_calls":[{"id":"t1", "type":"function",
+                                                                               "function":{"name":"read", "arguments":{"path":"x"}}}]},
+                            {"role":"tool", "tool_call_id":"t1", "content":"r"}])
+    self.assertEqual([t["function"]["name"] for t in tools or []], ["read"])
+
+  def test_anthropic_count_tokens(self):
+    status, data = self.anthropic({"model":"m", "messages":[{"role":"user", "content":"hi"}]}, "/v1/messages/count_tokens")
+    self.assertEqual((status, json.loads(data)), (200, {"input_tokens":3}))
+
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
