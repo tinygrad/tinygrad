@@ -519,6 +519,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
 
   # ** the conversations kept in slots (STASH): the model's states hold one conversation, a request of another one overwrites them. the one
   # there is stored in a free slot first, a request that continues a stored one takes its states back (an agent's turn isn't prefilled again)
+  # (SLOT_HOST: the model's conversation is a prompt decoded in a slot: its whole conversation is saved when done, see slot_done)
+  main_moved = False
   STASH_MIN = getenv("STASH_MIN", 512)  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
   def stash_main(self, busy:set[int]):
     """
@@ -527,7 +529,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
     if not self.keeps() or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
-       any(e.tokens == tokens for e in self.host): return
+       any(e.tokens == tokens for e in self.host) or (self.main_moved and self.slot_host()): return
     if not self.slots or len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
     free = list(range(max(busy, default=-1)+1, self.slots))
     # (an empty one, else host memory, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the
@@ -539,6 +541,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
     self.stash.pop(victims[0], None)
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
+  def slot_host(self) -> bool:
+    """
+    (SLOT_HOST, with slots and HOST_STASH) a request decoded in a slot has its whole conversation saved to host memory when done: with more
+    agents than slots the slot is taken before its next turn, the prompt alone kept would have the turn prefill the reply again
+    """
+    return bool(self.slots) and getenv("HOST_STASH", 0.0) > 0 and bool(getenv("SLOT_HOST", 1))
   def keeps(self) -> bool:
     """conversations are kept past the model's (in slots, or in host memory: HOST_STASH)"""
     return bool(self.slots) or getenv("HOST_STASH", 0.0) > 0
@@ -679,12 +687,21 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     its last step's rows were its tokens at start..start+k, the first j+1 real ones: the states of its tokens up to the last of them it has
     """
     k = self.spec
-    if not k or not getenv("STASH", 1) or i <= max(active, default=-1) or req.error is not None: return
+    if not k or not getenv("STASH", 1) or req.error is not None: return
     start = req.mtp - 1
     n = min(len(req.ids) + len(req.generated), req.pos)
-    if n < max(self.STASH_MIN, start + 1) or n >= self.model.batch_ctx() - k - 2: return
+    hrow = (1 - req.par) * (k + 1) + n - start - 1
+    if self.slot_host() and n >= max(getenv("HOST_MIN", 4096), start + 1):
+      # (its states are the slot's until the next step: into the model's (the model's conversation kept first if it isn't), from it to host)
+      st = time.perf_counter()
+      if not self.main_moved: self.stash_main(set(active) | {i})
+      self.model.slot_load(i, n, hrow)
+      self.model._cached_tokens, self.model._ckpt_tokens, self.main_moved = (req.ids + req.generated)[:n], [], False
+      self.host_save(self.model._cached_tokens)
+      trace(f"slot_host req {req.rid} slot {i} len {n} in {time.perf_counter()-st:.2f} s")
+    if i <= max(active, default=-1) or n < max(self.STASH_MIN, start + 1) or n >= self.model.batch_ctx() - k - 2: return
     self.stash.pop(i, None)
-    self.stash[i] = ((req.ids + req.generated)[:n], (1 - req.par) * (k + 1) + n - start - 1)
+    self.stash[i] = ((req.ids + req.generated)[:n], hrow)
     trace(f"slot_done req {req.rid} slot {i} len {n} hrow {self.stash[i][1]} active {sorted(active)}")
 
   def prefill(self, req:Request, busy:set[int]|None=None, target:int|None=None) -> int:
@@ -693,6 +710,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     trace(f"prefill req {req.rid} ids {len(ids)} target {target} busy {sorted(busy or set())}")
     self.miss_log(ids, self.stash_hit(ids, busy or set(), target))
     self.stash_load(ids, busy or set(), target)
+    self.main_moved = False
     req.cache_start = self.model.get_start_pos(ids)
     g = self.model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
     try: return next(g)
@@ -705,6 +723,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     trace(f"alone req {req.rid} ids {len(ids)}")
     self.miss_log(ids, self.stash_hit(ids, set()))
     self.stash_load(ids, set())
+    self.main_moved = False
     req.cache_start = model.get_start_pos(ids)
     spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
     g = model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
@@ -718,6 +737,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           self.slot_taken(0)
           trace(f"alone to batch req {req.rid} slot 0 pos {req.pos} row {getattr(model, '_spec_row', 0)}")
           model.slot_store(0, req.pos, getattr(model, "_spec_row", 0))
+          self.main_moved = True
           req.spec_start(req.generated[-1], req.pos, self.spec)
           return True
       return self.finish(req)
@@ -776,6 +796,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           req.pos = len(req.ids) + len(req.generated)
           trace(f"slot_store req {req.rid} slot {slot} pos {req.pos}")
           model.slot_store(slot, req.pos)
+          self.main_moved = True
           req.spec_start(first, req.pos, k)
           if self.emit(req, first): active[slot] = req
         if not active: continue

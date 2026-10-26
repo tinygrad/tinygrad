@@ -754,6 +754,30 @@ class TestStash(unittest.TestCase):
     self.server.slot_done(1, req, {0: None, 2: None})  # a slot a step writes (before an active one): not kept
     self.assertNotIn(1, self.server.stash)
 
+  def test_batched_done_to_host(self):
+    # (SLOT_HOST with HOST_STASH) a request done in a slot: its whole conversation into the model's states and from them to host memory (the
+    # slot is taken by another request before its next turn), even in a slot a step writes. the model's conversation was a prompt moved to a
+    # slot (its whole one saved when it's done): not saved
+    from tinygrad.llm.serve import Request
+    from tinygrad.helpers import getenv
+    m = self.model
+    m.HOST_CHUNK, m.host_ckpt = 1000, Mock(return_value=0)
+    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
+    self.server.spec, self.server.main_moved = 2, True
+    m._cached_tokens = list(range(5000, 10000))
+    req = Request(list(range(5000)), "", None, 0.0)
+    req.generated = list(range(20000, 20012))
+    req.mtp, req.j, req.par, req.pos = 5011, 2, 0, 5013
+    self.addCleanup(getenv.cache_clear)
+    with patch.dict(os.environ, {"HOST_STASH": "0.001"}):
+      getenv.cache_clear()
+      self.server.slot_done(1, req, {0: None, 2: None})
+      conv = list(range(5000)) + list(range(20000, 20012))
+      self.assertEqual((m.slot_load.call_args.args, m._cached_tokens, self.server.main_moved), ((1, 5012, 3 + 1), conv, False))
+      self.assertEqual([e.tokens for e in self.server.host], [conv])
+      self.assertEqual(m.host_save.call_count, 1)
+      self.assertEqual(self.server.stash_hit(conv + [7, 8], set()), 5012)
+
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
