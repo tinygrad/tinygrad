@@ -328,6 +328,22 @@ def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DT
     return mb
   return tensor(base, n), [tensor(UOp.from_buffer(view(i), dtype, devs), 1) for i in range(n)]
 
+def _region_views(devs:tuple[str, ...], axis:int|None, row:tuple[int, ...], dtype:DType, rows:int, spans:list[tuple[int, int]]) -> list[Tensor]:
+  """
+  views of one buffer of `rows` rows (of shape row) on every device, allocated: a tensor of every span (its first row, its rows). axis 0: a
+  split one, the rows of a span are every device's part ((n*rows, *row)), None: whole on every device ((rows, *row))
+  """
+  item = prod(row) * dtype.itemsize
+  base = cast(MultiBuffer, UOp.new_buffer(devs, rows * prod(row), dtype).buffer)
+  out = []
+  for r0, nr in spans:
+    assert 0 <= r0 and r0 + nr <= rows, f"rows {r0}..{r0+nr} of {rows}"
+    (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [x.view(nr * item, r0 * item) for x in base.bufs]
+    for b in mb.bufs: b.ensure_allocated()
+    u = UOp.from_buffer(mb, dtype, devs).reshape((nr, *row))
+    out.append(Tensor(u.unshard(axis) if axis is not None else u))
+  return out
+
 def _unallocated(*sizes:int|UOp, dtype:DType, device:str|tuple[str, ...]|None, axis:int|None=None) -> Tensor:
   """a tensor whose buffer is made but not allocated: a jit captured before its memory is (it holds it, not an intermediate of its own)"""
   shape, dev = tuple(int(s) for s in sizes), cast(str|tuple[str, ...], unwrap(device))
@@ -819,6 +835,7 @@ class TransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
 
 class Indexer:
+  _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: the slots, their positions, the regions of the cache, see _region_views)
   pool_pk:Tensor  # batched decoding: the caches of every slot, and of all of them (MLATransformerBlock._init_slots)
   pool_ring:Tensor
   slot_pk:list[Tensor]
@@ -841,6 +858,14 @@ class Indexer:
     self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, idx.head_dim,
                                  dtype=dtypes.half if self.sparse else dtypes.float32, device=x.device).contiguous()
     ring = round_up(max(2*idx.kpool, self.rewind + idx.kpool - 1), idx.kpool)
+    if self.sparse and (reg:=self._regions) is not None:
+      # (the slots' pooled keys in the same buffer, past the model's first slot's worth: see MLATransformerBlock._init_state)
+      n, S, R = reg
+      P = S // idx.kpool
+      views = _region_views(cast(tuple[str, ...], x.device), None, (idx.head_dim,), dtypes.half, R*P,
+                            [(0, R*P), (0, max_pools), (P, n*P)] + [((i+1)*P, P) for i in range(n)])
+      views[0].assign(Tensor.zeros(R*P, idx.head_dim, dtype=dtypes.half, device=x.device)).realize()
+      self.cache_pk, self.pool_pk, self.slot_pk = views[1], views[2], views[3:]
     if self.sparse: self.ring = Tensor.zeros(ring, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
     else: self.cache_kg = Tensor.zeros(x.shape[0], max_pools*idx.kpool, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
 
@@ -900,6 +925,7 @@ class Indexer:
 
 
 class MLATransformerBlock(FFNBlock):
+  _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: see Transformer._aliased)
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
@@ -1047,15 +1073,18 @@ class MLATransformerBlock(FFNBlock):
 
   def _init_slots(self, n:int, ctx:int):
     """the caches of n sequences of batched decoding of at most ctx tokens (one slot each)"""
-    if len(getattr(self, "slot_k", getattr(self, "slot_s", []))) >= n: return
-    if self.seq_sharded:
-      # (every device its rows of every slot, as the model's cache: seq_rows of the slot's positions)
-      nd = len(cast(tuple, self.cache_s.device))
-      self.pool_s, self.slot_s = _slot_pool(n, self.cache_s, (nd*seq_rows(ctx, nd), self.cache_s.shape[-1]))
-    else: self.pool_k, self.slot_k = _slot_pool(n, self.cache_k, (1, 1, ctx, self.cache_k.shape[-1]))
+    if len(getattr(self, "slot_k", getattr(self, "slot_s", []))) >= n and (self.indexer is None or len(getattr(self.indexer, "slot_ring", [])) >= n):
+      return
+    # (aliased: the caches of the slots made with the model's, see _init_state)
+    if len(getattr(self, "slot_k", getattr(self, "slot_s", []))) < n:
+      if self.seq_sharded:
+        # (every device its rows of every slot, as the model's cache: seq_rows of the slot's positions)
+        nd = len(cast(tuple, self.cache_s.device))
+        self.pool_s, self.slot_s = _slot_pool(n, self.cache_s, (nd*seq_rows(ctx, nd), self.cache_s.shape[-1]))
+      else: self.pool_k, self.slot_k = _slot_pool(n, self.cache_k, (1, 1, ctx, self.cache_k.shape[-1]))
     if (idx:=self.indexer) is not None:
       pools = round_up(ctx, idx.idx.kpool) // idx.idx.kpool
-      idx.pool_pk, idx.slot_pk = _slot_pool(n, idx.cache_pk, (pools, idx.cache_pk.shape[-1]))
+      if len(getattr(idx, "slot_pk", [])) < n: idx.pool_pk, idx.slot_pk = _slot_pool(n, idx.cache_pk, (pools, idx.cache_pk.shape[-1]))
       idx.pool_ring, idx.slot_ring = _slot_pool(n, idx.ring)
 
   def _attn_mask(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor|None:  # (1, 1, Tq, start_pos+T), None: all visible
@@ -1080,7 +1109,15 @@ class MLATransformerBlock(FFNBlock):
       if seq_sharded(x.device):
         # (MLA_SEQ_SHARD: every device the rows of its positions, see seq_store)
         devs = cast(tuple[str, ...], x.device)
-        self.cache_s = Tensor.empty(len(devs)*seq_rows(self.config.max_context, len(devs)), D, dtype=dtypes.half, device=devs, axis=0)
+        if (reg:=self._regions) is not None:
+          # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first, slot i's the i+1-th. the
+          # model's cache past S positions is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
+          n, S, R = reg
+          stride = seq_rows(S, len(devs))
+          views = _region_views(devs, 0, (D,), dtypes.half, R*stride, [(0, seq_rows(self.config.max_context, len(devs))), (stride, n*stride)] +
+                                [((i+1)*stride, stride) for i in range(n)])
+          self.cache_s, self.pool_s, self.slot_s = views[0], views[1], views[2:]
+        else: self.cache_s = Tensor.empty(len(devs)*seq_rows(self.config.max_context, len(devs)), D, dtype=dtypes.half, device=devs, axis=0)
       else: self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, D, dtype=dtypes.half, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
@@ -1524,7 +1561,26 @@ class Transformer:
     # (the memory of the slots: a shorter context of the model's own frees some)
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
     return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
-  def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
+  def batch_ctx(self) -> int:
+    ctx = min(getenv("BATCH_CTX", 2048), self.max_context)
+    # (aliased: whole blocks of the split sequence, the slots' regions are the model's cache's positions)
+    if self._aliased(): ctx = ctx // (q:=SEQ_BLK*len(to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)))) * q
+    return ctx
+  def _aliased(self) -> bool:
+    """
+    (SLOT_ALIAS, a sequence sharded cache) the slots' caches and the model's are one buffer: the model's first batch_ctx positions, then the
+    slots' (the model's past them too: a long sequence alone overwrites the slots, see main_overlaps)
+    """
+    return seq_sharded(self.token_embd.weight.device) and bool(self.batch_slots()) and bool(getenv("SLOT_ALIAS", 1))
+  def main_overlaps(self, length:int) -> list[int]:
+    """the slots the model's cache of `length` positions overwrites (aliased: slot i's are the model's past (i+1)*batch_ctx)"""
+    if not self._aliased(): return []
+    return list(range(min(self.batch_slots(), max(0, -(-length // self.batch_ctx()) - 1))))
+  def _slot_writes(self):
+    """(aliased) the slots written: the model's conversation past batch_ctx positions (and its checkpoint) is gone"""
+    if not self._aliased(): return
+    if len(getattr(self, "_cached_tokens", [])) > (S:=self.batch_ctx()): self._cached_tokens = []
+    if len(getattr(self, "_ckpt_tokens", [])) > S: self._ckpt_tokens = []
   def batch_sizes(self) -> tuple[int, ...]:
     """
     the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size). none with
@@ -1633,9 +1689,10 @@ class Transformer:
     def rows(t:Tensor, start:UOp, n:int) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
     Tensor.realize(*[rows(p, dst*n, n).assign(rows(p, src*n, n).contiguous()) for p, n in self._slot_pools()])
   def _slot_jits(self):
-    if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True)
-    if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True)
-    if not hasattr(self, "_slot_load_jit"): self._slot_load_jit = TinyJit(self._slot_load_copy, capture_first=True)
+    # (their temporaries in the memory of the model's intermediates: a slot's copy is as big as its caches)
+    if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True, scratch=self._scratch)
+    if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True, scratch=self._scratch)
+    if not hasattr(self, "_slot_load_jit"): self._slot_load_jit = TinyJit(self._slot_load_copy, capture_first=True, scratch=self._scratch)
   def _slot_move_vars(self, src:int, dst:int) -> tuple[UOp, ...]:
     v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
     return v("slot_src").bind(src), v("slot_dst").bind(dst)
@@ -1648,6 +1705,7 @@ class Transformer:
   def slot_move(self, src:int, dst:int):
     """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
     self._slot_jits()
+    self._slot_writes()
     self._slot_move_jit(*self._slot_move_vars(src, dst))
 
   def slot_store(self, i:int, length:int, hrow:int=0):
@@ -1655,6 +1713,8 @@ class Transformer:
     self._init_slots()
     self._slot_jits()
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
+    assert not self._aliased() or length <= self.batch_ctx(), f"a sequence of {length} tokens into a slot of {self.batch_ctx()}"
+    self._slot_writes()
     self._slot_jit(*self._slot_store_vars(i, length, hrow))
 
   def slot_load(self, i:int, length:int, hrow:int=0):
@@ -1677,7 +1737,7 @@ class Transformer:
     speculative decoding), the checkpoint's (the states at the end of the prompt of the last reply: the caches up to it are the conversation's).
     the same for every conversation of a bucket: host_save's copies are a program made once
     """
-    length = min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context)
+    length = self._host_len(length)
     parts:list[tuple[Buffer, int, int]] = []
     def add(t:Tensor, axis:int=0, n:int|None=None):
       # (the first n rows of axis (all of it), a prefix of every device's buffer past the axes of one before it)
@@ -1732,7 +1792,7 @@ class Transformer:
     # the copies of a bucket between the model and these chunks: a program made once (building and compiling ~2000 copies takes ~0.5 s),
     # the devices copy at once (CPU memory is the devices' to copy to, none staged)
     if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
-    key = (save, tuple(id(c) for c in chunks), min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context))
+    key = (save, tuple(id(c) for c in chunks), self._host_len(length))
     if (prg:=self._host_programs.pop(key, None)) is None:
       parts = self._host_parts(length)
       layout = self._host_layout(parts)
@@ -1747,6 +1807,11 @@ class Transformer:
     for d in devs: Device[d].synchronize()  # (run ahead steps of the model)
     run_linear(prg, jit=True, update_stats=False)
     for d in devs + ("CPU",): Device[d].synchronize()
+
+  def _host_len(self, length:int) -> int:
+    """the positions of a conversation host_save copies: rounded up to HOST_BUCKET, (aliased) not past batch_ctx if it fits (the slots')"""
+    n = min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context)
+    return min(n, self.batch_ctx()) if self._aliased() and length <= self.batch_ctx() else n
 
   def host_save(self, length:int, chunks:list[Buffer]):
     """
@@ -1791,6 +1856,7 @@ class Transformer:
     a step of batched decoding: rows (token, position, temperature (or temperature and top_p)) of the slots 0..len(rows)-1, their sampled tokens
     """
     self._init_slots()
+    self._slot_writes()
     n = len(rows)
     m = next(s for s in self.batch_sizes() if s >= n)
     assert m <= self.batch_slots(), f"{n} rows, {self.batch_slots()} slots"
@@ -1933,6 +1999,7 @@ class Transformer:
     of every one (see _spec_steps), their k+1 sampled tokens and k drafts
     """
     self._init_slots()
+    self._slot_writes()
     k, n = self.config.spec_drafts, len(seqs)
     m = next(s for s in self.batch_sizes() if s >= n)
     assert m <= self.batch_slots(), f"{n} sequences, {self.batch_slots()} slots"
@@ -1959,6 +2026,13 @@ class Transformer:
     if devs is not None and amd_custom_kernels_supported(devs): tables_ready(devs)
     x = Tensor.empty(1, 1, self.config.dim, device=devs)
     holders:list = []
+    if self._aliased():
+      # (the regions of the slots and the model's cache: as many as both need)
+      n, S = self.batch_slots(), self.batch_ctx()
+      for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
+        if isinstance(b, MLATransformerBlock):
+          b._regions = (n, S, max(n + 1, -(-self.max_context // S)))
+          if b.indexer is not None: b.indexer._regions = b._regions
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
       b._init_state(x)
       holders += [b] + ([idx] if (idx:=getattr(b, "indexer", None)) is not None else [])

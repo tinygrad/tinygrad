@@ -624,6 +624,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.host.append(e)
       st = time.perf_counter()
       model.host_load(e.chunks, len(e.tokens), e.hrow)
+      self.main_writes(n if callable(f:=getattr(model, "_host_len", None)) and isinstance(n:=f(len(e.tokens)), int) else len(e.tokens))
       model._cached_tokens, model._ckpt_tokens = list(e.tokens), list(e.tokens[:e.ckpt])
       trace(f"host_load len {len(e.tokens)} ckpt {e.ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")
     elif best[0] >= have + self.STASH_MIN:
@@ -649,6 +650,14 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if len(pending) == 1 or not self.keeps() or time.perf_counter() - pending[0].st > self.STARVE: return 0
     return max(range(len(pending)), key=lambda i: (self.stash_hit(pending[i].ids + pending[i].generated, set()), -i))
 
+  def main_writes(self, length:int):
+    """
+    the model's cache written up to `length` positions: the conversations kept in the slots it overwrites are gone (SLOT_ALIAS: the slots are
+    the model's cache past its first batch_ctx positions, a sequence that long is alone)
+    """
+    if callable(f:=getattr(self.model, "main_overlaps", None)) and isinstance(gone:=f(length), list) and gone:
+      trace(f"main_writes {length}: slots {gone} gone")
+      self.slot_taken(*gone)
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
@@ -715,6 +724,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     finally:
       if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list): req.steps += ss[0] - spec_st[0]
       _close(g)
+      # (its positions and the drafts past them)
+      self.main_writes(max(len(ids) + len(req.generated), len(getattr(model, "_cached_tokens", []))) + 64)
 
   def schedule(self):
     model, slots, k = self.model, self.slots, self.spec
