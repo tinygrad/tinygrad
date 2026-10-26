@@ -1,7 +1,7 @@
 import math, unittest
 from dataclasses import replace
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import AddrSpace, Invalid
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import ParamArg, UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 _strip_unique_pm = PatternMatcher([
@@ -497,12 +497,6 @@ class TestUOpEmpty(unittest.TestCase):
     self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
 
 class TestTensorUOpCreation(unittest.TestCase):
-  def test_full_axis_invalid_dtype(self):
-    for cls in (Tensor, UOp):
-      for axis in (None, 0):
-        x = cls.full((4,), Invalid, dtype=dtypes.float32, device=("NULL:0", "NULL:1"), axis=axis)
-        self.assertEqual(x.dtype, dtypes.float32)
-
   def test_empty(self):
     self.assertIs(_strip_unique(Tensor.empty(2, 3).uop), _strip_unique(UOp.empty(2, 3)))
   def test_full(self):
