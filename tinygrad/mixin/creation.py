@@ -71,7 +71,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     Creates a tensor with the given shape, filled with the given value.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    With multiple devices, optionally specify which `axis` to shard scalar fill values on.
+    With multiple devices, optionally specify which `axis` to shard on.
     Pass `buffer=False` to get a broadcast const value instead of a materialized buffer.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -85,12 +85,12 @@ class CreationMixin(DTypeMixin, MovementMixin):
     # if not buffer: assert device is None, "buffer=False does not support device specification"
     from tinygrad.uop.ops import UOp
     if axis is not None and (isinstance(fill_value, UOp) or not buffer):
-      raise ValueError("axis requires a scalar fill value and buffer=True")
+      raise RuntimeError("axis requires a scalar fill value and buffer=True")
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
     val = cls.const(fill_value, dt).expand(new_shape)
     if not buffer: return val
-    if axis is not None: ret = cls.empty(new_shape, device=device, dtype=val._uop.commit_dtype() if dt in dtypes.weaks else dt, axis=axis)
+    if axis is not None: ret = cls.empty(new_shape, device=device, dtype=val.commit_dtype() if dt in dtypes.weaks else dt, axis=axis)
     else: ret = val.empty_like(None if dt in dtypes.weaks else dt, device)
     return cls._wrap_uop(ret._uop.after(ret._uop.store(val._uop)))
 
