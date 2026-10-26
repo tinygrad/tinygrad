@@ -556,6 +556,25 @@ class TestStash(unittest.TestCase):
     self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
     self.server.host_free, self.server.host_made = [], 0
 
+  def test_host_without_slots(self):
+    # no slots (BATCH_SLOTS=0): a conversation that's overwritten goes to host memory, one continued is loaded back
+    from tinygrad.helpers import getenv
+    m = self.model
+    m.HOST_CHUNK, m.host_ckpt = 1000, Mock(return_value=0)
+    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
+    self.server.slots = 0
+    a, b = list(range(6000)), list(range(10000, 16000))
+    self.addCleanup(getenv.cache_clear)
+    with patch.dict(os.environ, {"HOST_STASH": "0.0001"}):
+      getenv.cache_clear()
+      m._cached_tokens = a[:5000]
+      self.server.stash_load(b, set())
+      m.slot_store.assert_not_called()
+      self.assertEqual([len(e.tokens) for e in self.server.host], [5000])
+      m._cached_tokens = b[:5000]
+      self.server.stash_load(a, set())
+      self.assertEqual((m.host_load.call_args.args[1], m._cached_tokens), (5000, a[:5000]))
+
   def test_step_writes(self):
     # a step of slots 0 and 2 is one of 4 rows (sizes 1, 2, 4): slots 1 and 3 are written (rows of nothing), the ones kept there are gone
     self.model.batch_sizes = Mock(return_value=(1, 2, 4, 8))

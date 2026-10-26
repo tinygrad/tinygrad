@@ -509,9 +509,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     before its last one (rows of nothing), a request takes the first free one
     """
     model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
-    if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
+    if not self.keeps() or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
        any(e.tokens == tokens for e in self.host): return
-    if len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
+    if not self.slots or len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
     free = list(range(max(busy, default=-1)+1, self.slots))
     # (an empty one, else host memory, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the
     # next one used)
@@ -522,6 +522,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
     self.stash.pop(victims[0], None)
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
+  def keeps(self) -> bool:
+    """conversations are kept past the model's (in slots, or in host memory: HOST_STASH)"""
+    return bool(self.slots) or getenv("HOST_STASH", 0.0) > 0
   def host_save(self, tokens:list[int]):
     """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
     model = self.model
@@ -579,7 +582,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
 
   def miss_log(self, ids:list[int], start:int):
     """(CACHE_LOG) a request prefilled from much less than it shares with a kept conversation: where they differ"""
-    if not self.slots or not getenv("CACHE_LOG", 1): return
+    if not self.keeps() or not getenv("CACHE_LOG", 1): return
     kept = self.kept()
     def lcp(t:list[int]) -> int: return next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), min(len(t), len(ids)))
     n, t = max(((lcp(t), t) for t in kept), key=lambda x: x[0], default=(0, []))
@@ -593,7 +596,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     before a prefill of ids (into slot target): the kept conversation it continues the most into the model (if more than the model's own), the
     model's kept. (the target's own is loaded before the prefill writes the slot)
     """
-    if not self.slots or not getenv("STASH", 1): return
+    if not self.keeps() or not getenv("STASH", 1): return
     model, have = self.model, self.model.get_start_pos(ids)
     best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and ids[:len(t)] == t),
                default=(0, -1))
@@ -616,7 +619,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     elif have < self.STASH_MIN: self.stash_main(busy)  # (ids overwrite the model's conversation)
   def stash_hit(self, ids:list[int], busy:set[int], target:int|None=None) -> int:
     """the tokens of ids the model or a kept conversation has (where its prefill starts)"""
-    if not self.slots: return 0
+    if not self.keeps(): return 0
     return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
                                                   len(t) < len(ids) and ids[:len(t)] == t] +
                [self.host_hit(e, ids) for e in self.host])
@@ -627,7 +630,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     the next request alone: the one whose conversation the model or a slot has the most of (agents taking turns: one's next request often comes
     while the others wait, taking it first keeps its cache), but the first one if it has waited too long
     """
-    if len(pending) == 1 or not self.slots or time.perf_counter() - pending[0].st > self.STARVE: return 0
+    if len(pending) == 1 or not self.keeps() or time.perf_counter() - pending[0].st > self.STARVE: return 0
     return max(range(len(pending)), key=lambda i: (self.stash_hit(pending[i].ids + pending[i].generated, set()), -i))
 
   def drop_caches(self):
