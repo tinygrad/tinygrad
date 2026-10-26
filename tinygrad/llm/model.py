@@ -1,12 +1,13 @@
 from __future__ import annotations
-import enum, functools, itertools, math, pathlib, re
+import enum, functools, itertools, json, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Callable, TypeVar
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_parse, gguf_shard
+from tinygrad.llm.hf import hf_load
 from tinygrad.uop.ops import resolve
-from tinygrad.helpers import unwrap, round_up
+from tinygrad.helpers import unwrap, round_up, get_child
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -34,10 +35,6 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
     freqs = freqs * interp + (freqs / yarn.factor) * (1 - interp)
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return (freqs.cos() * concentration).cat(freqs.sin() * concentration, dim=-1).clone(device)
-
-def e4m3fn_to_fnuz(weight:Tensor, scale:Tensor) -> tuple[Tensor, Tensor]:
-  bits = weight.bitcast(dtypes.uint8)
-  return bits.eq(0x80).where(0, bits).contiguous().bitcast(dtypes.fp8e4m3fnuz), scale * 2
 
 def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
@@ -658,6 +655,85 @@ class Transformer:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
     return model, kv
+
+  @staticmethod
+  def from_hf(path:str|pathlib.Path, max_context:int|None=None,
+              realize=bool(getenv("REALIZE", 0)), shard:int=1) -> tuple[Transformer, dict]:
+    path = pathlib.Path(path)
+    cfg = json.loads((path/'config.json').read_text())
+    assert cfg['architectures'][0] == 'GlmMoeDsaForCausalLM', "from_hf only supports glm-dsa checkpoints"
+    assert shard >= 1 and cfg['num_attention_heads'] % shard == 0, "tensor parallel must divide the attention heads"
+    devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
+    hf_names = {'token_embd.weight': 'model.embed_tokens.weight', 'output_norm.weight': 'model.norm.weight', 'output.weight': 'lm_head.weight',
+                'attn_norm.weight': 'input_layernorm.weight', 'ffn_norm.weight': 'post_attention_layernorm.weight',
+                'attn_q_a.weight': 'self_attn.q_a_proj.weight', 'attn_q_a_norm.weight': 'self_attn.q_a_layernorm.weight',
+                'attn_q_b.weight': 'self_attn.q_b_proj.weight', 'attn_kv_a_mqa.weight': 'self_attn.kv_a_proj_with_mqa.weight',
+                'attn_kv_a_norm.weight': 'self_attn.kv_a_layernorm.weight', 'attn_k_b.weight': 'self_attn.kv_b_proj.weight',
+                'attn_output.weight': 'self_attn.o_proj.weight', 'indexer.attn_q_b.weight': 'self_attn.indexer.wq_b.weight',
+                'indexer.attn_k.weight': 'self_attn.indexer.wk.weight', 'indexer.proj.weight': 'self_attn.indexer.weights_proj.weight',
+                'indexer.k_norm.weight': 'self_attn.indexer.k_norm.weight', 'indexer.k_norm.bias': 'self_attn.indexer.k_norm.bias',
+                'ffn_gate_inp.weight': 'mlp.gate.weight', 'exp_probs_b.bias': 'mlp.gate.e_score_correction_bias',
+                **{f'ffn_{p}.weight': f'mlp.{p}_proj.weight' for p in ('gate', 'up', 'down')},
+                **{f'ffn_{p}_shexp.weight': f'mlp.shared_experts.{p}_proj.weight' for p in ('gate', 'up', 'down')},
+                **{f'ffn_{p}_exps.weight': f'mlp.experts.{{}}.{p}_proj.weight' for p in ('gate', 'up', 'down')}}
+    shard_axes = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'ffn_gate.weight', 'ffn_up.weight')},
+                  **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')},
+                  **{w: 2 for w in ('ffn_don_exps.weight')}}
+
+    global_names = ('token_embd.weight', 'output_norm.weight', 'output.weight')
+    sources:dict[str, str|list[str]] = {k: hf_names[k] for k in global_names}
+    for layer in range(cfg['num_hidden_layers']):
+      for key, source in hf_names.items():
+        if key in global_names or (key.startswith('indexer.') and cfg['indexer_types'][layer] != 'full'): continue
+        source = f'model.layers.{layer}.' + source
+        sources[f'blk.{layer}.{key}'] = [source.format(i) for i in range(cfg['n_routed_experts'])] if '{}' in source else source
+    shard_map = {name: shard_axes[key] for name in sources if (key:=re.sub(r'^blk\.\d+\.', '', name)) in shard_axes}
+    state_dict = hf_load(path, devices, sources, shard_map)
+    block_size = tuple(cfg['quantization_config']['weight_block_size'])
+    nope, value = cfg['qk_nope_head_dim'], cfg['v_head_dim']
+    step = math.gcd(block_size[0], nope, value)
+
+    config = TransformerConfig(
+      num_blocks=cfg['num_hidden_layers'], dim=cfg['hidden_size'], hidden_dim=cfg['moe_intermediate_size'],
+      n_heads=cfg['num_attention_heads'], n_kv_heads=1, norm_eps=cfg['rms_norm_eps'], vocab_size=cfg['vocab_size'],
+      head_dim=cfg['qk_nope_head_dim'] + cfg['qk_rope_head_dim'], v_head_dim=cfg['v_head_dim'],
+      rope_theta=cfg['rope_parameters']['rope_theta'], rope_dim=cfg['qk_rope_head_dim'],
+      max_context=min(max_context, cfg['max_position_embeddings']) if max_context is not None else cfg['max_position_embeddings'],
+      num_experts=cfg['n_routed_experts'], num_experts_per_tok=cfg['num_experts_per_tok'], norm_topk_prob=cfg['norm_topk_prob'],
+      expert_gating_func=ExpertGating.SIGMOID if cfg['scoring_func'] == 'sigmoid' else ExpertGating.SOFTMAX,
+      kv_lora_rank=cfg['kv_lora_rank'], q_lora_rank=cfg['q_lora_rank'], leading_dense_blocks=cfg['first_k_dense_replace'],
+      shared_expert_dim=cfg['n_shared_experts'] * cfg['moe_intermediate_size'], shared_expert_gate=False, expert_bias=True,
+      dense_hidden_dim=cfg['intermediate_size'], routed_scaling_factor=cfg['routed_scaling_factor'],
+      indexer=IndexerConfig(cfg['index_n_heads'], cfg['index_head_dim'], cfg['index_topk'], rope_dim=cfg['qk_rope_head_dim'],
+                            rope_interleave=cfg['indexer_rope_interleave']),
+      indexer_shared=tuple(t != 'full' for t in cfg['indexer_types']), rope_interleave=cfg['rope_interleave'])
+    model = Transformer(config)
+    for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
+    for i, block in enumerate(model.blk):
+      assert isinstance(block, MLATransformerBlock)
+      prefix = f'blk.{i}.'
+      w = state_dict[prefix+'attn_k_b.weight']
+      kv = w.reshape(config.n_heads, nope + value, config.kv_lora_rank)
+      state_dict[prefix+'attn_k_b.weight'] = kv[:, :nope].transpose(1, 2)
+      state_dict[prefix+'attn_v_b.weight'] = kv[:, nope:]
+      if (scale:=state_dict.get(prefix+'attn_k_b.weight_scale_inv')) is not None:
+        # Repeat scales to align their blocks with each head's K/V slices.
+        scales = scale.repeat_interleave(block_size[0] // step, -2)[:w.shape[0] // step].reshape(config.n_heads, -1, scale.shape[-1])
+        state_dict[prefix+'attn_k_b.weight_scale_inv'] = scales[:, :nope // step].transpose(-1, -2)
+        state_dict[prefix+'attn_v_b.weight_scale_inv'] = scales[:, nope // step:]
+        block.kv_b_block_size = (step, block_size[1])
+    for name, scale in state_dict.items():
+      if not name.endswith('.weight_scale_inv'): continue
+      projection = get_child(model, name.removesuffix('.weight_scale_inv'))
+      if isinstance(projection, dict): projection['weight_scale_inv'] = scale
+      else: projection.weight_scale_inv, projection.weight_block_size = scale, block_size
+    nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
+    if realize:
+      params = nn.state.get_parameters(model)
+      packed = [s.bitcast(dtypes.uint8).contiguous() for s in params]
+      Tensor.realize(*packed)
+      for s, data in zip(params, packed): s.replace(data.bitcast(s.dtype))
+    return model, cfg
 
   def warmup(self):
     for _ in range(2): list(zip(range(2), self.generate([0])))
