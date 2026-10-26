@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, replace
 from typing import cast
-import itertools
+import itertools, graphlib, functools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
@@ -164,16 +164,16 @@ pm_no_views = PatternMatcher([
 
 DEVICE_MAX_BUFS = {"WEBGPU": 8} # TODO: get from device?
 @dataclass
-class LimitBufsContext:
+class StageContext:
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
   range_idx: itertools.count = field(default_factory=itertools.count)
 
-def stage(ctx:LimitBufsContext, s:UOp) -> UOp:
+def stage(ctx:StageContext, s:UOp) -> UOp:
   # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
   end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x for x in s.ranges]
   return s.substitute(dict(zip(s.ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*s.ranges)
 
-def _limit_bufs(ctx:LimitBufsContext, root:UOp):
+def _limit_bufs(ctx:StageContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
@@ -187,12 +187,46 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     return root.replace(src=tuple(stage(ctx, s) if s.op in GroupOp.Elementwise and s.device is not None else s for s in root.src))
 
-def fix_store_hazard(ctx:LimitBufsContext, dst:UOp, src:UOp):
-  loads = [u for u in src.toposort(gate=lambda u: u.op not in {Ops.STAGE, Ops.AFTER}) if u.op is Ops.INDEX and u.buf_uop is dst.buf_uop]
-  if any(u.src[1].get_idx() is not dst.src[1].get_idx() for u in loads): return dst.store(stage(ctx, src))
+def stage_war(ctx:StageContext, sink:UOp):
+  # a kernel runs after the kernels it reads and before the stores that overwrite a state it reads, itself if it reads another address
+  kernels = [u for u in sink.toposort() if u.op in {Ops.STORE, Ops.STAGE}]
+  writers: dict[UOp, list[UOp]] = {}
+  for t in kernels:
+    if t.op is Ops.STORE: writers.setdefault(t.src[0].src[0], []).append(t)
+  def reads(x:UOp) -> list[UOp]: return [u for u in x.toposort(gate=lambda u: u is x or u.op not in {Ops.STAGE, Ops.AFTER}) if u.op is Ops.INDEX]
+  def producers(x:UOp) -> list[UOp]:  # the kernels whose output state x reads. on a whole STORE this includes the state it overwrites
+    return [p.src[0] if p.op is Ops.END else p for u in reads(x) for p in (u.src[0].src[1:] if u.src[0].op is Ops.AFTER else (u.src[0],))]
+  def value(k:UOp) -> UOp: return k.src[1] if k.op is Ops.STORE else k.src[0]
+  war = {k:[(u, w) for u in reads(value(k)) for w in writers.get(u.src[0], [])
+            if w is not k or u.src[1].get_idx() is not k.src[0].src[1].get_idx()] for k in kernels}
+  succ: dict[UOp, list[UOp]] = {k:[w for _,w in war[k]] for k in kernels}
+  for k in kernels:
+    for p in producers(k): succ.setdefault(p, []).append(k)
+  try: return graphlib.TopologicalSorter(succ).prepare()
+  except graphlib.CycleError: pass
+  # a WAR edge k -> w is on a cycle when w reaches k. cut it by staging k's reads of w's state into the largest subtrees that can run first
+  subs: dict[UOp, UOp] = {}
+  for k in kernels:
+    for w in dict.fromkeys(w for _,w in war[k]):
+      after, todo = set(), [w]
+      while todo:
+        if (u:=todo.pop()) not in after: todo.extend(succ.get(u, []))
+        after.add(u)
+      if k not in after: continue
+      stale = {u for u,v in war[k] if v is w}
+      @functools.cache
+      def fix(x:UOp) -> UOp:
+        if not stale.intersection(reads(x)): return x
+        if not after.intersection(producers(x)): return stage(ctx, x)
+        return x.replace(src=tuple(fix(y) for y in x.src))
+      subs[k] = (s:=subs.get(k, k)).replace(src=tuple(fix(y) if y is value(s) else y for y in s.src))
+      succ[k] = [v for v in succ[k] if v is not w]
+  return sink.substitute(subs)
 
-pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs),
-  (UPat(Ops.INDEX, name="dst").store(UPat.var("src")), fix_store_hazard)])
+pm_stage = PatternMatcher([
+  (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs),
+  (UPat(Ops.SINK, name="sink"), stage_war),
+])
 
 # *****************
 # 4. put in buffers for bufferize
@@ -348,7 +382,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
                         symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
   next_range = max((x.axis_id[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
+  tsink = graph_rewrite(tsink, pm_stage, ctx=StageContext(range_idx=itertools.count(next_range)), name="stage")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store

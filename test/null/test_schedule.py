@@ -1186,7 +1186,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(out, 4, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm_optim(self, adam=False):
-    optim, cnt = (nn.optim.Adam, 29) if adam else (nn.optim.SGD, 15)
+    optim, cnt = (nn.optim.Adam, 25) if adam else (nn.optim.SGD, 11)
     with Context(TRAINING=1):
       img = Tensor.ones(1,3,4,4)
       c1 = nn.Conv2d(3,32,3)
@@ -1564,7 +1564,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       Tensor.realize(*nn.state.get_parameters(opt))
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 11)
 
   def test_adam_conv_fuse(self):
     with Context(TRAINING=1):
@@ -1575,7 +1575,7 @@ class TestSchedule(unittest.TestCase):
       Tensor.realize(*nn.state.get_parameters(opt))
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 11)
 
   def test_adam_2convs_fuse(self):
     with Context(TRAINING=1):
@@ -1587,7 +1587,7 @@ class TestSchedule(unittest.TestCase):
       Tensor.realize(*nn.state.get_parameters(opt))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 15)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_sgd_conv_fuse(self):
     with Context(TRAINING=1):
@@ -1597,7 +1597,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters(c1))
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 5) # TODO: 3?
+      check_schedule(opt.schedule_step(), 3)
 
   def test_sgd_2convs_fuse(self):
     with Context(TRAINING=1):
@@ -1608,7 +1608,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 7)
+      check_schedule(opt.schedule_step(), 5)
 
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Context(TRAINING=1):
@@ -1620,7 +1620,7 @@ class TestSchedule(unittest.TestCase):
       Tensor.realize(*nn.state.get_parameters(opt))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 11)
+      check_schedule(opt.schedule_step(), 9)
 
   def test_sgd_4convs_fuse(self):
     with Context(TRAINING=1):
@@ -1633,7 +1633,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 15)
+      check_schedule(opt.schedule_step(), 11)
 
   def test_sgd_4convs_fuse_conv_bw(self):
     with Context(TRAINING=1):
@@ -1646,7 +1646,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 15)
+      check_schedule(opt.schedule_step(), 11)
 
   def test_reduce_simple_chase(self):
     a = Tensor.empty(4, 4, 4)
@@ -2081,6 +2081,12 @@ class TestLimitBufs(unittest.TestCase):
     sched_time(400)
     t1, t2 = min(sched_time(400) for _ in range(3)), min(sched_time(1600) for _ in range(3))
     self.assertLess(t2/t1, 8, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
+
+  def test_limit_bufs_then_war_staging(self):
+    a, bs = Tensor.empty(8).realize(), [Tensor.empty(8).realize() for _ in range(4)]
+    a.assign(a.flip(0) + bs[0] + bs[1] + bs[2] + bs[3])
+    # limit_bufs stages the flipped read of a, so the store no longer reads its own destination at another address
+    with Context(MAX_KERNEL_BUFFERS=4, SCACHE=0): check_schedule(a, 2)
 
 class TestCopyFolding(unittest.TestCase):
   def test_one_hot_with_copy(self):

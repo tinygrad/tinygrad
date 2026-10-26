@@ -29,10 +29,6 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx.realize_map[s] = None
 
-def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
-  # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.toposort(): ctx.realize_map[src] = None
-
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:
     while s.op is Ops.RESHAPE: s = s.src[0]
@@ -47,8 +43,6 @@ pm_generate_realize_map = PatternMatcher([
   (UPat(Ops.STORE, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
-  # sometimes we need to realize the src of STORE if there's a self-access, or if it's a cross device store
-  (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 
 @dataclass(frozen=True)
