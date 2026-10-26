@@ -93,7 +93,7 @@ def is_regbuf(x:UOp) -> bool: return x.without_after.addrspace is AddrSpace.REG 
 
 extra_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPEQ is XOR+XOR, bool CMPLT is XOR+AND
-  (UPat.var('x', dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
+  (UPat.var('x', dtypes.bool).alu(Ops.CMPNE, UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtypes.bool).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
   (UPat.var('x', dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
   # can't cast from float16 to ints/float64 directly and vice versa
@@ -152,7 +152,7 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
 # comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
 # different kernels)
 def flag_gate(m:UOp) -> UOp|None:
-  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
+  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.cast(dtypes.int).alu(Ops.CMPNE, UOp.cconst(0, dtypes.int))
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
@@ -689,7 +689,7 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPNE)}
   linear_ctx_type = X86LinearContext
   def __init__(self, target:Target):
     if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
