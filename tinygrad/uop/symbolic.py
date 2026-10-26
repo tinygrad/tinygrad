@@ -262,6 +262,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("gate").where(UPat.var("x"), 0) != 0, lambda gate,x: gate & (x != 0)),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # a.where(b.where(c, d), c) -> (a & !b).where(d, c)
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("c")), lambda a,b,c,d: (a&b.logical_not()).where(d,c)),
   # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
   (UPat.var("a").where(UPat.var("c"), UPat.var("b").where(UPat.var("c"), UPat.var("d"))), lambda a,b,c,d: (a|b).where(c,d)),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
@@ -454,6 +456,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),
+  (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.load(UPat(Ops.INDEX, name="index")), UPat.var("alt"))),
+   lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate.logical_not())), alt)),
   # fold gated LOAD/STORE
   (UPat(Ops.STORE, src=(UPat(), invalid_pat), name="x"), lambda i,x: UOp(Ops.NOOP).after(*x.src)),
   # store of where with invalid -> gated store

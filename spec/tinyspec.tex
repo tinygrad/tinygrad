@@ -170,8 +170,8 @@ Binary & $(A, B)$
   & $a+b$, $a \cdot b$, $\max(a,b)$ \\
 & & \op{Floordiv}, \op{Floormod}
   & $\lfloor a/b \rfloor$, $a-b\lfloor a/b \rfloor$ \\
-& & \op{CmpLt}, \op{CmpNe}
-  & $[a < b]$, $[a \ne b]$ \\
+& & \op{CmpLt}, \op{CmpEq}
+  & $[a < b]$, $[a = b]$ \\
 & & \op{Xor}, \op{Or}, \op{And}, \op{Shr}, \op{Shl}
   & $a \oplus b$, $a \mid b$, $a \mathbin{\&} b$, $a \gg b$, $a \ll b$ \\[4pt]
 Ternary & $(P, A, B)$
@@ -195,10 +195,10 @@ Ternary & $(P, A, B)$
 \op{Cdiv} & $q+c$ & Integer division toward zero. \\
 \op{Cmod} & $r-bc$ & Remainder with dividend's sign (or zero). \\
 \op{CmpGt} & \op{CmpLt}($B$, $A$) & $[a > b]$ \\
-\op{CmpGe} & \op{CmpNe}(\op{CmpLt}($A$, $B$),\, $1$) & $[a \ge b]$ \\
-\op{CmpLe} & \op{CmpNe}(\op{CmpLt}($B$, $A$),\, $1$) & $[a \le b]$ \\
-\op{CmpEq} & \op{CmpNe}(\op{CmpNe}($A$, $B$),\, $1$) & $[a = b]$ \\
-\op{Not} & \op{CmpNe}($A$, $1$) & $\lnot a$ \\[4pt]
+\op{CmpGe} & \op{CmpEq}(\op{CmpLt}($A$, $B$),\, $0$) & $[a \ge b]$ \\
+\op{CmpLe} & \op{CmpEq}(\op{CmpLt}($B$, $A$),\, $0$) & $[a \le b]$ \\
+\op{CmpNe} & \op{CmpEq}(\op{CmpEq}($A$, $B$),\, $0$) & $[a \ne b]$ \\
+\op{Not} & \op{CmpEq}($A$, $0$) & $\lnot a$ \\[4pt]
 \op{Exp2} & polynomial approx + \op{Mul}, \op{Add} & $2^x$ \\
 \op{Log2} & exponent extract + polynomial approx & $\log_2 x$ \\
 \op{Sin} & argument reduction + polynomial approx & $\sin x$ \\
@@ -271,7 +271,7 @@ ALU unary & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ 
 \op{Mul} & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min,\max]$ of products \\
 \op{Max} & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\max(a,b),\, \max(A,B)]$ \\
 Other binary & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
-\op{CmpLt}, \op{CmpNe} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
+\op{CmpLt}, \op{CmpEq} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
 \op{Where} & $\mathrm{src}[1].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min(b,c),\, \max(B,C)]$ \\[3pt]
 \op{Call} & void & --- & first non-null src device & --- \\
 \op{Range} & index & $()$ & \textsc{null} & $[0,\, n{-}1]$ \\

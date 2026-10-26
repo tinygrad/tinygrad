@@ -49,6 +49,8 @@ wgsl_matcher = PatternMatcher([
   # fix nan checks after decomp, which can emit either comparison
   (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("a")), is_nan),
   (UPat.var("a", dtypes.floats).eq(UPat.var("a")), lambda a: is_nan(a).logical_not()),
+  # WGSL float != can be ordered: explicitly include unordered (NaN) operands.
+  (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("b")), lambda a,b: (a<b)|(b<a)|is_nan(a)|is_nan(b.cast(a.dtype))),
   ])
 
 class WGSLRenderer(CStyleLanguage):

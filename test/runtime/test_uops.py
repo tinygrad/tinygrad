@@ -138,7 +138,6 @@ class TestFloatUOps(TestUOps):
   def test_cmplt(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: a<b)
   def test_cmpne(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: a!=b)
   def test_cmpeq(self): self._test_bop_fxn(Ops.CMPEQ, lambda a,b: a==b)
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
   def test_cmpne_nan(self):  # NaN != x for any x (IEEE 754)
     for a, b in [(math.nan, 1.0), (1.0, math.nan), (math.nan, math.nan)]:
       self.assertTrue(_test_single_value(
