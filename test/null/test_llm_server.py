@@ -556,6 +556,13 @@ class TestStash(unittest.TestCase):
     self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
     self.server.host_free, self.server.host_made = [], 0
 
+  def test_step_writes(self):
+    # a step of slots 0 and 2 is one of 4 rows (sizes 1, 2, 4): slots 1 and 3 are written (rows of nothing), the ones kept there are gone
+    self.model.batch_sizes = Mock(return_value=(1, 2, 4, 8))
+    self.server.stash = {i: ([i]*100, 0) for i in (1, 3, 5)}
+    self.server.step_writes({0: None, 2: None})
+    self.assertEqual(list(self.server.stash), [5])
+
   def test_host(self):
     # (HOST_STASH) one longer than a slot into host memory (chunks of it), loaded back when continued. a later turn replaces its older one (its
     # chunks are its), past the GB the least recently used one's chunks are used

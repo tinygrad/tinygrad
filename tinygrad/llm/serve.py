@@ -628,6 +628,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.host_free += [c for _, cs, _ in self.host for c in cs]
     self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
+  def step_writes(self, active:dict):
+    """
+    a batched step of the active slots writes every slot below its size (the next of batch_sizes past the last active one): the free ones
+    there are rows of nothing at position 0, the conversations kept in them are gone (their first positions and their states overwritten)
+    """
+    m = next(s for s in self.model.batch_sizes() if s >= max(active) + 1)
+    self.slot_taken(*[i for i in range(m) if i not in active])
   def slot_taken(self, *slots:int):
     for i in slots: self.stash.pop(i, None)
   def slot_done(self, i:int, req:Request, active:dict):
@@ -739,6 +746,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # a step of every slot up to the last one used (the free ones in between are rows of nothing)
         self.inflight = len(active) + len(pending) + self.waiting.qsize()
         trace("step " + " ".join(f"{i}:{r.rid}@{r.pos}" for i, r in sorted(active.items())))
+        self.step_writes(active)
         if k:
           spec = model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p))
                                         if i in active else
