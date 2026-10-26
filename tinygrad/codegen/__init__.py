@@ -486,7 +486,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     ast = graph_rewrite(ast, pm_lower_calls, ctx=renderer, name="lower calls", walk=True)
-    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.arg is None or not ast.arg.optimized)
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=not ast.arg.optimized)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
     if isinstance(renderer, ISARenderer):
