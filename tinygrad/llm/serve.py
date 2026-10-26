@@ -49,8 +49,7 @@ def normalize_messages(messages:list[dict]) -> None:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  THINK, END_THINK = ("<think>", "<|open|>think<|sep|>"), ("</think>", "<|close|>think<|sep|><|open|>response<|sep|>")
-  TOOL = ("<tool_call>", "<|close|>response<|sep|>")
+  END_THINK, END_CONTENT = ("</think>", "<|close|>think<|sep|><|open|>response<|sep|>"), ("<tool_call>", "<|close|>response<|sep|>")
   def __init__(self, reasoning:bool=False):
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
@@ -73,7 +72,7 @@ class StreamRouter:
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, found = self.split(self.TOOL, final)
+    emit, found = self.split(self.END_CONTENT, final)
     if emit: yield "content", emit
     if found: self.mode, self.buf = "tool", found + self.buf
 
@@ -116,9 +115,9 @@ class Handler(VizHandler):
           break
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
-      for m in re.finditer(r"(?:<tool_call>|<\|open\|>call )\s*(.*?)\s*(?:</tool_call>|<\|close\|>call<\|sep\|>|$)", router.buf, re.DOTALL):
-        if (parsed := parse_tool_call(m.group(1))) is None:
-          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+      for m in re.finditer(r"(?:(<tool_call>)|<\|open\|>call )\s*(.*?)\s*(?:(?(1)</tool_call>|<\|close\|>call<\|sep\|>)|$)", router.buf, re.DOTALL):
+        if (parsed := parse_tool_call(m.group(2))) is None:
+          stderr_log(f"failed to parse tool call: {m.group(2)[:200]}")
           yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
         else:
           name, args = parsed
@@ -159,7 +158,7 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith(StreamRouter.THINK))
+                              reasoning=rendered.rstrip().endswith(("<think>", "<|open|>think<|sep|>")))
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"

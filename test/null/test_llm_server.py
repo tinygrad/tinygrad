@@ -361,6 +361,16 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'path':'README.md'})])
     self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
 
+  def test_kimi_tool_call_with_hermes_end_tag(self):
+    self.set_output('<|close|>response<|sep|><|open|>tools<|sep|><|open|>call tool="write" index="1"<|sep|>'
+      '<|open|>argument key="text" type="string"<|sep|></tool_call><|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>')
+    with patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>response<|sep|>'):
+      chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Write it"}],
+                                                       tools=self.tools(), stream=True))
+    calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+    self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('write', {'text':'</tool_call>'})])
+    self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
   def test_kimi_typed_arguments(self):
     body = ('tool="read" index="1"<|sep|><|open|>argument key="path" type="string"<|sep|>\na.txt\n<|close|>argument<|sep|>'
             '<|open|>argument key="offset" type="number"<|sep|>3<|close|>argument<|sep|>')

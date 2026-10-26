@@ -106,13 +106,13 @@ class TestTensorParallel(unittest.TestCase):
     data = random_data(shape, typ).reshape(-1)
     w = ggml_data_to_tensor(Tensor(data, device='CPU'), E*O*I, typ).reshape(shape).float().numpy()
     sel = np.array([[[3, 1]]], dtype=np.int32)
-    for axis in (1, 2):
-      with self.subTest(axis=axis):
+    for axis, x_axis in ((1, None), (1, 3), (2, 3)):
+      with self.subTest(axis=axis, x_axis=x_axis):
         layer = ExpertWeights(E, I, O)
         layer.weight = gguf_shard({'w': (Tensor(data, device='CPU'), shape, typ)}, DEVICES, {'w': axis})['w'].half()
-        x = np.random.default_rng(1).normal(size=(1, 1, 1 if axis == 1 else 2, I)).astype(np.float16)
+        x = np.random.default_rng(1).normal(size=(1, 1, 1 if x_axis is None else 2, I)).astype(np.float16)
         ref = np.stack([w[e] @ x[0, 0, j % x.shape[2]].astype(np.float32) for j, e in enumerate(sel[0, 0])])
-        got = layer(Tensor(sel).shard(DEVICES), Tensor(x).shard(DEVICES, 3 if axis == 2 else None)).float().to(Device.DEFAULT).numpy()
+        got = layer(Tensor(sel).shard(DEVICES), Tensor(x).shard(DEVICES, x_axis)).float().to(Device.DEFAULT).numpy()
         self.assertEqual(layer.ggml_type, typ)
         np.testing.assert_allclose(got[0, 0], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
 
@@ -147,5 +147,35 @@ class TestTensorParallel(unittest.TestCase):
       # the kv cache is sharded on its heads, the gated deltanet is copied to every device
       self.assertEqual(parallel.blk[1].cache_kv.uop.axis, 2)
       for t in (parallel.blk[0].attn_qkv.weight, parallel.blk[0].recurrent_state): self.assertEqual((t.device, t.uop.axis), (DEVICES, None))
+
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "too heavy for mock GPUs")
+  def test_kda_model(self):
+    rng = np.random.default_rng(42)
+    config = TransformerConfig(num_blocks=1, dim=8, hidden_dim=8, n_heads=4, n_kv_heads=1, norm_eps=1e-5, vocab_size=16, head_dim=2,
+      v_head_dim=2, rope_theta=10000, rope_dim=2, max_context=4, ssm=SSMConfig(2, 2, 4, 4, 8, kda=True), ssm_layers=(True,))
+    with tempfile.TemporaryDirectory() as folder:
+      writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'kimi-linear')
+      for key,value in {'context_length':4, 'embedding_length':8, 'feed_forward_length':8, 'block_count':1, 'ssm.conv_kernel':2,
+                        'kda.head_dim':2, 'attention.head_count':4, 'attention.kv_lora_rank':4}.items():
+        writer.add_uint32('kimi-linear.'+key, value)
+      writer.add_array('kimi-linear.attention.head_count_kv', [0])
+      writer.add_float32('kimi-linear.attention.layer_norm_rms_epsilon', 1e-5)
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(16)])
+      for name,weight in nn.state.get_state_dict(Transformer(config)).items():
+        value = -rng.random(weight.shape) if name.endswith('ssm_a') else rng.normal(1, .1, weight.shape) if 'norm' in name else \
+                rng.normal(0, .5 if 'token_embd' in name else .3, weight.shape)
+        writer.add_tensor(name.replace('ssm_out', 'attn_output'), value.astype(np.float16))
+      write_gguf(writer)
+      parallel = Transformer.from_gguf(path, 4, realize=True, shard=2)[0]
+      # greedy outputs from the unsharded model with these seeded weights
+      temperature = Tensor([0.0]).realize()
+      for pos, expected in enumerate((12, 8)):
+        x, start_pos = Tensor([[pos+1]]).realize(), Variable('start_pos', 0, 3).bind(pos)
+        self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
+      # everything but the norms and the f/g down projections is sharded, the conv and recurrent states on their heads
+      blk = parallel.blk[0]
+      self.assertEqual(sorted(k for k,v in nn.state.get_state_dict(blk).items() if v.uop.axis is None),
+                       ['attn_norm.weight', 'ffn_norm.weight', 'ssm_f_a.weight', 'ssm_g_a.weight', 'ssm_norm.weight'])
+      self.assertEqual([t.uop.axis for t in (*blk.conv_states, blk.recurrent_state)], [2, 2, 2, 1])
 
 if __name__ == '__main__': unittest.main()
