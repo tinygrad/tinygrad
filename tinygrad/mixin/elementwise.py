@@ -54,7 +54,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return self.cast(dtypes.bool).ne(True)
+    return self.cast(dtypes.bool).eq(False)
 
   def contiguous(self) -> Self:
     """
@@ -330,10 +330,10 @@ class ElementwiseMixin(CreationMixin):
     return (self > x).logical_not()
 
   def ne(self, x: Self | ConstType) -> Self:
-    return self._binop(Ops.CMPNE, x, False)
+    return self.eq(x).logical_not()
 
   def eq(self, x: Self | ConstType) -> Self:
-    return self.ne(x).logical_not()
+    return self._binop(Ops.CMPEQ, x, False)
 
   def __ne__(self, x: Self | ConstType) -> Self:  # type: ignore[override]
     return self.ne(x)

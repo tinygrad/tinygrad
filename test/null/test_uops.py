@@ -433,6 +433,16 @@ class TestNegLowering(unittest.TestCase):
       self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
 
 class TestUOpMethod(unittest.TestCase):
+  def test_cmpeq_canonical(self):
+    a, b = UOp.variable("a", 0, 10), UOp.variable("b", 0, 10)
+    eq = a.eq(b)
+    self.assertIs(eq.op, Ops.CMPEQ)
+    self.assertIs(eq.dtype, dtypes.bool)
+    self.assertIs(a.ne(b), eq.eq(False))
+    self.assertIs(eq.logical_not(), eq.eq(False))
+    self.assertIs(eq.logical_not().logical_not().simplify(), eq)
+    self.assertIs(eq.eq(True).simplify(), eq)
+
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
     a = UOp.const(2.0)
@@ -463,6 +473,7 @@ class TestUOpMethod(unittest.TestCase):
       x = Tensor.empty(*shape, dtype=dtypes.int).uop
       self.assertIs((x < x).simplify(), x.const_like(False, dtypes.bool))
       self.assertIs((x != x).simplify(), x.const_like(False, dtypes.bool))
+      self.assertIs(x.eq(x).simplify(), x.const_like(True, dtypes.bool))
 
   def test_replace(self):
     x = UOp.param(0, dtypes.int, 1)
@@ -633,6 +644,13 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.CMPEQ, ops)
     self.assertNotIn(Ops.CMPNE, ops)
+
+  def test_use_cmpne(self):
+    x = UOp.param(0, dtypes.uint32, 8).index(UOp.const(0))
+    uops = to_uops_list([x.ne(7)], ren=self.renderer)
+    self.renderer.render(uops)
+    self.assertEqual(sum(u.op is Ops.CMPNE for u in uops), 1)
+    self.assertNotIn(Ops.CMPEQ, [u.op for u in uops])
 
   def test_int_compare_without_negation(self):
     for dt in (dtypes.int32, dtypes.uint32):
