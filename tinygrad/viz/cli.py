@@ -66,9 +66,7 @@ def get(data:dict, key:str):
   match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
-def matches(name:str, query:str) -> bool:
-  chars = iter(name.lower())
-  return bool(query) and re.search(query, name, re.IGNORECASE) is not None
+def matches(name:str, query:str) -> bool: return bool(query) and re.search(query, name, re.IGNORECASE) is not None
 
 def fmt_top(k:dict) -> str:
   return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
