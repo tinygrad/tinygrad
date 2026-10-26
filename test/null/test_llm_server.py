@@ -333,6 +333,23 @@ class TestLLMServer(unittest.TestCase):
       with self.assertRaises(APIError):
         for _ in client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}], stream=True): pass
 
+  def test_slow_reply_held(self):
+    # a reply not streamed and slow: spaces while it's made (a proxy doesn't drop the quiet connection), then its JSON
+    import urllib.request
+    from tinygrad.helpers import getenv
+    def slow_generate(ids, **kwargs):
+      for t in (300, 301, 999):
+        time.sleep(0.12)
+        yield t
+    self.addCleanup(getenv.cache_clear)
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), patch.dict(os.environ, {"HOLD_JSON": "0.05"}):
+      getenv.cache_clear()
+      req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                   data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}]}).encode())
+      raw = urllib.request.urlopen(req).read()
+    self.assertTrue(raw.startswith(b" "))
+    self.assertEqual(json.loads(raw)["choices"][0]["message"]["content"], "HelloHello")
+
   def test_generate_runs_on_serving_thread(self):
     threads = []
     def generate(ids, **kwargs):

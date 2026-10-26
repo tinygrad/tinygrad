@@ -282,15 +282,32 @@ class Handler(VizHandler):
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+      # (a reply not streamed and not done in HOLD_JSON seconds: its headers then, and a space every HOLD_JSON seconds until it's done
+      # (whitespace before JSON is JSON): a proxy that drops a connection quiet for a while doesn't drop it, a client doesn't ask again)
+      hold = 0.0 if body.get("stream") else getenv("HOLD_JSON", 5.0)
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
                               reasoning=rendered.rstrip().endswith("<think>"), log=log,
-                              top_p=float(tp) if (tp:=body.get("top_p")) is not None else None)
+                              top_p=float(tp) if (tp:=body.get("top_p")) is not None else None, keepalive=hold or None)
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
+        held = False
+        def reply(data:bytes, status_code:int=200):
+          if held: self.wfile.write(data)
+          else: self.send_data(data, status_code=status_code)
+        out, reasoning, tool_calls, finish_reason, last = [], [], [], "stop", time.perf_counter()
         for c in chunks:
-          if "error" in c: return self.send_data(json.dumps(c).encode(), status_code=500)
+          if hold and time.perf_counter() - last > hold:
+            if not held:
+              self.send_response(200)
+              self.send_header("Content-Type", "application/json")
+              self.send_header("Connection", "close")
+              self.end_headers()
+              self.close_connection, held = True, True
+            self.wfile.write(b" ")
+            last = time.perf_counter()
+          if c.get("ping"): continue
+          if "error" in c: return reply(json.dumps(c).encode(), status_code=500)
           if not c["choices"]: continue
           choice = c["choices"][0]
           if (delta := choice.get("delta", {})):
@@ -301,8 +318,7 @@ class Handler(VizHandler):
         message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out) or None}
         if reasoning: message["reasoning_content"] = "".join(reasoning)
         if tool_calls: message["tool_calls"] = tool_calls
-        self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
+        reply(json.dumps({**c, "object":"chat.completion", "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
