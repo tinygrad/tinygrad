@@ -479,14 +479,14 @@ class GatedDeltaNetBlock(FFNBlock):
     alpha = log_alpha.transpose(1, 2).exp()  # per-channel decay for kda, per-head otherwise (B, H, T, K|1)
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
-    state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
+      state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
       core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)
-      state = initial.where(0, state.float())
+      state = initial.where(0, self.recurrent_state.float())
       outs = []
       for t in range(T_pad):
         s1 = state * alpha[:, :, t]  # decay the state
@@ -494,9 +494,9 @@ class GatedDeltaNetBlock(FFNBlock):
         state = s1 + delta * k[:, :, t]
         outs.append((state * q[:, :, t]).sum(-1))
 
-      # store the updated recurrent state in place, then read the stacked outputs after the write
-      state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
-      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store))
+      # store the updated recurrent state in place, then read the stacked outputs after the state and conv writes
+      state_store = self.recurrent_state.uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop))
+      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, self.conv_state.uop.after(conv_state_store)))
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
