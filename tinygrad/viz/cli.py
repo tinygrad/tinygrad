@@ -202,14 +202,14 @@ def main(args) -> None:
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
                "ext":"\n".join(ext)}
-    fmt_row, query = fmt_top if args.t else fmt_all, "".join(args.query).lower()
+    fmt_row, query = fmt_top if args.t else fmt_all, "".join(args.query).lower() if args.query else None
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
-      if len(args.src) > 1 and ansistrip(k["name"]) not in args.src and not args.query: return None
-      if not args.query: print(emit(k, to_str=fmt_row))
+      if len(args.src) > 1 and ansistrip(k["name"]) not in args.src and query is None: return None
+      if query is None: print(emit(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
-        for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
+        for i,s in enumerate():
           if matches(s["name"].lower(), query): print_step(s, reconstruct_matches=True)
           else:
             if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
