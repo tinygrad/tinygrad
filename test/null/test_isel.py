@@ -26,7 +26,7 @@ class TestIselX86(unittest.TestCase):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     b = UOp.variable("b", 0, 0, dtypes.int32)
     c = (a < b).where(a, b)
-    d = (a != b).where(a, b)
+    d = a.alu(Ops.CMPNE, b).where(a, b)
     f = c + d
     n = self.isel_rewrite(f)
     self.assertTrue(n.src[0].arg[0] is X86Ops.CMOVL and n.src[1].arg[0] is X86Ops.CMOVNE)

@@ -112,7 +112,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       ((UPat.cvar("c1")<UPat.var("x", dtypes.ints)) & (UPat.var("x", dtypes.ints)<UPat.cvar("c2")),
         lambda x,c1,c2: x.eq(c1+1) if c1.val+1==c2.val-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
-  if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
+  if Ops.CMPNE in ops: pat += [(UPat.var('x').eq(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPNE, y))]
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
     # also fuse (x << n) + c → MULACC(x, 2^n, c) since MUL→SHL may run first

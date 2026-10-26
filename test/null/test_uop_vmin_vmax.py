@@ -14,6 +14,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     for copy in (src.contiguous(), src.copy_to_device("NULL")):
       self.assertEqual((copy.vmin, copy.vmax), (0, 3))
 
+  def test_vmin_vmax_cmpeq(self):
+    x = UOp.variable('x', 10, 20)
+    for y, bounds in [(9, (False, False)), (21, (False, False)), (10, (False, True)),
+                      (UOp.variable('y', 15, 25), (False, True))]:
+      cmp = x.eq(y)
+      self.assertEqual((cmp.vmin, cmp.vmax), bounds)
+    cmp = UOp.const(42).eq(42)
+    self.assertEqual((cmp.vmin, cmp.vmax), (True, True))
+
   def test_vmin_vmax_cmpne(self):
     uop = UOp.const(42)
     def test_bool(u, x):

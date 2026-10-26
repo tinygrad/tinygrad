@@ -45,13 +45,13 @@ class TestSymbolic(unittest.TestCase):
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
-    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "(a<8).eq(False)")
 
   def test_ge(self):
     self.helper_test_variable(Variable("a", 3, 8) >= 77, 0, 0, "False")
     self.helper_test_variable(Variable("a", 3, 8) >= 9, 0, 0, "False")
-    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
-    self.helper_test_variable(Variable("a", 3, 8) >= 4, 0, 1, "((a<4)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "(a<8).eq(False)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 4, 0, 1, "(a<4).eq(False)")
     self.helper_test_variable(Variable("a", 3, 8) >= 3, 1, 1, "True")
     self.helper_test_variable(Variable("a", 3, 8) >= 2, 1, 1, "True")
 
@@ -379,8 +379,8 @@ class TestSymbolic(unittest.TestCase):
     c0, c1 = -2, -(2**54-1)
     self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"({2**53-1}<a)")
     self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "(0<a)")
-    self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
-    self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "(a<3).eq(False)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "(a<4).eq(False)")
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
@@ -980,16 +980,16 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", 0, 3)
     d = Variable("d", -3, 3)
     self.helper_test_variable((a<2), 0, 1, "(a<2)")
-    self.helper_test_variable((a<=2), 0, 1, "((2<a)!=True)")
+    self.helper_test_variable((a<=2), 0, 1, "(2<a).eq(False)")
     self.helper_test_variable((a>1), 0, 1, "(1<a)")
-    self.helper_test_variable((a>=1), 0, 1, "((a<1)!=True)")
-    self.helper_test_variable((a<1).ne(True), 0, 1, "((a<1)!=True)")
-    self.helper_test_variable((a+b<1).ne(True), 0, 1, "(((a+b)<1)!=True)")
-    self.helper_test_variable((a*3+b*4<1).ne(True), 0, 1, "(((a+b)<1)!=True)")
-    self.helper_test_variable((a*(-3)+b*4<1).ne(True), 0, 1, "((((a*-3)+(b*4))<1)!=True)")  # negative coeff, should not be simplified
-    self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
-    self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
-    self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
+    self.helper_test_variable((a>=1), 0, 1, "(a<1).eq(False)")
+    self.helper_test_variable((a<1).ne(True), 0, 1, "(a<1).eq(False)")
+    self.helper_test_variable((a+b<1).ne(True), 0, 1, "((a+b)<1).eq(False)")
+    self.helper_test_variable((a*3+b*4<1).ne(True), 0, 1, "((a+b)<1).eq(False)")
+    self.helper_test_variable((a*(-3)+b*4<1).ne(True), 0, 1, "(((a*-3)+(b*4))<1).eq(False)")  # negative coeff, should not be simplified
+    self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "(((a*3)+(d*4))<1).eq(False)")  # var can be negative, should not be simplified
+    self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "(((a+b)+c)<1).eq(False)")
+    self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "(((a+b)+c)<1).eq(False)")
 
   def test_mul_by_zero_casted_to_emulated_dtype(self):
     # a float zero cast to bfloat16 is one committed const, so the mul-by-zero fold still sees it
@@ -1001,13 +1001,13 @@ class TestSymbolic(unittest.TestCase):
     # CAST(bool -> int) != 0  ->  cond
     self.helper_test_variable(cond.cast(dtypes.int).ne(0), 0, 1, "(a<2)")
     # CAST(bool -> int) != 1  ->  !cond
-    self.helper_test_variable(cond.cast(dtypes.int).ne(1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.cast(dtypes.int).ne(1), 0, 1, "(a<2).eq(False)")
     # CAST(bool -> int) != c (c not in {0,1})  ->  always True (CAST is 0 or 1)
     self.helper_test_variable(cond.cast(dtypes.int).ne(2), 1, 1, "True")
     self.helper_test_variable(cond.cast(dtypes.int).ne(-1), 1, 1, "True")
     # CAST(bool -> index) folds too
     self.helper_test_variable(cond.cast(dtypes.weakint).ne(0), 0, 1, "(a<2)")
-    self.helper_test_variable(cond.cast(dtypes.weakint).ne(1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.cast(dtypes.weakint).ne(1), 0, 1, "(a<2).eq(False)")
 
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
@@ -1015,7 +1015,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
-    self.helper_test_variable(cond.where(u0, u1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.where(u0, u1), 0, 1, "(a<2).eq(False)")
     self.helper_test_variable(cond.where(u0, u1).where(u0, u1), 0, 1, "(a<2)")
 
   def test_equivalent_const_max(self):
