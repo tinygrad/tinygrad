@@ -84,8 +84,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     # TODO: enable this check
     # if not buffer: assert device is None, "buffer=False does not support device specification"
     from tinygrad.uop.ops import UOp
-    if axis is not None and (isinstance(fill_value, UOp) or not buffer):
-      raise RuntimeError("axis requires a scalar fill value and buffer=True")
+    if axis is not None and (isinstance(fill_value, UOp) or not buffer): raise RuntimeError("axis requires a scalar fill value and buffer=True")
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
     val = cls.const(fill_value, dt).expand(new_shape)
