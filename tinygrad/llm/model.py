@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped
+  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -855,16 +855,18 @@ class Indexer:
       idx.head_dim % 16 == 0 and max_pools % 64 == 0 and bool(getenv("INDEXER_SPARSE", 1))
     # the pooled keys, a call pools its tokens' pools only. the sparse path keeps them in half and the tokens of the last incomplete pool in a
     # ring (the last tokens: the next call can start before the end, see pool_keys), the other one every token's key and gate
-    self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, idx.head_dim,
-                                 dtype=dtypes.half if self.sparse else dtypes.float32, device=x.device).contiguous()
+    # (SEQ_FP8 with a sequence sharded cache: fp8 pooled keys, a row of 32 words of e4m3 values and the scale)
+    fp8 = self.sparse and bool(getenv("SEQ_FP8", 0)) and seq_sharded(x.device) and idx.head_dim == 128
+    row, dt = ((IDX_FP8_ROW,), dtypes.uint32) if fp8 else ((idx.head_dim,), dtypes.half if self.sparse else dtypes.float32)
+    self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, *row, dtype=dt, device=x.device).contiguous()
     ring = round_up(max(2*idx.kpool, self.rewind + idx.kpool - 1), idx.kpool)
     if self.sparse and (reg:=self._regions) is not None:
       # (the slots' pooled keys in the same buffer, past the model's first slot's worth: see MLATransformerBlock._init_state)
       n, S, R = reg
       P = S // idx.kpool
-      views = _region_views(cast(tuple[str, ...], x.device), None, (idx.head_dim,), dtypes.half, R*P,
+      views = _region_views(cast(tuple[str, ...], x.device), None, row, dt, R*P,
                             [(0, R*P), (0, max_pools), (P, n*P)] + [((i+1)*P, P) for i in range(n)])
-      views[0].assign(Tensor.zeros(R*P, idx.head_dim, dtype=dtypes.half, device=x.device)).realize()
+      views[0].assign(Tensor.zeros(R*P, *row, dtype=dt, device=x.device)).realize()
       self.cache_pk, self.pool_pk, self.slot_pk = views[1], views[2], views[3:]
     if self.sparse: self.ring = Tensor.zeros(ring, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
     else: self.cache_kg = Tensor.zeros(x.shape[0], max_pools*idx.kpool, 2, idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
@@ -945,7 +947,7 @@ class MLATransformerBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
     if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
     if T is not None: return self._attention_rows(x, start_pos, T)  # rows mode: x is padded, the first T rows are the tokens
-    N, D = (self.config.max_context, int(self.cache_s.shape[-1])) if self.seq_sharded else self.cache_k.shape[2:]
+    N, D = (self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim) if self.seq_sharded else self.cache_k.shape[2:]
     flash = amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0
     # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
     if flash and not isinstance(T:=x.shape[1], int): return self._attention_rows(x.pad_to(x.max_shape), start_pos, T)[:, :T]
@@ -980,7 +982,7 @@ class MLATransformerBlock(FFNBlock):
       # the cache split on its positions over the devices (MLA_SEQ_SHARD): every device stores its rows of the tokens, attends all the heads
       # over its keys (the indexer's lists of every token: the pooled keys are on every device), the outputs combined on the devices of the heads
       assert self.indexer is not None and self.indexer.sparse and isinstance(start_pos, UOp), "a sequence sharded cache needs the sparse indexer"
-      cache = seq_store(self.cache_s, k_store[0, 0], start_pos, T)
+      cache = seq_store(self.cache_s, self._seq_rows(k_store[0, 0]), start_pos, T)
       lists = self.indexer.picks(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T)
       scale = 1.0/self.config.head_dim**0.5
       if isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16) and getenv("SEQ_GATHER", 1):
@@ -1061,7 +1063,7 @@ class MLATransformerBlock(FFNBlock):
       # (the slots' caches split on their positions as the model's: a device stores its rows of every sequence's tokens, attends all the heads
       # of every row over its keys of the row's slot)
       stride = int(self.slot_s[0].shape[0]) // len(cast(tuple, x.device))
-      cache = seq_store_grouped(self.pool_s, k_store[0, 0], positions, slots, stride)
+      cache = seq_store_grouped(self.pool_s, self._seq_rows(k_store[0, 0]), positions, slots, stride)
       attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(positions, slots, stride))[..., :self.config.kv_lora_rank]
     else:
       ctx, D = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1])
@@ -1095,6 +1097,9 @@ class MLATransformerBlock(FFNBlock):
 
   @property
   def seq_sharded(self) -> bool: return hasattr(self, "cache_s")
+  def _seq_rows(self, k:Tensor) -> Tensor:
+    """the rows of the tokens as the sequence sharded cache's: half, or fp8 (SEQ_FP8, see fp8_rows)"""
+    return fp8_rows(k) if self.cache_s.dtype == dtypes.uint32 else k
   def slot_rows(self) -> int:
     """(sequence sharded) the rows of a device of a slot"""
     return int(self.slot_s[0].shape[0]) // len(cast(tuple, self.cache_s.device))
@@ -1109,15 +1114,17 @@ class MLATransformerBlock(FFNBlock):
       if seq_sharded(x.device):
         # (MLA_SEQ_SHARD: every device the rows of its positions, see seq_store)
         devs = cast(tuple[str, ...], x.device)
+        # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory)
+        row, dt = ((FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 0) and D == 512 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
           # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first, slot i's the i+1-th. the
           # model's cache past S positions is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
           n, S, R = reg
           stride = seq_rows(S, len(devs))
-          views = _region_views(devs, 0, (D,), dtypes.half, R*stride, [(0, seq_rows(self.config.max_context, len(devs))), (stride, n*stride)] +
+          views = _region_views(devs, 0, row, dt, R*stride, [(0, seq_rows(self.config.max_context, len(devs))), (stride, n*stride)] +
                                 [((i+1)*stride, stride) for i in range(n)])
           self.cache_s, self.pool_s, self.slot_s = views[0], views[1], views[2:]
-        else: self.cache_s = Tensor.empty(len(devs)*seq_rows(self.config.max_context, len(devs)), D, dtype=dtypes.half, device=devs, axis=0)
+        else: self.cache_s = Tensor.empty(len(devs)*seq_rows(self.config.max_context, len(devs)), *row, dtype=dt, device=devs, axis=0)
       else: self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, D, dtype=dtypes.half, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)

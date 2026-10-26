@@ -2966,6 +2966,34 @@ def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale
   # rep: the tokens are groups of rep with the lists of index's rep rows (every 16 heads of a token, see mla_sparse_seq)
   return _mla_sparse_body(out, ml, q, cache, index, (), scale, valid_len, 0, split, rep)
 
+# ** an fp8 latent cache (SEQ_FP8): a row of 512 latent dims is 128 words of e4m3 values and 4 float scales (of 128 dims each, their absolute
+# max over 448), 528 bytes instead of 1024
+
+FP8_ROW = 132  # (the words of a row)
+
+def fp8_rows(k:Tensor) -> Tensor:
+  """the (R, 512) rows k as fp8 rows (R, 132) uint32: the values over their scale in e4m3 (rounded to nearest), the 4 scales"""
+  R, D = k.shape
+  assert D == 512, f"fp8 rows of {D} dims"
+  x = k.float().reshape(R, 4, 128)
+  s = x.abs().max(-1, keepdim=True).maximum(1e-20) / 448
+  q = (x / s).cast(dtypes.fp8e4m3).bitcast(dtypes.uint8).reshape(R, D).contiguous().bitcast(dtypes.uint32)
+  return q.cat(s.reshape(R, 4).bitcast(dtypes.uint32), dim=-1)
+
+def _fp8_halves(w:UOp) -> list[UOp]:
+  """the 4 e4m3 bytes of a word as halves of 2**-8 their values (exact: the sign, exponent and mantissa bits moved, the bias difference is 8)"""
+  out = []
+  for i in range(4):
+    b = (w >> (8*i)) & 0xff
+    out.append((((b & 0x80) << 8) | ((b & 0x7f) << 7)).cast(dtypes.uint16).bitcast(dtypes.half))
+  return out
+
+IDX_FP8_ROW = 33  # (an fp8 pooled key of the indexer (SEQ_FP8): 32 words of its 128 dims, its scale)
+
+def _fp8_frag(k:UOp, row:UOp, w0:UOp|int, half:UOp) -> UOp:
+  """the 8 halves of a lane's WMMA fragment of fp8 words (the dims of words w0+half and w0+half+2, see _fp8_halves: 2**-8 their values)"""
+  return UOp.stack(*_fp8_halves(k[row, w0 + half].load()), *_fp8_halves(k[row, w0 + half + 2].load()))
+
 def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
                      split:int, rep:int=0) -> UOp:
   # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
@@ -3001,12 +3029,20 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
     return off + key.maximum(0).minimum((stride or N)-1), (i < count) & (key < valid_len)
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
+  # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
+  fp8 = cache.dtype == dtypes.uint32
+  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) == FP8_ROW), "fp8 rows: 512 dims, a wave's 128 of a scale"
+  def fp8_scale(k:UOp) -> UOp: return cache[k, 128 + wave].load().bitcast(dtypes.float) * 256
   s_acc = zero8
-  for kk in range(KT): s_acc = UOp.wmma(qfrag[kk], UOp.stack(*(cache[key, dbase + kk*16 + k].load() for k in ks)), s_acc, *WMMA_ARG)
+  for kk in range(KT):
+    if fp8: kf = UOp.stack(*_fp8_halves(cache[key, wave*32 + kk*4 + half].load()), *_fp8_halves(cache[key, wave*32 + kk*4 + half + 2].load()))
+    else: kf = UOp.stack(*(cache[key, dbase + kk*16 + k].load() for k in ks))
+    s_acc = UOp.wmma(qfrag[kk], kf, s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
   s_reg = s_reg.after(s_reg.store(s_acc))
+  sk = fp8_scale(key) if fp8 else UOp.const(1.0, dtypes.float)
   lds_s = UOp.alloc((WAVES, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
-  lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(s_reg[e].load()) for e in range(8))).barrier())
+  lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(s_reg[e].load() * sk if fp8 else s_reg[e].load()) for e in range(8))).barrier())
   o_regs = [_reg((8,), 0) for _ in range(KT)]
   # the softmax of rows e (of both halves) in ES = 8//WAVES of them a wave: its running max and sum, P and the rescale of the rows to LDS
   ES = 8 // WAVES
@@ -3031,12 +3067,17 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   shared = UOp.group(*pst, m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new))).barrier()
   lds_p, lds_a = lds_p.after(shared), lds_a.after(shared)
   alpha = [lds_a[half*8 + e].load() for e in range(8)]
-  pfrag = UOp.stack(*(lds_p[col, k].load() for k in ks))
   vkeys = [key_at(k) for k in ks]
+  # (fp8: P times the scale of its key's values of the wave's dims, 0 past the count)
+  if fp8: pfrag = UOp.stack(*(lds_p[col, k].load() * vok.where(fp8_scale(vk), UOp.const(0, dtypes.float)).cast(dtypes.half)
+                              for k, (vk, vok) in zip(ks, vkeys)))
+  else: pfrag = UOp.stack(*(lds_p[col, k].load() for k in ks))
   o_new = []
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
-    vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
+    if fp8: vfrag = UOp.stack(*(vok.where(_fp8_halves(cache[vk, wave*32 + dt*4 + col//4].load() >> (8*(col % 4)).cast(dtypes.uint32))[0],
+                                          UOp.const(0, dtypes.half)) for vk, vok in vkeys))
+    else: vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     prev = o_regs[dt].after(n_tile_r)
     o_new.append(UOp.wmma(pfrag, vfrag, UOp.stack(*(prev[e].load() * alpha[e] for e in range(8))), *WMMA_ARG))
   update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier().end(n_tile_r)
@@ -3075,13 +3116,13 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
     # a few tokens: a token's keys over `split` workgroups, their outputs combined by their max and sum (the GPU's workgroups, not a few)
     parts = Tensor.empty(n*T*split*16, D, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
     ml = Tensor.empty(n*T*split*16, 2, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
-    parts, ml = Tensor.custom_kernel(parts, ml, rows, cache.reshape(-1, D), index,
+    parts, ml = Tensor.custom_kernel(parts, ml, rows, cache.reshape(-1, int(cache.shape[-1])), index,
                                      fxn=functools.partial(_mla_sparse_split_kernel, scale=scale, valid_len=vl, split=split))[:2]
     m, l = (ml.reshape(n, T, split, 16, 2)[..., i:i+1] for i in range(2))
     w = l * (m - m.max(2, keepdim=True)).exp()
     out = ((parts.reshape(n, T, split, 16, D) * w).sum(2) / w.sum(2).maximum(1e-30)).reshape(n*T*16, D)
   else:
-    out = Tensor.custom_kernel(out, rows, cache.reshape(-1, D), index, *extra,
+    out = Tensor.custom_kernel(out, rows, cache.reshape(-1, int(cache.shape[-1])), index, *extra,
                                fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
 
@@ -3197,14 +3238,14 @@ def seq_picks(picks:Tensor, valid_len:int|UOp|None, devs:tuple[str, ...], groupe
 _seq_view_cache:dict[int, list[Tensor]] = {}
 def seq_views(cache:Tensor) -> list[Tensor]:
   """
-  the parts of a sequence sharded cache (n*rows, D) half on every device as (rows, D//4) uint64: view k on device d is the part of device
+  the parts of a sequence sharded cache (n*rows, D) on every device as (rows, its row's bytes//8) uint64: view k on device d is the part of device
   (d+k)%n (k > 0: the other device's memory mapped on this one, read peer to peer)
   """
   devs = cast(tuple[str, ...], cache.device)
   mb = [u.buffer for u in cache.uop.toposort() if u.op is Ops.BUFFER][0]
   if (views:=_seq_view_cache.get(id(mb))) is not None: return views
   from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
-  n, rows, D = len(devs), int(cache.shape[0]) // len(devs), int(cache.shape[1])
+  n, rows, W = len(devs), int(cache.shape[0]) // len(devs), int(cache.shape[1]) * cache.dtype.itemsize // 8
   def alias(b:Buffer, d:str) -> Buffer:
     return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
   views = []
@@ -3213,7 +3254,7 @@ def seq_views(cache:Tensor) -> list[Tensor]:
     own = [b.ensure_allocated() for b in cast(MultiBuffer, mb).bufs]
     for k in range(n):
       (vm:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % n], devs[d]) for d in range(n)]
-      views.append(Tensor(UOp.from_buffer(vm, dtypes.uint64, devs)).reshape(rows, D//4))
+      views.append(Tensor(UOp.from_buffer(vm, dtypes.uint64, devs)).reshape(rows, W))
   _seq_view_cache[id(mb)] = views
   return views
 
@@ -3229,6 +3270,21 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) 
     .sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
 
 @functools.cache
+def _seq_gather_fp8_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) -> UOp:
+  # _seq_gather_kernel of fp8 rows (SEQ_FP8, 66 words: 64 of 8 values, 2 of the 4 scales): their values in half (4 a word of out)
+  rows, C = cast(int, part.shape[0]), cast(int, out.shape[1])
+  J = (start_pos + SEQ_BLK*n - 1) // (SEQ_BLK*n)
+  j, r, c = UOp.range(J, 0, AxisType.GLOBAL), UOp.range(SEQ_BLK, 1, AxisType.GLOBAL), UOp.range(C, 2, AxisType.LOCAL)
+  owner = (dev[0].load().cast(dtypes.weakint) + k) % n
+  p = (j*n + owner) * SEQ_BLK + r
+  row = (j*SEQ_BLK + r).minimum(rows-1)
+  w = ((part[row, c // 2].load() >> (32 * (c % 2)).cast(dtypes.uint64)) & 0xffffffff).cast(dtypes.uint32)
+  sc = ((part[row, 64 + c // 64].load() >> (32 * ((c // 32) % 2)).cast(dtypes.uint64)) & 0xffffffff).cast(dtypes.uint32).bitcast(dtypes.float) * 256
+  vals = [(h.cast(dtypes.float) * sc).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint64) for h in _fp8_halves(w)]
+  word = vals[0] | (vals[1] << 16) | (vals[2] << 32) | (vals[3] << 48)
+  return out[p.valid(p < start_pos), c].store(word).end(j, r, c).sink(arg=KernelInfo(name=f"seq_gather_fp8_{k}", opts_to_apply=()))
+
+@functools.cache
 def _seq_rows_kernel(out:UOp, k:UOp, start_pos:UOp, T:UOp) -> UOp:
   # the rows of the tokens (the first T of k) at their positions
   R, C = cast(tuple[int, int], k.shape)
@@ -3242,16 +3298,21 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tenso
   T tokens' rows k (R, D, on every device) at theirs
   """
   devs = cast(tuple[str, ...], cache.device)
-  n, D = len(devs), int(cache.shape[1])
+  # (the rows of the tokens: the cache's dims, its rows half or fp8 (see fp8_rows). fp8: the whole one fp8 too (its rows copied as they are,
+  # the tokens' quantized: half the memory and the reads, the attention reads fp8 rows), else in half (SEQ_GATHER_FP8=0)
+  n, D, fp8 = len(devs), int(k.shape[-1]), cache.dtype == dtypes.uint32
+  raw = not fp8 or bool(getenv("SEQ_GATHER_FP8", 1))
   sp, t = _unbind(start_pos), (_unbind(T) if isinstance(T, UOp) else UOp.const(T, dtypes.weakint))
+  W = int(cache.shape[1]) * cache.dtype.itemsize // 8 if raw else D//4  # (the words of a row of the whole one)
   # (after the cache's store: the rows of the tokens in the devices' parts for the calls after this one)
-  out = Tensor(Tensor.empty(N, D//4, dtype=dtypes.uint64, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T) if isinstance(v, UOp))))
+  out = Tensor(Tensor.empty(N, W, dtype=dtypes.uint64, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T) if isinstance(v, UOp))))
   for kk, part in enumerate(seq_views(cache)):
-    out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=kk, n=n))[0]
-  rows = k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
-  assert rows.shape[-1] == D//4, f"the rows of the tokens {k.shape} as {rows.shape}"
+    out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
+                                                                                     start_pos=sp, k=kk, n=n))[0]
+  rows = (fp8_rows(k) if fp8 and raw else k.cast(dtypes.half)).contiguous().bitcast(dtypes.uint64)
+  assert rows.shape[-1] == W, f"the rows of the tokens {k.shape} as {rows.shape}"
   out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]
-  return out.bitcast(dtypes.half)
+  return out.bitcast(cache.dtype if raw else dtypes.half)
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None) -> Tensor:
   """
@@ -3568,7 +3629,12 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=4) ->
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 2, AxisType.LOOP)
   t0, p0 = tt * 16, (g + active * G) * (16*NP)
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
-  kfrags = [[UOp.stack(*(k[p0 + n*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)] for n in range(NP)]
+  # (fp8 pooled keys (SEQ_FP8): the scores times the scale of the key)
+  fp8 = k.dtype == dtypes.uint32
+  if fp8:
+    kfrags = [[_fp8_frag(k, p0 + n*16 + col, kk*4, half) for kk in range(D // 16)] for n in range(NP)]
+    kscale = [k[p0 + n*16 + col, D // 4].load().bitcast(dtypes.float) * 256 for n in range(NP)]
+  else: kfrags = [[UOp.stack(*(k[p0 + n*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)] for n in range(NP)]
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   # a loop over the heads (unrolled, the loads of all the heads would be hoisted): the sums in registers
   accs = [_reg((8,), 0, active) for _ in range(NP)]
@@ -3582,7 +3648,8 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, pools:UOp, NP:int=4) ->
     s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
     s_reg = s_reg.after(s_reg.store(s))
     prev = accs[n].after(h)
-    updates.append(accs[n].store(UOp.stack(*(prev[e].load() + s_reg[e].load().maximum(0) * wt[e] for e in range(8)))))
+    sv = [s_reg[e].load() * kscale[n] if fp8 else s_reg[e].load() for e in range(8)]
+    updates.append(accs[n].store(UOp.stack(*(prev[e].load() + sv[e].maximum(0) * wt[e] for e in range(8)))))
   done = UOp.group(*updates).end(h)
   stores = [out[t0 + half*8 + e, p0 + n*16 + col].store(accs[n].after(done)[e].load()) for n in range(NP) for e in range(8)]
   # a data dependent count of tiles, an upper bound estimate
@@ -3594,7 +3661,7 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp) -> Tensor:
   T, H, D = q.shape
   P = k.shape[0]
   out = Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
-  kh = k if k.dtype == dtypes.half else k.half().contiguous()
+  kh = k if k.dtype in (dtypes.half, dtypes.uint32) else k.half().contiguous()
   if isinstance(pools, UOp): kh = Tensor(kh.uop.after(pools))
   fxn = functools.partial(_indexer_scores_kernel, pools=_unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint))
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), fxn=fxn)[0]
@@ -3606,7 +3673,7 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
   # tokens before start_pos in the first pool come from the ring (the last tokens), the others from kg (T rows of key and gate)
   # grouped (positions): G sequences (batched decoding), kg their rows (rows//G each, the first at positions[g]), their pools stride rows of pk
   # each, their rings R rows of ring each
-  P, D = cast(tuple[int, int], pk.shape)
+  P, D = cast(int, pk.shape[0]), cast(int, kg.shape[2])
   kpool, rows = cast(int, ape.shape[0]), cast(int, kg.shape[0])
   off, ring_off, kg_off, ends = UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), []
   if grouped:
@@ -3635,8 +3702,19 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
   ws = [((l - mx) * LOG2E).exp2() for l in logits]
   pooled = functools.reduce(lambda a, b: a + b, (w * k for w, k in zip(ws, keys))) / functools.reduce(lambda a, b: a + b, ws)
   ok = (pool * kpool < end) & (pool < P)
+  if pk.dtype == dtypes.uint32:
+    # fp8 (SEQ_FP8): the pool's absolute max (its threads' through LDS), its values over it/448 in e4m3, 4 a word, the scale the last word
+    amax_l = UOp.alloc((D,), dtypes.float, addrspace=AddrSpace.LOCAL)
+    amax_l = amax_l.after(amax_l[d].store(pooled.abs()).barrier())
+    sc = functools.reduce(UOp.maximum, [amax_l[i].load() for i in range(D)]).maximum(1e-20) / 448
+    byte_l = UOp.alloc((D,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    byte_l = byte_l.after(byte_l[d].store((pooled / sc).cast(dtypes.fp8e4m3).bitcast(dtypes.uint8).cast(dtypes.uint32)).barrier())
+    w = d.minimum(D//4 - 1) * 4
+    word = byte_l[w].load() | (byte_l[w+1].load() << 8) | (byte_l[w+2].load() << 16) | (byte_l[w+3].load() << 24)
+    value, ok, d_out = (d < D//4).where(word, sc.bitcast(dtypes.uint32)), ok & (d <= D//4), d.minimum(D//4)
+  else: value, d_out = pooled.cast(pk.dtype), d
   row = (off + pool.minimum(P-1)).valid(ok) if grouped else pool.valid(ok).minimum(P-1)
-  return pk[row, d].store(pooled.cast(pk.dtype)).end(*ends, j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
+  return pk[row, d_out].store(value).end(*ends, j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
 
 @functools.cache
 def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:int=0, slotted:bool=False, counted:bool=False) -> UOp:
@@ -3703,6 +3781,7 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
     pools = (grouped[0][seq].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]) + kpool - 1) // kpool
     koff = _slot_of(grouped[1:], seq) * stride
   col, half = lane % 16, lane // 16
+  fp8 = k.dtype == dtypes.uint32
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 1, AxisType.LOOP)
   p0 = (g + active * G) * (16*NP)
@@ -3714,10 +3793,15 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
     wt = [w[ht*16 + half*8 + e].load() for e in range(8)]
     for n in range(NP):
       s = zero8
-      for kk in range(D // 16): s = UOp.wmma(qfrags[kk], UOp.stack(*(k[koff + p0 + n*16 + col, kk*16 + j].load() for j in ks)), s, *WMMA_ARG)
+      kr = koff + p0 + n*16 + col
+      for kk in range(D // 16):
+        kf = _fp8_frag(k, kr, kk*4, half) if fp8 else UOp.stack(*(k[kr, kk*16 + j].load() for j in ks))
+        s = UOp.wmma(qfrags[kk], kf, s, *WMMA_ARG)
       s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
       s_reg = s_reg.after(s_reg.store(s))
-      totals[n] = totals[n] + functools.reduce(lambda a, e: a + s_reg[e].load().maximum(0) * wt[e], range(1, 8), s_reg[0].load().maximum(0) * wt[0])
+      # (fp8 pooled keys (SEQ_FP8): times the key's scale)
+      sv = [s_reg[e].load() * (k[kr, D // 4].load().bitcast(dtypes.float) * 256) if fp8 else s_reg[e].load() for e in range(8)]
+      totals[n] = totals[n] + functools.reduce(lambda a, e: a + sv[e].maximum(0) * wt[e], range(1, 8), sv[0].maximum(0) * wt[0])
   # the rows of a lane's half, then the other half's (lane ^ 16)
   stores = [out[(p0 + n*16 + col).valid(half.eq(0))].store(tot + _swizzle_xor(tot, 16)) for n, tot in enumerate(totals)]
   # a data dependent count of tiles, an upper bound estimate
