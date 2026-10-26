@@ -227,7 +227,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  parser.add_argument("-q", "--query", nargs="+", default=[], metavar="NAME", help="Search query")
+  parser.add_argument("-q", "--query", nargs="+", default=[], metavar="REGEX", help="Search query")
   parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))
   parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
