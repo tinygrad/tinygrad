@@ -71,7 +71,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     Creates a tensor with the given shape, filled with the given value.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    `axis` uses the same sharding as `empty` and requires a scalar fill value and `buffer=True`.
+    With multiple devices, optionally specify which `axis` to shard scalar fill values on.
     Pass `buffer=False` to get a broadcast const value instead of a materialized buffer.
 
     ```python exec="true" source="above" session="tensor" result="python"

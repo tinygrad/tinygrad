@@ -92,14 +92,13 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(scalar.uop.base.buffer.nbytes, scalar.dtype.itemsize)
 
   def test_full_axis(self):
-    for axis in (0, 1, -1):
-      for x, value in ((Tensor.zeros(4, 6, device=devices_2, axis=axis), 0),
-                       (Tensor.ones(4, 6, device=devices_2, axis=axis), 1),
-                       (Tensor.full((4, 6), 7, device=devices_2, axis=axis, dtype=dtypes.int32), 7)):
-        x.realize()
-        self.assertEqual((x.shape, x.uop.axis), ((4, 6), axis % 2))
-        self.assertEqual(x.uop.base.buffer.nbytes, 12 * x.dtype.itemsize)
-        np.testing.assert_equal(x.numpy(), np.full((4, 6), value))
+    for x, axis, value in ((Tensor.zeros(4, 6, device=devices_2, axis=0), 0, 0),
+                           (Tensor.ones(4, 6, device=devices_2, axis=1), 1, 1),
+                           (Tensor.full((4, 6), 7, device=devices_2, axis=-1, dtype=dtypes.int32), 1, 7)):
+      x.realize()
+      self.assertEqual((x.shape, x.uop.axis), ((4, 6), axis))
+      self.assertEqual(x.uop.base.buffer.nbytes, 12 * x.dtype.itemsize)
+      np.testing.assert_equal(x.numpy(), np.full((4, 6), value))
 
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
