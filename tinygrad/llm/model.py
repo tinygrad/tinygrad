@@ -1,9 +1,9 @@
 from __future__ import annotations
 import enum, functools, itertools, math, pathlib, re
 from dataclasses import dataclass, replace
-from typing import Callable, TypeVar
+from typing import Callable
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.llm.kernels.amd import Linear, ExpertWeights, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_parse, gguf_shard
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up
@@ -136,11 +136,10 @@ class TransformerConfig:
   hc: HCConfig|None = None
   indexer: IndexerConfig|None = None
   indexer_shared: tuple[bool, ...] = ()
+  rope_interleave: bool = False
   expert_latent_dim: int = 0
   situ: tuple[float, float]|None = None
   attn_res_block_size: int = 0
-
-HCOut = TypeVar("HCOut", Tensor, tuple[Tensor, Tensor|None])
 
 class AttentionResidual:
   def __init__(self, config:TransformerConfig):
@@ -150,11 +149,9 @@ class AttentionResidual:
     scores = (xs.rmsnorm(eps=self.norm_eps) * self.weight).sum(-1, keepdim=True)
     return (scores.softmax(2) * xs).sum(2)
 
-  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], HCOut]) -> HCOut:
-    ret = sublayer(self.mix(xs))
-    out = (ret[0] if isinstance(ret, tuple) else ret).unsqueeze(2)
-    out = xs.cat(out, dim=2) if self.new_block else xs[:, :, :-1].cat(xs[:, :, -1:] + out, dim=2)
-    return (out, ret[1]) if isinstance(ret, tuple) else out
+  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
+    out, aux = sublayer(self.mix(xs))
+    return (xs.cat(out.unsqueeze(2), dim=2) if self.new_block else xs[:, :, :-1].cat(xs[:, :, -1:] + out.unsqueeze(2), dim=2)), aux
 
 class HyperConnection:
   def __init__(self, config:TransformerConfig):
@@ -162,7 +159,7 @@ class HyperConnection:
     self.fn = Linear(self.count * config.dim, (2 + self.count) * self.count, bias=False)
     self.base, self.scale = {"weight": Tensor.zeros((2 + self.count) * self.count)}, {"weight": Tensor.zeros(3)}
 
-  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], HCOut]) -> HCOut:
+  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     base, scale, mix = self.base["weight"], self.scale["weight"], self.fn(xs.flatten(2).rmsnorm(eps=self.norm_eps))
     pre  = (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps
@@ -170,10 +167,8 @@ class HyperConnection:
     comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
     # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
     for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
-    ret = sublayer((xs * pre.unsqueeze(-1)).sum(2))
-    out = ret[0] if isinstance(ret, tuple) else ret
-    out = out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
-    return (out, ret[1]) if isinstance(ret, tuple) else out
+    out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
+    return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -257,14 +252,11 @@ class FFNBlock:
         h = self.attn_norm(h)
         mask = self._indexer_mask(h, start_pos, idx_mask)
         return self._attention(h, start_pos, mask), mask
-      if self.config.hc is not None or self.config.attn_res_block_size:
-        res_attn, res_ffn = (self.hc_attn, self.hc_ffn) if self.config.hc is not None else (self.attn_res_score, self.ffn_res_score)
-        xs, idx_mask = res_attn(x, attend)
-        out = res_ffn(xs, lambda h: self._feed_forward(self.ffn_norm(h))).contiguous()
-      else:
-        attn, idx_mask = attend(x)
-        h = x + attn
-        out = (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+      res_attn = res_ffn = lambda xs, sublayer: (xs + (ret:=sublayer(xs))[0], ret[1])
+      if self.config.hc is not None: res_attn, res_ffn = self.hc_attn, self.hc_ffn
+      elif self.config.attn_res_block_size: res_attn, res_ffn = self.attn_res_score, self.ffn_res_score
+      x, idx_mask = res_attn(x, attend)
+      out = res_ffn(x, lambda h: (self._feed_forward(self.ffn_norm(h)), None))[0].contiguous()
       return (out, idx_mask) if idx_mask is not None else out
     out = _run(x, start_pos, idx_mask)
     return out if isinstance(out, tuple) else (out, None)
@@ -377,6 +369,7 @@ class Indexer:
 
 
 class MLATransformerBlock(FFNBlock):
+  kv_b_block_size:tuple[int, int] = (128, 128)
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
@@ -400,13 +393,16 @@ class MLATransformerBlock(FFNBlock):
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
-    q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
+    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T], self.config.rope_interleave)
+    if 'weight_scale_inv' in self.attn_k_b:
+      q_nope = fp8_matmul(q_nope, self.attn_k_b['weight'], self.attn_k_b['weight_scale_inv'], self.kv_b_block_size[::-1])
+    else: q_nope = q_nope @ self.attn_k_b['weight'].transpose(-1, -2)
+    q = q_nope.cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T], self.config.rope_interleave)
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
@@ -415,7 +411,11 @@ class MLATransformerBlock(FFNBlock):
     attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
     if (mask:=self._attn_mask(x, start_pos, idx_mask)) is not None: attn = attn + mask
     attn = attn.softmax(-1)
-    attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+    attn = attn @ v
+    if 'weight_scale_inv' in self.attn_v_b:
+      attn = fp8_matmul(attn, self.attn_v_b['weight'], self.attn_v_b['weight_scale_inv'], self.kv_b_block_size)
+    else: attn = attn @ self.attn_v_b['weight'].transpose(-1, -2)
+    attn = attn.transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn * self.attn_gate(x).sigmoid() if self.config.attn_output_gate else attn)
 
   def _attn_mask(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor|None:  # (1, 1, T, start_pos+T), None: everything is visible
@@ -504,14 +504,14 @@ class GatedDeltaNetBlock(FFNBlock):
     alpha = log_alpha.transpose(1, 2).exp()  # per-channel decay for kda, per-head otherwise (B, H, T, K|1)
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
-    state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
+      state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
       core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)
-      state = initial.where(0, state.float())
+      state = initial.where(0, self.recurrent_state.float())
       outs = []
       for t in range(T_pad):
         s1 = state * alpha[:, :, t]  # decay the state
@@ -519,9 +519,9 @@ class GatedDeltaNetBlock(FFNBlock):
         state = s1 + delta * k[:, :, t]
         outs.append((state * q[:, :, t]).sum(-1))
 
-      # store the updated recurrent state in place, then read the stacked outputs after the write
-      state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
-      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store))
+      # store the updated recurrent state in place, then read the stacked outputs after the state and conv writes
+      state_store = self.recurrent_state.uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop))
+      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, self.conv_state.uop.after(conv_state_store)))
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()

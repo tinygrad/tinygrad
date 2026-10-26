@@ -327,7 +327,7 @@ class PCIIfaceBase:
   def free(self, storage:BufferStorage):
     if storage.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(storage.meta.mapping)
     elif hasattr(self.pci_dev, "vfio_dev"): System.vfio_unmap(storage.meta.hMemory, storage.meta.mapping.size)
-    if storage.meta.has_cpu_mapping and self.remote is None: FileIOInterface.munmap(storage.buf, storage.meta.mapping.size)
+    if storage.meta.has_cpu_mapping and type(storage.host) is MMIOInterface: FileIOInterface.munmap(storage.host.addr, storage.host.nbytes)
 
   def unmap(self, mapping:BufferStorage):
     self.dev_impl.mm.unmap_range(*mapping.meta[:2])

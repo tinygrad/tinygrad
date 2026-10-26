@@ -305,7 +305,6 @@ class TestOps(TensorTestCase):
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32).permute((1, 0)),
       lambda x: (x > 0.5).where(4, 2).clone().permute((1, 0)), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software vulkan evaluates a NaN != x as false")
   def test_where_nan_cond(self):
     # a NaN compares false against everything except !=.
     for fxn in (lambda x: x<1, lambda x: x>1, lambda x: x!=1, lambda x: x==1):
@@ -330,6 +329,22 @@ class TestOps(TensorTestCase):
         helper_test_op(None, fxn, fxn, forward_only=True, vals=[[s0], [s1]])
 
   def test_cmp_eq(self): self._test_cmp(lambda x,y: x==y, reverse=False)
+  def test_cmp_ne(self): self._test_cmp(lambda x,y: x!=y)
+
+  def test_cmp_eq_ne_specials(self):
+    vals = [[math.nan, math.inf, -math.inf, 0.0, -0.0, 1.0], [math.nan, math.inf, math.inf, -0.0, 0.0, 2.0]]
+    for fxn in (lambda x,y: x==y, lambda x,y: x!=y):
+      helper_test_op(None, fxn, forward_only=True, vals=vals)
+      helper_test_op(None, lambda x: fxn(x, x), forward_only=True, vals=vals[:1])
+
+  def test_cmp_eq_padding(self):
+    # Padding a comparison fills False; comparing two zero-padded inputs fills True.
+    for fxn in (lambda x,y: x==y, lambda x,y: x!=y):
+      helper_test_op(None, lambda x,y: torch.nn.functional.pad(fxn(x,y), (1,2)).float().sum(),
+                     lambda x,y: fxn(x,y).pad((1,2)).float().sum(), vals=[[1,2,3], [1,0,3]], forward_only=True)
+      helper_test_op(None, lambda x,y: fxn(torch.nn.functional.pad(x, (1,2)), torch.nn.functional.pad(y, (1,2))).float().sum(),
+                     lambda x,y: fxn(x.pad((1,2)), y.pad((1,2))).float().sum(), vals=[[1,2,3], [1,0,3]], forward_only=True)
+
   def test_cmp_gt(self): self._test_cmp(lambda x,y: x>y)
   def test_cmp_ge(self): self._test_cmp(lambda x,y: x>=y)
   def test_cmp_lt(self): self._test_cmp(lambda x,y: x<y)

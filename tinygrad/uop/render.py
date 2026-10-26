@@ -79,7 +79,7 @@ def render_uir(root:UOp|list[UOp]) -> str:
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.FLOORDIV: "//", Ops.FLOORMOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
-         Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
+         Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.CMPEQ: "==", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
 # comparison operators are not in here because they are chained in python, not left-associative
 precedence = {Ops.MUL:1, Ops.FLOORDIV:1, Ops.FLOORMOD:1, Ops.ADD:2, Ops.SUB:2, Ops.SHL:3, Ops.SHR:3, Ops.AND:4, Ops.XOR:5, Ops.OR:6}
 def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:

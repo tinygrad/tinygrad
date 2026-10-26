@@ -77,8 +77,6 @@ class TestAttention(unittest.TestCase):
     # pre averages streams [1, 3] to 2, the sublayer squares it to 4, and post adds 4 to both streams
     # mixing rows [3/4, 1/4], [1/2, 1/2] normalize to [3/5, 1/3], [2/5, 2/3]
     expected = [[[[4 + (3/5 + 3*2/5)], [4 + (1/3 + 3*2/3)]]]]
-    actual = hc(Tensor([[[[1.], [3.]]]]), lambda x: x.square())
-    np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
     for mask in (None, Tensor([0., -np.inf])):
       with self.subTest(mask=mask is not None):
         actual, returned_mask = hc(Tensor([[[[1.], [3.]]]]), lambda x: (x.square(), mask))
