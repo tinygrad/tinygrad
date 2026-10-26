@@ -1382,7 +1382,7 @@ _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYST
 
 @functools.cache
 def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, two_shot:bool=False, gather:bool=False,
-                          half:bool=False, triple:bool=False, pack:tuple[int, int]|None=None) -> UOp:
+                          half:bool=False, triple:bool=False, pack:tuple[int, int]|None=None, scatter:bool=False) -> UOp:
   # half: two values a word, in half (n is the pairs): what's sent and summed, every device's own too (the same bits everywhere). triple: three
   # (n is the triples), the low 16 bits of the epoch in the word's top 16 (only the calls before and after it share the mailbox)
   # one shot: every device stores its values into its slot in the mailboxes of all the others and polls its own mailbox for theirs (gather:
@@ -1409,7 +1409,11 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   def sat(v:UOp) -> UOp: return v.maximum(-65504.0).minimum(65504.0)
   def h(v:UOp) -> UOp: return sat(v).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
   def unh(b:UOp) -> UOp: return b.cast(dtypes.uint16).bitcast(dtypes.half).float()
-  vals = [[(sat(x[0, e*W + c].load().float()).cast(dtypes.half).float() if half else x[0, e*W + c].load().float()) for c in range(W)] for e in els]
+  # (scatter: x is a part of n words for every device, a device gets the sum of its parts: a reduce scatter, one shot)
+  def vals_for(dest:UOp|int) -> list[list[UOp]]:
+    def ld(i:UOp) -> UOp: return sat(x[0, i].load().float()).cast(dtypes.half).float() if half else x[0, i].load().float()
+    return [[ld(dest*(n*W) + e*W + c) for c in range(W)] for e in els]
+  vals = vals_for(0)
   def pow2(k:UOp) -> UOp: return ((k + 127).maximum(1).minimum(254).cast(dtypes.uint32) << 23).bitcast(dtypes.float32)
   def word(v:list[UOp]) -> UOp:
     if pack is not None:
@@ -1459,7 +1463,13 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   if pack is not None: vals = [value(word(v)) for v in vals]
   def ordered_sum(parts:list[UOp]) -> UOp: return functools.reduce(lambda a,b: a+b, parts)
   def mine(s:int, v:list[UOp], w:UOp) -> list[UOp]: return [me.eq(s).where(a, b) for a, b in zip(v, value(w))]
-  if not two_shot:
+  if scatter:
+    assert not two_shot and pack is None and not gather, "a reduce scatter is one shot"
+    sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals_for((me + k) % N))])
+    got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
+    parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals_for(me))]
+    stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
+  elif not two_shot:
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
     parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals)]
@@ -1479,7 +1489,18 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     stores = [out[e*W + c].store(is_owner.where(sm[c], value(g)[c])) for e, sm, g in zip(els, sums, got2) for c in range(W)]
   # the next epoch, once every thread of the workgroup read the counter
   done = counter.after(UOp.group(*stores).barrier())[wg.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
-  return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name="p2p_allgather" if gather else "p2p_allreduce", opts_to_apply=()))
+  name = "p2p_allgather" if gather else "p2p_reduce_scatter" if scatter else "p2p_allreduce"
+  return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name=name, opts_to_apply=()))
+
+def p2p_reduce_scatter(p:Tensor) -> Tensor|None:
+  """p (devices, devices, n) partials split on the first: device i gets the sum over the devices of their part i, (devices, n) split on the
+  first. one shot peer to peer, the parts in half. None: not supported (or too big for the mailboxes)"""
+  devs = cast(tuple[str, ...], p.device)
+  N, n = len(devs), int(p.shape[-1])
+  if n % 2 or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(n // 2)) is None: return None
+  out = Tensor.empty(N*n, dtype=dtypes.float32, device=devs, axis=0)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n//2, T=shape[0], EP=shape[1], half=True, scatter=True)
+  return Tensor.custom_kernel(out, p.float().reshape(N, N*n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, n)
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
 
@@ -2932,12 +2953,13 @@ def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, 
   return _mla_sparse_body(out, None, q, cache, index, grouped, scale, valid_len, stride, 1)
 
 @functools.cache
-def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, split:int) -> UOp:
-  # a token's keys split over `split` workgroups: out (T*split*16, D) every split's output (normed by its sum), ml its rows' max and sum
-  return _mla_sparse_body(out, ml, q, cache, index, (), scale, valid_len, 0, split)
+def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, split:int, rep:int=0) -> UOp:
+  # a token's keys split over `split` workgroups: out (T*split*16, D) every split's output (normed by its sum), ml its rows' max and sum.
+  # rep: the tokens are groups of rep with the lists of index's rep rows (every 16 heads of a token, see mla_sparse_seq)
+  return _mla_sparse_body(out, ml, q, cache, index, (), scale, valid_len, 0, split, rep)
 
 def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
-                     split:int) -> UOp:
+                     split:int, rep:int=0) -> UOp:
   # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
   # they share the keys. 4 waves own a quarter of the latent dims each: they sum their partial scores through LDS, then update their quarter of
   # the output with P (via LDS). keys past valid_len aren't seen (padding rows of a chunk past its tokens: the cache isn't written there)
@@ -2958,7 +2980,8 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
     valid_len, off = grouped[0][g].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]), _slot_of(grouped[1:], g) * stride
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
   qfrag = [UOp.stack(*(q[tok*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
-  count = index[tok, n_max].load().cast(dtypes.weakint).minimum(n_max)
+  itok = tok % rep if rep else tok  # (the row of the token's list)
+  count = index[itok, n_max].load().cast(dtypes.weakint).minimum(n_max)
   # (split: the tiles of the keys of a token in ranges, sp's)
   tiles = (count + 15) // 16
   per = (tiles + split - 1) // split
@@ -2966,7 +2989,7 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   n_tile = n_tile_r + sp*per
   def key_at(j) -> tuple[UOp, UOp]:
     i = n_tile * 16 + j
-    key = index[tok, i.minimum(n_max-1)].load().cast(dtypes.weakint)
+    key = index[itok, i.minimum(n_max-1)].load().cast(dtypes.weakint)
     return off + key.maximum(0).minimum((stride or N)-1), (i < count) & (key < valid_len)
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
@@ -3136,29 +3159,43 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   devs = cast(tuple[str, ...], cache.device)
   n, (_, H, T, D) = len(devs), q.shape
   G = (H + 15) // 16
-  qa = all_gather(q.contiguous(), 1, dtypes.half) if q.uop.axis == 1 else q.half()
+  # (a few tokens (decoding): the gathers and the sum in one peer to peer kernel each, the latency of a ring of copies is a few of them)
+  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 16) and p2p_allreduce(devs) is not None
+  def gather(x:Tensor, dtype=dtypes.float32) -> Tensor:
+    # x (n, ...) split on its leading axis: whole on every device
+    if small and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
+    return all_gather(x, 0, dtype)
+  if q.uop.axis == 1: qa = gather(q.contiguous().reshape(n, H//n, T, D), dtypes.half).reshape(1, H, T, D).half()
+  else: qa = q.half()
   rows = qa.reshape(H, T, D).pad(((0, G*16 - H), None, None)).reshape(G, 16, T, D).permute(0, 2, 1, 3).reshape(G*T*16, D).contiguous()
-  # every device's lists of its keys, one for every 16 heads
-  local = seq_picks(picks, valid_len, devs)
-  index = local.reshape(n, 1, T, -1).expand(n, G, T, local.shape[-1]).reshape(n*G*T, -1).contiguous()
+  # every device's lists of its keys (the kernel's tokens are (16 heads, token): the list of token tok%T)
+  index = seq_picks(picks, valid_len, devs)
   split = getenv("MLA_SPLIT", 16) if T < 16 else 1
   nrows = G*T*split*16
   parts = Tensor.empty(n*nrows, D, dtype=dtypes.float32, device=devs, axis=0)
   ml = Tensor.empty(n*nrows, 2, dtype=dtypes.float32, device=devs, axis=0)
   parts, ml = Tensor.custom_kernel(parts, ml, rows, cache, index, fxn=functools.partial(_mla_sparse_split_kernel, scale=scale,
-                                   valid_len=UOp.const(int(cache.shape[0]) // n, dtypes.weakint), split=split))[:2]
+                                   valid_len=UOp.const(int(cache.shape[0]) // n, dtypes.weakint), split=split, rep=T))[:2]
   # a device's splits combined: its output (normed by its sum), its max and sum
   m, l = (ml.reshape(n, G, T, split, 16, 2)[..., i:i+1] for i in range(2))
-  mx = m.max(3, keepdim=True)
-  w = l * (m - mx).exp()
-  ld = w.sum(3)
-  od = (parts.reshape(n, G, T, split, 16, D) * w).sum(3) / ld.maximum(1e-30)
+  if split > 1:
+    mx = m.max(3, keepdim=True)
+    w = l * (m - mx).exp()
+    ld = w.sum(3)
+    od = (parts.reshape(n, G, T, split, 16, D) * w).sum(3) / ld.maximum(1e-30)
+  else: mx, ld, od = m, l.squeeze(3), parts.reshape(n, G, T, 16, D)
   # the devices' combined: weighed by their sum at the max of all of them
-  st = all_gather(mx.squeeze(3).cat(ld, dim=-1), 0, dtypes.float32)
+  st = gather(mx.squeeze(3).cat(ld, dim=-1))
   M = st[..., 0:1].max(0)
   L = (st[..., 1:2] * (st[..., 0:1] - M).exp()).sum(0)
   contrib = od * (ld * (mx.squeeze(3) - M).exp() / L.maximum(1e-30))
   contrib = contrib.permute(0, 2, 1, 3, 4).reshape(n, 1, T, G*16, D)[:, :, :, :H]
+  # (a few tokens: the heads of every device sent to it, summed there: one peer to peer kernel)
+  if small:
+    hl = H // n
+    parts = contrib.reshape(n, T, n, hl, D).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*D)
+    if (rs:=p2p_reduce_scatter(parts)) is not None: return rs.reshape(n, 1, T, hl, D).permute(1, 0, 3, 2, 4).reshape(1, H, T, D)
+    return shard_rows(partial_sum(contrib), 2).permute(0, 2, 1, 3)
   return reduce_scatter(contrib, 2).permute(0, 2, 1, 3)
 
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
