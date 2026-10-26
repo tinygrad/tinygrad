@@ -510,10 +510,9 @@ class GatedDeltaNetBlock(FFNBlock):
   def _init_state(self, x):
     if not hasattr(self, "conv_states"):
       kda = unwrap(self.config.ssm).kda
-      def zeros(*shape, axis:int) -> Tensor:
-        return (Tensor.zeros(*shape).shard(x.device, axis) if kda and isinstance(x.device, tuple) else Tensor.zeros(*shape, device=x.device)).clone()
-      self.conv_states = [zeros(x.shape[0], self.ssm_conv_kernel-1, c, axis=-1) for c in ((self.q_dim,)*3 if kda else (self.conv_channels,))]
-      self.recurrent_state = zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, axis=1)
+      self.conv_states = [Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, c, device=x.device, axis=-1 if kda else None)
+                          for c in ((self.q_dim,)*3 if kda else (self.conv_channels,))]
+      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device, axis=1 if kda else None)
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
