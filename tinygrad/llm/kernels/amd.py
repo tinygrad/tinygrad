@@ -1342,7 +1342,7 @@ class P2PAllreduce:
   def __init__(self, devs:tuple[str, ...]):
     from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
     N = len(devs)
-    nbytes = P2P_AR_MAXG * 2*(N+1)*P2P_AR_MAXW * 8
+    nbytes = P2P_AR_CLASSES * P2P_AR_MAXG * 2*(N+1)*P2P_AR_MAXW * 8
     with Context(ALLOW_DEVICE_USAGE=1):
       # (zeroed from host memory: no kernel to compile. a word the last process left could have an epoch this one waits for)
       own = [Buffer(d, nbytes, initial_value=bytes(nbytes)) for d in devs]
@@ -1354,12 +1354,17 @@ class P2PAllreduce:
         (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % N], devs[d]) for d in range(N)]
         self.mboxes.append(Tensor(UOp.from_buffer(mb, dtypes.uint64, devs)))
       # the epoch counter of every workgroup, then the device's index
-      counters = [Buffer(d, (P2P_AR_MAXG+1)*4, initial_value=bytes(P2P_AR_MAXG*4)+i.to_bytes(4, "little")) for i,d in enumerate(devs)]
+      counters = [Buffer(d, (P2P_AR_CLASSES*P2P_AR_MAXG+1)*4, initial_value=bytes(P2P_AR_CLASSES*P2P_AR_MAXG*4)+i.to_bytes(4, "little"))
+                  for i,d in enumerate(devs)]
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.int32, devs))
       for d in devs: Device[d].synchronize()
 
 P2P_AR_MAXG, P2P_AR_MAXW = 64, 1024  # workgroups, the words of a workgroup's slot
+# the classes of words (their epochs: 32 bits of plain and half words, 16 of three halves, 8 of packed ones): every class has its regions of
+# the mailboxes and its epoch counters. a stale word of one class read by a kernel of another could look fresh (its bits where the epoch is),
+# a class whose slot wasn't used while the others' counted could see its own stale word as fresh (8 or 16 bits of the epoch): wrong values
+P2P_AR_CLASSES = 3
 
 def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None: return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
 @functools.cache
@@ -1396,10 +1401,12 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   wg, t = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
   li = [t*EP + i for i in range(EP)]
   els = [wg*T*EP + l for l in li]
-  epoch, me = (counter[wg].load() + 1).cast(dtypes.uint32), counter[P2P_AR_MAXG].load().cast(dtypes.weakint)
+  cls = 2 if pack is not None else 1 if triple else 0  # (the class of the words: its counters, its regions)
+  cw = wg + cls*P2P_AR_MAXG
+  epoch, me = (counter[cw].load() + 1).cast(dtypes.uint32), counter[P2P_AR_CLASSES*P2P_AR_MAXG].load().cast(dtypes.weakint)
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 50) * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
-  def reg(s:int|UOp, l:UOp) -> UOp: return ((wg*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
+  def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
   # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and the low 8 bits of the epoch (two shot: the sums of the
   # owner are the packed ones on every device)
   W = pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
@@ -1488,7 +1495,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     got2 = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li])
     stores = [out[e*W + c].store(is_owner.where(sm[c], value(g)[c])) for e, sm, g in zip(els, sums, got2) for c in range(W)]
   # the next epoch, once every thread of the workgroup read the counter
-  done = counter.after(UOp.group(*stores).barrier())[wg.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
+  done = counter.after(UOp.group(*stores).barrier())[cw.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
   name = "p2p_allgather" if gather else "p2p_reduce_scatter" if scatter else "p2p_allreduce"
   return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
@@ -3256,12 +3263,12 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   n, (_, H, T, D) = len(devs), q.shape
   G = (H + 15) // 16
   # (a few tokens (decoding): the gathers and the sum in one peer to peer kernel each, the latency of a ring of copies is a few of them)
-  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 0) and p2p_allreduce(devs) is not None
-  def gather(x:Tensor, dtype=dtypes.float32) -> Tensor:
+  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 16) and p2p_allreduce(devs) is not None
+  def gather(x:Tensor, dtype=dtypes.float32, p2p:bool=True) -> Tensor:
     # x (n, ...) split on its leading axis: whole on every device
-    if small and getenv("SEQ_P2P_GATHER", 1) and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
+    if small and p2p and getenv("SEQ_P2P_GATHER", 1) and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
     return all_gather(x, 0, dtype)
-  if q.uop.axis == 1: qa = gather(q.contiguous().reshape(n, H//n, T, D), dtypes.half).reshape(1, H, T, D).half()
+  if q.uop.axis == 1: qa = gather(q.contiguous().reshape(n, H//n, T, D), dtypes.half, bool(getenv("SEQ_P2P_Q", 1))).reshape(1, H, T, D).half()
   else: qa = q.half()
   rows = qa.reshape(H, T, D).pad(((0, G*16 - H), None, None)).reshape(G, 16, T, D).permute(0, 2, 1, 3).reshape(G*T*16, D).contiguous()
   # every device's lists of its keys (the kernel's tokens are (16 heads, token): the list of token tok%T)
@@ -3281,7 +3288,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     od = (parts.reshape(n, G, T, split, 16, D) * w).sum(3) / ld.maximum(1e-30)
   else: mx, ld, od = m, l.squeeze(3), parts.reshape(n, G, T, 16, D)
   # the devices' combined: weighed by their sum at the max of all of them
-  st = gather(mx.squeeze(3).cat(ld, dim=-1))
+  st = gather(mx.squeeze(3).cat(ld, dim=-1), p2p=bool(getenv("SEQ_P2P_ST", 1)))
   M = st[..., 0:1].max(0)
   L = (st[..., 1:2] * (st[..., 0:1] - M).exp()).sum(0)
   contrib = od * (ld * (mx.squeeze(3) - M).exp() / L.maximum(1e-30))
