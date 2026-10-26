@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather
+  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -1026,21 +1026,33 @@ class MLATransformerBlock(FFNBlock):
     # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor
     assert idx is not None and len({T for _, T in groups}) == 1, "batched decoding: the sparse attention of the indexer, groups of the same rows"
     scale, positions = 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
-    ctx, D, P, R = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1]), int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
+    P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
     # (prefills: the slots of the prompts, their token counts)
     slots, counts = (pf.slots.to(x.device), pf.counts.to(x.device)) if (pf:=_batch_prefill[0]) is not None else (None, None)
-    cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx, slots)
     pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R, slots, counts))
     picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P, slots))
-    attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx, slots))[..., :self.config.kv_lora_rank]
+    if self.seq_sharded:
+      # (the slots' caches split on their positions as the model's: a device stores its rows of every sequence's tokens, attends all the heads
+      # of every row over its keys of the row's slot)
+      stride = int(self.slot_s[0].shape[0]) // len(cast(tuple, x.device))
+      cache = seq_store_grouped(self.pool_s, k_store[0, 0], positions, slots, stride)
+      attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(positions, slots, stride))[..., :self.config.kv_lora_rank]
+    else:
+      ctx, D = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1])
+      cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx, slots)
+      attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx, slots))[..., :self.config.kv_lora_rank]
     if tc: attn = attn.half().contiguous().matmul(self.attn_v_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
     else: attn = mla_bmm(attn, self.attn_v_b["weight"])
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
 
   def _init_slots(self, n:int, ctx:int):
     """the caches of n sequences of batched decoding of at most ctx tokens (one slot each)"""
-    if len(getattr(self, "slot_k", [])) >= n: return
-    self.pool_k, self.slot_k = _slot_pool(n, self.cache_k, (1, 1, ctx, self.cache_k.shape[-1]))
+    if len(getattr(self, "slot_k", getattr(self, "slot_s", []))) >= n: return
+    if self.seq_sharded:
+      # (every device its rows of every slot, as the model's cache: seq_rows of the slot's positions)
+      nd = len(cast(tuple, self.cache_s.device))
+      self.pool_s, self.slot_s = _slot_pool(n, self.cache_s, (nd*seq_rows(ctx, nd), self.cache_s.shape[-1]))
+    else: self.pool_k, self.slot_k = _slot_pool(n, self.cache_k, (1, 1, ctx, self.cache_k.shape[-1]))
     if (idx:=self.indexer) is not None:
       pools = round_up(ctx, idx.idx.kpool) // idx.idx.kpool
       idx.pool_pk, idx.slot_pk = _slot_pool(n, idx.cache_pk, (pools, idx.cache_pk.shape[-1]))
@@ -1054,6 +1066,14 @@ class MLATransformerBlock(FFNBlock):
 
   @property
   def seq_sharded(self) -> bool: return hasattr(self, "cache_s")
+  def slot_rows(self) -> int:
+    """(sequence sharded) the rows of a device of a slot"""
+    return int(self.slot_s[0].shape[0]) // len(cast(tuple, self.cache_s.device))
+  @staticmethod
+  def slot_rows_view(t:Tensor) -> Tensor:
+    """(sequence sharded) a (n*rows, D) cache or pool as (rows, n, D): its rows on every device (axis 0 isn't the split one)"""
+    n = len(cast(tuple, t.device))
+    return t.reshape(n, -1, t.shape[-1]).permute(1, 0, 2)
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k") and not hasattr(self, "cache_s"):
       D = self.config.kv_lora_rank + self.config.rope_dim
@@ -1502,7 +1522,7 @@ class Transformer:
   BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,2,4,16,32,64,80")).split(","))
   def batch_slots(self) -> int:
     # (the memory of the slots: a shorter context of the model's own frees some)
-    if not (self.has_recurrent_block and self.config.kv_lora_rank > 0) or seq_sharded(self.token_embd.weight.device): return 0
+    if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
     return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
   def batch_sizes(self) -> tuple[int, ...]:
@@ -1548,7 +1568,7 @@ class Transformer:
     for blk in self._slot_blocks():
       if isinstance(blk, GatedDeltaNetBlock): todo += [blk.pool_rec, *blk.pool_conv]
       if isinstance(blk, MLATransformerBlock):
-        todo += [blk.pool_k] + ([blk.indexer.pool_pk, blk.indexer.pool_ring] if blk.indexer is not None else [])
+        todo += [blk.pool_s if blk.seq_sharded else blk.pool_k] + ([blk.indexer.pool_pk, blk.indexer.pool_ring] if blk.indexer is not None else [])
     for t in todo:
       for u in t.uop.toposort():
         if u.op is Ops.BUFFER:
@@ -1571,8 +1591,8 @@ class Transformer:
         copies.append(rows(b.pool_rec, slot*S + wp).assign(rows(b.recurrent_state, rp).cast(b.pool_rec.dtype)))
         copies += [rows(d, slot*SC + wpc).assign(rows(c, rp).cast(d.dtype)) for d, c in zip(b.pool_conv, b.conv_states)]
       if isinstance(b, MLATransformerBlock):
-        ctx = int(b.slot_k[0].shape[2])
-        copies.append(rows(b.pool_k, slot).assign(b.cache_k[:, :, :ctx]))
+        if b.seq_sharded: copies.append(rows(b.slot_rows_view(b.pool_s), slot*(n:=b.slot_rows()), n).assign(rows(b.slot_rows_view(b.cache_s), 0, n)))
+        else: copies.append(rows(b.pool_k, slot).assign(b.cache_k[:, :, :int(b.slot_k[0].shape[2])]))
         if (idx:=b.indexer) is not None:
           P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
           copies += [rows(idx.pool_pk, slot*P, P).assign(idx.cache_pk[:P]), rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
@@ -1592,8 +1612,8 @@ class Transformer:
         copies.append(rows(b.recurrent_state, rp).assign(rows(b.pool_rec, slot*S + wp).cast(b.recurrent_state.dtype)))
         copies += [rows(c, rp).assign(rows(d, slot*SC + wpc).cast(c.dtype)) for d, c in zip(b.pool_conv, b.conv_states)]
       if isinstance(b, MLATransformerBlock):
-        ctx = int(b.slot_k[0].shape[2])
-        copies.append(b.cache_k[:, :, :ctx].assign(rows(b.pool_k, slot)))
+        if b.seq_sharded: copies.append(rows(b.slot_rows_view(b.cache_s), 0, n:=b.slot_rows()).assign(rows(b.slot_rows_view(b.pool_s), slot*n, n)))
+        else: copies.append(b.cache_k[:, :, :int(b.slot_k[0].shape[2])].assign(rows(b.pool_k, slot)))
         if (idx:=b.indexer) is not None:
           P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
           copies += [idx.cache_pk[:P].assign(rows(idx.pool_pk, slot*P, P)), idx.ring.assign(rows(idx.pool_ring, slot*R, R))]
@@ -1606,7 +1626,7 @@ class Transformer:
       if isinstance(b, GatedDeltaNetBlock):
         pools += [(b.pool_rec, int(b.slot_rec[0].shape[0]))] + [(p, int(b.slot_conv[0][0].shape[0])) for p in b.pool_conv]
       if isinstance(b, MLATransformerBlock):
-        pools.append((b.pool_k, 1))
+        pools.append((b.slot_rows_view(b.pool_s), b.slot_rows()) if b.seq_sharded else (b.pool_k, 1))
         if (idx:=b.indexer) is not None: pools += [(idx.pool_pk, int(idx.slot_pk[0].shape[0])), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
     return pools
   def _slot_move_copy(self, src:UOp, dst:UOp):
@@ -1871,6 +1891,7 @@ class Transformer:
     context of 64K or less (as the slots of more sequences)
     """
     return self.BPF_G if self.batch_sizes() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
+      not seq_sharded(self.token_embd.weight.device) and \
       self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
   def _bpf_jit(self):
     if not hasattr(self, "_bpf_jit_"): self._bpf_jit_ = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)

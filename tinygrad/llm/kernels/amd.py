@@ -1718,7 +1718,8 @@ def host_allgather(x:Tensor) -> Tensor|None:
   if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m)) is not None:
     fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m, T=shape[0], EP=shape[1], gather=True)
     return Tensor.custom_kernel(out, x.float().pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
-  if (comm:=host_allreduce(x.device)) is None: return None
+  # (the host mailbox's values at most: more would wait for epochs no workgroup writes)
+  if m > HOST_AR_MAXN or (comm:=host_allreduce(x.device)) is None: return None
   fxn = functools.partial(_host_allreduce_kernel, N=N, n=m, gather=True)
   return Tensor.custom_kernel(out, x.float().pad((None, (0, m-n))).contiguous(), comm.mbox, comm.counter, fxn=fxn)[0].reshape(N, m)[:, :n]
 
@@ -3102,6 +3103,28 @@ def _seq_store_kernel(cache:UOp, k:UOp, dev:UOp, start_pos:UOp, T:UOp, n:int) ->
   row = (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK
   return cache[row.valid(ok), d].store(k[r, d].load().cast(cache.dtype)).end(r, d).sink(arg=KernelInfo(name="seq_store", opts_to_apply=()))
 
+@functools.cache
+def _seq_store_grouped_kernel(cache:UOp, k:UOp, dev:UOp, positions:UOp, *slots:UOp, n:int, stride:int) -> UOp:
+  # the rows of G sequences (k: T//G rows each, the first at positions[g]) a device has into its rows of their slots (slot g or slots[g],
+  # stride rows each)
+  R, D = cast(tuple[int, int], k.shape)
+  Tg = R // cast(int, positions.shape[0])
+  r, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
+  g = r // Tg
+  p = positions[g].load().cast(dtypes.weakint) + r % Tg
+  slot = slots[0][g].load().cast(dtypes.weakint) if slots else g
+  local = (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK
+  # (a position past the slot's rows isn't stored: not into the next slot or past the pool)
+  ok = ((p // SEQ_BLK) % n).eq(dev[0].load().cast(dtypes.weakint)) & (local < stride)
+  row = slot * stride + local
+  return cache[row.valid(ok), d].store(k[r, d].load().cast(cache.dtype)).end(r, d).sink(arg=KernelInfo(name="seq_store_g", opts_to_apply=()))
+
+def seq_store_grouped(pool:Tensor, k:Tensor, positions:Tensor, slots:Tensor|None, stride:int) -> Tensor:
+  """the (G*T, D) rows k of G sequences (T each, the first at positions[g]) into their slots (stride rows a device) of the sequence sharded pool"""
+  devs = cast(tuple[str, ...], pool.device)
+  return Tensor.custom_kernel(pool, k.contiguous(), _device_index(devs), positions, *([slots] if slots is not None else []),
+                              fxn=functools.partial(_seq_store_grouped_kernel, n=len(devs), stride=stride))[0]
+
 def seq_store(cache:Tensor, k:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
   """the (R, D) rows k (on every device, the first T the tokens at start_pos) into the sequence sharded cache (n*rows, D): the cache after"""
   devs = cast(tuple[str, ...], cache.device)
@@ -3111,7 +3134,7 @@ def seq_store(cache:Tensor, k:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
                                                                                                 n=len(devs)))[0]
 
 @functools.cache
-def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, valid_len:UOp, n:int) -> UOp:
+def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, n:int, stride:int=0) -> UOp:
   # a row's list of keys (pool_index_rows: positions, the count last) as the rows of the device's part of the keys on it (the count last): a
   # workgroup a row, a thread a run of the list (its keys in their order): their counts, the offsets of the threads, the keys
   T, W = cast(tuple[int, int], picks.shape)
@@ -3120,35 +3143,49 @@ def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, valid_len:UOp, n:int) -> UOp:
   row, t = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(TH, 1, AxisType.LOCAL)
   me = dev[0].load().cast(dtypes.weakint)
   count = picks[row, n_max].load().cast(dtypes.weakint).minimum(n_max)
+  # (grouped (positions, slots): the rows of G sequences (T//G each, the first at positions[g]), their keys in slot g or slots[g] (stride rows))
+  off = UOp.const(0, dtypes.weakint)
+  if grouped:
+    Tg = T // cast(int, grouped[0].shape[0])
+    g = row // Tg
+    valid_len = grouped[0][g].load().cast(dtypes.weakint) + Tg
+    off = (grouped[1][g].load().cast(dtypes.weakint) if len(grouped) > 1 else g) * stride
   def entry(j:UOp) -> tuple[UOp, UOp]:
     i = t*per + j
     key = picks[row, i.minimum(n_max-1)].load().cast(dtypes.weakint)
-    return key, (i < count) & (key >= 0) & (key < valid_len) & ((key // SEQ_BLK) % n).eq(me)
+    ok = (i < count) & (key >= 0) & (key < valid_len) & ((key // SEQ_BLK) % n).eq(me)
+    # (grouped: a key past the slot's rows isn't seen)
+    return key, ok & ((key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK < stride) if grouped else ok
   j1 = UOp.range(per, 2, AxisType.LOOP)
   mine = _reg_int(entry(j1)[1].cast(dtypes.int32), j1)
   lds = UOp.alloc((TH,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   lds = lds.after(lds[t].store(mine).barrier())
   k = UOp.range(TH, 3, AxisType.LOOP)
   first = _reg_int((k < t).where(lds[k].load(), UOp.const(0, dtypes.int32)), k)
-  off = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
-  off = off.after(off[0].store(first))
+  pos = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  pos = pos.after(pos[0].store(first))
   j2 = UOp.range(per, 4, AxisType.LOOP)
   key, own = entry(j2)
-  cur = off.after(j2)[0].load()
-  local = (key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK
-  keys = UOp.group(out[row, cur.cast(dtypes.weakint).valid(own)].store(local.cast(dtypes.int32)), off[0].store(cur + own.cast(dtypes.int32))).end(j2)
+  cur = pos.after(j2)[0].load()
+  local = off + (key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK
+  keys = UOp.group(out[row, cur.cast(dtypes.weakint).valid(own)].store(local.cast(dtypes.int32)), pos[0].store(cur + own.cast(dtypes.int32))).end(j2)
   # (the count: the last thread's offset and its keys)
-  last = off.after(keys)[0].load()
+  last = pos.after(keys)[0].load()
   return UOp.group(keys, out[row, UOp.const(n_max, dtypes.weakint).valid(t.eq(TH-1))].store(last)).end(row, t) \
     .sink(arg=KernelInfo(name="seq_picks", opts_to_apply=()))
 
-def seq_picks(picks:Tensor, valid_len:int|UOp, devs:tuple[str, ...]) -> Tensor:
-  """the (T, n_max+1) lists of keys (positions, on every device) as every device's rows of its keys (n*T, n_max+1) split on the devices"""
+def seq_picks(picks:Tensor, valid_len:int|UOp|None, devs:tuple[str, ...], grouped:tuple|None=None) -> Tensor:
+  """
+  the (T, n_max+1) lists of keys (positions, on every device) as every device's rows of its keys (n*T, n_max+1) split on the devices.
+  grouped (positions, slots, stride): the rows of G sequences (batched decoding), their keys in their slots (stride rows of a device each)
+  """
   T, W = picks.shape
-  vl = _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len, dtypes.weakint)
+  vl = _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len or 0, dtypes.weakint)
   if isinstance(valid_len, UOp): picks = Tensor(picks.uop.after(valid_len))
   out = Tensor.empty(len(devs)*T, W, dtype=dtypes.int32, device=devs, axis=0)
-  return Tensor.custom_kernel(out, picks.contiguous(), _device_index(devs), fxn=functools.partial(_seq_picks_kernel, valid_len=vl, n=len(devs)))[0]
+  srcs = [x for x in grouped[:2] if x is not None] if grouped is not None else []
+  return Tensor.custom_kernel(out, picks.contiguous(), _device_index(devs), *srcs, fxn=functools.partial(_seq_picks_kernel, valid_len=vl,
+                              n=len(devs), stride=grouped[2] if grouped is not None else 0))[0]
 
 _seq_view_cache:dict[int, list[Tensor]] = {}
 def seq_views(cache:Tensor) -> list[Tensor]:
@@ -3209,7 +3246,7 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tenso
   out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]
   return out.bitcast(dtypes.half)
 
-def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp) -> Tensor:
+def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None) -> Tensor:
   """
   the attention of the (1, H, T, D) queries (heads split over the devices) on the sequence sharded latent cache (n*rows, D), every token on the
   keys of its list (T, n_max+1, on every device): (1, H, T, D) heads split. every device attends all the heads over its keys (the queries
@@ -3228,7 +3265,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   else: qa = q.half()
   rows = qa.reshape(H, T, D).pad(((0, G*16 - H), None, None)).reshape(G, 16, T, D).permute(0, 2, 1, 3).reshape(G*T*16, D).contiguous()
   # every device's lists of its keys (the kernel's tokens are (16 heads, token): the list of token tok%T)
-  index = seq_picks(picks, valid_len, devs)
+  index = seq_picks(picks, valid_len, devs, grouped)
   split = getenv("MLA_SPLIT", 16) if T < 16 else 1
   nrows = G*T*split*16
   parts = Tensor.empty(n*nrows, D, dtype=dtypes.float32, device=devs, axis=0)
