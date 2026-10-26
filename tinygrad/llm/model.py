@@ -458,7 +458,8 @@ class GatedDeltaNetBlock(FFNBlock):
       return functools.reduce(lambda a,b: a+b, (conv_window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
     projs = (self.attn_q, self.attn_k, self.attn_v) if is_kda else (self.attn_qkv,)
     weights = (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v) if is_kda else (self.ssm_conv1d,)
-    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"]) for s, proj, w in zip(self.conv_states, projs, weights)))
+    states = self.conv_states if is_kda else [self.conv_state]
+    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"]) for s, proj, w in zip(states, projs, weights)))
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
@@ -490,7 +491,7 @@ class GatedDeltaNetBlock(FFNBlock):
 
       # store the updated recurrent state in place, then read the stacked outputs after the state and conv writes
       state_store = self.recurrent_state.uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop))
-      conv_writes = [c.uop.after(st) for c, st in zip(self.conv_states, conv_state_stores)]
+      conv_writes = [c.uop.after(st) for c, st in zip(states, conv_state_stores)]
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, *conv_writes))
 
     # output; undo the padding before the output projection
@@ -499,11 +500,12 @@ class GatedDeltaNetBlock(FFNBlock):
     return self.ssm_out(z.reshape(B, T, -1))
 
   def _init_state(self, x):
-    if not hasattr(self, "conv_states"):
-      kda = unwrap(self.config.ssm).kda
-      self.conv_states = [Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, c, device=x.device, axis=-1 if kda else None)
-                          for c in (self.qkv_dims if kda else (self.conv_channels,))]
-      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device, axis=1 if kda else None)
+    if not hasattr(self, "recurrent_state"):
+      if kda:=unwrap(self.config.ssm).kda:
+        self.conv_states = [Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, d, device=x.device, axis=-1).clone() for d in self.qkv_dims]
+      else: self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
+      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device,
+                                          axis=1 if kda else None).clone()
 
 class Transformer:
   def __init__(self, config:TransformerConfig):

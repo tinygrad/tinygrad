@@ -153,7 +153,9 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     return block._attention(x_norm, start_pos).realize().numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
-    if hasattr(block, 'conv_states'):
+    if hasattr(block, 'conv_state'):
+      return block.conv_state.numpy(), block.recurrent_state.numpy()
+    elif hasattr(block, 'conv_states'):
       return np.concatenate([s.numpy() for s in block.conv_states], -1), block.recurrent_state.numpy()
     else:
       conv_flat = (block.ssm_conv_kernel - 1) * block.conv_channels
@@ -163,7 +165,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       return conv_state, recurrent_state
 
   def _reset_state(self, block:GatedDeltaNetBlock):
-    Tensor.realize(*[s.assign(s.const_like(0)) for s in block.conv_states],
+    Tensor.realize(*[s.assign(s.const_like(0)) for s in (block.conv_states if hasattr(block, 'conv_states') else [block.conv_state])],
                    block.recurrent_state.assign(block.recurrent_state.const_like(0)))
 
   def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
