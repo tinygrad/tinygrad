@@ -1189,7 +1189,7 @@ class TestCLI(unittest.TestCase):
       k1q = run_cli(*files, "-s", "NULL", "-q", "k1")
       both_kq = run_cli(*files, "-s", "NULL", "-q", "k1|k2")
     self.assertEqual(len([s for s in k1q if s.get("value")]), 1, "debug output was not deduped")
-    self.assertEqual(len([s for s in k1q if s.get("dur_ms")]), CNT, f"expected 4 runs for k1")
+    self.assertEqual(len([s for s in k1q if s.get("dur_ms")]), CNT, "expected 4 runs for k1")
     self.assertEqual(len([s for s in both_kq if s.get("value")]), 2)
     self.assertEqual(len([s for s in both_kq if s.get("dur_ms")]), CNT*2)
 
