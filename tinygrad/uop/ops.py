@@ -937,12 +937,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
     return self.op in GroupOp.Defines
 
-  def _base_buffer_is_realized(self) -> bool:
-    """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
-    u = self.base
-    while u.op is Ops.AFTER: u = u.src[0]
-    return u.is_realized
-
   @functools.cached_property
   def _buffer_view(self) -> tuple[UOp, int]:
     # Cache only the UOp and byte offset, never an allocated Buffer view.
