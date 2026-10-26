@@ -3256,10 +3256,10 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   n, (_, H, T, D) = len(devs), q.shape
   G = (H + 15) // 16
   # (a few tokens (decoding): the gathers and the sum in one peer to peer kernel each, the latency of a ring of copies is a few of them)
-  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 16) and p2p_allreduce(devs) is not None
+  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 0) and p2p_allreduce(devs) is not None
   def gather(x:Tensor, dtype=dtypes.float32) -> Tensor:
     # x (n, ...) split on its leading axis: whole on every device
-    if small and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
+    if small and getenv("SEQ_P2P_GATHER", 1) and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
     return all_gather(x, 0, dtype)
   if q.uop.axis == 1: qa = gather(q.contiguous().reshape(n, H//n, T, D), dtypes.half).reshape(1, H, T, D).half()
   else: qa = q.half()
@@ -3287,11 +3287,10 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   contrib = od * (ld * (mx.squeeze(3) - M).exp() / L.maximum(1e-30))
   contrib = contrib.permute(0, 2, 1, 3, 4).reshape(n, 1, T, G*16, D)[:, :, :, :H]
   # (a few tokens: the heads of every device sent to it, summed there: one peer to peer kernel)
-  if small:
+  if small and getenv("SEQ_P2P_RS", 1):
     hl = H // n
     parts = contrib.reshape(n, T, n, hl, D).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*D)
     if (rs:=p2p_reduce_scatter(parts)) is not None: return rs.reshape(n, 1, T, hl, D).permute(1, 0, 3, 2, 4).reshape(1, H, T, D)
-    return shard_rows(partial_sum(contrib), 2).permute(0, 2, 1, 3)
   return reduce_scatter(contrib, 2).permute(0, 2, 1, 3)
 
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
