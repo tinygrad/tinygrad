@@ -215,7 +215,7 @@ def main(args) -> None:
             if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src):
               print_step(s, reconstruct_matches=s["name"] in args.src)
             if DEBUG >= 7: print_step(s, reconstruct_matches=True)
-          elif matches(s["name"], query): print_step(s, reconstruct_matches=DEBUG >= 7)
+          elif query is not None and matches(s["name"], query): print_step(s, reconstruct_matches=DEBUG >= 7)
       elif debug_steps and (DEBUG >= 3 and k.get("ext")): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
