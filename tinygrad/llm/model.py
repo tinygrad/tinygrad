@@ -1037,7 +1037,7 @@ class MLATransformerBlock(FFNBlock):
     q = self.attn_q_b(q_lora).reshape(B, Tq, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     # (many rows: the tensor cores)
-    tc = Tq > getenv("MLA_BMM_ROWS", 64) and self.attn_k_b["weight"].dtype == dtypes.half
+    tc = Tq > getenv("MLA_BMM_ROWS", 32) and self.attn_k_b["weight"].dtype == dtypes.half
     if tc: q = q_nope.half().contiguous().matmul(self.attn_k_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
     else: q = mla_bmm(q_nope, self.attn_k_b["weight"])
     q = q.cat(q_rope.cast(q.dtype), dim=-1)
@@ -2298,6 +2298,8 @@ class Transformer:
     if self.has_recurrent_block and not fast: chunk_size = 1
     sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_TINY", 192), getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048),
                                                           4096) if fast else ())]
+    # (PREFILL_SIZES: more sizes, less padding of a prompt's last piece (the turns of agents: a few hundred tokens), a jit each)
+    if fast and (more:=getenv("PREFILL_SIZES", "")): sizes += [min(chunk_size, int(n)) for n in str(more).split(",")]
     if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None and getenv("SEQ_PARALLEL", 1):
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)

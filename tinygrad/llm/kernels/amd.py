@@ -2980,19 +2980,33 @@ def fp8_rows(k:Tensor) -> Tensor:
   q = (x / s).cast(dtypes.fp8e4m3).bitcast(dtypes.uint8).reshape(R, D).contiguous().bitcast(dtypes.uint32)
   return q.cat(s.reshape(R, 4).bitcast(dtypes.uint32), dim=-1)
 
+def _fp8_bits(x:UOp) -> UOp:
+  """bytes at bits 8 and 24 of x (the others 0) as the halves of a word of 2**-8 their e4m3 values (exact: the sign, exponent and mantissa
+  bits moved, the bias difference is 8)"""
+  return (x & 0x80008000) | ((x >> 1) & 0x3f803f80)
+
 def _fp8_halves(w:UOp) -> list[UOp]:
-  """the 4 e4m3 bytes of a word as halves of 2**-8 their values (exact: the sign, exponent and mantissa bits moved, the bias difference is 8)"""
-  out = []
-  for i in range(4):
-    b = (w >> (8*i)) & 0xff
-    out.append((((b & 0x80) << 8) | ((b & 0x7f) << 7)).cast(dtypes.uint16).bitcast(dtypes.half))
-  return out
+  """the 4 e4m3 bytes of a word as halves of 2**-8 their values (see _fp8_bits, the bytes moved by v_perm)"""
+  zero = UOp.const(0, dtypes.uint32)
+  pairs = [_fp8_bits(_amd_byte_perm(zero, w, UOp.const(sel, dtypes.uint32))) for sel in (0x010c000c, 0x030c020c)]
+  return [((p >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p in pairs for sh in (0, 16)]
+
+def _fp8_byte_half(w:UOp, j:UOp) -> UOp:
+  """byte j of a word of e4m3 values as a half of 2**-8 its value"""
+  x = _amd_byte_perm(UOp.const(0, dtypes.uint32), w, UOp.const(0x0c0c000c, dtypes.uint32) | (j.cast(dtypes.uint32) << 8))
+  return (_fp8_bits(x) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half)
 
 IDX_FP8_ROW = 33  # (an fp8 pooled key of the indexer (SEQ_FP8): 32 words of its 128 dims, its scale)
 
+def _word(k:UOp, row:UOp, w:UOp|int) -> UOp:
+  """word w of a row of fp8 words: k uint32, or uint64 (two words each: the whole cache of a prefill, see seq_gather)"""
+  if k.dtype == dtypes.uint32: return k[row, w].load()
+  sh = UOp.const(32 * (w % 2), dtypes.uint64) if isinstance(w, int) else (32 * (w % 2)).cast(dtypes.uint64)
+  return ((k[row, w // 2].load() >> sh) & 0xffffffff).cast(dtypes.uint32)
+
 def _fp8_frag(k:UOp, row:UOp, w0:UOp|int, half:UOp) -> UOp:
   """the 8 halves of a lane's WMMA fragment of fp8 words (the dims of words w0+half and w0+half+2, see _fp8_halves: 2**-8 their values)"""
-  return UOp.stack(*_fp8_halves(k[row, w0 + half].load()), *_fp8_halves(k[row, w0 + half + 2].load()))
+  return UOp.stack(*_fp8_halves(_word(k, row, w0 + half)), *_fp8_halves(_word(k, row, w0 + half + 2)))
 
 def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
                      split:int, rep:int=0) -> UOp:
@@ -3030,12 +3044,13 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
-  fp8 = cache.dtype == dtypes.uint32
-  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) == FP8_ROW), "fp8 rows: 512 dims, a wave's 128 of a scale"
-  def fp8_scale(k:UOp) -> UOp: return cache[k, 128 + wave].load().bitcast(dtypes.float) * 256
+  # (uint64: two words each, the whole cache of a prefill, see seq_gather)
+  fp8 = cache.dtype in (dtypes.uint32, dtypes.uint64)
+  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
+  def fp8_scale(k:UOp) -> UOp: return _word(cache, k, 128 + wave).bitcast(dtypes.float) * 256
   s_acc = zero8
   for kk in range(KT):
-    if fp8: kf = UOp.stack(*_fp8_halves(cache[key, wave*32 + kk*4 + half].load()), *_fp8_halves(cache[key, wave*32 + kk*4 + half + 2].load()))
+    if fp8: kf = _fp8_frag(cache, key, wave*32 + kk*4, half)
     else: kf = UOp.stack(*(cache[key, dbase + kk*16 + k].load() for k in ks))
     s_acc = UOp.wmma(qfrag[kk], kf, s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
@@ -3075,7 +3090,7 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   o_new = []
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
-    if fp8: vfrag = UOp.stack(*(vok.where(_fp8_halves(cache[vk, wave*32 + dt*4 + col//4].load() >> (8*(col % 4)).cast(dtypes.uint32))[0],
+    if fp8: vfrag = UOp.stack(*(vok.where(_fp8_byte_half(_word(cache, vk, wave*32 + dt*4 + col//4), col % 4),
                                           UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     else: vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     prev = o_regs[dt].after(n_tile_r)
@@ -3245,7 +3260,9 @@ def seq_views(cache:Tensor) -> list[Tensor]:
   mb = [u.buffer for u in cache.uop.toposort() if u.op is Ops.BUFFER][0]
   if (views:=_seq_view_cache.get(id(mb))) is not None: return views
   from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
-  n, rows, W = len(devs), int(cache.shape[0]) // len(devs), int(cache.shape[1]) * cache.dtype.itemsize // 8
+  # (fp8 rows (uint32): their words, see fp8_rows)
+  dt = cache.dtype if cache.dtype == dtypes.uint32 else dtypes.uint64
+  n, rows, W = len(devs), int(cache.shape[0]) // len(devs), int(cache.shape[1]) * cache.dtype.itemsize // dt.itemsize
   def alias(b:Buffer, d:str) -> Buffer:
     return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
   views = []
@@ -3254,7 +3271,7 @@ def seq_views(cache:Tensor) -> list[Tensor]:
     own = [b.ensure_allocated() for b in cast(MultiBuffer, mb).bufs]
     for k in range(n):
       (vm:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % n], devs[d]) for d in range(n)]
-      views.append(Tensor(UOp.from_buffer(vm, dtypes.uint64, devs)).reshape(rows, W))
+      views.append(Tensor(UOp.from_buffer(vm, dt, devs)).reshape(rows, W))
   _seq_view_cache[id(mb)] = views
   return views
 
@@ -3271,15 +3288,14 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) 
 
 @functools.cache
 def _seq_gather_fp8_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) -> UOp:
-  # _seq_gather_kernel of fp8 rows (SEQ_FP8, 66 words: 64 of 8 values, 2 of the 4 scales): their values in half (4 a word of out)
+  # _seq_gather_kernel of fp8 rows (SEQ_FP8, 132 words: 128 of 4 values, the 4 scales): their values in half (4 a word of out)
   rows, C = cast(int, part.shape[0]), cast(int, out.shape[1])
   J = (start_pos + SEQ_BLK*n - 1) // (SEQ_BLK*n)
   j, r, c = UOp.range(J, 0, AxisType.GLOBAL), UOp.range(SEQ_BLK, 1, AxisType.GLOBAL), UOp.range(C, 2, AxisType.LOCAL)
   owner = (dev[0].load().cast(dtypes.weakint) + k) % n
   p = (j*n + owner) * SEQ_BLK + r
   row = (j*SEQ_BLK + r).minimum(rows-1)
-  w = ((part[row, c // 2].load() >> (32 * (c % 2)).cast(dtypes.uint64)) & 0xffffffff).cast(dtypes.uint32)
-  sc = ((part[row, 64 + c // 64].load() >> (32 * ((c // 32) % 2)).cast(dtypes.uint64)) & 0xffffffff).cast(dtypes.uint32).bitcast(dtypes.float) * 256
+  w, sc = _word(part, row, c), _word(part, row, 128 + c // 32).bitcast(dtypes.float) * 256
   vals = [(h.cast(dtypes.float) * sc).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint64) for h in _fp8_halves(w)]
   word = vals[0] | (vals[1] << 16) | (vals[2] << 32) | (vals[3] << 48)
   return out[p.valid(p < start_pos), c].store(word).end(j, r, c).sink(arg=KernelInfo(name=f"seq_gather_fp8_{k}", opts_to_apply=()))
@@ -3303,16 +3319,19 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tenso
   n, D, fp8 = len(devs), int(k.shape[-1]), cache.dtype == dtypes.uint32
   raw = not fp8 or bool(getenv("SEQ_GATHER_FP8", 1))
   sp, t = _unbind(start_pos), (_unbind(T) if isinstance(T, UOp) else UOp.const(T, dtypes.weakint))
-  W = int(cache.shape[1]) * cache.dtype.itemsize // 8 if raw else D//4  # (the words of a row of the whole one)
+  # (the words of a row of the whole one: fp8 rows' 132, else 4 halves a word)
+  wdt = dtypes.uint32 if fp8 and raw else dtypes.uint64
+  W = int(cache.shape[1]) if fp8 and raw else D//4
   # (after the cache's store: the rows of the tokens in the devices' parts for the calls after this one)
-  out = Tensor(Tensor.empty(N, W, dtype=dtypes.uint64, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T) if isinstance(v, UOp))))
+  out = Tensor(Tensor.empty(N, W, dtype=wdt, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T) if isinstance(v, UOp))))
   for kk, part in enumerate(seq_views(cache)):
     out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
                                                                                      start_pos=sp, k=kk, n=n))[0]
-  rows = (fp8_rows(k) if fp8 and raw else k.cast(dtypes.half)).contiguous().bitcast(dtypes.uint64)
+  rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
   assert rows.shape[-1] == W, f"the rows of the tokens {k.shape} as {rows.shape}"
   out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]
-  return out.bitcast(cache.dtype if raw else dtypes.half)
+  # (fp8: the rows as they are, the attention reads them so. a bitcast would be a copy of all of it)
+  return out if fp8 and raw else out.bitcast(dtypes.half)
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None) -> Tensor:
   """
