@@ -156,7 +156,7 @@ class TestLLMServer(unittest.TestCase):
     import jinja2
     # Qwen3's template concatenates content with strings, so a content array raises TypeError without normalization.
     template = jinja2.Template("{% for m in messages %}{{ '<|im_start|>' + m.role + '\n' + m.content + '<|im_end|>\n' }}{% endfor %}")
-    with patch.object(self.server, "template", template), patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
+    with patch.object(self.server, "template", template), patch.object(self.mock_tok, "encode", side_effect=lambda text, **kwargs: [200, 201, 202]):
       response = self.client.chat.completions.create(model="test", messages=[
         {"role":"user", "content":[{"type":"text", "text":"Hello"}, {"type":"text", "text":" world"}]},
         {"role":"assistant", "content":None, "tool_calls":[
@@ -165,7 +165,7 @@ class TestLLMServer(unittest.TestCase):
       ], stream=True)
       self.assertEqual(list(response)[-1].choices[0].finish_reason, "stop")
       self.mock_tok.encode.assert_called_with('<|im_start|>user\nHello world<|im_end|>\n'
-                                              '<|im_start|>assistant\n<|im_end|>\n<|im_start|>tool\nresult<|im_end|>\n')
+                                              '<|im_start|>assistant\n<|im_end|>\n<|im_start|>tool\nresult<|im_end|>\n', cache=True)
 
   def test_content_is_streamed(self):
     stream = self.client.chat.completions.create(
@@ -280,7 +280,7 @@ class TestLLMServer(unittest.TestCase):
       generating.set()
       if len(calls) == 1: gate.wait(5)
       yield from (300, 999)
-    def encode(text):
+    def encode(text, **kwargs):
       if generating.is_set(): encoded.set()
       return [200, 201, 202]
     results: dict[str, str] = {}
@@ -576,6 +576,15 @@ class TestStash(unittest.TestCase):
     self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
     self.server.host_free, self.server.host_made = [], 0
 
+  def test_common_prefix(self):
+    import random
+    from tinygrad.llm.serve import common_prefix
+    rng = random.Random(0)
+    for _ in range(200):
+      a = [rng.randrange(3) for _ in range(rng.randrange(40))]
+      b = a[:rng.randrange(len(a)+1)] + [rng.randrange(3) for _ in range(rng.randrange(40))]
+      self.assertEqual(common_prefix(a, b), next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b))))
+
   def test_host_without_slots(self):
     # no slots (BATCH_SLOTS=0): a conversation that's overwritten goes to host memory, one continued is loaded back
     from tinygrad.helpers import getenv
@@ -671,7 +680,7 @@ class TestStash(unittest.TestCase):
   def test_reuse_tokens(self):
     # a prompt that continues the model's conversation as text, tokenized differently ("bc" one token): the kept tokens and the rest's
     class Tok:
-      def encode(self, text:str) -> list[int]:
+      def encode(self, text:str, **kwargs) -> list[int]:
         out, i = [], 0
         while i < len(text):
           if text[i:i+2] == "bc": out, i = out + [999], i + 2

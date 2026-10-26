@@ -1,6 +1,6 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
-from typing import TYPE_CHECKING
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib, threading
+from typing import TYPE_CHECKING, cast
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv, round_up
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
+    self._enc_cache: list[tuple[str, list[int]]] = []  # (encode(cache=True))
+    self._enc_lock = threading.Lock()
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
@@ -80,12 +82,24 @@ class SimpleTokenizer:
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
     return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
-  def encode(self, text:str) -> list[int]:
-    tokens: list[int] = []
-    pos = 0
-    for match in self._split_to_sentence.finditer(text):
+  def encode(self, text:str, cache:bool=False) -> list[int]:
+    """
+    the tokens of text. cache: the text up to its last special token kept with its tokens (the last ENCODE_CACHE ones), a text that starts with
+    one encodes only what follows (the text between special tokens is encoded on its own: the same tokens). a conversation's prompts grow
+    """
+    base, tokens = "", cast(list[int], [])
+    if cache:
+      with self._enc_lock:
+        base, tokens = max(((t, ids) for t, ids in self._enc_cache if text.startswith(t)), key=lambda e: len(e[0]), default=("", tokens))
+    tokens, pos, cut, cut_n = list(tokens), len(base), None, 0
+    for match in self._split_to_sentence.finditer(text, pos):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
-      pos = match.end(0)
+      pos = cut = match.end(0)
+      cut_n = len(tokens)
+    if cache and cut is not None:
+      with self._enc_lock:
+        keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0])]
+        self._enc_cache = keep[len(keep)-getenv("ENCODE_CACHE", 16)+1:] + [(text[:cut], tokens[:cut_n])]
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')

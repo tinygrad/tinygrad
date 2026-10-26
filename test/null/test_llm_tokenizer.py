@@ -38,6 +38,16 @@ class TestLLMTokenizer(unittest.TestCase):
   def test_llama_early_tokenize(self): self._test_coding(self.llama_tok, " например", [ 111797 ])
 
   def test_llama_basic(self): self._test_coding(self.llama_tok, "hello world", [ 15339, 1917 ])
+  def test_encode_cache(self):
+    # a conversation's growing prompts: the tokens of encode(cache=True) are encode's, the text up to a special token encoded once
+    tok, h, e = self.llama_tok, "<|start_header_id|>", "<|eot_id|>"
+    conv = "<|begin_of_text|>"
+    for turn in (f"{h}user hello world{e}", f"{h}assistant hi there{e}", f"{h}user how are you{e}", f"{h}assistant fine thanks", " and you?"):
+      conv += turn
+      self.assertEqual(tok.encode(conv, cache=True), tok.encode(conv))
+    self.assertEqual(tok._enc_cache[-1][0], conv[:conv.rindex(h) + len(h)])
+    self.assertEqual(tok.encode(f"{h}other", cache=True), tok.encode(f"{h}other"))
+
   def test_llama_control_char(self): self._test_coding(self.llama_tok, " \x850", [ 220, 116360, 15 ])
   def test_llama_bytes(self): self._test_coding(self.llama_tok, " \xec\x8b\xa4\xed", [ 1717, 105, 116174, 82638, 2483 ])
   def test_llama_special1(self): self._test_coding(self.llama_tok, "hello <|end_of_text|>", [ 15339, 220, 128001 ])

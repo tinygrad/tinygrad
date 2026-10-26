@@ -92,6 +92,15 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
 PING = -1  # (Handler.next_token: no token for a while)
 
+def common_prefix(a:list[int], b:list[int]) -> int:
+  """the tokens a and b start with (the lists compared in slices: a loop over a long conversation's tokens is slow)"""
+  lo, hi = 0, min(len(a), len(b))
+  while lo < hi:
+    mid = (lo + hi + 1) // 2
+    if a[lo:mid] == b[lo:mid]: lo = mid
+    else: hi = mid - 1
+  return lo
+
 class HostConv(typing.NamedTuple):
   """a conversation kept in host memory (HOST_STASH): its tokens, its chunks (Transformer.host_save), the tokens of its checkpoint (the prompt
   of its last reply: a request can continue that one, its reply came back different, or 0), its row of the hidden states (_spec_row)"""
@@ -288,7 +297,7 @@ class Handler(VizHandler):
       # render and tokenize
       normalize_messages(body["messages"])
       rendered = self.render(body["messages"], body.get("tools"), body)
-      ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+      ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered, cache=True))
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
         stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
@@ -349,7 +358,7 @@ class Handler(VizHandler):
     msgs, tools = anthropic_messages(body)
     normalize_messages(msgs)
     rendered = self.render(msgs, tools, body)
-    ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+    ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered, cache=True))
     if path.endswith("count_tokens"): return self.send_data(json.dumps({"input_tokens": len(ids)}).encode())
     log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
     if len(ids) >= (n:=self.server.model.max_context):
@@ -584,7 +593,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     for t in sorted(self.kept() + [list(ck)] + [e.tokens[:e.ckpt] for e in list(self.host) if e.ckpt], key=len, reverse=True):
       if len(t) < 1000 or len(t) >= len(ids) + 1000: continue
       if ids[:len(t)] == t: return ids
-      if next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), len(t)) < len(t) // 2: continue
+      if common_prefix(t, ids) < len(t) // 2: continue
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
 
@@ -592,8 +601,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """(CACHE_LOG) a request prefilled from much less than it shares with a kept conversation: where they differ"""
     if not self.keeps() or not getenv("CACHE_LOG", 1): return
     kept = self.kept()
-    def lcp(t:list[int]) -> int: return next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), min(len(t), len(ids)))
-    n, t = max(((lcp(t), t) for t in kept), key=lambda x: x[0], default=(0, []))
+    n, t = max(((common_prefix(t, ids), t) for t in kept), key=lambda x: x[0], default=(0, []))
     if n - start < 2000: return
     dec = self.tok.decode
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
