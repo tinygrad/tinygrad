@@ -2,12 +2,13 @@ import unittest, itertools
 from dataclasses import replace
 
 from tinygrad.codegen.late.coalesce import indexing_simplify, pm_simplify_add_image
-from tinygrad import Tensor
+from tinygrad.codegen import full_rewrite_to_sink
+from tinygrad import Tensor, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.weak import pm_commit_weak
 from tinygrad.uop.symbolic import simplify_valid, uop_given_valid, sym, pm_move_where_on_load
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, is_image_shape
 from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
 
@@ -533,6 +534,14 @@ class TestImageStore(unittest.TestCase):
     gidx0, gidx1 = Special("gidx0", 8), Special("gidx1", 8)
     store = graph_rewrite(img.index(gidx1, gidx0).store(UOp.param(1, dtypes.half, (64, 4)).index(gidx1*8+gidx0)), pm_simplify_add_image)
     self.assertEqual([(s.op, s.shape) for s in store.src[1].src], [(Ops.CAST, ())]*4)
+
+  def test_read_and_written_buffer_stays_a_buffer(self):
+    # an image param is read_only or write_only, so an in-place update keeps its buffer a pointer
+    with Context(DEV="NULL:OPENCL:,IMAGE_PITCH_ALIGNMENT=64", IMAGE=1):
+      w = Tensor.empty(1280).realize()
+      call = w.assign(w*2).schedule_linear().src[-1]
+      sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
+      self.assertFalse(any(is_image_shape(u._shape) for u in sink.toposort() if u.op is Ops.PARAM))
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):

@@ -33,13 +33,12 @@ class TestAfterCounterexamples(unittest.TestCase):
     self.assertEqual(a.tolist(), [4.])
     self.assertEqual(b.tolist(), [6.])
 
-  @unittest.expectedFailure
   def test_chained_square_assign_gradient(self):
     x = Tensor([2.0])
     y = x.clone()
     y.assign(y*y)
     y.assign(y*y)
-    # y = x**4, so dy/dx = 4*x**3. Currently raises "cycle detected while indexing".
+    # y = x**4, so dy/dx = 4*x**3
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [32.])
 
   def test_partial_store_gradient(self):
