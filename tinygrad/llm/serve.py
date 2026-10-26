@@ -558,7 +558,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if len(tokens) < getenv("HOST_MIN", 4096): return
     st = time.perf_counter()
     ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
-    k = model.host_chunks(len(tokens))
+    k = model.host_chunks(len(tokens), bool(ckpt))
     # (an older turn of it out first: its chunks are this one's, in their order (its copies the same program). then free ones, new ones up to
     # the GB, the least recently used one's)
     older = [e for e in self.host if tokens[:len(e.tokens)] == e.tokens]
@@ -573,7 +573,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       elif self.host: self.host_free += self.host.pop(0).chunks
       else: return
     chunks = chunks + [self.host_free.pop() for _ in range(k - len(chunks))]
-    model.host_save(len(tokens), chunks)
+    model.host_save(len(tokens), chunks, bool(ckpt))
     self.host.append(HostConv(tokens, chunks, ckpt, getattr(model, "_spec_row", 0)))
     trace(f"host_save len {len(tokens)} ckpt {ckpt} {k} chunks ({made} new) in {time.perf_counter()-st:.2f} s, {len(self.host)} kept, "
           f"{len(self.host_free)} free")
@@ -633,7 +633,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.stash_main(busy)
       self.host.append(e)
       st = time.perf_counter()
-      model.host_load(e.chunks, len(e.tokens), e.hrow)
+      model.host_load(e.chunks, len(e.tokens), e.hrow, bool(e.ckpt))
       self.main_writes(n if callable(f:=getattr(model, "_host_len", None)) and isinstance(n:=f(len(e.tokens)), int) else len(e.tokens))
       model._cached_tokens, model._ckpt_tokens = list(e.tokens), list(e.tokens[:e.ckpt])
       trace(f"host_load len {len(e.tokens)} ckpt {e.ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")

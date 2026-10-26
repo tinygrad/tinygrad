@@ -590,7 +590,7 @@ class TestStash(unittest.TestCase):
     from tinygrad.helpers import getenv
     m = self.model
     m.HOST_CHUNK, m.host_ckpt = 1000, Mock(return_value=0)
-    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
+    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
     self.server.slots = 0
     a, b = list(range(6000)), list(range(10000, 16000))
     self.addCleanup(getenv.cache_clear)
@@ -617,7 +617,7 @@ class TestStash(unittest.TestCase):
     a, b, c = list(range(30000)), list(range(30000, 50000)), list(range(60000, 80000))
     m = self.model
     m.HOST_CHUNK = 1000
-    m.host_chunks = Mock(side_effect=lambda n: (n + 999) // 1000)
+    m.host_chunks = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000)
     m.host_alloc = Mock(side_effect=lambda: Mock())
     m.host_ckpt = Mock(return_value=0)
     from tinygrad.helpers import getenv
@@ -653,7 +653,7 @@ class TestStash(unittest.TestCase):
       ids = a[:16000] + [7, 8, 9]
       self.assertEqual(self.server.stash_hit(ids, set()), 16000)
       self.server.stash_load(ids, set())
-      self.assertEqual(m.host_load.call_args.args[1:], (18000, 2))
+      self.assertEqual(m.host_load.call_args.args[1:], (18000, 2, True))  # (with its checkpoint)
       self.assertEqual((len(m._cached_tokens), m._ckpt_tokens), (18000, a[:16000]))
 
   def test_switch_conversations(self):
@@ -767,7 +767,7 @@ class TestStash(unittest.TestCase):
     from tinygrad.helpers import getenv
     m = self.model
     m.HOST_CHUNK, m.host_ckpt = 1000, Mock(return_value=0)
-    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
+    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
     self.server.spec, self.server.main_moved = 2, True
     m._cached_tokens = list(range(5000, 10000))
     req = Request(list(range(5000)), "", None, 0.0)

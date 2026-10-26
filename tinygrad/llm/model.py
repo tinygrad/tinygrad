@@ -1737,16 +1737,17 @@ class Transformer:
 
   # ** a conversation's states in host memory (HOST_STASH in the server: the ones longer than a slot): its bytes copied, no kernel
   HOST_BUCKET = getenv("HOST_BUCKET", 16384)  # the positions host_save copies: a conversation's rounded up to a multiple (the same copies)
-  def _host_parts(self, length:int) -> list[tuple[Buffer, int, int]]:
+  def _host_parts(self, length:int, ckpt:bool=True) -> list[tuple[Buffer, int, int]]:
     """
     the bytes of the model's states at the end of its `length` tokens: (a device's buffer, offset, size) each. the positions of the caches up
-    to `length` rounded up to HOST_BUCKET, every row of the other states (the recurrent ones of the last positions, the hidden states of
-    speculative decoding), the checkpoint's (the states at the end of the prompt of the last reply: the caches up to it are the conversation's).
+    to `length` rounded up to HOST_BUCKET, the row of the recurrent ones at its end (the one a call after it reads), every row of the other
+    states (the hidden states of speculative decoding), the checkpoint's if it has one (the states at the end of the prompt of the last reply:
+    the caches up to it are the conversation's).
     the same for every conversation of a bucket: host_save's copies are a program made once
     """
-    length = self._host_len(length)
+    rows = self._host_len(length)
     parts:list[tuple[Buffer, int, int]] = []
-    def add(t:Tensor, axis:int=0, n:int|None=None):
+    def add(t:Tensor, axis:int=0, n:int|None=None, start:int=0):
       # (the first n rows of axis (all of it), a prefix of every device's buffer past the axes of one before it)
       bufs = [u.buffer for u in t.uop.toposort() if u.op is Ops.BUFFER]
       assert len(bufs) == 1, f"a state of {len(bufs)} buffers"
@@ -1755,21 +1756,23 @@ class Transformer:
       if isinstance(t.device, tuple) and (sa:=t.uop.axis) is not None: shape[sa] //= len(t.device)
       assert prod(shape[:axis]) == 1 and per[0].nbytes == prod(shape) * t.dtype.itemsize, f"{t.shape} isn't rows of a buffer on axis {axis}"
       row = int(prod(shape[axis+1:])) * t.dtype.itemsize
-      parts.extend((b, 0, (int(shape[axis]) if n is None else n)*row) for b in per)
+      parts.extend((b, start*row, (int(shape[axis]) if n is None else n)*row) for b in per)
     if self.config.spec_drafts: add(self._spec_h)
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock):
-        for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t)
+        # (a recurrent state's row of the end only (of S: a position p's is p%S): the one the next call reads)
+        for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t, 0, 1, length % int(t.shape[0]))
       if isinstance(b, MLATransformerBlock):
         if b.seq_sharded:
           n = len(cast(tuple[str, ...], b.cache_s.device))
-          add(b.cache_s, 0, (length + SEQ_BLK*n - 1) // (SEQ_BLK*n) * SEQ_BLK)
-        else: add(b.cache_k, 2, length)
+          add(b.cache_s, 0, (rows + SEQ_BLK*n - 1) // (SEQ_BLK*n) * SEQ_BLK)
+        else: add(b.cache_k, 2, rows)
         if (idx:=b.indexer) is not None:
-          pools = (length + idx.idx.kpool - 1) // idx.idx.kpool
+          pools = (rows + idx.idx.kpool - 1) // idx.idx.kpool
           if idx.sparse: add(idx.cache_pk, 0, pools), add(idx.ring)
           else: add(idx.cache_pk, 1, pools), add(idx.cache_kg, 1, pools * idx.idx.kpool)
-    for t in getattr(self, "_ckpt", []): add(t)
+    if ckpt:
+      for t in getattr(self, "_ckpt", []): add(t)
     return parts
 
   HOST_CHUNK = getenv("HOST_CHUNK", 1 << 30)  # the bytes of a buffer of host memory (host_alloc): a conversation takes as many as it needs
@@ -1782,9 +1785,9 @@ class Transformer:
       out.append((chunk, off))
       off = round_up(off + n, 256)
     return out
-  def host_chunks(self, length:int) -> int:
+  def host_chunks(self, length:int, ckpt:bool=True) -> int:
     """the chunks of host memory (host_alloc) host_save needs for a conversation of `length` tokens"""
-    return self._host_layout(self._host_parts(length))[-1][0] + 1
+    return self._host_layout(self._host_parts(length, ckpt))[-1][0] + 1
   def host_ckpt(self, tokens:list[int]) -> int:
     """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save keeps it)"""
     ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
@@ -1795,13 +1798,14 @@ class Transformer:
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): buf.get_buf(d)
     return buf
 
-  def _host_copy(self, save:bool, chunks:list[Buffer], length:int):
+  def _host_copy(self, save:bool, chunks:list[Buffer], length:int, ckpt:bool=True):
     # the copies of a bucket between the model and these chunks: a program made once (building and compiling ~2000 copies takes ~0.5 s),
     # the devices copy at once (CPU memory is the devices' to copy to, none staged)
     if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
-    key = (save, tuple(id(c) for c in chunks), self._host_len(length))
+    # (the bucket of its positions, the row of its recurrent states, its checkpoint or not)
+    key = (save, tuple(id(c) for c in chunks), self._host_len(length), length % (self.config.rewind + 1), ckpt)
     if (prg:=self._host_programs.pop(key, None)) is None:
-      parts = self._host_parts(length)
+      parts = self._host_parts(length, ckpt)
       layout = self._host_layout(parts)
       assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
       pairs = [(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)]
@@ -1820,20 +1824,20 @@ class Transformer:
     n = min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context)
     return min(n, self.batch_ctx()) if self._aliased() and length <= self.batch_ctx() else n
 
-  def host_save(self, length:int, chunks:list[Buffer]):
+  def host_save(self, length:int, chunks:list[Buffer], ckpt:bool=True):
     """
     the states of the model's conversation of `length` tokens copied to host memory: chunks (host_alloc'd, as many as host_chunks: the same
-    ones every time its copies are the same program). its checkpoint's too, its hidden states of speculative decoding (every row, see
+    ones every time its copies are the same program). its checkpoint's too (ckpt), its hidden states of speculative decoding (every row, see
     host_load)
     """
-    self._host_copy(True, chunks, length)
+    self._host_copy(True, chunks, length, ckpt)
 
-  def host_load(self, chunks:list[Buffer], length:int, hrow:int):
+  def host_load(self, chunks:list[Buffer], length:int, hrow:int, ckpt:bool=True):
     """
-    the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them, or from its checkpoint).
-    hrow: the row of _spec_h of its last token's hidden state when saved (_spec_row). sets no _cached_tokens, _ckpt_tokens
+    the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them, or from its checkpoint:
+    ckpt, saved with it). hrow: the row of _spec_h of its last token's hidden state when saved (_spec_row). sets no _cached_tokens, _ckpt_tokens
     """
-    self._host_copy(False, chunks, length)
+    self._host_copy(False, chunks, length, ckpt)
     self._ckpt_tokens, self._spec_row = [], hrow
 
   def forward_batch(self, *positions:UOp) -> Tensor:
