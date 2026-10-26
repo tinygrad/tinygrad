@@ -2200,7 +2200,8 @@ class Transformer:
   def warmup(self):
     """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
     sizes = self.prefill_chunks()
-    if getenv("WARMUP_PARALLEL", 1): self._capture_parallel(sizes)
+    # (a sequence sharded cache (a long context): one after the other, the weights read before the caches are made (their memory is the device's))
+    if getenv("WARMUP_PARALLEL", 0 if seq_sharded(self.token_embd.weight.device) else 1): self._capture_parallel(sizes)
     self._finish_load()
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
