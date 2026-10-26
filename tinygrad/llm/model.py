@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm, nucleus
+  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -415,6 +415,10 @@ def _argmax_rows(x:Tensor, cols:int=256) -> Tensor:
   row = g.max(-1).argmax(-1, keepdim=True)  # (B, 1)
   col = g.gather(1, row.unsqueeze(-1).expand(B, 1, cols)).argmax(-1)  # (B, 1)
   return row * cols + col
+
+def seq_sharded(device:str|tuple[str, ...]|None) -> bool:
+  """MLA_SEQ_SHARD: the MLA latent caches split on their positions over the devices (memory for a context 1/devices of a copy on every one)"""
+  return isinstance(device, tuple) and len(device) > 1 and amd_custom_kernels_supported(device) and bool(getenv("MLA_SEQ_SHARD", 0))
 
 class HyperConnection:
   def __init__(self, config:TransformerConfig):
@@ -915,7 +919,7 @@ class MLATransformerBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
     if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
     if T is not None: return self._attention_rows(x, start_pos, T)  # rows mode: x is padded, the first T rows are the tokens
-    N, D = self.cache_k.shape[2:]
+    N, D = (self.config.max_context, int(self.cache_s.shape[-1])) if self.seq_sharded else self.cache_k.shape[2:]
     flash = amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0
     # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
     if flash and not isinstance(T:=x.shape[1], int): return self._attention_rows(x.pad_to(x.max_shape), start_pos, T)[:, :T]
@@ -945,7 +949,19 @@ class MLATransformerBlock(FFNBlock):
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
     if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, freqs)
 
-    k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)[:, :, :T]
+    k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)
+    if self.seq_sharded:
+      # the cache split on its positions over the devices (MLA_SEQ_SHARD): every device stores its rows of the tokens, attends all the heads
+      # over its keys (the indexer's lists of every token: the pooled keys are on every device), the outputs combined on the devices of the heads
+      assert self.indexer is not None and self.indexer.sparse and isinstance(start_pos, UOp), "a sequence sharded cache needs the sparse indexer"
+      cache = seq_store(self.cache_s, k_store[0, 0], start_pos, T)
+      lists = self.indexer.picks(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T)
+      attn = mla_sparse_seq(q, cache, lists, 1.0/self.config.head_dim**0.5, start_pos+T)
+      v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
+      if bmm: attn = mla_bmm(attn, self.attn_v_b["weight"])
+      else: attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b
+      return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
+    k_store = k_store[:, :, :T]
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.cast(self.cache_k.dtype).uop)))
     (N, D), fast = self.cache_k.shape[2:], amd_custom_kernels_supported(x.device) and self.cache_k.shape[2] % 64 == 0
     fast = fast and D & (D-1) == 0
@@ -1030,10 +1046,16 @@ class MLATransformerBlock(FFNBlock):
     T = x.shape[1]
     return Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) if resolve(T != 1) else None
 
+  @property
+  def seq_sharded(self) -> bool: return hasattr(self, "cache_s")
   def _init_state(self, x:Tensor):
-    if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, dtype=dtypes.half,
-                                  device=x.device)
+    if not hasattr(self, "cache_k") and not hasattr(self, "cache_s"):
+      D = self.config.kv_lora_rank + self.config.rope_dim
+      if seq_sharded(x.device):
+        # (MLA_SEQ_SHARD: every device the rows of its positions, see seq_store)
+        devs = cast(tuple[str, ...], x.device)
+        self.cache_s = Tensor.empty(len(devs)*seq_rows(self.config.max_context, len(devs)), D, dtype=dtypes.half, device=devs, axis=0)
+      else: self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, D, dtype=dtypes.half, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
     if self.indexer: self.indexer._init_state(x)
@@ -1474,7 +1496,7 @@ class Transformer:
   BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,2,4,16,32,64,80")).split(","))
   def batch_slots(self) -> int:
     # (the memory of the slots: a shorter context of the model's own frees some)
-    if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
+    if not (self.has_recurrent_block and self.config.kv_lora_rank > 0) or seq_sharded(self.token_embd.weight.device): return 0
     return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def batch_ctx(self) -> int: return min(getenv("BATCH_CTX", 2048), self.max_context)
   def batch_sizes(self) -> tuple[int, ...]:
@@ -1646,7 +1668,10 @@ class Transformer:
       if isinstance(b, GatedDeltaNetBlock):
         for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t)
       if isinstance(b, MLATransformerBlock):
-        add(b.cache_k, 2, length)
+        if b.seq_sharded:
+          n = len(cast(tuple[str, ...], b.cache_s.device))
+          add(b.cache_s, 0, (length + SEQ_BLK*n - 1) // (SEQ_BLK*n) * SEQ_BLK)
+        else: add(b.cache_k, 2, length)
         if (idx:=b.indexer) is not None:
           pools = (length + idx.idx.kpool - 1) // idx.idx.kpool
           if idx.sparse: add(idx.cache_pk, 0, pools), add(idx.ring)

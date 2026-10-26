@@ -3054,6 +3054,113 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
                                fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
 
+# ******** the MLA latent cache split on its positions over the devices (sequence sharded): a block of SEQ_BLK positions a device in turn ********
+# position p is on device (p // SEQ_BLK) % n, row (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK of its part: the positions of a context of any length
+# are on every device. a device attends all the heads over its keys, the devices' outputs are combined by their max and sum
+
+SEQ_BLK = getenv("SEQ_BLK", 64)
+
+def seq_rows(max_context:int, n:int) -> int:
+  """the rows of a device's part of a sequence sharded cache of max_context positions over n devices"""
+  return (max_context + SEQ_BLK*n - 1) // (SEQ_BLK*n) * SEQ_BLK
+
+@functools.cache
+def _device_index(devs:tuple[str, ...]) -> Tensor:
+  # the index of every device on it (a kernel's own part)
+  return Tensor(list(range(len(devs))), dtype=dtypes.int32).shard(devs, 0).realize()
+
+@functools.cache
+def _seq_store_kernel(cache:UOp, k:UOp, dev:UOp, start_pos:UOp, T:UOp, n:int) -> UOp:
+  # the rows of k (the first T: the tokens at start_pos) a device has into its part of the cache
+  R, D = cast(tuple[int, int], k.shape)
+  r, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
+  p = start_pos + r
+  ok = (r < T) & ((p // SEQ_BLK) % n).eq(dev[0].load().cast(dtypes.weakint))
+  row = (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK
+  return cache[row.valid(ok), d].store(k[r, d].load().cast(cache.dtype)).end(r, d).sink(arg=KernelInfo(name="seq_store", opts_to_apply=()))
+
+def seq_store(cache:Tensor, k:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+  """the (R, D) rows k (on every device, the first T the tokens at start_pos) into the sequence sharded cache (n*rows, D): the cache after"""
+  devs = cast(tuple[str, ...], cache.device)
+  ints = [_unbind(x) if isinstance(x, UOp) else UOp.const(x, dtypes.weakint) for x in (start_pos, T)]
+  cache = Tensor(cache.uop.after(*(v for v in (start_pos, T) if isinstance(v, UOp))))
+  return Tensor.custom_kernel(cache, k.contiguous(), _device_index(devs), fxn=functools.partial(_seq_store_kernel, start_pos=ints[0], T=ints[1],
+                                                                                                n=len(devs)))[0]
+
+@functools.cache
+def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, valid_len:UOp, n:int) -> UOp:
+  # a row's list of keys (pool_index_rows: positions, the count last) as the rows of the device's part of the keys on it (the count last): a
+  # workgroup a row, a thread a run of the list (its keys in their order): their counts, the offsets of the threads, the keys
+  T, W = cast(tuple[int, int], picks.shape)
+  n_max, TH = W - 1, 64
+  per = (n_max + TH - 1) // TH
+  row, t = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(TH, 1, AxisType.LOCAL)
+  me = dev[0].load().cast(dtypes.weakint)
+  count = picks[row, n_max].load().cast(dtypes.weakint).minimum(n_max)
+  def entry(j:UOp) -> tuple[UOp, UOp]:
+    i = t*per + j
+    key = picks[row, i.minimum(n_max-1)].load().cast(dtypes.weakint)
+    return key, (i < count) & (key >= 0) & (key < valid_len) & ((key // SEQ_BLK) % n).eq(me)
+  j1 = UOp.range(per, 2, AxisType.LOOP)
+  mine = _reg_int(entry(j1)[1].cast(dtypes.int32), j1)
+  lds = UOp.alloc((TH,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(lds[t].store(mine).barrier())
+  k = UOp.range(TH, 3, AxisType.LOOP)
+  first = _reg_int((k < t).where(lds[k].load(), UOp.const(0, dtypes.int32)), k)
+  off = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  off = off.after(off[0].store(first))
+  j2 = UOp.range(per, 4, AxisType.LOOP)
+  key, own = entry(j2)
+  cur = off.after(j2)[0].load()
+  local = (key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK
+  keys = UOp.group(out[row, cur.cast(dtypes.weakint).valid(own)].store(local.cast(dtypes.int32)), off[0].store(cur + own.cast(dtypes.int32))).end(j2)
+  # (the count: the last thread's offset and its keys)
+  last = off.after(keys)[0].load()
+  return UOp.group(keys, out[row, UOp.const(n_max, dtypes.weakint).valid(t.eq(TH-1))].store(last)).end(row, t) \
+    .sink(arg=KernelInfo(name="seq_picks", opts_to_apply=()))
+
+def seq_picks(picks:Tensor, valid_len:int|UOp, devs:tuple[str, ...]) -> Tensor:
+  """the (T, n_max+1) lists of keys (positions, on every device) as every device's rows of its keys (n*T, n_max+1) split on the devices"""
+  T, W = picks.shape
+  vl = _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len, dtypes.weakint)
+  if isinstance(valid_len, UOp): picks = Tensor(picks.uop.after(valid_len))
+  out = Tensor.empty(len(devs)*T, W, dtype=dtypes.int32, device=devs, axis=0)
+  return Tensor.custom_kernel(out, picks.contiguous(), _device_index(devs), fxn=functools.partial(_seq_picks_kernel, valid_len=vl, n=len(devs)))[0]
+
+def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp) -> Tensor:
+  """
+  the attention of the (1, H, T, D) queries (heads split over the devices) on the sequence sharded latent cache (n*rows, D), every token on the
+  keys of its list (T, n_max+1, on every device): (1, H, T, D) heads split. every device attends all the heads over its keys (the queries
+  gathered), their outputs are weighed by their max and sum (gathered) and summed on the devices of the heads (reduce_scatter)
+  """
+  devs = cast(tuple[str, ...], cache.device)
+  n, (_, H, T, D) = len(devs), q.shape
+  G = (H + 15) // 16
+  qa = all_gather(q.contiguous(), 1, dtypes.half) if q.uop.axis == 1 else q.half()
+  rows = qa.reshape(H, T, D).pad(((0, G*16 - H), None, None)).reshape(G, 16, T, D).permute(0, 2, 1, 3).reshape(G*T*16, D).contiguous()
+  # every device's lists of its keys, one for every 16 heads
+  local = seq_picks(picks, valid_len, devs)
+  index = local.reshape(n, 1, T, -1).expand(n, G, T, local.shape[-1]).reshape(n*G*T, -1).contiguous()
+  split = getenv("MLA_SPLIT", 16) if T < 16 else 1
+  nrows = G*T*split*16
+  parts = Tensor.empty(n*nrows, D, dtype=dtypes.float32, device=devs, axis=0)
+  ml = Tensor.empty(n*nrows, 2, dtype=dtypes.float32, device=devs, axis=0)
+  parts, ml = Tensor.custom_kernel(parts, ml, rows, cache, index, fxn=functools.partial(_mla_sparse_split_kernel, scale=scale,
+                                   valid_len=UOp.const(int(cache.shape[0]) // n, dtypes.weakint), split=split))[:2]
+  # a device's splits combined: its output (normed by its sum), its max and sum
+  m, l = (ml.reshape(n, G, T, split, 16, 2)[..., i:i+1] for i in range(2))
+  mx = m.max(3, keepdim=True)
+  w = l * (m - mx).exp()
+  ld = w.sum(3)
+  od = (parts.reshape(n, G, T, split, 16, D) * w).sum(3) / ld.maximum(1e-30)
+  # the devices' combined: weighed by their sum at the max of all of them
+  st = all_gather(mx.squeeze(3).cat(ld, dim=-1), 0, dtypes.float32)
+  M = st[..., 0:1].max(0)
+  L = (st[..., 1:2] * (st[..., 0:1] - M).exp()).sum(0)
+  contrib = od * (ld * (mx.squeeze(3) - M).exp() / L.maximum(1e-30))
+  contrib = contrib.permute(0, 2, 1, 3, 4).reshape(n, 1, T, G*16, D)[:, :, :, :H]
+  return reduce_scatter(contrib, 2).permute(0, 2, 1, 3)
+
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,
                                     mask:Tensor|None=None, group:int=4, partials:int=4, block_n:int=32) -> Tensor:
   """
@@ -3575,16 +3682,17 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
   wc = wc.after(wc[c2, wave.valid(lane.eq(0))].store(_popcount(_ballot(key(c2) >= thr))).end(c2).barrier())
   # the offsets of the (chunk, wave)s in pool order: in every chunk a scan of its waves' counts (a wave per chunk), then a scan of the
   # chunks' totals (one wave). the chunks without pools count 0
+  # (the offsets of the waves in place of their counts: a thread reads its count, then writes its offset. LDS for a long context's pools)
   def count(ci:UOp) -> UOp: return (ci < npc).where(wc[ci.minimum(per-1), lane].load(), zero)
-  wpre, ct = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL), UOp.alloc((per,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  ct = UOp.alloc((per,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   st_a = []
   for r in range((per + W - 1) // W):
     ci = (wave + r * W).minimum(per - 1)
     n = count(wave + r * W)
     incl = _wave_scan(n, lane)
     ok = wave + r * W < per
-    st_a += [wpre[ci.valid(ok), lane].store(incl - n), ct[ci.valid(ok & lane.eq(W - 1))].store(incl)]
-  wpre, ct = (x.after(UOp.group(*st_a).barrier()) for x in (wpre, ct))
+    st_a += [wc[ci.valid(ok), lane].store(incl - n), ct[ci.valid(ok & lane.eq(W - 1))].store(incl)]
+  wpre, ct = (x.after(UOp.group(*st_a).barrier()) for x in (wc, ct))
   cb = UOp.alloc((per + 1,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   carry, st_b = zero, []
   for r in range((per + W - 1) // W):
