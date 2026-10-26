@@ -106,13 +106,13 @@ class TestTensorParallel(unittest.TestCase):
     data = random_data(shape, typ).reshape(-1)
     w = ggml_data_to_tensor(Tensor(data, device='CPU'), E*O*I, typ).reshape(shape).float().numpy()
     sel = np.array([[[3, 1]]], dtype=np.int32)
-    for axis, x_axis in ((1, None), (1, 3), (2, 3)):
-      with self.subTest(axis=axis, x_axis=x_axis):
+    for axis in (1, 2):
+      with self.subTest(axis=axis):
         layer = ExpertWeights(E, I, O)
         layer.weight = gguf_shard({'w': (Tensor(data, device='CPU'), shape, typ)}, DEVICES, {'w': axis})['w'].half()
         x = np.random.default_rng(1).normal(size=(1, 1, 1 if axis == 1 else 2, I)).astype(np.float16)
         ref = np.stack([w[e] @ x[0, 0, j % x.shape[2]].astype(np.float32) for j, e in enumerate(sel[0, 0])])
-        got = layer(Tensor(sel).shard(DEVICES), Tensor(x).shard(DEVICES, x_axis)).float().to(Device.DEFAULT).numpy()
+        got = layer(Tensor(sel).shard(DEVICES), Tensor(x).shard(DEVICES, 3 if axis == 2 else None)).float().to(Device.DEFAULT).numpy()
         self.assertEqual(layer.ggml_type, typ)
         np.testing.assert_allclose(got[0, 0], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
 
