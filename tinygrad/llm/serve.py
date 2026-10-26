@@ -91,6 +91,14 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
 
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
 PING = -1  # (Handler.next_token: no token for a while)
+
+class HostConv(typing.NamedTuple):
+  """a conversation kept in host memory (HOST_STASH): its tokens, its chunks (Transformer.host_save), the tokens of its checkpoint (the prompt
+  of its last reply: a request can continue that one, its reply came back different, or 0), its row of the hidden states (_spec_row)"""
+  tokens: list[int]
+  chunks: list[typing.Any]
+  ckpt: int
+  hrow: int
 ODD_TOKENS = ("[gMASK]", "[sMASK]", "[MASK]", "<sop>", "<eop>")
 
 def anthropic_events(chunks:typing.Iterator[dict], model:str, input_tokens:int) -> typing.Iterator[dict]:
@@ -431,10 +439,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
     # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
-    # (the tokens, the chunks of host memory of Transformer.host_save, the tokens of its checkpoint (the prompt of its last reply: a request can
-    # continue that one, its reply came back different) or 0). the chunks of the ones out are used again (new memory and its devices' mappings
-    # are slow, ~1 s a GB)
-    self.host: list[tuple[list[int], list[typing.Any], int]] = []
+    # (see HostConv). the chunks of the ones out are used again (new memory and its devices' mappings are slow, ~1 s a GB)
+    self.host: list[HostConv] = []
     self.host_free: list[typing.Any] = []
     self.host_made = 0  # (the chunks made: never freed, used again)
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
@@ -504,7 +510,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
     if not self.slots or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
-       any(t == tokens for t, _, _ in self.host): return
+       any(e.tokens == tokens for e in self.host): return
     if len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
     free = list(range(max(busy, default=-1)+1, self.slots))
     # (an empty one, else host memory, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the
@@ -524,20 +530,23 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if len(tokens) < getenv("HOST_MIN", 4096): return
     st = time.perf_counter()
     ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
-    k = model.host_chunks(len(tokens), bool(ckpt))
-    # (an older turn of it out first: its chunks are this one's. then free ones, new ones up to the GB, the least recently used one's)
-    self.host_free += [c for t, cs, _ in self.host if tokens[:len(t)] == t for c in cs]
-    self.host = [e for e in self.host if tokens[:len(e[0])] != e[0]]
+    k = model.host_chunks(len(tokens))
+    # (an older turn of it out first: its chunks are this one's, in their order (its copies the same program). then free ones, new ones up to
+    # the GB, the least recently used one's)
+    older = [e for e in self.host if tokens[:len(e.tokens)] == e.tokens]
+    chunks = max((e.chunks for e in older), key=len, default=[])[:k]
+    self.host_free += [c for e in older for c in e.chunks if not any(c is x for x in chunks)]
+    self.host = [e for e in self.host if tokens[:len(e.tokens)] != e.tokens]
     made = 0
-    while len(self.host_free) < k:
+    while len(self.host_free) < k - len(chunks):
       if self.host_made < most:
         self.host_free.append(model.host_alloc())
         self.host_made, made = self.host_made + 1, made + 1
-      elif self.host: self.host_free += self.host.pop(0)[1]
+      elif self.host: self.host_free += self.host.pop(0).chunks
       else: return
-    chunks = [self.host_free.pop() for _ in range(k)]
-    model.host_save(len(tokens), getattr(model, "_spec_row", 0), chunks, ckpt=bool(ckpt))
-    self.host.append((tokens, chunks, ckpt))
+    chunks = chunks + [self.host_free.pop() for _ in range(k - len(chunks))]
+    model.host_save(len(tokens), chunks)
+    self.host.append(HostConv(tokens, chunks, ckpt, getattr(model, "_spec_row", 0)))
     trace(f"host_save len {len(tokens)} ckpt {ckpt} {k} chunks ({made} new) in {time.perf_counter()-st:.2f} s, {len(self.host)} kept, "
           f"{len(self.host_free)} free")
   def host_prepare(self):
@@ -546,14 +555,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.host_free.append(self.model.host_alloc())
       self.host_made += 1
   @staticmethod
-  def host_hit(e:tuple[list[int], typing.Any, int], ids:list[int]) -> int:
+  def host_hit(e:HostConv, ids:list[int]) -> int:
     """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
-    t, _, ckpt = e
-    return next((n for n in (len(t), ckpt) if 0 < n < len(ids) and ids[:n] == t[:n]), 0)
+    return next((n for n in (len(e.tokens), e.ckpt) if 0 < n < len(ids) and ids[:n] == e.tokens[:n]), 0)
   def kept(self) -> list[list[int]]:
     """the kept conversations' tokens: the model's, the slots', the host's"""
     model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
-    return [list(model)] + [t for t, _ in list(self.stash.values())] + [t for t, _, _ in list(self.host)]
+    return [list(model)] + [t for t, _ in list(self.stash.values())] + [e.tokens for e in list(self.host)]
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation (the model's, or one in a slot) as its text but not its tokens (the model's reply
@@ -562,7 +570,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not getenv("REUSE_TOKENS", 1): return ids
     # (the conversations, and their checkpoints: the text after one can be different, a reply before it tokenized differently)
     ck = c if isinstance(c:=getattr(self.model, "_ckpt_tokens", None), list) else []
-    for t in sorted(self.kept() + [list(ck)] + [t[:c] for t, _, c in list(self.host) if c], key=len, reverse=True):
+    for t in sorted(self.kept() + [list(ck)] + [e.tokens[:e.ckpt] for e in list(self.host) if e.ckpt], key=len, reverse=True):
       if len(t) < 1000 or len(t) >= len(ids) + 1000: continue
       if ids[:len(t)] == t: return ids
       if next((i for i, (a, b) in enumerate(zip(t, ids)) if a != b), len(t)) < len(t) // 2: continue
@@ -592,13 +600,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     host = max(((self.host_hit(e, ids), j) for j, e in enumerate(self.host)), default=(0, -1))
     if host[0] > best[0] and host[0] >= have + self.STASH_MIN:
       # (out of the list while the model's is saved: not the one it frees memory of. back as the most recently used)
-      tokens, saved, ckpt = self.host.pop(host[1])
+      e = self.host.pop(host[1])
       self.stash_main(busy)
-      self.host.append((tokens, saved, ckpt))
+      self.host.append(e)
       st = time.perf_counter()
-      model.host_load(saved, len(tokens), ckpt=bool(ckpt))  # (saved: its chunks)
-      model._cached_tokens, model._ckpt_tokens = list(tokens), list(tokens[:ckpt])
-      trace(f"host_load len {len(tokens)} ckpt {ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")
+      model.host_load(e.chunks, len(e.tokens), e.hrow)
+      model._cached_tokens, model._ckpt_tokens = list(e.tokens), list(e.tokens[:e.ckpt])
+      trace(f"host_load len {len(e.tokens)} ckpt {e.ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")
     elif best[0] >= have + self.STASH_MIN:
       self.stash_main(busy | {best[1]})
       tokens, hrow = self.stash[best[1]]
@@ -625,7 +633,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def drop_caches(self):
     """the model's conversation and the kept ones forgotten (their states may be wrong): every request is prefilled from the start"""
     self.stash.clear()
-    self.host_free += [c for _, cs, _ in self.host for c in cs]
+    self.host_free += [c for e in self.host for c in e.chunks]
     self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens, self.model._ckpt_tokens = [], []
   def step_writes(self, active:dict):

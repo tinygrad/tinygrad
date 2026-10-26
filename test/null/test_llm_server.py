@@ -569,7 +569,7 @@ class TestStash(unittest.TestCase):
     a, b, c = list(range(30000)), list(range(30000, 50000)), list(range(60000, 80000))
     m = self.model
     m.HOST_CHUNK = 1000
-    m.host_chunks = Mock(side_effect=lambda n, ckpt: (n + 999) // 1000)
+    m.host_chunks = Mock(side_effect=lambda n: (n + 999) // 1000)
     m.host_alloc = Mock(side_effect=lambda: Mock())
     m.host_ckpt = Mock(return_value=0)
     from tinygrad.helpers import getenv
@@ -578,28 +578,34 @@ class TestStash(unittest.TestCase):
       getenv.cache_clear()
       m._cached_tokens = a[:15000]
       self.server.stash_load(b, set())
-      self.assertEqual((m.host_save.call_args.args[:2], len(m.host_save.call_args.args[2])), ((15000, 0), 15))
+      self.assertEqual((m.host_save.call_args.args[0], len(m.host_save.call_args.args[1])), (15000, 15))
       m.slot_store.assert_not_called()
       m._cached_tokens = b[:12000]
       self.server.stash_load(a, set())  # a continues: b kept, a loaded back
       m.host_load.assert_called_once()
       self.assertEqual(m.host_load.call_args.args[1], 15000)
-      self.assertEqual((m._cached_tokens, [len(t) for t, _, _ in self.server.host]), (a[:15000], [12000, 15000]))
+      self.assertEqual((m._cached_tokens, [len(e.tokens) for e in self.server.host]), (a[:15000], [12000, 15000]))
       self.assertEqual(self.server.stash_hit(b, set()), 12000)
       m._cached_tokens = a[:25000]
       self.server.stash_load(c, set())  # a's later turn replaces its older one (its 15 chunks and 10 more: 37 > 45 - 12)
-      self.assertEqual(([len(t) for t, _, _ in self.server.host], m.host_alloc.call_count), ([12000, 25000], 37))
+      self.assertEqual(([len(e.tokens) for e in self.server.host], m.host_alloc.call_count), ([12000, 25000], 37))
       m._cached_tokens = c[:10000]
       self.server.stash_load(a, set())  # past the GB: b's chunks are c's
-      self.assertEqual(([len(t) for t, _, _ in self.server.host], m.host_alloc.call_count), ([10000, 25000], 45))
+      self.assertEqual(([len(e.tokens) for e in self.server.host], m.host_alloc.call_count), ([10000, 25000], 45))
       self.assertEqual(len(self.server.host_free), 10)
+      # a later turn of a: its chunks again, in their order (its copies the same program)
+      chunks_a = self.server.host[-1].chunks
+      m._cached_tokens = a[:26000]
+      self.server.stash_load(c, set())
+      self.assertEqual(m.host_save.call_args.args[1][:25], chunks_a)
       # a request that continues the prompt of a's last reply, not the reply: from its checkpoint
-      self.server.host = [(a[:18000], [Mock()], 16000)]
+      from tinygrad.llm.serve import HostConv
+      self.server.host = [HostConv(a[:18000], [Mock()], 16000, 2)]
       m._cached_tokens = c[:5000]
       ids = a[:16000] + [7, 8, 9]
       self.assertEqual(self.server.stash_hit(ids, set()), 16000)
       self.server.stash_load(ids, set())
-      self.assertEqual(m.host_load.call_args.kwargs, {"ckpt": True})
+      self.assertEqual(m.host_load.call_args.args[1:], (18000, 2))
       self.assertEqual((len(m._cached_tokens), m._ckpt_tokens), (18000, a[:16000]))
 
   def test_switch_conversations(self):

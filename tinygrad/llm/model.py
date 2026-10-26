@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, _TinyJit
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -1621,15 +1621,18 @@ class Transformer:
     self._ckpt_tokens, self._spec_row = [], 0
 
   # ** a conversation's states in host memory (HOST_STASH in the server: the ones longer than a slot): its bytes copied, no kernel
-  def _host_parts(self, length:int, hrow:int, ckpt:bool=False) -> list[tuple[Buffer, int, int]]:
+  HOST_BUCKET = getenv("HOST_BUCKET", 16384)  # the positions host_save copies: a conversation's rounded up to a multiple (the same copies)
+  def _host_parts(self, length:int) -> list[tuple[Buffer, int, int]]:
     """
-    the bytes of the model's states at the end of its `length` tokens: (a device's buffer, offset, size) each. hrow: the row of _spec_h of the
-    last token's hidden state (row 0 when loaded). ckpt: and the checkpoint's (the states at the end of its prompt, _checkpoint: the caches
-    up to it are the conversation's)
+    the bytes of the model's states at the end of its `length` tokens: (a device's buffer, offset, size) each. the positions of the caches up
+    to `length` rounded up to HOST_BUCKET, every row of the other states (the recurrent ones of the last positions, the hidden states of
+    speculative decoding), the checkpoint's (the states at the end of the prompt of the last reply: the caches up to it are the conversation's).
+    the same for every conversation of a bucket: host_save's copies are a program made once
     """
+    length = min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context)
     parts:list[tuple[Buffer, int, int]] = []
-    def add(t:Tensor, axis:int, start:int, n:int):
-      # (the rows start..start+n of axis, a prefix of every device's buffer past the axes of one before it)
+    def add(t:Tensor, axis:int=0, n:int|None=None):
+      # (the first n rows of axis (all of it), a prefix of every device's buffer past the axes of one before it)
       bufs = [u.buffer for u in t.uop.toposort() if u.op is Ops.BUFFER]
       assert len(bufs) == 1, f"a state of {len(bufs)} buffers"
       per = bufs[0].bufs if isinstance(bufs[0], MultiBuffer) else [bufs[0]]
@@ -1637,27 +1640,19 @@ class Transformer:
       if isinstance(t.device, tuple) and (sa:=t.uop.axis) is not None: shape[sa] //= len(t.device)
       assert prod(shape[:axis]) == 1 and per[0].nbytes == prod(shape) * t.dtype.itemsize, f"{t.shape} isn't rows of a buffer on axis {axis}"
       row = int(prod(shape[axis+1:])) * t.dtype.itemsize
-      parts.extend((b, start*row, n*row) for b in per)
-    if self.config.spec_drafts: add(self._spec_h, 0, hrow, 1)
-    rp = length % (self.config.rewind + 1)
+      parts.extend((b, 0, (int(shape[axis]) if n is None else n)*row) for b in per)
+    if self.config.spec_drafts: add(self._spec_h)
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock):
-        for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t, 0, rp, 1)
+        for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t)
       if isinstance(b, MLATransformerBlock):
-        add(b.cache_k, 2, 0, length)
+        add(b.cache_k, 2, length)
         if (idx:=b.indexer) is not None:
           pools = (length + idx.idx.kpool - 1) // idx.idx.kpool
-          if idx.sparse: add(idx.cache_pk, 0, 0, pools), add(idx.ring, 0, 0, int(idx.ring.shape[0]))
-          else: add(idx.cache_pk, 1, 0, pools), add(idx.cache_kg, 1, 0, pools * idx.idx.kpool)
-    if ckpt:
-      for t in self._ckpt: add(t, 0, 0, int(t.shape[0]))
+          if idx.sparse: add(idx.cache_pk, 0, pools), add(idx.ring)
+          else: add(idx.cache_pk, 1, pools), add(idx.cache_kg, 1, pools * idx.idx.kpool)
+    for t in getattr(self, "_ckpt", []): add(t)
     return parts
-
-  def _host_copy(self, pairs:list[tuple[Buffer, Buffer]]):
-    # (in one go: the devices copy at once, CPU memory is the devices' to copy to (none staged))
-    run_linear(UOp(Ops.LINEAR, src=tuple(UOp.from_buffer(d, dtypes.uint8).store_call(UOp.from_buffer(s, dtypes.uint8)) for d, s in pairs)),
-               update_stats=False)
-    for d in dedup([b.device for p in pairs for b in p]): Device[d].synchronize()
 
   HOST_CHUNK = getenv("HOST_CHUNK", 1 << 30)  # the bytes of a buffer of host memory (host_alloc): a conversation takes as many as it needs
   def _host_layout(self, parts:list[tuple[Buffer, int, int]]) -> list[tuple[int, int]]:
@@ -1669,11 +1664,11 @@ class Transformer:
       out.append((chunk, off))
       off = round_up(off + n, 256)
     return out
-  def host_chunks(self, length:int, ckpt:bool=False) -> int:
-    """the chunks of host memory (host_alloc) host_save needs for a conversation of `length` tokens (and its checkpoint)"""
-    return self._host_layout(self._host_parts(length, 0, ckpt))[-1][0] + 1
+  def host_chunks(self, length:int) -> int:
+    """the chunks of host memory (host_alloc) host_save needs for a conversation of `length` tokens"""
+    return self._host_layout(self._host_parts(length))[-1][0] + 1
   def host_ckpt(self, tokens:list[int]) -> int:
-    """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save can keep it)"""
+    """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save keeps it)"""
     ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
     return len(ck) if 0 < len(ck) < len(tokens) and tokens[:len(ck)] == ck else 0
   def host_alloc(self) -> Buffer:
@@ -1682,28 +1677,41 @@ class Transformer:
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): buf.get_buf(d)
     return buf
 
-  def host_save(self, length:int, hrow:int, chunks:list[Buffer], ckpt:bool=False):
-    """
-    the states of the model's conversation of `length` tokens (hrow: the row of _spec_h) copied to host memory: chunks (host_alloc'd, as many
-    as host_chunks). ckpt: and its checkpoint's (see host_ckpt)
-    """
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
-    parts = self._host_parts(length, hrow, ckpt)
-    layout = self._host_layout(parts)
-    assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
-    self._host_copy([(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)])
+  def _host_copy(self, save:bool, chunks:list[Buffer], length:int):
+    # the copies of a bucket between the model and these chunks: a program made once (building and compiling ~2000 copies takes ~0.5 s),
+    # the devices copy at once (CPU memory is the devices' to copy to, none staged)
+    if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
+    key = (save, tuple(id(c) for c in chunks), min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context))
+    if (prg:=self._host_programs.pop(key, None)) is None:
+      parts = self._host_parts(length)
+      layout = self._host_layout(parts)
+      assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
+      pairs = [(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)]
+      if not save: pairs = [(b, h) for h, b in pairs]
+      calls = [UOp.from_buffer(d, dtypes.uint8).store_call(UOp.from_buffer(s, dtypes.uint8)) for d, s in pairs]
+      prg = link_linear(compile_linear(UOp(Ops.LINEAR, src=tuple(calls)), cache=True))
+      while len(self._host_programs) >= getenv("HOST_PROGRAMS", 512): self._host_programs.pop(next(iter(self._host_programs)))
+    self._host_programs[key] = prg  # (the most recently used last)
+    devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+    for d in devs: Device[d].synchronize()  # (run ahead steps of the model)
+    run_linear(prg, jit=True, update_stats=False)
+    for d in devs + ("CPU",): Device[d].synchronize()
 
-  def host_load(self, chunks:list[Buffer], length:int, ckpt:bool=False):
+  def host_save(self, length:int, chunks:list[Buffer]):
+    """
+    the states of the model's conversation of `length` tokens copied to host memory: chunks (host_alloc'd, as many as host_chunks: the same
+    ones every time its copies are the same program). its checkpoint's too, its hidden states of speculative decoding (every row, see
+    host_load)
+    """
+    self._host_copy(True, chunks, length)
+
+  def host_load(self, chunks:list[Buffer], length:int, hrow:int):
     """
     the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them, or from its checkpoint).
-    sets no _cached_tokens, _ckpt_tokens
+    hrow: the row of _spec_h of its last token's hidden state when saved (_spec_row). sets no _cached_tokens, _ckpt_tokens
     """
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (run ahead steps of the model)
-    parts = self._host_parts(length, 0, ckpt)
-    layout = self._host_layout(parts)
-    assert len(chunks) > layout[-1][0], "saved by another model"
-    self._host_copy([(b.view(n, o).ensure_allocated(), chunks[c].view(n, off).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)])
-    self._ckpt_tokens, self._spec_row = [], 0
+    self._host_copy(False, chunks, length)
+    self._ckpt_tokens, self._spec_row = [], hrow
 
   def forward_batch(self, *positions:UOp) -> Tensor:
     """a step of batched decoding: row i the sequence of slot i at positions[i], its token in _batch_in, its temperature in _batch_temp"""
