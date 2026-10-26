@@ -700,6 +700,11 @@ class TestStash(unittest.TestCase):
     # a prompt that continues one as it is: its tokens
     self.model._ckpt_tokens = []
     self.assertEqual(self.server.reuse_tokens("a" * 1500 + "q", [ord("a")] * 1500 + [ord("q")]), [ord("a")] * 1500 + [ord("q")])
+    # the tokens different early (a reply of an early turn sampled as "b", "c"), the conversation long after it: the kept tokens
+    long = [ord("a")] * 100 + [ord("b"), ord("c")] + [ord("d")] * 3000
+    self.model._cached_tokens = long
+    rendered = "a" * 100 + "bc" + "d" * 3000 + "xyz"
+    self.assertEqual(self.server.reuse_tokens(rendered, self.server.tok.encode(rendered)), long + [ord("x"), ord("y"), ord("z")])
 
   def test_corrupt_reply_fails(self):
     # token 0 again and again (NaN logits) or an odd special token: the reply fails, the caches are dropped

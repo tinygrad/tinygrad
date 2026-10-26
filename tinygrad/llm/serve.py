@@ -598,11 +598,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not getenv("REUSE_TOKENS", 1): return ids
     # (the conversations, and their checkpoints: the text after one can be different, a reply before it tokenized differently)
     ck = c if isinstance(c:=getattr(self.model, "_ckpt_tokens", None), list) else []
-    for t in sorted(self.kept() + [list(ck)] + [e.tokens[:e.ckpt] for e in list(self.host) if e.ckpt], key=len, reverse=True):
-      if len(t) < 1000 or len(t) >= len(ids) + 1000: continue
-      if ids[:len(t)] == t: return ids
-      if common_prefix(t, ids) < len(t) // 2: continue
-      if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
+    cands = [t for t in self.kept() + [list(ck)] + [e.tokens[:e.ckpt] for e in list(self.host) if e.ckpt] if 1000 <= len(t) < len(ids) + 1000]
+    # (one the prompt's tokens continue: the cache has it. a longer one the prompt's text continues: the ones sharing the most tokens with it
+    # (an agent's own conversation, not the others' with the same system prompt), however early they differ: a sampled token of an early
+    # reply that isn't its text's tokenization differs from then on, every turn after)
+    exact = max((len(t) for t in cands if ids[:len(t)] == t), default=0)
+    for t in sorted(cands, key=lambda t: common_prefix(t, ids), reverse=True)[:getenv("REUSE_TRY", 2)]:
+      if len(t) > exact and rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
 
   def miss_log(self, ids:list[int], start:int):
