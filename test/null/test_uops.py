@@ -239,6 +239,29 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
 
 class TestGatedStoreRewrite(unittest.TestCase):
+  def test_store_back_loaded_value(self):
+    idx = UOp.param(0, dtypes.float, 8).index(UOp.special(8, 'gidx0'))
+    gate = UOp.param(1, dtypes.bool, 1).index(UOp.const(0)).load()
+    val = UOp.const(42.0)
+    for keep_when_true in (False, True):
+      with self.subTest(keep_when_true=keep_when_true):
+        expr = gate.where(idx.load(), val) if keep_when_true else gate.where(val, idx.load())
+        store = graph_rewrite(idx.store(expr), sym)
+        self.assertIs(store.src[1], val)
+        self.assertIs(store.src[0].src[1].get_valid(), gate.logical_not() if keep_when_true else gate)
+        self.assertNotIn(idx.load(), store.toposort())
+
+  def test_nested_store_back_loaded_value(self):
+    idx = UOp.param(0, dtypes.float, 8).index(UOp.special(8, 'gidx0'))
+    gates = UOp.param(1, dtypes.bool, 2)
+    a, b = gates.index(UOp.const(0)).load(), gates.index(UOp.const(1)).load()
+    store = graph_rewrite(idx.store(a.where(b.where(idx.load(), 42.0), idx.load())), sym)
+    self.assertNotIn(idx.load(), store.toposort())
+    gate = store.src[0].src[1].get_valid()
+    for av in (False, True):
+      for bv in (False, True):
+        self.assertEqual(gate.substitute({a:UOp.const(av), b:UOp.const(bv)}).simplify().val, av and not bv)
+
   def test_tiny_gate_store(self):
     gmem = UOp.param(0, dtypes.float, 8)
     gidx0 = UOp.special(4, 'gidx0')
@@ -433,6 +456,16 @@ class TestNegLowering(unittest.TestCase):
       self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
 
 class TestUOpMethod(unittest.TestCase):
+  def test_cmpeq_canonical(self):
+    a, b = UOp.variable("a", 0, 10), UOp.variable("b", 0, 10)
+    eq = a.eq(b)
+    self.assertIs(eq.op, Ops.CMPEQ)
+    self.assertIs(eq.dtype, dtypes.bool)
+    self.assertIs(a.ne(b), eq.eq(False))
+    self.assertIs(eq.logical_not(), eq.eq(False))
+    self.assertIs(eq.logical_not().logical_not().simplify(), eq)
+    self.assertIs(eq.eq(True).simplify(), eq)
+
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
     a = UOp.const(2.0)
@@ -463,6 +496,7 @@ class TestUOpMethod(unittest.TestCase):
       x = Tensor.empty(*shape, dtype=dtypes.int).uop
       self.assertIs((x < x).simplify(), x.const_like(False, dtypes.bool))
       self.assertIs((x != x).simplify(), x.const_like(False, dtypes.bool))
+      self.assertIs(x.eq(x).simplify(), x.const_like(True, dtypes.bool))
 
   def test_replace(self):
     x = UOp.param(0, dtypes.int, 1)
@@ -633,6 +667,13 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.CMPEQ, ops)
     self.assertNotIn(Ops.CMPNE, ops)
+
+  def test_use_cmpne(self):
+    x = UOp.param(0, dtypes.uint32, 8).index(UOp.const(0))
+    uops = to_uops_list([x.ne(7)], ren=self.renderer)
+    self.renderer.render(uops)
+    self.assertEqual(sum(u.op is Ops.CMPNE for u in uops), 1)
+    self.assertNotIn(Ops.CMPEQ, [u.op for u in uops])
 
   def test_int_compare_without_negation(self):
     for dt in (dtypes.int32, dtypes.uint32):

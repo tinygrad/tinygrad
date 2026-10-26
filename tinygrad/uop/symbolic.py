@@ -129,14 +129,14 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat(Ops.ADD, dtype=dtypes.weakint, name="x"), fold_add_divmod_recombine),
   (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c"), lambda x,c: x if c.val else c),
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c"), lambda x,c: c if c.val else x),
-  (UPat.var("x", dtype=dtypes.bool) != UPat.const(False, dtypes.bool), lambda x: x),  # x != False -> x
+  (UPat.var("x", dtype=dtypes.bool).eq(UPat.const(True, dtypes.bool)), lambda x: x),  # x == True -> x
   (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(True, dtypes.bool), UPat.const(False, dtypes.bool)), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(False, dtypes.bool), UPat.const(True, dtypes.bool)), lambda x: x.logical_not()),
-  # CAST(bool -> int) != const — CAST(True)=1, CAST(False)=0, so fold based on const value
-  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint,)) != UPat.cvar("c"),
-   lambda x,c: x if c.val == 0 else x.logical_not() if c.val == 1 else x.const_like(True)),
+  # CAST(bool -> int) == const — CAST(True)=1, CAST(False)=0, so fold based on const value
+  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint,)).eq(UPat.cvar("c")),
+   lambda x,c: x.logical_not() if c.val == 0 else x if c.val == 1 else x.const_like(False)),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False, dtypes.bool)), # x < x -> False
@@ -148,8 +148,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
    lambda x,mask,k: x >> k.val if x.dtype.const(mask.val | ((1 << k.val) - 1)) == x.dtype.const(-1) else None),
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
    lambda x,mask,c: x // c.val if c.val > 0 and c.val & (c.val-1) == 0 and x.dtype.const(mask.val | (c.val-1)) == x.dtype.const(-1) else None),
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
-   lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).eq(UPat.var("x")),
+   lambda x: x.const_like(True, dtypes.bool)), # x == x -> True (only ints)
   # ** constant folding **
   # canonicalize casted CONST
   (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
@@ -262,6 +262,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("gate").where(UPat.var("x"), 0) != 0, lambda gate,x: gate & (x != 0)),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # a.where(b.where(c, d), c) -> (a & !b).where(d, c)
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("c")), lambda a,b,c,d: (a&b.logical_not()).where(d,c)),
   # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
   (UPat.var("a").where(UPat.var("c"), UPat.var("b").where(UPat.var("c"), UPat.var("d"))), lambda a,b,c,d: (a|b).where(c,d)),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
@@ -273,7 +275,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # complementary zero branches under the same condition select directly
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
   # ALU/variable min==max -> CONST
-  (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.SPECIAL}, name="x"),
+  (UPat({Ops.CMPLT, Ops.CMPEQ, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.SPECIAL}, name="x"),
    lambda x: x.const_like(x.vmin) if x.dtype is not dtypes.void and x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat.cvar().or_casted(),), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
@@ -299,7 +301,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.var("y")*-1, lambda x,y: y<x),
   (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.cvar("c"), lambda x,c: -c<x if c.val != x.dtype.min else None),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
-  ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  ((UPat.var("x", dtypes.weakint)<1).logical_not(), lambda x: (newx<1).logical_not() if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")//UPat.var("end"), lambda r,end: r.const_like(0)),
@@ -332,7 +334,7 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   # if it's X >= c, returns X, False, c
 
   # a<b gives a<=b.vmax-1 (b>=a+1 for a const a), its negation a>=b.vmin (b<=a for a const a)
-  neg = v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].val == 1
+  neg = v.op is Ops.CMPEQ and v.src[1].op is Ops.CONST and v.src[1].val == 0
   if (lt:=v.src[0] if neg else v).op is not Ops.CMPLT or not dtypes.is_int(lt.src[0].dtype): return None
   if (a:=lt.src[0]).op is Ops.CONST: return lt.src[1], neg, int(a.val) + (0 if neg else 1)
   return a, not neg, int(lt.src[1].vmin) if neg else int(lt.src[1].vmax)-1
@@ -454,6 +456,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),
+  (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.load(UPat(Ops.INDEX, name="index")), UPat.var("alt"))),
+   lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate.logical_not())), alt)),
   # fold gated LOAD/STORE
   (UPat(Ops.STORE, src=(UPat(), invalid_pat), name="x"), lambda i,x: UOp(Ops.NOOP).after(*x.src)),
   # store of where with invalid -> gated store

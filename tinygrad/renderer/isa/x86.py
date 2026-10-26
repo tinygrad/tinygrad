@@ -93,7 +93,7 @@ def is_regbuf(x:UOp) -> bool: return x.without_after.addrspace is AddrSpace.REG 
 
 extra_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPEQ is XOR+XOR, bool CMPLT is XOR+AND
-  (UPat.var('x', dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
+  (UPat.var('x', dtypes.bool).alu(Ops.CMPNE, UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtypes.bool).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
   (UPat.var('x', dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
   # can't cast from float16 to ints/float64 directly and vice versa
@@ -152,7 +152,7 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
 # comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
 # different kernels)
 def flag_gate(m:UOp) -> UOp|None:
-  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
+  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.cast(dtypes.int).alu(Ops.CMPNE, UOp.cconst(0, dtypes.int))
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
@@ -286,15 +286,9 @@ def _xmm_sz(x: UOp) -> X86Ops:
   if bits >= 8: return X86Ops.VMOVSD
   return X86Ops.VMOVSS
 
-def _xmm_sz_m(x: UOp) -> X86Ops:
-  bits = x.max_numel() * x.dtype.itemsize
-  if bits >= 16: return X86Ops.VMOVUPSm
-  if bits >= 8: return X86Ops.VMOVSDm
-  return X86Ops.VMOVSSm
-
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.op is Ops.INS and x.arg[0] is X86Ops.IMM: return None
+  if is_imm(x): return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -302,7 +296,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # a register buffer is a REG, a stack buffer becomes the LEA of its address before regalloc
   if x.op in {Ops.BUFFER, Ops.ALLOC}: return reg(x.dtype, regbuf_reg(x)) if x.addrspace is AddrSpace.REG else None
   if regs(x): defs = [ctx.vreg(regs(x), x.dtype.itemsize)]
-  elif x.dtype in dtypes.floats or x.op is Ops.INS and x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
+  elif x.dtype in dtypes.floats or x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR, x.dtype.itemsize)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
@@ -421,10 +415,10 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.ins(X86Ops.VMOVDm)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
-  (UPat.var("a").store(UPat.var("val"), name="x"), lambda ctx,a,val,x:
+  (UPat.var("a").store(UPat.var("val")), lambda a,val:
     UOp(Ops.STACK).after(buf.ins(copy_op(val.dtype), regbuf_reg(buf.without_after), src=(val.after(buf),)))
     if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) else None),
-  (UPat.var("a").load().named("x"), lambda ctx,a,x:
+  (UPat.var("a").load().named("x"), lambda a,x:
     x.ins(copy_op(x.dtype), src=(buf,)) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: lea(x) if not _is_vec_xmm(x.src[0]) and x.addrspace is not AddrSpace.REG else None),
@@ -437,9 +431,9 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.MOV, src=fold_address(a)) if x.max_numel() == 1 else x.ins(_xmm_sz(x), src=fold_address(a))),
   (UPat.var("a").store(UPat.var("b", dtypes.floats), name="x"), lambda a,b,x: None if a.addrspace is AddrSpace.REG else
    x.ins(X86Ops.VPEXTRW, src=fold_address(a) + (b, imm(dtypes.uint8, 0))) if b.max_numel() * b.dtype.itemsize == 2 else
-   x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,))),
+   x.ins(X86Ops[_xmm_sz(b).name+"m"], src=fold_address(a) + (b,))),
   (UPat.var("a").store(UPat.var("b", dtypes.ints+(dtypes.bool,)), name="x"), lambda a,b,x: None if a.addrspace is AddrSpace.REG else
-   x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
+   x.ins(X86Ops[_xmm_sz(b).name+"m"], src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC), name="x"), alloc_vregs),
@@ -695,7 +689,7 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPNE)}
   linear_ctx_type = X86LinearContext
   def __init__(self, target:Target):
     if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
