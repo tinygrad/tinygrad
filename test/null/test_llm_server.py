@@ -350,6 +350,26 @@ class TestLLMServer(unittest.TestCase):
     self.assertTrue(raw.startswith(b" "))
     self.assertEqual(json.loads(raw)["choices"][0]["message"]["content"], "HelloHello")
 
+  def test_tool_call_held(self):
+    # a slow reply that's a tool call (sent when it ends, no chunks before): spaces while it's made all the same
+    import urllib.request
+    from tinygrad.helpers import getenv
+    from tinygrad.llm.serve import Request
+    seen = []
+    orig = self.server.emit
+    def slow_emit(req:Request, tok:int) -> bool:
+      time.sleep(0.12)
+      return orig(req, tok)
+    def generate(ids, **kwargs): yield from (300, 301, 302, 999)
+    self.addCleanup(getenv.cache_clear)
+    with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.server, "emit", side_effect=slow_emit), \
+         patch.object(self.mock_tok, "stream_decoder", return_value=lambda tid=None: ""), patch.dict(os.environ, {"HOLD_JSON": "0.05"}):
+      getenv.cache_clear()
+      req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                   data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}]}).encode())
+      seen.append(urllib.request.urlopen(req).read())
+    self.assertGreater(len(seen[0]) - len(seen[0].lstrip()), 2)
+
   def test_generate_runs_on_serving_thread(self):
     threads = []
     def generate(ids, **kwargs):

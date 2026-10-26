@@ -214,15 +214,23 @@ class Handler(VizHandler):
       # (special tokens no reply has: the sign of a model gone wrong, logged)
       specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
       odd = {i for t, i in specials.items() if t in ODD_TOKENS}
+      # (keepalive: a ping after that long without a chunk, also while tokens come that make none: a tool call is sent when it ends)
+      last = time.perf_counter()
       while (next_id := Handler.next_token(self, req, keepalive)) is not None:
         if next_id == PING:
           yield {"ping": True}
+          last = time.perf_counter()
           continue
         out.append(next_id)
         if next_id in odd:
           stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
           trace(f"odd token req {req.rid} after {len(out)}")
-        for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)): yield chunk({field:delta})
+        for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)):
+          yield chunk({field:delta})
+          last = time.perf_counter()
+        if keepalive is not None and time.perf_counter() - last > keepalive:
+          yield {"ping": True}
+          last = time.perf_counter()
       if req.error is not None:
         yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
         return
