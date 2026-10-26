@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK
+  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -956,7 +956,13 @@ class MLATransformerBlock(FFNBlock):
       assert self.indexer is not None and self.indexer.sparse and isinstance(start_pos, UOp), "a sequence sharded cache needs the sparse indexer"
       cache = seq_store(self.cache_s, k_store[0, 0], start_pos, T)
       lists = self.indexer.picks(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T)
-      attn = mla_sparse_seq(q, cache, lists, 1.0/self.config.head_dim**0.5, start_pos+T)
+      scale = 1.0/self.config.head_dim**0.5
+      if isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16) and getenv("SEQ_GATHER", 1):
+        # a chunk of a prompt: the cache before it read from the devices that have it (peer to peer), the chunk's own rows (every device
+        # computes them), the attention of the device's heads on the whole of it
+        whole = seq_gather(cache, k_store[0, 0], start_pos, T, round_up(self.config.max_context, 64))
+        attn = flash_attention_mla_sparse(q, whole.reshape(1, 1, 1, -1, whole.shape[-1]), lists, scale, start_pos+T)
+      else: attn = mla_sparse_seq(q, cache, lists, scale, start_pos+T)
       v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
       if bmm: attn = mla_bmm(attn, self.attn_v_b["weight"])
       else: attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b

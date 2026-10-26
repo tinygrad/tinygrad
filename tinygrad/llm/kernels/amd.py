@@ -3150,6 +3150,65 @@ def seq_picks(picks:Tensor, valid_len:int|UOp, devs:tuple[str, ...]) -> Tensor:
   out = Tensor.empty(len(devs)*T, W, dtype=dtypes.int32, device=devs, axis=0)
   return Tensor.custom_kernel(out, picks.contiguous(), _device_index(devs), fxn=functools.partial(_seq_picks_kernel, valid_len=vl, n=len(devs)))[0]
 
+_seq_view_cache:dict[int, list[Tensor]] = {}
+def seq_views(cache:Tensor) -> list[Tensor]:
+  """
+  the parts of a sequence sharded cache (n*rows, D) half on every device as (rows, D//4) uint64: view k on device d is the part of device
+  (d+k)%n (k > 0: the other device's memory mapped on this one, read peer to peer)
+  """
+  devs = cast(tuple[str, ...], cache.device)
+  mb = [u.buffer for u in cache.uop.toposort() if u.op is Ops.BUFFER][0]
+  if (views:=_seq_view_cache.get(id(mb))) is not None: return views
+  from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
+  n, rows, D = len(devs), int(cache.shape[0]) // len(devs), int(cache.shape[1])
+  def alias(b:Buffer, d:str) -> Buffer:
+    return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
+  views = []
+  # (made once, the buffers and their mappings: maybe while a function is traced)
+  with Context(ALLOW_DEVICE_USAGE=1):
+    own = [b.ensure_allocated() for b in cast(MultiBuffer, mb).bufs]
+    for k in range(n):
+      (vm:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % n], devs[d]) for d in range(n)]
+      views.append(Tensor(UOp.from_buffer(vm, dtypes.uint64, devs)).reshape(rows, D//4))
+  _seq_view_cache[id(mb)] = views
+  return views
+
+@functools.cache
+def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) -> UOp:
+  # the positions before start_pos of the part of device (me+k)%n (part: its rows, k > 0 another device's memory) into their rows of out
+  rows, C = cast(tuple[int, int], part.shape)
+  J = (start_pos + SEQ_BLK*n - 1) // (SEQ_BLK*n)
+  j, r, c = UOp.range(J, 0, AxisType.GLOBAL), UOp.range(SEQ_BLK, 1, AxisType.GLOBAL), UOp.range(C, 2, AxisType.LOCAL)
+  owner = (dev[0].load().cast(dtypes.weakint) + k) % n
+  p = (j*n + owner) * SEQ_BLK + r
+  return out[p.valid(p < start_pos), c].store(part[(j*SEQ_BLK + r).minimum(rows-1), c].load()).end(j, r, c) \
+    .sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
+
+@functools.cache
+def _seq_rows_kernel(out:UOp, k:UOp, start_pos:UOp, T:UOp) -> UOp:
+  # the rows of the tokens (the first T of k) at their positions
+  R, C = cast(tuple[int, int], k.shape)
+  t, c = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(C, 1, AxisType.LOCAL)
+  return out[(start_pos + t).valid(t < T), c].store(k[t, c].load()).end(t, c).sink(arg=KernelInfo(name="seq_rows", opts_to_apply=()))
+
+def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tensor:
+  """
+  the whole cache of the positions before start_pos+T on every device (N, D): the positions before start_pos read from the devices that
+  have them (peer to peer: they were written by the calls before this one, at whose end the caches are written back and invalidated), the
+  T tokens' rows k (R, D, on every device) at theirs
+  """
+  devs = cast(tuple[str, ...], cache.device)
+  n, D = len(devs), int(cache.shape[1])
+  sp, t = _unbind(start_pos), (_unbind(T) if isinstance(T, UOp) else UOp.const(T, dtypes.weakint))
+  # (after the cache's store: the rows of the tokens in the devices' parts for the calls after this one)
+  out = Tensor(Tensor.empty(N, D//4, dtype=dtypes.uint64, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T) if isinstance(v, UOp))))
+  for kk, part in enumerate(seq_views(cache)):
+    out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=kk, n=n))[0]
+  rows = k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
+  assert rows.shape[-1] == D//4, f"the rows of the tokens {k.shape} as {rows.shape}"
+  out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]
+  return out.bitcast(dtypes.half)
+
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp) -> Tensor:
   """
   the attention of the (1, H, T, D) queries (heads split over the devices) on the sequence sharded latent cache (n*rows, D), every token on the
