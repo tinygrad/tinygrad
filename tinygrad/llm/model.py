@@ -412,7 +412,8 @@ class GatedDeltaNetBlock(FFNBlock):
     assert self.num_v_heads % self.num_k_heads == 0
     self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
-    if ssm.kda: self.attn_q, self.attn_k, self.attn_v = (Linear(config.dim, self.q_dim, bias=False) for _ in range(3))
+    self.qkv_dims = (self.q_dim, self.q_dim, ssm.inner_size)
+    if ssm.kda: self.attn_q, self.attn_k, self.attn_v = (Linear(config.dim, d, bias=False) for d in self.qkv_dims)
     else: self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
     if ssm.kda:
       self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
@@ -421,7 +422,7 @@ class GatedDeltaNetBlock(FFNBlock):
       self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
       self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
-    if ssm.kda: self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v = ({"weight": Tensor.zeros(self.q_dim, ssm.conv_kernel)} for _ in range(3))
+    if ssm.kda: self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v = ({"weight": Tensor.zeros(d, ssm.conv_kernel)} for d in self.qkv_dims)
     else: self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
@@ -448,7 +449,7 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # qkv conv, conv_state is reset when starting from position 0
     def conv(conv_state:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
-      # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
+      # assemble the conv window in a static-size buffer: [conv_state | proj rows | zero-pad].
       # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
       conv_window = initial.where(0, conv_state).cat(proj.cast(conv_state.dtype), dim=1)
       conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
@@ -501,7 +502,7 @@ class GatedDeltaNetBlock(FFNBlock):
     if not hasattr(self, "conv_states"):
       kda = unwrap(self.config.ssm).kda
       self.conv_states = [Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, c, device=x.device, axis=-1 if kda else None)
-                          for c in ((self.q_dim,)*3 if kda else (self.conv_channels,))]
+                          for c in (self.qkv_dims if kda else (self.conv_channels,))]
       self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device, axis=1 if kda else None)
 
 class Transformer:

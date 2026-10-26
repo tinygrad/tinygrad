@@ -172,8 +172,10 @@ class TestTensorParallel(unittest.TestCase):
       for pos, expected in enumerate((12, 8)):
         x, start_pos = Tensor([[pos+1]]).realize(), Variable('start_pos', 0, 3).bind(pos)
         self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
-      # q/k/v, their convs and the recurrent state are sharded on the heads
+      # everything but the norms and the f/g down projections is sharded, the conv and recurrent states on their heads
       blk = parallel.blk[0]
-      self.assertEqual([t.uop.axis for t in (blk.attn_q.weight, blk.ssm_conv1d_v["weight"], blk.conv_states[0], blk.recurrent_state)], [0, 0, 2, 1])
+      self.assertEqual(sorted(k for k,v in nn.state.get_state_dict(blk).items() if v.uop.axis is None),
+                       ['attn_norm.weight', 'ffn_norm.weight', 'ssm_f_a.weight', 'ssm_g_a.weight', 'ssm_norm.weight'])
+      self.assertEqual([t.uop.axis for t in (*blk.conv_states, blk.recurrent_state)], [2, 2, 2, 1])
 
 if __name__ == '__main__': unittest.main()
