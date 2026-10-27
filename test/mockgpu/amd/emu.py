@@ -58,8 +58,8 @@ from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEV, DEBUG, PROFILE, colored, ContextVar, dedup, to_mv
 from tinygrad.engine.realize import get_runtime, run_linear
 from tinygrad.codegen import to_program
-
 from tinygrad.renderer.amd import decode_inst
+from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
 from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
@@ -2004,7 +2004,6 @@ pm_asm_call = PatternMatcher([
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
 def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
          user_data_count:int=0, name="") -> UOp:
-  from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN
   # decode
   view = to_mv(lib, lib_sz)
   insts = amd_decode(view, arch)
