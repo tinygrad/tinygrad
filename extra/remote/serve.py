@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import socket, struct, sys, signal, ctypes, time
+import socket, struct, sys, signal, ctypes, time, json
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
@@ -79,7 +79,9 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     FileIOInterface.munmap(arg0, arg1)
     conn.sendall(resp())
   elif cmd == RemoteCmd.LOAD_PROG:
-    programs.append(Device["CPU"].runtime(TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), ())))
+    lib = conn.recv(arg0, socket.MSG_WAITALL)
+    links = {n:programs[i] for n,i in json.loads(conn.recv(arg1, socket.MSG_WAITALL)).items()}
+    programs.append(Device["CPU"].runtime(TinyELF(lib, "hcq_submit", Target("CPU"), ()), links=links))
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
     kernargs = ctypes.create_string_buffer(conn.recv(arg1, socket.MSG_WAITALL))

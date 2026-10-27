@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, ctypes, struct
+import platform, ctypes, struct, json
 from typing import Any
 from tinygrad.helpers import OSX, unwrap, data64_le, cpu_profile
 from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, BufferSpec
@@ -15,13 +15,16 @@ from tinygrad.runtime.autogen import libc
 class CPUProgram(Program['CPUDevice']):
   rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
 
-  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()))
+  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()),
+                                                                                              link_syms={n:p.buf.buf for n,p in self.links.items()})
 
-  def __init__(self, dev:CPUDevice, obj:TinyELF):
-    self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
+  def __init__(self, dev:CPUDevice, obj:TinyELF, links:dict[str,CPUProgram]):
+    self.dev, self.name, self.signature, self.profile_key, self.links = dev, obj.name, obj.signature, obj.profile_key, links
     self.lvp = obj.target.renderer == "LVP"
     self.packer = struct.Struct(''.join(unwrap(dt.fmt) for _, dt in TinyELF.iter_sig(self.signature)))
-    if dev.remote is not None: self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), payload=obj.lib)[0]
+    if dev.remote is not None:
+      link_ids = json.dumps({n:p.fxn for n,p in links.items()}).encode()
+      self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(link_ids), payload=obj.lib + link_ids)[0]
     else:
       self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True))
       loaded = self._load(obj.lib, self.buf.buf)
