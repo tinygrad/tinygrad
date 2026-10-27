@@ -349,6 +349,7 @@ class TestOps(TensorTestCase):
   def test_cmp_ge(self): self._test_cmp(lambda x,y: x>=y)
   def test_cmp_lt(self): self._test_cmp(lambda x,y: x<y)
   def test_cmp_le(self): self._test_cmp(lambda x,y: x<=y)
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_cmp_lt_int_mul_add(self):
     self.assertEqual((((Tensor([-2**30-1], dtype=dtypes.int32)+1)*2)<0).tolist(), [True])
 
