@@ -51,7 +51,7 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, rewrite_group, uopfunc, AxisType
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, uopfunc, AxisType
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
@@ -1967,7 +1967,6 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 
 dispatch_cache:dict[tuple, UOp] = {}
 
-@rewrite_group(name=lambda insts,arch,renderer,dispatch,name,ret: f"lift {name}")
 def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
