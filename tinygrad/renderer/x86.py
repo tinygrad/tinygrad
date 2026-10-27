@@ -172,7 +172,7 @@ extra_matcher = PatternMatcher([
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
-  (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
+  (UPat(Ops.TRUNCMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.TRUNCDIV, y)),
   # scalar reg gated mops become cmovs
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate")),
     lambda addr,alt,gate: gate.where(addr.load(), alt) if is_regbuf(addr.src[0]) else None),
@@ -406,7 +406,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.floats).index(UPat.cvar("c").cast(), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, c.val * x.dtype.itemsize))) if _is_vec_xmm(y) else None),
   # int binary
-  ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
+  ((UPat(dtype=dtypes.ints).alu(Ops.TRUNCDIV, UPat())).named("x"), idiv),
   # int binary with immediate
   (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.val)))),
   (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.val)))),

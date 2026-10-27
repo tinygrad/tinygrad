@@ -52,7 +52,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       (a00, a01), (b00, b01) = unpack32(a0), unpack32(b0)
       mid = l2i(Ops.ADD, dt, shl(a00*b01, 16).bitcast(dt), shr(a00*b01, 16).bitcast(dt), shl(a01*b00, 16).bitcast(dt), shr(a01*b00, 16).bitcast(dt))
       return l2i(Ops.ADD, dt, *mid, (a00*b00).bitcast(dt), (a01*b01).bitcast(dt) + a0*b1 + a1*b0)
-    case Ops.CDIV | Ops.CMOD:
+    case Ops.TRUNCDIV | Ops.TRUNCMOD:
       # TAOCP Algorithm 4.3.1D could be faster here, but must be parameterized over the width of b
       if dt == dtypes.int:
         ua0, ua1, ub0, ub1 = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), b0.bitcast(dtypes.uint), b1.bitcast(dtypes.uint)
@@ -69,8 +69,8 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       if dt == dtypes.int:
         (nq0, nq1), (nr0, nr1) = l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *q)), l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *r))
         (q0, q1), (r0, r1) = l2i(Ops.BITCAST, dt, *q), l2i(Ops.BITCAST, dt, *r)
-        return (a_neg.where(nr0, r0), a_neg.where(nr1, r1)) if op == Ops.CMOD else ((a_neg^b_neg).where(nq0, q0), (a_neg^b_neg).where(nq1, q1))
-      return r if op == Ops.CMOD else q
+        return (a_neg.where(nr0, r0), a_neg.where(nr1, r1)) if op == Ops.TRUNCMOD else ((a_neg^b_neg).where(nq0, q0), (a_neg^b_neg).where(nq1, q1))
+      return r if op == Ops.TRUNCMOD else q
     case Ops.CMPLT: return (a1 < b1) | ((a1.eq(b1)) & (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)))
     case Ops.CMPEQ: return a0.eq(b0) & a1.eq(b1)
     case Ops.CMPNE: return a0.ne(b0) | a1.ne(b1)

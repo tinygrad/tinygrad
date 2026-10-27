@@ -16,7 +16,7 @@ def render_val(x, dtype):
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
 asm_for_op: dict[Ops, Callable] = {
-  Ops.RECIPROCAL: lambda d,a,dt,name: f"rcp.approx.{name} {d}, {a};",
+  Ops.RECIP: lambda d,a,dt,name: f"rcp.approx.{name} {d}, {a};",
   Ops.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", Ops.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
   Ops.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", Ops.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
   Ops.TRUNC: lambda d,a,dt,name: f"cvt.rzi.{name}.{name} {d}, {a};",
@@ -26,7 +26,7 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.XOR: lambda d,a,b,dt,name: f"xor.pred {d}, {a}, {b};" if dt == dtypes.bool else f"xor.b{name[1:]} {d}, {a}, {b};",
   Ops.AND: lambda d,a,b,dt, name: f"and.pred {d}, {a}, {b};" if dt == dtypes.bool else f"and.b{name[1:]} {d}, {a}, {b};",
   Ops.OR: lambda d,a,b,dt, name: f"or.pred {d}, {a}, {b};" if dt == dtypes.bool else f"or.b{name[1:]} {d}, {a}, {b};",
-  Ops.CDIV: lambda d,a,b,dt,name: f"div.{name} {d}, {a}, {b};", Ops.CMOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
+  Ops.TRUNCDIV: lambda d,a,b,dt,name: f"div.{name} {d}, {a}, {b};", Ops.TRUNCMOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
   Ops.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", Ops.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
   Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
   Ops.CMPNE: lambda d,a,b,dt,name: f"setp.{'neu' if dtypes.is_float(dt) else 'ne'}.{name} {d}, {a}, {b};",

@@ -11,7 +11,7 @@ from tinygrad.helpers import Context
 from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
 
-# symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
+# symbolic-only idx + valid simplification (no late lowering of DIV/MOD)
 def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
 # image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
 def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")

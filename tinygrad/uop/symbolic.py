@@ -33,8 +33,8 @@ def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
   # moves consts freely: the quotient may be merged ((x//c + a)//div -> (x + a*c)//(c*div) for div>0) and shifted ((y + k*D)//D == y//D + k)
   (q, s), (num, a) = q.pop_const(), base.pop_const()
-  if q.op is not Ops.FLOORDIV or q.src[1].op is not Ops.CONST: return None
-  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].val == (c:=num.src[1].val)*div: num, a, D = num.src[0], a*c, c*div
+  if q.op is not Ops.DIV or q.src[1].op is not Ops.CONST: return None
+  if div > 0 and num.op is Ops.DIV and num.src[1].op is Ops.CONST and q.src[1].val == (c:=num.src[1].val)*div: num, a, D = num.src[0], a*c, c*div
   elif q.src[1].val == div: D = div
   else: return None
   (x, xa), (p, pa) = num.pop_const(), q.src[0].pop_const()
@@ -48,14 +48,14 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   terms = list(x.split_uop(Ops.ADD))
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
-    if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
+    if mod.op is not Ops.MOD or mod.src[1].op is not Ops.CONST: continue
     base, div = mod.src[0], mod.src[1].val
     for j,v in enumerate(terms):
       q, scale = v.pop_const(Ops.MUL)
       if i == j or scale != div*mul: continue
       rest = [t for k,t in enumerate(terms) if k not in (i,j)]
       if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
-      if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].val) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
+      if q.op is Ops.MOD and q.src[1].op is Ops.CONST and (d:=q.src[1].val) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
         return ((b % (div*d))*mul).usum(*rest)
   return None
 
@@ -275,7 +275,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # complementary zero branches under the same condition select directly
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
   # ALU/variable min==max -> CONST
-  (UPat({Ops.CMPLT, Ops.CMPEQ, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.SPECIAL}, name="x"),
+  (UPat({Ops.CMPLT, Ops.CMPEQ, Ops.DIV, Ops.MOD, Ops.PARAM, Ops.SPECIAL}, name="x"),
    lambda x: x.const_like(x.vmin) if x.dtype is not dtypes.void and x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat.cvar().or_casted(),), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
@@ -430,7 +430,7 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   # pure index math only: a LOAD in x executes even where cond is false, so its INDEX valid must survive the assumption
   if x.dtype is not dtypes.weakint or x.op_in_backward_slice_with_self(Ops.INDEX): return None
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
-  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
+  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.TRUNCDIV, Ops.TRUNCMOD, Ops.DIV, Ops.MOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
 pm_simplify_valid = PatternMatcher([
