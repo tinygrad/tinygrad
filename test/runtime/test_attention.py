@@ -155,6 +155,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
       return block.conv_state.numpy(), block.recurrent_state.numpy()
+    elif hasattr(block, 'conv_states'):
+      return np.concatenate([s.numpy() for s in block.conv_states], -1), block.recurrent_state.numpy()
     else:
       conv_flat = (block.ssm_conv_kernel - 1) * block.conv_channels
       cache = block.delta_cache.numpy()
@@ -163,7 +165,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       return conv_state, recurrent_state
 
   def _reset_state(self, block:GatedDeltaNetBlock):
-    Tensor.realize(block.conv_state.assign(block.conv_state.const_like(0)),
+    Tensor.realize(*[s.assign(s.const_like(0)) for s in (block.conv_states if hasattr(block, 'conv_states') else [block.conv_state])],
                    block.recurrent_state.assign(block.recurrent_state.const_like(0)))
 
   def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
@@ -273,8 +275,9 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     # q/k are normalized as x/sqrt(sum(x²)+1e-6) like FLA: tiny vectors aren't scaled up to unit length
     ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True)
     block = GatedDeltaNetBlock(self._make_config(dim=16, n_heads=2, ssm=ssm), ssm)
-    block.attn_qkv.weight = Tensor([1e-4]*32 + [1.0]*16).reshape(48, 1).expand(48, 16) / 16  # x of ones: q = k = 1e-4, v = 1
-    block.ssm_conv1d["weight"], block.ssm_beta.weight = Tensor.ones(48, 4), Tensor.zeros(2, 16)
+    block.attn_q.weight = block.attn_k.weight = Tensor.full((16, 16), 1e-4/16)  # x of ones: q = k = 1e-4, v = 1
+    block.attn_v.weight, block.ssm_beta.weight = Tensor.full((16, 16), 1/16), Tensor.zeros(2, 16)
+    block.ssm_conv1d_q["weight"] = block.ssm_conv1d_k["weight"] = block.ssm_conv1d_v["weight"] = Tensor.ones(16, 4)
     x = Tensor.ones(1, 1, 16)
     block._init_state(x)
     block._attention(x, 0).realize()
