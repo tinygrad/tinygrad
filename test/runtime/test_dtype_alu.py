@@ -7,7 +7,7 @@ from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.uop import Ops
 import numpy as np
 import pytest

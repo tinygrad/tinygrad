@@ -5,7 +5,7 @@ from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, dtypes, AddrSpace
-from tinygrad.renderer.isa import ISARenderer
+from tinygrad.renderer.x86 import ISARenderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.helpers import Target
