@@ -362,7 +362,7 @@ class TinyELF:
       offset += dt.itemsize
 
 class Program(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType, obj:TinyELF): pass
+  def __init__(self, dev:DeviceType, obj:TinyELF, links:dict[str,Program[DeviceType]]): pass
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False) -> float|None: pass
 
 class Compiled:
@@ -404,7 +404,8 @@ class Compiled:
   @property
   def compiler(self) -> Compiler: return self.renderer.compiler
 
-  def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
+  def runtime(self, obj:TinyELF, links:dict[str,Program[Self]]={}) -> Program[Self]:
+    return unwrap(self.runtime_t)(self, obj, links=links)
 
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]

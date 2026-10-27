@@ -69,7 +69,7 @@ spec_shared = PatternMatcher([
   (UPat((Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR), name="x"), lambda x: False if any(dtypes.is_float(s.dtype) for s in x.src) else None),
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("c")), name="a"), lambda a,x,c:
    matches_dtype(c, a.dtype) or c.dtype in (dtypes.uint, dtypes.weakint) or x.base.is_invalid),
-  (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"),
+  (UPat((Ops.TRUNCDIV, Ops.TRUNCMOD, Ops.DIV, Ops.MOD), name="x"),
    lambda x: None if dtypes.is_int(x.dtype) or any(s.base.is_invalid for s in x.src) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(matches_dtype(y, x.dtype) or y.dtype == weak_dtype(x.dtype) for y in x.src)),
 
@@ -142,7 +142,7 @@ def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isi
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
-  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"),
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIP), src=(UPat(),), name="u"),
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
   # BUFFER has bound storage; ALLOC declares storage without a runtime buffer

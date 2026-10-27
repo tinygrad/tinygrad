@@ -105,7 +105,9 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.to_elf())
+    links = {call.body.src[0].arg.function_name:get_runtime(device, call.body, cache)
+             for call in ast.src[1].src if call.op is Ops.CALL and call.body.op is Ops.PROGRAM}
+    runtime = Device[device].runtime(ast.to_elf(), links=links)
     if cache: runtime_cache[key] = runtime
   return runtime
 

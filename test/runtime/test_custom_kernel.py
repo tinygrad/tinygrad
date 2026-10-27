@@ -1,11 +1,10 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import run_linear, get_runtime
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
-from tinygrad.helpers import getenv
-from test.mockgpu.amd.emu import ASM_CALL
+from tinygrad.helpers import getenv, DEV
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
@@ -587,7 +586,8 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.shape, (2, 2))
 
   @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
-                       Device.DEFAULT != "WEBGPU" and not ASM_CALL, "binary not supported on this backend")
+                       Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK"), "AMD emulator doesn't support direct pc read and write")
   def test_binary(self):
     payload = bytes(range(256))
     def kernel(out:UOp):
@@ -596,8 +596,8 @@ class TestCustomKernel(unittest.TestCase):
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
 
-@unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer))) \
-    or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "calls in kernels render not implemented in renderer")
+@unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer))),
+                     "calls in kernel not implemented in this renderer")
 class TestCallInKernel(unittest.TestCase):
   def test_simple(self):
     N = getenv("N", 4)
@@ -663,6 +663,18 @@ class TestCallInKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3, 6, 9, 12])
 
+  def test_call_scalar_arg(self):
+    @uopfunc
+    def add(out:UOp, src:UOp, val:UOp) -> UOp:
+      return out[0].store(src[0]+val).sink()
+
+    def kernel(out:UOp, src:UOp) -> UOp:
+      i = UOp.range(4, 0)
+      return add(out[i], src[i], i).end(i).sink(arg=KernelInfo(name="call_scalar_arg", opts_to_apply=()))
+
+    x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    self.assertEqual(Tensor.empty_like(x).custom_kernel(x, fxn=kernel)[0].tolist(), [1, 3, 5, 7])
+
   def test_call_with_gated_store(self):
     @uopfunc
     def gated_store(out:UOp, idx:UOp):
@@ -723,8 +735,11 @@ class TestCallInKernel(unittest.TestCase):
       i = UOp.range(x.shape[0], 0, AxisType.LOOP)
       return out[i].store(out[i] + x[i] * a).end(i).sink()
 
+    @uopfunc
+    def triple(out:UOp, x:UOp): return axpy(out, x, 3).sink()
+
     def kernel(C:UOp, A:UOp) -> UOp:
-      C = C.after(axpy(C.after(axpy(C, A, 2)), A, 3))
+      C = C.after(triple(C.after(axpy(C, A, 2)), A))
       i = UOp.range(A.shape[0], 1, AxisType.LOOP) # a loop after the calls
       return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
 
@@ -765,9 +780,41 @@ class TestCallInKernel(unittest.TestCase):
     y, z = y.to("CPU"), z.to("CPU")
     Tensor.realize(y, z)
 
-    with self.assertRaises(AssertionError):
-      self.assertEqual(y.tolist(), z.tolist())
+    self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
+
+  def test_compile_cache(self):
+    @uopfunc
+    def plus2(out:UOp, A:UOp): return out[0].store(A[0]+2).sink()
+
+    @uopfunc
+    def copy(out:UOp, A:UOp): return out[0].store(A[0]).sink()
+
+    def kernel(A:UOp, extra=False):
+      A = A.flatten()
+      i = UOp.range(A.shape[0], 0)
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      if extra: tmp = tmp.after(copy(tmp[i], A[i]))
+      return A[i].store(tmp[i].after(plus2(tmp[i], A[i]))).end(i).sink(arg=KernelInfo(name="test_kernel", opts_to_apply=()))
+
+    x = Tensor.custom_kernel(Tensor.arange(4).clone().realize(), fxn=kernel)[0]
+    run_linear(lin:=x.schedule_linear())
+
+    prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
+    assert "+2" not in prg.src[2].arg, f"found callee body in caller kernel {prg.src[2].arg}"
+    call = next(u for u in prg.src[1].src if u.op is Ops.CALL)
+    first_binary = call.body.src[3]
+    call_runtime = get_runtime(Device.DEFAULT, call.body)
+    self.assertListEqual(x.tolist(), Tensor.arange(4).add(2).tolist())
+
+    # launch a different caller with the same callee
+    x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=lambda A: kernel(A, extra=True))[0]
+    run_linear(lin:=x.schedule_linear())
+    prg2 = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer).src[1]
+    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call.body))
+    self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

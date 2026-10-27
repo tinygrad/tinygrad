@@ -69,8 +69,9 @@ base_rewrite = PatternMatcher([
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{ctx.fn_names[body]}("
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src if u.op is Ops.PARAM))});"),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
+   f"{body.src[0].arg.function_name}(&(struct {body.src[0].arg.function_name}_args){{"
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)}}});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -145,14 +146,13 @@ class CStyleLanguage(Renderer):
     dtypes.f32: "float", dtypes.f64: "double"}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  fn_prefix: str = ""
   code_for_op: dict = {
-    Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIPROCAL: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
+    Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.TRUNC: lambda x,dtype: f"trunc({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}|{b})",
     Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
-    Ops.CMOD: lambda a,b,dtype: f"({a}%{b})", Ops.CDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"({a}!={b})",
+    Ops.TRUNCMOD: lambda a,b,dtype: f"({a}%{b})", Ops.TRUNCDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"({a}!={b})",
     Ops.SHR: lambda a,b,dtype: f"({a}>>{b})", Ops.SHL: lambda a,b,dtype: f"({a}<<{b})", Ops.CMPLT: lambda a,b,dtype: f"({a}<{b})",
     Ops.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})", Ops.CMPEQ: lambda a,b,dtype: f"({a}=={b})"}
 
@@ -166,8 +166,8 @@ class CStyleLanguage(Renderer):
                        self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     if self.args_struct_prefix is not None:
-      prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} {n}; " for n,(u,_) in bufs) + "};"]
-      kernel = [f"  {t} {n} = args->{n};" for n,t in buftypes] + kernel
+      prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} arg{u.arg.slot}; " for _,(u,_) in bufs) + "};"]
+      kernel = [f"  {self.param_type(u)} {n} = args->arg{u.arg.slot};" for n,(u,_) in bufs] + kernel
       buftypes = [("args", f"{self.args_struct_prefix} struct {function_name}_args*")]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
@@ -276,16 +276,11 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
-    prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in topo if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
-    for body in (u for u in topo if u.op is Ops.LINEAR):
-      self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
-      _, call, bufs = self._render(body.src)
-      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
-      prefix.append(f"static inline {self.fn_prefix} void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
-      call_bodies.extend(body.src)
-    return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
+    fns = {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
+    prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
+                f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
+              *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
+    return self.render_kernel(*self._render(uops), uops, prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -301,7 +296,7 @@ class ClangRenderer(CStyleLanguage):
   barrier = "__atomic_thread_fence(__ATOMIC_SEQ_CST);"
   buffer_suffix = " restrict"
   type_map = {**CStyleLanguage.type_map, dtypes.bool:"_Bool", dtypes.f16:"__fp16"}
-  code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.RECIPROCAL]}),
+  code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.RECIP]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
@@ -444,7 +439,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
-    Ops.RECIPROCAL: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
+    Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
   type_map = {**CStyleLanguage.type_map, dtypes.u32: "uint", dtypes.bf16: "nv_bfloat16",
               dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
   extra_matcher = pm_narrow_uint + create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
@@ -507,7 +502,6 @@ class HIPRenderer(CStyleLanguage):
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
-  fn_prefix = "__attribute__((device))"
 
   @staticmethod
   def is_cdna(arch): return arch in {"gfx942", "gfx950"}

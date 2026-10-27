@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import replace, dataclass, field
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
@@ -7,7 +7,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.isa import ISARenderer, IselContext
+from tinygrad.renderer.x86 import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -234,7 +234,7 @@ pm_add_local_buffers = PatternMatcher([
 # float ALUs need a float operand
 # make that cast explicit before the decomps, which expand SIN/LOG2/EXP2 into float polynomials and assert a float operand
 pm_cast_float_alu = PatternMatcher([
-  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(name="x"),), name="u"),
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIP), src=(UPat(name="x"),), name="u"),
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
 ])
 
@@ -321,7 +321,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = graph_rewrite(sink, symbolic_simple+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
+  # an image is read_only or write_only, so a PARAM that is both loaded and stored stays a buffer
+  loaded, stored = [{u.src[0].buf_uop for u in sink.toposort() if u.op is op} for op in (Ops.LOAD, Ops.STORE)]
+  sink = graph_rewrite(sink, symbolic_simple+pm_simplify_add_image, name="add images", ctx=({}, ren, loaded & stored), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies
@@ -410,16 +412,20 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
-def lower_call(ctx:Renderer, call:UOp) -> UOp:
-  key = (call.body.key, type(ctx), ctx.target, *[x.value for x in to_program_config])
-  if (body:=to_program_cache.get(key)) is None:
-    body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-    body = full_rewrite_to_sink(body, ctx, optimize=False)
-    to_program_cache[key] = body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)))
-  return call.replace(src=(body.replace(arg=to_function_name(call.arg.name)),)+call.src[1:])
+@dataclass
+class LowerCallsCtx:
+  renderer: Renderer
+  names: dict[str, dict[UOp, int]] = field(default_factory=dict)
+
+def lower_call(ctx:LowerCallsCtx, call:UOp) -> UOp|None:
+  if call.body.op is Ops.PROGRAM and call.body.src[-1].op is Ops.BINARY: return None
+  bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
+  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(call.body, len(bodies))) else ""), optimized=True)
+  body = call.body.substitute({call.body.src[0]:call.body.src[0].replace(arg=ki)}) if call.body.op is Ops.PROGRAM else call.body.replace(arg=ki)
+  return call.replace(src=(to_program(body, ctx.renderer), *call.src[1:]))
 
 pm_lower_calls = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), allow_any_len=True, name="call"), lower_call),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
@@ -482,10 +488,10 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer), name="lower calls", walk=True)
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
-    ast = graph_rewrite(ast, pm_lower_calls, ctx=renderer, name="lower calls", walk=True)
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=not ast.arg.optimized)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection

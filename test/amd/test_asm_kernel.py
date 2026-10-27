@@ -8,13 +8,12 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
 from test.amd.helpers import TARGET_TO_ARCH
-from test.mockgpu.amd.emu import ASM_CALL
 from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
@@ -209,7 +208,6 @@ def custom_data_deps(A:UOp) -> UOp:
 class TestAsmKernel(unittest.TestCase):
   def setUp(self):
     self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
-    self.enterContext(Context(ASM_CALL=max(ASM_CALL.value, 1)))
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
@@ -254,7 +252,6 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
-  @unittest.expectedFailure
   def test_cfg_branch_diamond(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):

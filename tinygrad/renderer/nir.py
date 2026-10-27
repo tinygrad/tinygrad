@@ -16,10 +16,10 @@ def glsl_type(t:DType): return {
   **{d:g(f"glsl_type_builtin_{'u' * (d in dtypes.uints)}int{str(d.bitsize)+'_t' if d.itemsize != 4 else ''}") for d in dtypes.ints}}[t]
 
 # alu ops, aop[<dtype>][<op>]
-u_aop = { Ops.ADD: "iadd", Ops.MUL: "imul", Ops.CDIV: "udiv", Ops.CMOD: "umod", Ops.CMPLT: "ult", Ops.CMPNE: "ine", Ops.CMPEQ: "ieq", Ops.OR: "ior",
-          Ops.AND: "iand", Ops.XOR: "ixor", Ops.WHERE: "bcsel", Ops.MAX: "umax", Ops.SHL: "ishl", Ops.SHR: "ushr"}
-s_aop = {**u_aop, Ops.CMPLT: "ilt", Ops.CDIV: "idiv", Ops.CMOD: "irem", Ops.MAX: "imax", Ops.SHR: "ishr"}
-f_aop = { Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "flt", Ops.CMPNE: "fneu", Ops.CMPEQ: "feq", Ops.FDIV: "fdiv", Ops.RECIPROCAL: "frcp",
+u_aop = { Ops.ADD: "iadd", Ops.MUL: "imul", Ops.TRUNCDIV: "udiv", Ops.TRUNCMOD: "umod", Ops.CMPLT: "ult", Ops.CMPNE: "ine", Ops.CMPEQ: "ieq",
+          Ops.OR: "ior", Ops.AND: "iand", Ops.XOR: "ixor", Ops.WHERE: "bcsel", Ops.MAX: "umax", Ops.SHL: "ishl", Ops.SHR: "ushr"}
+s_aop = {**u_aop, Ops.CMPLT: "ilt", Ops.TRUNCDIV: "idiv", Ops.TRUNCMOD: "irem", Ops.MAX: "imax", Ops.SHR: "ishr"}
+f_aop = { Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "flt", Ops.CMPNE: "fneu", Ops.CMPEQ: "feq", Ops.FDIV: "fdiv", Ops.RECIP: "frcp",
           Ops.MAX: "fmax", Ops.TRUNC: "ftrunc", Ops.SIN: "fsin", Ops.EXP2: "fexp2", Ops.LOG2: "flog2", Ops.SQRT: "fsqrt"}
 aop = {**{x:u_aop for x in (dtypes.bool,)+dtypes.uints}, **{x:s_aop for x in dtypes.sints}, **{x:f_aop for x in dtypes.floats}}
 
