@@ -1182,12 +1182,6 @@ class TestSymbolic(unittest.TestCase):
     r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.weakint), 0)
     self.helper_test_variable(r0, 0, 0, "r0")
 
-  def test_const_reciprocal(self):
-    a = Variable("a", 1, 10, dtypes.float)
-    # TODO: bounds for reciprocal
-    # TODO: should z3 work?
-    self.helper_test_variable(2*(2*a).reciprocal(), -math.inf, math.inf, "a.reciprocal()", test_z3=False)
-
   def test_trunc_noop(self):
     a = Variable("a", 1, 10, dtypes.int)
     self.helper_test_variable(a.trunc(), 1, 10, "a", test_z3=False)
