@@ -1968,7 +1968,7 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 dispatch_cache:dict[tuple, UOp] = {}
 
 @rewrite_group(name=lambda insts,arch,renderer,dispatch,name,ret: f"lift {name}")
-def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
     if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"AMD lifter does not support {inst_st}")
@@ -2081,7 +2081,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, len(user_data or []))
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = _lift(amd_decode(code, arch), arch, renderer, dispatch, name)
+      dispatch_cache[key] = lift(amd_decode(code, arch), arch, renderer, dispatch, name)
     prg = dispatch_cache[key]
   vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
   with _MXCSRContext():
