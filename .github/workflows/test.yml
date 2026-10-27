@@ -562,6 +562,12 @@ jobs:
         run: python -m pytest test/null/test_hcq2.py test/runtime/test_hcq2.py
       - name: Run disk copy tests on MOCKPCI
         run: python -m pytest test/runtime/test_disk_tensor.py -k test_copy_from_disk
+      - name: Run test_tiny on MOCKPCI over REMOTE
+        run: |
+          python3 extra/remote/serve.py 6482 &
+          trap 'kill $!' EXIT
+          sleep 1
+          REMOTE=127.0.0.1:6482 python -m pytest test/test_tiny.py
       - name: Run tests on MOCK+HIP
         run: DEV=MOCK+HIP python -m pytest -n=auto test/test_tiny.py test/runtime/test_jit.py test/runtime/test_hcq2.py test/runtime/test_dtype.py
 
