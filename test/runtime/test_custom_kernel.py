@@ -798,23 +798,22 @@ class TestCallInKernel(unittest.TestCase):
       return A[i].store(tmp[i].after(plus2(tmp[i], A[i]))).end(i).sink(arg=KernelInfo(name="test_kernel", opts_to_apply=()))
 
     x = Tensor.custom_kernel(Tensor.arange(4).clone().realize(), fxn=kernel)[0]
-    lin = x.schedule_linear()
+    run_linear(lin:=x.schedule_linear())
+
     prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
-    self.assertEqual(sum("plus2" in s for s in prg.src[2].arg.splitlines()), 2)  # declaration and call, no definition
-    call = next(u.body for u in prg.src[1].src if u.op is Ops.CALL)
-    self.assertEqual(call.op, Ops.PROGRAM)
-    binary = call.src[3]
-    run_linear(lin)
-    call_runtime = get_runtime(Device.DEFAULT, call)
+    assert "+2" not in prg.src[2].arg, f"found callee body in caller kernel {prg.src[2].arg}"
+    call = next(u for u in prg.src[1].src if u.op is Ops.CALL)
+    first_binary = call.body.src[3]
+    call_runtime = get_runtime(Device.DEFAULT, call.body)
     self.assertListEqual(x.tolist(), Tensor.arange(4).add(2).tolist())
 
+    # launch a different caller with the same callee
     x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=lambda A: kernel(A, extra=True))[0]
-    lin = x.schedule_linear()
-    prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
-    self.assertIs(call, next(u.body for u in prg.src[1].src if u.op is Ops.CALL and u.arg.name == "plus2"))
-    self.assertIs(binary, next(u.body.src[3] for u in prg.src[1].src if u.op is Ops.CALL and u.arg.name == "plus2"))
-    run_linear(lin)
-    self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call))
+    run_linear(lin:=x.schedule_linear())
+    prg2 = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer).src[1]
+    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call.body))
     self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
 
 class TestCustomKernelInput(unittest.TestCase):
