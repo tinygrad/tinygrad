@@ -276,8 +276,11 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    prefix = [f"extern void {f}();" for f in dedup(u.arg.name for u in uops if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
-    return self.render_kernel(*self._render(uops), uops, prefix or None)
+    fns = {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
+    prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
+                f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
+              *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
+    return self.render_kernel(*self._render(uops), uops, prefix)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -323,13 +326,6 @@ class ClangRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
-
-  def render(self, uops:list[UOp]) -> str:
-    fns = {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
-    prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
-                f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
-              *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
-    return self.render_kernel(*self._render(uops), uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   # language options
