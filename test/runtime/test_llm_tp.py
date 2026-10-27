@@ -164,6 +164,7 @@ class TestTensorParallel(unittest.TestCase):
       for name,weight in nn.state.get_state_dict(Transformer(config)).items():
         value = -rng.random(weight.shape) if name.endswith('ssm_a') else rng.normal(1, .1, weight.shape) if 'norm' in name else \
                 rng.normal(0, .5 if 'token_embd' in name else .3, weight.shape)
+        value = value.reshape(-1) if name.endswith('ssm_a') else value[:, None] if 'ssm_conv1d' in name else value
         writer.add_tensor(name.replace('ssm_out', 'attn_output'), value.astype(np.float16))
       write_gguf(writer)
       parallel = Transformer.from_gguf(path, 4, realize=True, shard=2)[0]
