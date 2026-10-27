@@ -793,7 +793,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
   def test_div_partial_quotient(self):
-    # FLOORDIV should extract partial quotients when const_factor > divisor, matching what FLOORMOD already does
+    # DIV should extract partial quotients when const_factor > divisor, matching what MOD already does
     # (f*x+c)//d -> (f%d*x+c)//d + (f//d)*x  when f >= d
     b = Variable("b", 0, 100)
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
@@ -838,7 +838,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((x%4)*-2 + ((x//4)%2)*-8, -14, 0, "(x%8*-2)")
 
   def test_mod_nest_by_factor(self):
-    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for FLOORMOD
+    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for MOD
     gidx0 = Variable("gidx0", 0, 15)
     lidx0 = Variable("lidx0", 0, 3)
     # f=4, k=2, c=8: (gidx0*4+lidx0)%8 = (gidx0%2)*4 + lidx0
@@ -852,7 +852,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b)%9, 0, 8, "(b+a%3*3)")
 
   def test_mod_nest_by_factor_with_const(self):
-    # nest_by_factor FLOORMOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
+    # nest_by_factor MOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
     a = Variable("a", 0, 7)
     b = Variable("b", 0, 1)
     # f=4, k=2, const=2: (a*4+b+2)%8 = (a%2)*4 + b + 2
@@ -864,7 +864,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
 
   def test_div_nest_by_factor_with_const(self):
-    # nest_by_factor FLOORDIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
+    # nest_by_factor DIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
     a = Variable("a", 0, 2)
     b = Variable("b", 0, 31)
     c = Variable("c", 0, 1)
@@ -1287,6 +1287,13 @@ class TestSymInfer(unittest.TestCase):
     # floor: 1 % -1000 = -999, 1 // -1000 = -1
     assert sym_infer(a%b, var_vals) == -999
     assert sym_infer(a//b, var_vals) == -1
+  def test_sym_infer_truncdiv_truncmod(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    for av, bv, div, mod in ((7, -3, -2, 1), (-7, 3, -2, -1), (7, 0, 0, 7)):
+      var_vals = {a.expr: av, b.expr: bv}
+      assert sym_infer(a.alu(Ops.TRUNCDIV, b), var_vals) == div
+      assert sym_infer(a.alu(Ops.TRUNCMOD, b), var_vals) == mod
   def test_sym_infer_with_cast(self):
     a = Variable("a", 0, 100, dtypes.int)
     assert sym_infer(a.cast(dtypes.long) + 1, {a.expr: 5}) == 6
