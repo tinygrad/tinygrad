@@ -4,6 +4,7 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
 from test.mockgpu.amd.emu import ASM_CALL
+from tinygrad.helpers import DEV
 
 # TODO: write a clean version of this
 from test.runtime.test_linearizer import helper_linearizer_opt
@@ -21,7 +22,8 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: segfaults on MOCKKFD with AMD:LLVM")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and not (DEV.interface == "MOCKKFD" and DEV.arch == "gfx950"),
+                   "TODO: grouped reduce test disabled on AMD except CDNA4 MOCKKFD (verified amd and amdllvm)")
   def test_local_and_grouped_reduce(self):
     N = 128
     Tensor.manual_seed(1882)
