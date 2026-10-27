@@ -309,6 +309,9 @@ class TestDTypeALU(unittest.TestCase):
   def test_neg_add_half_zero(self):
     self.assertEqual((1/-(Tensor([0.])+Tensor([-0.])).half()).tolist(), [-math.inf])
 
+  def test_add_right_add_no_overflow(self):
+    self.assertEqual(((2**30+(2**30+Tensor([-2**31, 1-2**31], dtype=dtypes.int32)))//2).tolist(), [0, 0])
+
   def test_neg_add_no_overflow(self):
     self.assertEqual((-(Tensor([1, 2], dtype=dtypes.int32)+(-2**31))==2**31-1).tolist(), [True, False])
 
@@ -339,6 +342,10 @@ class TestDTypeALU(unittest.TestCase):
   def test_fused_recip_const_matches_unfused(self):
     x = Tensor([3e38, 1e30, 1.7])
     np.testing.assert_equal((1/(x*3)).numpy(), (1/(x*3).realize()).numpy())
+
+  def test_fused_add_matches_unfused(self):
+    x, y, z = Tensor([1e20]), Tensor([-1e20]), Tensor([1.0])
+    np.testing.assert_equal((x+(y+z)).numpy(), (x+(y+z).realize()).numpy())
 
   def test_unsigned_mul_max(self):
     for dt in (dtypes.uint32, dtypes.uint64):
