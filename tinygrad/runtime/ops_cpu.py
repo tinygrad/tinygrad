@@ -7,7 +7,7 @@ from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.support.system import RemotePCIDevice, RemoteCmd
 from tinygrad.runtime.autogen import libc

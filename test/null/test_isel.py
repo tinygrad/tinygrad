@@ -4,8 +4,8 @@ from tinygrad.helpers import Target, Context
 from tinygrad.codegen import to_program
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
-from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
-from tinygrad.renderer.isa import IselContext
+from tinygrad.renderer.x86 import X86Renderer, X86Ops
+from tinygrad.renderer.x86 import IselContext
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
 def lane(y:UOp, i:int) -> UOp: return y.index(UOp.cconst(i, dtypes.int))
