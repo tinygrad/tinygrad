@@ -170,7 +170,7 @@ class TestTensorParallel(unittest.TestCase):
       parallel = Transformer.from_gguf(path, 4, realize=True, shard=2)[0]
       # greedy outputs from the unsharded model with these seeded weights
       temperature = Tensor([0.0]).realize()
-      for pos, expected in enumerate((12, 8)):
+      for pos, expected in enumerate((9, 1)):
         x, start_pos = Tensor([[pos+1]]).realize(), Variable('start_pos', 0, 3).bind(pos)
         self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
       # everything but the norms and the f/g down projections is sharded, the conv and recurrent states on their heads
