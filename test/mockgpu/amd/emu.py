@@ -1,6 +1,6 @@
-# AMD instruction semantics compiled to UOps for the CPU lifter.
-# Instruction helpers operate on buffers:
-#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], SCC=258, SCRATCH_STRIDE=259
+# RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
+# Each instruction is compiled to a kernel that operates on buffers:
+#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
@@ -74,7 +74,7 @@ from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to
 
 MASK32 = 0xFFFFFFFF
 
-# SQTT traces are consumed by amdgpu.py; the lifter does not emit them yet.
+# sqtt traces are consumed by amdgpu.py; the lifter does not emit them yet.
 sqtt_traces: list[bytes] = []
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(val, dtype)
@@ -654,7 +654,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink()
-  # Barriers are represented by block boundaries in the lifter.
+  # barriers are represented by block boundaries in the lifter.
   if inst.op in _BARRIER_OPS: return UOp.sink()
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
   if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink()
@@ -1871,7 +1871,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[Instructio
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
     if bits & mask == base: return ret
-  # Dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
+  # dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
   ctx = _Ctx(inst.size(), _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
   base, mask, _, name = _canonical_info(inst, ctx, inst_bytes)
@@ -1894,12 +1894,12 @@ def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[U
     seen.update(nodes)
     linear.extend(nodes)
     linear.append(template.replace(src=(template.body, *args)))
-  # The assembly is already linear: keep calls in instruction order and compute their addresses immediately before use.
+  # the assembly is already linear: keep calls in instruction order and compute their addresses immediately before use.
   sink = UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
-  # Thread jump-only blocks.
+  # thread jump-only blocks.
   targets:dict[int, int] = {}
   def target(pc:int) -> int:
     seen:set[int] = set()
@@ -1917,7 +1917,7 @@ def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int,
   for pc, pcs in blocks.items():
     if len(paths[pc]) != 2: continue
     inst = insts[pcs[-1]]
-    # Complementary tests with reversed destinations are the same branch.
+    # complementary tests with reversed destinations are the same branch.
     branch_dests = tuple(sorted((dst, kind ^ (inst.op_name in opposite)) for dst,kind in paths[pc].items()))
     key = (type(inst), opposite.get(inst.op_name, inst.op_name),
            tuple((n, getattr(inst, n)) for n,_ in inst._fields if n not in {"op", "simm16"}), branch_dests)
@@ -1931,12 +1931,12 @@ def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int,
       paths[pc] = {header:UNCOND}
     blocks[header], paths[header] = [header], dests
 
-# A block has an empty body; a loop contains its header block and the rest of its iteration.
+# a block has an empty body; a loop contains its header block and the rest of its iteration.
 CFGRegion = tuple[int, list["CFGRegion"]]
 class IrreducibleCFG(RuntimeError): pass
 
 def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
-  # Number the reachable blocks in DFS postorder, without recursion on long instruction streams.
+  # number the reachable blocks in DFS postorder, without recursion on long instruction streams.
   order:dict[int, int] = {}
   seen, pending = set(), [(entry, False)]
   while pending:
@@ -1951,7 +1951,7 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     for dst in paths[pc]: preds[dst].add(pc)
   def build(remaining:set[int]) -> list[CFGRegion]:
     regions: list[CFGRegion] = []
-    # Reverse postorder and predecessor walks partition this region into SCCs in execution order.
+    # reverse postorder and predecessor walks partition this region into SCCs in execution order.
     for pc in sorted(remaining, key=order.__getitem__, reverse=True):
       if pc not in remaining: continue
       component, todo = set(), [pc]
@@ -1964,13 +1964,13 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
       if len(component) > 1 or pc in paths[pc]:
         if any(preds[dst] - component for dst in component if dst != pc):
           raise IrreducibleCFG("irreducible control flow is not supported by the AMD lifter")
-        # Removing the single entry exposes nested loops; the original DFS order still applies.
+        # removing the single entry exposes nested loops; the original DFS order still applies.
         body = [(pc, [])] + build(component - {pc})
       regions.append((pc, body))
     return regions
   return build(set(order))
 
-# ISA operand types and operations are independent of tensor construction and GPU lowering settings.
+# isa operand types and operations are independent of tensor construction and GPU lowering settings.
 @Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
          DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
 @rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
@@ -1994,10 +1994,10 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
   thread_branches(insts, cfg["blocks"], cfg["paths"])
   try: regions = cfg_regions(cfg["paths"], 0)
   except IrreducibleCFG:
-    # Sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
+    # sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
     merge_branches(insts, cfg["blocks"], cfg["paths"])
     regions = cfg_regions(cfg["paths"], 0)
-  # Propagate possible wave PCs across acyclic regions; loops retain runtime routing.
+  # propagate possible wave PCs across acyclic regions; loops retain runtime routing.
   unconditional:set[int] = set()
   possible:set[int]|None = {0}
   for pc, body in regions:
@@ -2063,7 +2063,7 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
     args += [lib_addr.after(end, *scopes), UOp.const(off, dtypes.uint64), UOp.const(block_pc, dtypes.int)]
     params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
                         else AddrSpace.GLOBAL) for i,a in enumerate(args)]
-    # Lower the wave loop with the block, so repeated blocks share its indexing and route check too.
+    # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
                                                             1, dtype=dtypes.int),)
@@ -2075,17 +2075,17 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
       if body:
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
-        # Waves that exited keep their route while the remaining waves repeat the loop.
+        # waves that exited keep their route while the remaining waves repeat the loop.
         check = loop_active(routes.after(end, *scopes, loop).index(0), active,
                             UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
-        # Complete the block for every participating wave before entering its successors, including barrier successors.
+        # complete the block for every participating wave before entering its successors, including barrier successors.
         end = emit_block(pc, end, scopes)
     return end
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
-  # Operand bits are read from the runtime code pointer; identical call graphs can share machine code.
+  # operand bits are read from the runtime code pointer; identical call graphs can share machine code.
   sink = UOp.sink(body, arg=KernelInfo(name=f"emu {name}", optimized=True))
   sink = graph_rewrite(sink, pm_asm_call, name="pm_asm_call", enter_calls=True)
   return to_program(sink, renderer)

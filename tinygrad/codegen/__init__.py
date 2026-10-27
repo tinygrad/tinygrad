@@ -420,7 +420,7 @@ class LowerCallsCtx:
 def lower_call(ctx:LowerCallsCtx, call:UOp) -> UOp|None:
   if call.body.op is Ops.PROGRAM and call.body.src[-1].op is Ops.BINARY: return None
   bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
-  ki = KernelInfo(f"{name}_{bodies.setdefault(call.body, len(bodies))}", optimized=True)
+  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(call.body, len(bodies))) else ""), optimized=True)
   body = call.body.substitute({call.body.src[0]:call.body.src[0].replace(arg=ki)}) if call.body.op is Ops.PROGRAM else call.body.replace(arg=ki)
   return call.replace(src=(to_program(body, ctx.renderer), *call.src[1:]))
 

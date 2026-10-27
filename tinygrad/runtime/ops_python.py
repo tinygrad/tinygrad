@@ -45,10 +45,9 @@ def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
   return out
 
 class PythonProgram(Program['PythonDevice']):
-  def __init__(self, dev:'PythonDevice', obj:TinyELF, links:dict[str,'PythonProgram']|None=None):
+  def __init__(self, dev:'PythonDevice', obj:TinyELF, links:dict[str,'PythonProgram']):
     self.uops: list[UOp] = pickle.loads(obj.lib)
-    self.links = links or {}
-    self.tensor_cores = PythonRenderer(obj.target).tensor_cores
+    self.tensor_cores, self.links = PythonRenderer(obj.target).tensor_cores, links
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):

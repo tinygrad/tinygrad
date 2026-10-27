@@ -230,8 +230,7 @@ class LLVMRenderer(Renderer):
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, sorted(args, key=lambda a: a[1].arg.slot) if args_struct else args,
-                                              call_args + kernel, prefix, args_struct)
+    return tuple(local_args), self._render_fn(name, args, call_args + kernel, prefix, args_struct)
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
