@@ -280,7 +280,7 @@ class CStyleLanguage(Renderer):
     prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
                 f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
               *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
-    return self.render_kernel(*self._render(uops), uops, prefix)
+    return self.render_kernel(*self._render(uops), uops, prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"

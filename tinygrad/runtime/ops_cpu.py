@@ -15,9 +15,8 @@ from tinygrad.runtime.autogen import libc
 class CPUProgram(Program['CPUDevice']):
   rt_lib, libm = DLL('rt', 'System' if OSX else 'gcc_s'), DLL('m', 'm')
 
-  def _load(self, lib, base=0):
-    return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()),
-                                                                  link_syms={name: prg.buf.buf for name,prg in self.links.items()})
+  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=list(DLL._loaded_.values()),
+                                                                                              link_syms={n:p.buf.buf for n,p in self.links.items()})
 
   def __init__(self, dev:CPUDevice, obj:TinyELF, links:dict[str,CPUProgram]|None=None):
     self.links = links or {}

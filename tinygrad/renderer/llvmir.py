@@ -239,13 +239,12 @@ class CPULLVMRenderer(LLVMRenderer):
   global_max = (1, 0, 0)
   abi = None
   string_rewrite = base_rewrite
-  def render(self, uops: list[UOp]) -> str:
-    return "\n".join((k:=self._render_kernel(uops, args_struct=True))[0] + (k[1], self._render_footer(uops)))
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops, args_struct=True))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
-    decls.update({x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}(ptr)"
-                  for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM})
+    decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}(ptr)"
+              for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
     return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])
