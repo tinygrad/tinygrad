@@ -45,10 +45,9 @@ def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
   return out
 
 class PythonProgram(Program['PythonDevice']):
-  def __init__(self, dev:'PythonDevice', obj:TinyELF, uops:list[UOp]|None=None):
-    self.uops: list[UOp] = uops or pickle.loads(obj.lib)
-    self.fxns = {u: PythonProgram(dev, obj, list(u.body.src)) for u in self.uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
-    self.tensor_cores = PythonRenderer(obj.target).tensor_cores
+  def __init__(self, dev:'PythonDevice', obj:TinyELF, links:dict[str,'PythonProgram']):
+    self.uops: list[UOp] = pickle.loads(obj.lib)
+    self.tensor_cores, self.links = PythonRenderer(obj.target).tensor_cores, links
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
@@ -142,7 +141,8 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
-        elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
+        elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
+          values[u] = [self.links[u.body.src[0].arg.function_name](env={p: values[u.src[p.arg.slot+1]] for p in u.body.arg.params})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
           cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))

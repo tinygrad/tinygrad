@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
-from test.mockgpu.amd.emu import ASM_CALL
+from tinygrad.helpers import DEV
 
 # TODO: write a clean version of this
 from test.runtime.test_linearizer import helper_linearizer_opt
@@ -69,7 +69,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.SPLIT, 5, (0, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 1, (0, AxisType.LOCAL))],
     ])
 
-  @unittest.skipIf(ASM_CALL, "ASM_CALL doesn't support direct pc read and write")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK"), "AMD emulator doesn't support direct pc read and write")
   def test_unrolled_padded_cumsum(self):
     Tensor.manual_seed(7)
     a = Tensor.rand(13, 17)
