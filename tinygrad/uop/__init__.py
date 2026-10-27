@@ -120,7 +120,7 @@ class GroupOp:
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
-  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
+  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX, Ops.XOR}
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}

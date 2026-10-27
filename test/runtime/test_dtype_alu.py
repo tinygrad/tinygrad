@@ -297,6 +297,9 @@ class TestDTypeALU(unittest.TestCase):
     x = Tensor([2**31-2], dtype=dtypes.int32)
     self.assertEqual(((x//2+2**29)//2).tolist(), [805306367])
 
+  def test_div_div_no_overflow(self):
+    self.assertEqual(((Tensor([2**31-1, -5], dtype=dtypes.int32)//65536)//65536).tolist(), [0, -1])
+
   def test_fused_div_matches_unfused(self):
     x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
     for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):
