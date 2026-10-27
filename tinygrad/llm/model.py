@@ -593,7 +593,7 @@ class Transformer:
         'ffn_up.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
         **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')}, 'ffn_down_exps.weight':2}
       # TODO: can't split H on IQ2_XS, use EP or slicing when ready
-      if arch == 'kimi-k3': rules.update({'ffn_down_exps.weight': 1, 'ffn_routed_up.weight': 1})
+      if arch == 'kimi-k3': rules.update({'ffn_down_exps.weight': 1, 'ffn_routed_up.weight': 1, 'attn_gate.weight': 0})
       if arch in ('kimi-linear', 'glm5-next', 'kimi-k3'): rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight',
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
