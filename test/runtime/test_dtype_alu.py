@@ -300,6 +300,27 @@ class TestDTypeALU(unittest.TestCase):
   def test_div_div_no_overflow(self):
     self.assertEqual(((Tensor([2**31-1, -5], dtype=dtypes.int32)//65536)//65536).tolist(), [0, -1])
 
+  def test_add_add_no_overflow(self):
+    self.assertEqual((((Tensor([-2**31, 1-2**31], dtype=dtypes.int32)+2**30)+2**30)//2).tolist(), [0, 0])
+
+  def test_neg_add_no_overflow(self):
+    self.assertEqual((-(Tensor([1, 2], dtype=dtypes.int32)+(-2**31))==2**31-1).tolist(), [True, False])
+
+  def test_add_mul_no_overflow(self):
+    self.assertEqual((((Tensor([-715827887, 0], dtype=dtypes.int32)+5)*3)==-2**31+2).tolist(), [True, False])
+
+  def test_add_lt_no_overflow(self):
+    self.assertEqual(((Tensor([0, -715827882], dtype=dtypes.int32)*3+15) < -2**31+8).tolist(), [False, False])
+
+  def test_mul_mul_no_overflow(self):
+    self.assertEqual(((Tensor([-1, 0], dtype=dtypes.int32)*65536)*32768//2).tolist(), [-2**30, 0])
+
+  def test_combine_terms_no_overflow(self):
+    t, u = Tensor([-1, 0], dtype=dtypes.int32), Tensor([0, 0], dtype=dtypes.int32)
+    self.assertEqual(((t*2**30+t*2**30)//2).tolist(), [-2**30, 0])
+    self.assertEqual(((t+t*(2**31-1))//2).tolist(), [-2**30, 0])
+    self.assertEqual((((u+t*(2**31-1))+t)//2).tolist(), [-2**30, 0])
+
   def test_fused_div_matches_unfused(self):
     x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
     for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):
