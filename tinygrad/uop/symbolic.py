@@ -26,8 +26,10 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   # the value is mathematical and may not fit: reading it as bits is the emission that pins it to the stated width
   return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
 
-# no truncate: signed ints stay mathematical past the fold (emission truncates); unsigned ints wrap and floats re-round in the mint
+# the mint truncates to a strong dtype, ints wrap and floats re-round
 def fold_const_alu(a:UOp) -> UOp: return a.const_like(exec_alu(a.op, a.dtype, [const_arg(s) for s in a.src]))
+# a fold mints a signed const only if it fits, the mint would wrap it. unsigned ring ops wrap by definition
+def fits(x:UOp, v:PyConst) -> bool: return x.dtype not in dtypes.sints or x.dtype.min <= v <= x.dtype.max
 
 def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
@@ -165,7 +167,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
    if (dt:=promo_dtype(a.src)) not in dtypes.weaks else None),
   # ** two stage ALU folding **
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
-     lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
+     lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2)) if fits(x, exec_alu(f.op, dtypes.weakint, [c1.vmin, c2.vmin])) else None)
+    for op in GroupOp.Associative),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
@@ -244,13 +247,16 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x", dtype=dtypes.bool).logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
   # ** combine terms **
-  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
-  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),
-  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
-  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
-  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c")) + UPat.var("x"), lambda x,y,c: y+x*(c+1)),
+  # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1) if fits(x, c0.vmin+c1.vmin) else None),
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"),
+   lambda x,y,c0,c1: y+x*(c0+c1) if fits(x, c0.vmin+c1.vmin) else None),
+  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1) if fits(x, c.vmin+1) else None), # (x+x*c)-> x*(c+1)
+  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1) if fits(x, c.vmin+1) else None),
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c")) + UPat.var("x"), lambda x,y,c: y+x*(c+1) if fits(x, c.vmin+1) else None),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
-  ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
+  (((UPat.var("y") + UPat.var("x")) + UPat.var("x")).named("a"),
+   lambda a,y,x: y+x*2 if fits(a, 2*x.vmin) and fits(a, 2*x.vmax) else None),
   (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.weakint) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # y*(x+c) -> y*x + y*c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
@@ -287,7 +293,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
    lambda x,c1,c2: x//(c1*c2) if c2.vmin>0 and x.dtype.min<=c1.vmin*c2.vmin<=x.dtype.max else None),
   # ** lt **
   # c0+x<c1 -> x < c1-c0
-  ((UPat.cvar("c0") + UPat.var("x", dtype=dtypes.sints+(dtypes.weakint,))) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),
+  ((UPat.cvar("c0") + UPat.var("x", dtype=dtypes.sints+(dtypes.weakint,))) < UPat.cvar("c1"),
+   lambda x,c0,c1: x<(c1-c0) if fits(x, c1.vmin-c0.vmin) else None),
   # x//d<c -> x<c*d for d>0, and -> c*d<x for d<0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
    lambda x,d,c: (x<c.val*d.val) if d.val > 0 else (x>c.val*d.val) if d.val < 0 else None),
@@ -298,7 +305,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val)),
   (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.var("y")*-1, lambda x,y: y<x),
-  (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.cvar("c"), lambda x,c: -c<x if c.val != x.dtype.min else None),
+  (UPat.var("x", dtypes.sints+(dtypes.weakint,))*-1 < UPat.cvar("c"), lambda x,c: -c<x if fits(x, -c.vmin) else None),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
   ((UPat.var("x", dtypes.weakint)<1).logical_not(), lambda x: (newx<1).logical_not() if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range
@@ -468,7 +475,9 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
   # ** combine terms (opinionated) **
-  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # -(x+y) -> -x + -y
+  (-1 * (UPat.var("x") + UPat.var("y")).named("a"), lambda a,x,y: (-x)+(-y) if fits(a, -x.vmin) and fits(a, -y.vmin) else None),
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.weakint) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  ((UPat.var("x", dtypes.weakint) + UPat.var("y")).named("a") * UPat.cvar("c"),
+   lambda a,x,y,c: x*c+y*c if all(fits(a, v*c.vmin) for v in (x.vmin, x.vmax, y.vmin, y.vmax)) else None),
 ])+pm_clean_up_group_sink
