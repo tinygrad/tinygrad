@@ -84,4 +84,58 @@ class TestDSCDNA(unittest.TestCase):
           expected = [v if acc else v ^ 0xFFFFFFFF for v in values[:width*count//32]]
           self.assertEqual(list(mem), expected + [0xDEADBEEF] * (4-len(expected)))
 
+  def test_cdna_lds_above_64k(self):
+    # CDNA4 supports more than RDNA's 64 KiB of LDS; this access is beyond
+    # the old emulator PARAM bound even though the LDS allocation is large enough.
+    out = (ctypes.c_uint32 * 1)(0)
+    ptr = ctypes.addressof(out)
+    instructions = [
+      rc.v_mov_b32_e32(rc.v[0], ptr & 0xFFFFFFFF), rc.v_mov_b32_e32(rc.v[1], ptr >> 32),
+      rc.v_mov_b32_e32(rc.v[2], 65536), rc.v_mov_b32_e32(rc.v[4], 0x12345678),
+      rc.ds_write_b32(addr=rc.v[2], data0=rc.v[4]),
+      rc.ds_read_b32(vdst=rc.v[8], addr=rc.v[2]),
+      rc.global_store_dword(addr=rc.v[0:1], data=rc.v[8], saddr=rc.NULL),
+      rc.s_endpgm(),
+    ]
+    code = b''.join(inst.to_bytes() for inst in instructions)
+    kernel = ctypes.create_string_buffer(code)
+    self.assertEqual(run_asm(ctypes.addressof(kernel), len(code), 1, 1, 1, 1, 1, 1, ptr,
+                             rsrc2=0x19c | (129 << 15), arch='cdna'), 0)
+    self.assertEqual(out[0], 0x12345678)
+
+  def _check_ds_read_b64_tr_b16(self, offset: int, acc: int):
+    # CDNA4 transposes 16 source lanes (4 fp16 words each) into 16 destination
+    # lanes (4 values from distinct rows). Check all 64 lanes and both VGPRs.
+    out = (ctypes.c_uint32 * 128)(*([0xDEADBEEF] * 128))
+    instructions = [
+      rc.v_lshlrev_b32_e32(rc.v[1], 3, rc.v[0]), # each lane owns 8 consecutive LDS bytes
+      rc.v_lshlrev_b32_e32(rc.v[2], 2, rc.v[0]),
+      rc.v_add_u32_e32(rc.v[3], 1, rc.v[2]),
+      rc.v_add_u32_e32(rc.v[4], 2, rc.v[2]),
+      rc.v_add_u32_e32(rc.v[5], 3, rc.v[2]),
+      rc.v_lshlrev_b32_e32(rc.v[6], 16, rc.v[3]),
+      rc.v_or_b32_e32(rc.v[6], rc.v[2], rc.v[6]),
+      rc.v_lshlrev_b32_e32(rc.v[7], 16, rc.v[5]),
+      rc.v_or_b32_e32(rc.v[7], rc.v[4], rc.v[7]),
+      rc.ds_write_b64(addr=rc.v[1], data0=rc.v[6:7], offset0=offset),
+      rc.ds_read_b64_tr_b16(vdst=rc.v[8:9], addr=rc.v[1], offset0=offset, acc=acc),
+      *([rc.v_accvgpr_read(rc.v[8], rc.v[8]), rc.v_accvgpr_read(rc.v[9], rc.v[9])] if acc else []),
+      rc.v_mov_b32_e32(rc.v[10], rc.s[0]), rc.v_mov_b32_e32(rc.v[11], rc.s[1]),
+      rc.v_add_u32_e32(rc.v[10], rc.v[1], rc.v[10]),
+      rc.global_store_dwordx2(addr=rc.v[10:11], data=rc.v[8:9], saddr=rc.NULL),
+      rc.s_endpgm(),
+    ]
+    code = b''.join(inst.to_bytes() for inst in instructions)
+    kernel = ctypes.create_string_buffer(code)
+    self.assertEqual(run_asm(ctypes.addressof(kernel), len(code), 1, 1, 1, 64, 1, 1, ctypes.addressof(out),
+                             rsrc2=0x19c | (1 << 15), arch='cdna'), 0)
+    for lane in range(64):
+      group, col = divmod(lane, 16)
+      vals = [((group * 16 + row * 4 + col // 4) * 4 + col % 4) for row in range(4)]
+      self.assertEqual(out[lane * 2], vals[0] | (vals[1] << 16), f"lane {lane} VGPR low")
+      self.assertEqual(out[lane * 2 + 1], vals[2] | (vals[3] << 16), f"lane {lane} VGPR high")
+  def test_ds_read_b64_tr_b16(self):
+    for offset, acc in ((0, 0), (24, 0), (24, 1)):
+      with self.subTest(offset=offset, acc=acc): self._check_ds_read_b64_tr_b16(offset, acc)
+
 if __name__ == '__main__': unittest.main()
