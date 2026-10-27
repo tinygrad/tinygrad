@@ -655,6 +655,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                [self.host_hit(e, ids) for e in self.host])
   # requests waiting this long are taken in turn, before the others the cache has more of
   STARVE = getenv("STARVE", 120.0)
+  STARVE_LONG = getenv("STARVE_LONG", 30.0)  # (a request that doesn't fit a slot: the batch drains for it after this long)
   def next_alone(self, pending:list[Request]) -> int:
     """
     the next request alone: the one whose conversation the model or a slot has the most of (agents taking turns: one's next request often comes
@@ -765,10 +766,14 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
         self.inflight = len(active) + len(pending)
+        # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains), then it goes on
+        # alone. else it waits for no request to be decoded: while agents take turns that's never)
+        drain = any(not self.batchable(r) and time.perf_counter() - r.st > self.STARVE_LONG for r in pending)
         if not active and pending:
           # one request (or one that doesn't fit a slot): alone
-          if len(pending) == 1 or not self.batchable(pending[0]):
-            req = pending.pop(self.next_alone(pending))
+          if len(pending) == 1 or not self.batchable(pending[0]) or drain:
+            long = next((i for i, r in enumerate(pending) if not self.batchable(r)), None) if drain else None
+            req = pending.pop(long if long is not None else self.next_alone(pending))
             try:
               if self.run_alone(req): active[0] = req
             except Exception as e:
@@ -779,7 +784,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]
         # (with a step's worth waiting, they wait for that many free slots)
         defer = bool(G:=model.batch_prefills()) and bool(active) and len(shorts()) >= G and slots - len(active) < G
-        while G and not defer and len(short:=shorts()[:min(G, slots - len(active))]) >= BATCH_PREFILL_MIN:
+        while G and not defer and not drain and len(short:=shorts()[:min(G, slots - len(active))]) >= BATCH_PREFILL_MIN:
           _p0 = time.perf_counter()
           free = [i for i in range(slots) if i not in active][:len(short)]
           self.slot_taken(*free)
@@ -791,7 +796,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             req.spec_start(first, req.pos, k)
             if self.emit(req, first): active[slot] = req
         for req in [r for r in pending if self.batchable(r) and not (defer and r in shorts())]:
-          if len(active) >= slots: break
+          if len(active) >= slots or drain: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
           first = self.prefill(req, set(active) | {slot}, slot)
