@@ -105,7 +105,17 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.to_elf())
+    if device.split(":")[0] == "CPU":
+      links:dict[str, Any] = {}
+      for call in ast.src[1].src:
+        if call.op is not Ops.CALL or call.body.op is not Ops.PROGRAM: continue
+        name = call.body.src[0].arg.function_name
+        if name in links:
+          if links[name].profile_key != call.body.key: raise RuntimeError(f"conflicting compiled kernels named {name}")
+          continue
+        links[name] = get_runtime(device, call.body, cache)
+      runtime = Device[device].runtime(ast.to_elf(), links=links)
+    else: runtime = Device[device].runtime(ast.to_elf())
     if cache: runtime_cache[key] = runtime
   return runtime
 

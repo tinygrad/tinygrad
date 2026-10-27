@@ -151,8 +151,6 @@ base_rewrite = PatternMatcher([
   # calls
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
    f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"  call void @{ctx[body]}(" +
-   ", ".join(f"{ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU)} {ctx[x.src[p.arg.slot+1]]}" for p in body.src if p.op is Ops.PARAM) + ")"),
 ])
 
 pm_widen_uidx = PatternMatcher([
@@ -179,11 +177,11 @@ class LLVMRenderer(Renderer):
       kernel = [f"  %args_t = load {args_t}, ptr %args"] + [f"  {n} = extractvalue {args_t} %args_t, {i}" for i,(n,_) in enumerate(args)] + kernel
       sargs = "ptr %args"
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
-  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", fns:dict[UOp, str]|None=None,
-                     args_struct=False) -> tuple[tuple[str, ...], str]:
-    r: dict[UOp, str] = dict(fns or {}) # the functions the kernel calls, by name
+  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", args_struct=False) -> tuple[tuple[str, ...], str]:
+    r: dict[UOp, str] = {}
     args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
+    call_args: list[str] = []
     vc = -1
 
     local_args: list[str] = []
@@ -210,6 +208,17 @@ class LLVMRenderer(Renderer):
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
       elif u.op is Ops.BINARY: r[u] = f"@bin_{u.key.hex()}"
+      elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
+        vc += 1
+        params = u.body.arg.params
+        types = [ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in params]
+        arg_type = "{ " + ", ".join(types) + " }"
+        r[u] = f"%v{vc}"
+        call_args.append(f"  {r[u]} = alloca {arg_type}")
+        for i, (p, ty) in enumerate(zip(params, types)):
+          kernel.append(f"  {r[u]}_{i} = getelementptr inbounds {arg_type}, ptr {r[u]}, i32 0, i32 {i}")
+          kernel.append(f"  store {ty} {r[u.src[p.arg.slot+1]]}, ptr {r[u]}_{i}")
+        kernel.append(f"  call void @{u.body.src[0].arg.function_name}(ptr {r[u]})")
       elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
       elif (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype)) or (u.op is Ops.BITCAST and u.addrspace not in (None, AddrSpace.ALU)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -222,21 +231,21 @@ class LLVMRenderer(Renderer):
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix, args_struct)
+    return tuple(local_args), self._render_fn(name, sorted(args, key=lambda a: a[1].arg.slot) if args_struct else args,
+                                              call_args + kernel, prefix, args_struct)
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
   string_rewrite = base_rewrite
-  def render(self, uops: list[UOp]) -> str: # the kernel is first, it is the entry. its functions follow, a name traced with other args gets a suffix
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
-    fns = {b: f"{b.arg}_{i}" for i, b in enumerate(b for b in topo if b.op is Ops.LINEAR)}
-    defs = [self._render_kernel(b.src, name=n, fns=fns)[1] for b, n in fns.items()]
-    return "\n".join((k:=self._render_kernel(uops, fns=fns, args_struct=True))[0] + (k[1], *defs, self._render_footer(topo)))
+  def render(self, uops: list[UOp]) -> str:
+    return "\n".join((k:=self._render_kernel(uops, args_struct=True))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+    decls.update({x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}(ptr)"
+                  for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM})
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}
     return "\n".join([*decls.values(), *blobs.values(), 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'])

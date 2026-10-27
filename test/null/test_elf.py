@@ -25,6 +25,13 @@ class TestElfLoader(unittest.TestCase):
     '''
     with self.assertRaisesRegex(RuntimeError, 'evil_external_function'):
       elf_loader(ClangCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src))
+  def test_link_symbols(self):
+    src = "extern void helper(int *); void caller(int *x) { helper(x); }"
+    obj = ClangCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src)
+    _, _, relocs = elf_loader(obj, link_syms={"helper":0x12340000})
+    self.assertTrue(any(target == 0x12340000 for _,target,_,_ in relocs))
+    with self.assertRaisesRegex(RuntimeError, "helper"): elf_loader(obj)
+
   def test_link(self):
     src = '''
       float powf(float, float); // from libm

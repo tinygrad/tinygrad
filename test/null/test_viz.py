@@ -1244,11 +1244,13 @@ class TestCLI(unittest.TestCase):
     with save_viz() as viz, Context(SCACHE=0):
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
     with write_files(viz) as files:
+      programs = [s["name"] for s in run_cli(*files, "-s", "TINY") if s.get("name", "").startswith("do_to_program for ")]
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
-    self.assertEqual(len(codegen_count), 3)
+    self.assertCountEqual(programs, [f"do_to_program for {name}" for name in ("inner_0", "outer_0", "nested_calls")])
+    self.assertEqual(len(codegen_count), 1)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
 

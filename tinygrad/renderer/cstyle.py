@@ -69,8 +69,9 @@ base_rewrite = PatternMatcher([
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{ctx.fn_names[body]}("
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src if u.op is Ops.PARAM))});"),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
+   f"{body.src[0].arg.function_name}(&(struct {body.src[0].arg.function_name}_args){{"
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)}}});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -165,8 +166,8 @@ class CStyleLanguage(Renderer):
                        self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     if self.args_struct_prefix is not None:
-      prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} {n}; " for n,(u,_) in bufs) + "};"]
-      kernel = [f"  {t} {n} = args->{n};" for n,t in buftypes] + kernel
+      prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} arg{u.arg.slot}; " for _,(u,_) in bufs) + "};"]
+      kernel = [f"  {self.param_type(u)} {n} = args->arg{u.arg.slot};" for n,(u,_) in bufs] + kernel
       buftypes = [("args", f"{self.args_struct_prefix} struct {function_name}_args*")]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
@@ -275,16 +276,8 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
-    topo = UOp.sink(*uops).toposort(enter_calls=True)
-    prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in topo if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
-    for body in (u for u in topo if u.op is Ops.LINEAR):
-      self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
-      _, call, bufs = self._render(body.src)
-      params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
-      prefix.append(f"static inline void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
-      call_bodies.extend(body.src)
-    return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
+    prefix = [f"extern void {f}();" for f in dedup(u.arg.name for u in uops if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
+    return self.render_kernel(*self._render(uops), uops, prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -330,6 +323,13 @@ class ClangRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
+
+  def render(self, uops:list[UOp]) -> str:
+    fns = {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
+    prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
+                f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
+              *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
+    return self.render_kernel(*self._render(uops), uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   # language options
