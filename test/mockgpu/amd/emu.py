@@ -1525,6 +1525,28 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  if isinstance(inst, irc.DS) and op_name == 'DS_READ_B64_TR_B16':
+    # CDNA4 transpose LDS read: each 16-lane group has 16x4 packed 16-bit
+    # elements (one 64-bit source per lane). Its 4x16 transpose leaves each
+    # destination lane with four 16-bit values from four different source lanes.
+    # The official CDNA4 pcode does not describe this instruction.
+    addr_reg, dst_reg = ctx.inst_field(type(inst).addr), ctx.inst_field(type(inst).vdst)
+    offset = ctx.inst_field(type(inst).offset0) | (ctx.inst_field(type(inst).offset1) << _c(8))
+    lane = ctx.range()
+    group_base = lane & _c(-16, dtypes.int)
+    src_column = (lane & _c(15, dtypes.int)) >> _c(2, dtypes.int)
+    column_half = lane & _c(3, dtypes.int)
+    vals: list[UOp] = []
+    for row in range(4):
+      src_lane = group_base + src_column + _c(row * 4, dtypes.int)
+      byte_addr = ctx.rvgpr_dyn(addr_reg, src_lane) + offset + (column_half * _c(2, dtypes.int)).cast(dtypes.uint32)
+      word = ctx.lds.index(byte_addr >> _c(2)).load()
+      vals.append((word >> ((byte_addr & _c(2)) << _c(3))) & _c(0xffff))
+    lo, hi = vals[0] | (vals[1] << _c(16)), vals[2] | (vals[3] << _c(16))
+    reads = UOp(Ops.STACK, src=tuple(vals))
+    write = ctx.waccvgpr_dyn if _iattr(inst, 'acc') else ctx.wvgpr_dyn
+    return UOp.sink(UOp.group(write(dst_reg, lane, lo, exec_mask, after=reads),
+                              write(dst_reg + _c(1), lane, hi, exec_mask, after=reads)).end(lane), *ctx.inc_pc())
   pcode = get_pcode(inst.op)
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
