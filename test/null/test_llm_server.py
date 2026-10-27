@@ -585,6 +585,17 @@ class TestStash(unittest.TestCase):
       b = a[:rng.randrange(len(a)+1)] + [rng.randrange(3) for _ in range(rng.randrange(40))]
       self.assertEqual(common_prefix(a, b), next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b))))
 
+  def test_starts(self):
+    import random
+    from tinygrad.llm.serve import starts
+    rng = random.Random(1)
+    for _ in range(300):
+      t = [rng.randrange(3) for _ in range(rng.randrange(1, 60))]
+      ids = t[:rng.randrange(len(t)+1)] + [rng.randrange(3) for _ in range(rng.randrange(40))]
+      n = rng.randrange(len(t)+1)
+      self.assertEqual(starts(ids, t), ids[:len(t)] == t)
+      self.assertEqual(starts(ids, t, n), n <= len(ids) and ids[:n] == t[:n])
+
   def test_host_without_slots(self):
     # no slots (BATCH_SLOTS=0): a conversation that's overwritten goes to host memory, one continued is loaded back
     from tinygrad.helpers import getenv
@@ -700,10 +711,10 @@ class TestStash(unittest.TestCase):
     # a prompt that continues one as it is: its tokens
     self.model._ckpt_tokens = []
     self.assertEqual(self.server.reuse_tokens("a" * 1500 + "q", [ord("a")] * 1500 + [ord("q")]), [ord("a")] * 1500 + [ord("q")])
-    # the tokens different early (a reply of an early turn sampled as "b", "c"), the conversation long after it: the kept tokens
-    long = [ord("a")] * 100 + [ord("b"), ord("c")] + [ord("d")] * 3000
+    # the tokens different early (a reply of an early turn, after the task, sampled as "b", "c"), the conversation long after it: the kept tokens
+    long = [ord("a")] * 2100 + [ord("b"), ord("c")] + [ord("d")] * 6000
     self.model._cached_tokens = long
-    rendered = "a" * 100 + "bc" + "d" * 3000 + "xyz"
+    rendered = "a" * 2100 + "bc" + "d" * 6000 + "xyz"
     self.assertEqual(self.server.reuse_tokens(rendered, self.server.tok.encode(rendered)), long + [ord("x"), ord("y"), ord("z")])
 
   def test_corrupt_reply_fails(self):

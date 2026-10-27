@@ -92,6 +92,19 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
 PING = -1  # (Handler.next_token: no token for a while)
 
+def starts(ids:list[int], t:list[int], n:int|None=None) -> bool:
+  """ids starts with the first n (all) tokens of t: a few of them compared first (another conversation differs there), then all (the lists of
+  long conversations: a comparison of them all is a copy of every one, with many kept that's the time of a request's prefill)"""
+  n = len(t) if n is None else n
+  if n > len(ids) or n > len(t): return False
+  return all(ids[p] == t[p] for p in (n // 2, (3 * n) // 4, n - 1) if 0 <= p) and ids[:n] == t[:n]
+
+def same_start(a:list[int], b:list[int], n:int=2048) -> bool:
+  """a and b share their first n tokens, at most half of either (the system prompt and the task of an agent's conversation: another one's task
+  differs)"""
+  n = min(n, len(a) // 2, len(b) // 2)
+  return a[:n] == b[:n]
+
 def common_prefix(a:list[int], b:list[int]) -> int:
   """the tokens a and b start with (the lists compared in slices: a loop over a long conversation's tokens is slow)"""
   lo, hi = 0, min(len(a), len(b))
@@ -588,7 +601,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   @staticmethod
   def host_hit(e:HostConv, ids:list[int]) -> int:
     """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
-    return next((n for n in (len(e.tokens), e.ckpt) if 0 < n < len(ids) and ids[:n] == e.tokens[:n]), 0)
+    return next((n for n in (len(e.tokens), e.ckpt) if 0 < n < len(ids) and starts(ids, e.tokens, n)), 0)
   def kept(self) -> list[list[int]]:
     """the kept conversations' tokens: the model's, the slots', the host's"""
     model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
@@ -605,7 +618,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # (one the prompt's tokens continue: the cache has it. a longer one the prompt's text continues: the ones sharing the most tokens with it
     # (an agent's own conversation, not the others' with the same system prompt), however early they differ: a sampled token of an early
     # reply that isn't its text's tokenization differs from then on, every turn after)
-    exact = max((len(t) for t in cands if ids[:len(t)] == t), default=0)
+    exact = max((len(t) for t in cands if starts(ids, t)), default=0)
+    # (an agent's own ones: the others' differ in their task, at the start)
+    cands = [t for t in cands if len(t) > exact and same_start(t, ids)]
     for t in sorted(cands, key=lambda t: common_prefix(t, ids), reverse=True)[:getenv("REUSE_TRY", 2)]:
       if len(t) > exact and rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
@@ -614,7 +629,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """(CACHE_LOG) a request prefilled from much less than it shares with a kept conversation: where they differ"""
     if not self.keeps() or not getenv("CACHE_LOG", 1): return
     kept = self.kept()
-    n, t = max(((common_prefix(t, ids), t) for t in kept), key=lambda x: x[0], default=(0, []))
+    n, t = max(((common_prefix(t, ids), t) for t in kept if same_start(t, ids)), key=lambda x: x[0], default=(0, []))
     if n - start < 2000: return
     dec = self.tok.decode
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
@@ -627,7 +642,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     if not self.keeps() or not getenv("STASH", 1): return
     model, have = self.model, self.model.get_start_pos(ids)
-    best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and ids[:len(t)] == t),
+    best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and starts(ids, t)),
                default=(0, -1))
     host = max(((self.host_hit(e, ids), j) for j, e in enumerate(self.host)), default=(0, -1))
     if host[0] > best[0] and host[0] >= have + self.STASH_MIN:
@@ -651,7 +666,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """the tokens of ids the model or a kept conversation has (where its prefill starts)"""
     if not self.keeps(): return 0
     return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
-                                                  len(t) < len(ids) and ids[:len(t)] == t] +
+                                                  len(t) < len(ids) and starts(ids, t)] +
                [self.host_hit(e, ids) for e in self.host])
   # requests waiting this long are taken in turn, before the others the cache has more of
   STARVE = getenv("STARVE", 120.0)
