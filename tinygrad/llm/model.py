@@ -415,7 +415,7 @@ class GatedDeltaNetBlock(FFNBlock):
     if ssm.kda:
       self.qkv_dims = (self.q_dim, self.q_dim, ssm.inner_size)
       self.attn_q, self.attn_k, self.attn_v = (Linear(config.dim, d, bias=False) for d in self.qkv_dims)
-      self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v = ({"weight": Tensor.zeros(d, ssm.conv_kernel)} for d in self.qkv_dims)
+      self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v = ({"weight": Tensor.zeros(d, 1, ssm.conv_kernel)} for d in self.qkv_dims)
       self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
       self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
     else:
@@ -457,9 +457,9 @@ class GatedDeltaNetBlock(FFNBlock):
       store = conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(conv_state.dtype).uop)
       return functools.reduce(lambda a,b: a+b, (conv_window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
     projs = (self.attn_q, self.attn_k, self.attn_v) if is_kda else (self.attn_qkv,)
-    weights = (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v) if is_kda else (self.ssm_conv1d,)
+    convs = (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v) if is_kda else (self.ssm_conv1d,)
     states = self.conv_states if is_kda else [self.conv_state]
-    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"]) for s, proj, w in zip(states, projs, weights)))
+    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"].flatten(1)) for s, proj, w in zip(states, projs, convs)))
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
@@ -596,7 +596,6 @@ class Transformer:
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)
-        for c in "qkv": state_dict[f"blk.{i}.ssm_conv1d_{c}.weight"] = state_dict[f"blk.{i}.ssm_conv1d_{c}.weight"].squeeze(1)
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
     if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
