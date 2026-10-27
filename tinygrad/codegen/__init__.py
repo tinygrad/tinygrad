@@ -421,7 +421,7 @@ def lower_call(ctx:LowerCallsCtx, call:UOp) -> UOp|None:
   if call.body.op is Ops.PROGRAM and call.body.src[-1].op is Ops.BINARY: return None
   bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
   ki = KernelInfo(f"{name}_{bodies.setdefault(call.body, len(bodies))}", optimized=True)
-  body = call.body.replace(src=(call.body.src[0].replace(arg=ki), *call.body.src[1:])) if call.body.op is Ops.PROGRAM else call.body.replace(arg=ki)
+  body = call.body.substitute({call.body.src[0]:call.body.src[0].replace(arg=ki)}) if call.body.op is Ops.PROGRAM else call.body.replace(arg=ki)
   return call.replace(src=(to_program(body, ctx.renderer), *call.src[1:]))
 
 pm_lower_calls = PatternMatcher([
@@ -457,7 +457,7 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp|None:
   return prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
-  src = ctx.render([*lin.src, prg.src[0]])
+  src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:

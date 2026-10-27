@@ -1895,8 +1895,8 @@ def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[U
     linear.extend(nodes)
     linear.append(template.replace(src=(template.body, *args)))
   # The assembly is already linear: keep calls in instruction order and compute their addresses immediately before use.
-  return UOp(Ops.PROGRAM, src=(UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True)),
-                               UOp(Ops.LINEAR, src=tuple(linear)))), bufs
+  sink = UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # Thread jump-only blocks.
