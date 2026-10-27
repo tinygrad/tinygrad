@@ -122,8 +122,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
-  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  ((UPat.var("x") ^ UPat.var("y")) ^ UPat.var("y"), lambda x,y: x), # (x^y)^y -> x
+  (UPat.var("x", dtypes.sints+(dtypes.weakint,)) // -1, lambda x: -x), # x//-1 -> -x
+  ((UPat.var("x") ^ UPat.var("y", dtypes.weakint)) ^ UPat.var("y"), lambda x,y: x), # (x^y)^y -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   # variations of (x%c)+(x//c)*c = x
   (UPat(Ops.ADD, dtype=dtypes.weakint, name="x"), fold_add_divmod_recombine),
@@ -282,8 +282,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
-  # (x//c1)//c2 -> x//(c1*c2) for c2>0
-  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2) if c2.vmin>0 else None),
+  # (x//c1)//c2 -> x//(c1*c2) for c2>0 when c1*c2 fits
+  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"),
+   lambda x,c1,c2: x//(c1*c2) if c2.vmin>0 and x.dtype.min<=c1.vmin*c2.vmin<=x.dtype.max else None),
   # ** lt **
   # c0+x<c1 -> x < c1-c0
   ((UPat.cvar("c0") + UPat.var("x", dtype=dtypes.sints+(dtypes.weakint,))) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),
