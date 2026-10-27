@@ -4045,10 +4045,10 @@ def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, 
 
 @functools.cache
 def _pool_merge_kernel(index:UOp, cand:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0) -> UOp:
-  # the lists of _pool_index_kernel from the candidates of every device (n, rows, k, 2): the top k of all of them, the tail, the count
-  n, rows = cast(int, cand.shape[0]), cast(int, cand.shape[1])
+  # the lists of _pool_index_kernel from the candidates of every device (n, rows, c, 2): the top k of all of them, the tail, the count
+  n, rows, c = cast(int, cand.shape[0]), cast(int, cand.shape[1]), cast(int, cand.shape[2])
   n_max, THREADS = cast(int, index.shape[1]) - 1, DECODE_THREADS
-  NC, W = n * k, THREADS // WARP_SIZE
+  NC, W = n * c, THREADS // WARP_SIZE
   per = (NC + THREADS - 1) // THREADS
   row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   t, q, index = wave * WARP_SIZE + lane, q_start + row, index.shrink(((row0, row0 + rows), None))
@@ -4056,11 +4056,11 @@ def _pool_merge_kernel(index:UOp, cand:UOp, *grouped:UOp, q_start:UOp, pools:UOp
     Tg = rows // cast(int, grouped[0].shape[0])
     start = grouped[0][row // Tg].load().cast(dtypes.weakint)
     q, pools = start + row % Tg, (start + Tg + kpool - 1) // kpool
-  def at(c:UOp) -> tuple[UOp, UOp, UOp]:
-    i = t + c * THREADS
-    return (i // k).minimum(n-1), i % k, i < NC
-  def key(c:UOp) -> UOp:
-    j, m, inb = at(c)
+  def at(ci:UOp) -> tuple[UOp, UOp, UOp]:
+    i = t + ci * THREADS
+    return (i // c).minimum(n-1), i % c, i < NC
+  def key(ci:UOp) -> UOp:
+    j, m, inb = at(ci)
     ok = inb & (cand[j, row, m, 1].load() >= 0)
     return ok.where(_order_key(cand[j, row, m, 0].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
   npc = UOp.const(per, dtypes.weakint)
@@ -4092,14 +4092,17 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools or 0, dtypes.weakint)
   sc = Tensor(scores.uop.after(*[x for x in (q_start, pools) if isinstance(x, UOp)]))
   extra = [positions] if positions is not None else []
-  cand = Tensor.empty(n*rows, top, 2, dtype=dtypes.float32, device=devs, axis=0)
-  cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=top,
+  # (every device's top c (IDX_CAND, at least top/n): the top k of all are among them unless a device has more of them than c, its pools
+  # are blocks of SEQ_BLK positions in turn)
+  c = max(min(top, getenv("IDX_CAND", top)), (top + n - 1) // n)
+  cand = Tensor.empty(n*rows, c, 2, dtype=dtypes.float32, device=devs, axis=0)
+  cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=c,
                                                                                            kpool=kpool, n=n))[0]
-  flat = cand.reshape(n, rows*top*2)
+  flat = cand.reshape(n, rows*c*2)
   # (a ring of copies: the peer to peer kernel is slower past a few rows' (IDX_P2P_ROWS))
   g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 4) else None
   allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
-  return Tensor.custom_kernel(out, allc.reshape(n, rows, top, 2).contiguous(), *extra,
+  return Tensor.custom_kernel(out, allc.reshape(n, rows, c, 2).contiguous(), *extra,
                               fxn=functools.partial(_pool_merge_kernel, q_start=qs, pools=pu, k=top, kpool=kpool, row0=row0))[0]
 
 def _reg_u32() -> UOp:

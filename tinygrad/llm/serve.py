@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, queue, random, re, select, socket, socketserver, threading, time, traceback, typing, uuid
+import json, pathlib, queue, random, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -465,6 +465,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     super().__init__(server_address, Handler)
 
   def serve_forever(self, poll_interval:float=0.5):
+    # (the model's thread polls the devices holding the GIL: the request threads (many streams) take it in turns of SWITCH_INTERVAL, the
+    # default 5 ms delays its steps)
+    sys.setswitchinterval(getenv("SWITCH_INTERVAL", 0.0005))
     # the model runs here, not on a thread of its own: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
     threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
     self.schedule()
