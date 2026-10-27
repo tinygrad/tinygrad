@@ -1965,22 +1965,9 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     return regions
   return build(set(order))
 
-# isa operand types and operations are independent of tensor construction and GPU lowering settings.
-@Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
-         DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1)
-@rewrite_group(name=lambda *args,ret,**kw: f"lift {kw.get('name', '')}")
-def lift(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int, arch:str="rdna3",
-         user_data_count:int=0, name:str="") -> UOp:
-  with Context(DEV=DEV.target('CPU', renderer='LLVM')):
-    code = bytes(to_mv(lib, lib_sz))
-    dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, user_data_count)
-    renderer = Device['CPU'].renderer
-    if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = _lift(amd_decode(code, arch), arch, renderer, dispatch, name)
-    return dispatch_cache[key]
-
 dispatch_cache:dict[tuple, UOp] = {}
 
+@rewrite_group(name=lambda insts,arch,renderer,dispatch,name,ret: f"lift {name}")
 def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
@@ -2087,7 +2074,15 @@ def _lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, na
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  prg = lift(lib, lib_sz, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(user_data or []), name=name)
+  # isa operand types and operations are independent of tensor construction and GPU lowering settings.
+  with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
+               DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
+    code = bytes(to_mv(lib, lib_sz))
+    dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, len(user_data or []))
+    renderer = Device['CPU'].renderer
+    if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
+      dispatch_cache[key] = _lift(amd_decode(code, arch), arch, renderer, dispatch, name)
+    prg = dispatch_cache[key]
   vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
   with _MXCSRContext():
     vmem_buf = UOp.from_buffer(Buffer('CPU', 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.uint32)
