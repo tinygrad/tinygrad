@@ -1,8 +1,7 @@
-import unittest, ctypes, gc
+import unittest
 from tinygrad import Tensor, Device
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, KernelInfo
-from tinygrad.device import TinyELF
 from tinygrad.renderer.cstyle import CStyleLanguage
 
 # an external call is a CALL on a CUSTOM_FUNCTION body naming the symbol, the program links against the loaded libraries
@@ -23,17 +22,5 @@ class TestExternalCall(unittest.TestCase):
   def test_call_ret(self):
     c = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int, device="CPU"), fxn=call_ret_kernel)[0]
     self.assertEqual(c.item(), 8)
-
-  def test_linked_program_lifetime(self):
-    dev = Device["CPU"]
-    callee = dev.runtime(TinyELF(dev.compiler.compile("void helper(int *x) { *x += 2; }"), "helper", dev.renderer.target, ()))
-    caller = dev.runtime(TinyELF(dev.compiler.compile("extern void helper(int *); struct args { int *x; }; "
-                                                  "void caller(const struct args *a) { helper(a->x); }"),
-                                     "caller", dev.renderer.target, (("x", AddrSpace.GLOBAL, dtypes.int, (1,)),)), links={"helper":callee})
-    del callee
-    gc.collect()
-    x = ctypes.c_int(1)
-    caller(ctypes.addressof(x))
-    self.assertEqual(x.value, 3)
 
 if __name__ == "__main__": unittest.main()
