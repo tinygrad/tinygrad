@@ -193,8 +193,8 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
 
 # a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
 def reg(dt:DType, r:Register) -> UOp: return UOp(Ops.INS, arg=(X86Ops.REG, dt, r))
-stack_pointer = reg(dtypes.uint64, RSP)
-args_pointer = reg(dtypes.uint64, RDI)
+def stack_pointer() -> UOp: return reg(dtypes.uint64, RSP)
+def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, named by its identity
@@ -261,7 +261,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint32, x.dtype.itemsize))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, the stack pointer by byte
-  scale = 1 if base in (stack_pointer, args_pointer) else base.dtype.itemsize
+  scale = 1 if base in (stack_pointer(), args_pointer()) else base.dtype.itemsize
   sz = imm(dtypes.uint32, base.dtype.itemsize)
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
     return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale), sz)
@@ -271,7 +271,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x), dtype=dtypes.uint64)
 def abi(ctx:IselContext, x:UOp) -> UOp:
-  src = fold_address(args_pointer.index(UOp.cconst(ctx.arg_offsets[x], dtypes.uint32)))
+  src = fold_address(args_pointer().index(UOp.cconst(ctx.arg_offsets[x], dtypes.uint32)))
   return x.ins(X86Ops.MOV, dtype=x.dtype if x.addrspace is AddrSpace.ALU else dtypes.uint64, src=src)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
@@ -452,10 +452,10 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
-  nx = UOp(Ops.INS, fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))),
+  nx = UOp(Ops.INS, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))),
            (X86Ops.LEA, x.dtype, Register(f"s{ctx.stack_size}", 0, WGPR, 8)))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
-  return nx, [stack_pointer, nx]
+  return nx, [stack_pointer(), nx]
 
 # TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
@@ -670,8 +670,8 @@ class X86LinearContext(LinearContext):
         after.append(self.ren.fill(slot,a,r))
 
     if self.stack_size > 0:
-      before.insert(0, stack_pointer.ins(X86Ops.SUBi, RSP, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
-      after.append(stack_pointer.ins(X86Ops.ADDi, RSP, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+      before.insert(0, stack_pointer().ins(X86Ops.SUBi, RSP, src=(stack_pointer(),imm(dtypes.int32, self.stack_size))))
+      after.append(stack_pointer().ins(X86Ops.ADDi, RSP, src=(stack_pointer(),imm(dtypes.int32, self.stack_size))))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
@@ -702,11 +702,11 @@ class X86Renderer(ISARenderer):
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)) + (x,), arg=(op, dtypes.void))
+    return UOp(Ops.INS, src=fold_address(stack_pointer().index(disp)) + (x,), arg=(op, dtypes.void))
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype, reg))
+    return UOp(Ops.INS, src=fold_address(stack_pointer().index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype, reg))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
