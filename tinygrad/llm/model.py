@@ -671,7 +671,7 @@ class Transformer:
                 **{f'ffn_{p}_exps.weight': f'mlp.experts.{{}}.{p}_proj.weight' for p in ('gate', 'up', 'down')}}
     shard_axes = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'ffn_gate.weight', 'ffn_up.weight')},
                   **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')},
-                  **{w: 2 for w in ('ffn_don_exps.weight')}}
+                  **{w: 2 for w in ('ffn_down_exps.weight',)}}
 
     global_names = ('token_embd.weight', 'output_norm.weight', 'output.weight')
     sources:dict[str, str|list[str]] = {k: hf_names[k] for k in global_names}
