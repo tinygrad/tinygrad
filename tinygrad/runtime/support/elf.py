@@ -7,7 +7,7 @@ from tinygrad.runtime.autogen import libc
 class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:bytes # noqa: E702
 
 def link_sym(sym:str, libs:list[ctypes.CDLL], link_syms:dict[str,int]|None=None) -> int:
-  if link_syms is not None and sym in link_syms: return link_syms[sym]
+  if link_syms is not None and (addr:=link_syms.get(sym)): return addr
   for lib in libs:
     try: return unwrap(ctypes.cast(getattr(lib, sym), ctypes.c_void_p).value)
     except (OSError, AttributeError, TypeError): pass

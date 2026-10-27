@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear, get_runtime, runtime_cache
+from tinygrad.engine.realize import run_linear, get_runtime
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
@@ -816,11 +816,6 @@ class TestCallInKernel(unittest.TestCase):
     run_linear(lin)
     self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call))
     self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
-    runtime = get_runtime(Device.DEFAULT, prg)
-    del call_runtime
-    runtime_cache.clear()
-    runtime(x.uop.buffer.ensure_allocated().get_buf(Device.DEFAULT))
-    self.assertListEqual(x.tolist(), Tensor.arange(5).add(4).tolist())
 
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):

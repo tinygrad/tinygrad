@@ -210,12 +210,11 @@ class LLVMRenderer(Renderer):
       elif u.op is Ops.BINARY: r[u] = f"@bin_{u.key.hex()}"
       elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
         vc += 1
-        params = u.body.arg.params
-        types = [ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in params]
+        types = [ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in u.body.arg.params]
         arg_type = "{ " + ", ".join(types) + " }"
         r[u] = f"%v{vc}"
         call_args.append(f"  {r[u]} = alloca {arg_type}")
-        for i, (p, ty) in enumerate(zip(params, types)):
+        for i, (p, ty) in enumerate(zip(u.body.arg.params, types)):
           kernel.append(f"  {r[u]}_{i} = getelementptr inbounds {arg_type}, ptr {r[u]}, i32 0, i32 {i}")
           kernel.append(f"  store {ty} {r[u.src[p.arg.slot+1]]}, ptr {r[u]}_{i}")
         kernel.append(f"  call void @{u.body.src[0].arg.function_name}(ptr {r[u]})")
