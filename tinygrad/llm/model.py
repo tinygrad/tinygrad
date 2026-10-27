@@ -1759,9 +1759,6 @@ class Transformer:
       parts.extend((b, start*row, (int(shape[axis]) if n is None else n)*row) for b in per)
     if self.config.spec_drafts: add(self._spec_h)
     for b in self._slot_blocks():
-      if isinstance(b, GatedDeltaNetBlock):
-        # (a recurrent state's row of the end only (of S: a position p's is p%S): the one the next call reads)
-        for t in [b.recurrent_state] + ([b.conv_state] if hasattr(b, "conv_state") else b.conv_states): add(t, 0, 1, length % int(t.shape[0]))
       if isinstance(b, MLATransformerBlock):
         if b.seq_sharded:
           n = len(cast(tuple[str, ...], b.cache_s.device))
@@ -1771,9 +1768,28 @@ class Transformer:
           pools = (rows + idx.idx.kpool - 1) // idx.idx.kpool
           if idx.sparse: add(idx.cache_pk, 0, pools), add(idx.ring)
           else: add(idx.cache_pk, 1, pools), add(idx.cache_kg, 1, pools * idx.idx.kpool)
+    # (the recurrent states' row of the end only: through the staging rows, see _host_rows)
+    for t in self._host_rows(): add(t)
     if ckpt:
       for t in getattr(self, "_ckpt", []): add(t)
     return parts
+
+  def _host_rows(self, length:int|None=None, save:bool=True) -> list[Tensor]:
+    """
+    the staging rows of the slotted recurrent states (the row of a position p is p%S): host_save copies the row of a conversation's end into
+    them (length, save) then them to host memory, host_load back from them (save False). their copies are the same program for every row
+    """
+    states:list[tuple[Tensor, bool]] = [(t, sl) for t, sl in self._recurrent_states() if sl]
+    if not states: return []
+    slot = UOp.variable("hrow_slot", 0, self.config.rewind).bind((length or 0) % (self.config.rewind + 1))
+    if not hasattr(self, "_hrows"):
+      self._hrows = [v.clone().realize() for v in self._ckpt_views(states, slot)]
+      self._hrow_jits = {sv: TinyJit(functools.partial(self._hrow_copy, sv), capture_first=True) for sv in (True, False)}
+    if length is not None: self._hrow_jits[save](slot)
+    return self._hrows
+  def _hrow_copy(self, save:bool, slot:UOp):
+    views = self._ckpt_views([x for x in self._recurrent_states() if x[1]], slot)
+    Tensor.realize(*[dst.assign(src) for dst, src in (zip(self._hrows, views) if save else zip(views, self._hrows))])
 
   HOST_CHUNK = getenv("HOST_CHUNK", 1 << 30)  # the bytes of a buffer of host memory (host_alloc): a conversation takes as many as it needs
   def _host_layout(self, parts:list[tuple[Buffer, int, int]]) -> list[tuple[int, int]]:
@@ -1802,8 +1818,9 @@ class Transformer:
     # the copies of a bucket between the model and these chunks: a program made once (building and compiling ~2000 copies takes ~0.5 s),
     # the devices copy at once (CPU memory is the devices' to copy to, none staged)
     if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
-    # (the bucket of its positions, the row of its recurrent states, its checkpoint or not)
-    key = (save, tuple(id(c) for c in chunks), self._host_len(length), length % (self.config.rewind + 1), ckpt)
+    # (the bucket of its positions, its checkpoint or not)
+    key = (save, tuple(id(c) for c in chunks), self._host_len(length), ckpt)
+    if save: self._host_rows(length, True)  # (the row of its end to the staging rows, before the copies)
     if (prg:=self._host_programs.pop(key, None)) is None:
       parts = self._host_parts(length, ckpt)
       layout = self._host_layout(parts)
@@ -1818,6 +1835,7 @@ class Transformer:
     for d in devs: Device[d].synchronize()  # (run ahead steps of the model)
     run_linear(prg, jit=True, update_stats=False)
     for d in devs + ("CPU",): Device[d].synchronize()
+    if not save: self._host_rows(length, False)  # (the staging rows to the row of its end)
 
   def _host_len(self, length:int) -> int:
     """the positions of a conversation host_save copies: rounded up to HOST_BUCKET, (aliased) not past batch_ctx if it fits (the slots')"""
@@ -2331,6 +2349,8 @@ class Transformer:
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
       else: self.batch_step([(0, 1, 0.0)] * m)
     if self.batch_prefills(): self.batch_prefill([([0], 0, 0.0)])
+    # (the staging rows of host_save and host_load: their copies captured)
+    self._host_rows(1, True), self._host_rows(1, False)
     self._cached_tokens, self._ckpt_tokens = [], []
 
   def _capture_parallel(self, sizes:tuple[int, ...]):
