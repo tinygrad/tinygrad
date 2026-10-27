@@ -11,7 +11,7 @@ from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.isa import ISARenderer
+from tinygrad.renderer.x86 import ISARenderer
 from test.helpers import replace_opts, check_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")

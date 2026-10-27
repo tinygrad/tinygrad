@@ -309,8 +309,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
-  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, estimates=sum(estimates, start=Estimates()).simplify(),
-                 slots=tuple((d, i) for i, d in enumerate(slots)))
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
+                 estimates=Estimates(*[sum(x*t.count(x) for x in dict.fromkeys(t)) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
   return sink.call(*slots.values(), aux=info)
 
 @rewrite_group(new_ctx=False)

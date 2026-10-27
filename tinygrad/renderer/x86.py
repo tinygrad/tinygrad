@@ -1,14 +1,61 @@
 from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-import struct, functools
-from typing import cast
+import struct, functools, itertools
+from typing import Any, cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef, regs, with_regs
+from tinygrad.renderer import Renderer
+from tinygrad.device import TinyELF
 from tinygrad.helpers import unwrap, Target
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
+
+@dataclass(frozen=True)
+class Register:
+  name: str
+  index: int
+  _cons: tuple[Register, ...] = field(default_factory=tuple)
+  size: int = 8
+  @property
+  def cons(self): return self._cons or (self,)
+  def __repr__(self): return self.name
+
+class IselContext:
+  def __init__(self, sink:UOp):
+    self.reg_n = itertools.count()
+    params = sorted([u for u in sink.toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
+    self.arg_offsets = {u: o for u, (o, _) in zip(params, TinyELF.iter_sig(tuple((None, u.addrspace, u.dtype, ()) for u in params)))}
+
+  def vreg(self, cons:tuple[Register, ...]|Register, size:int=0):
+    cons = cons if isinstance(cons, tuple) else (cons,)
+    return Register(f"v{next(self.reg_n)}", 0, cons, size or cons[0].size)
+
+# the registers an INS defines follow its opcode and dtype in its arg
+def regs(u:UOp) -> tuple[Register, ...]: return u.arg[2:] if u.op is Ops.INS else ()
+def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp: return u.replace(arg=u.arg[:2]+r)
+
+def rdef(u:UOp):
+  if u.op in {Ops.AFTER, Ops.BITCAST}: return rdef(u.src[0])
+  return r[0] if (r:=regs(u)) else None
+
+class LinearContext:
+  def __init__(self, ren:ISARenderer):
+    self.ren, self.stack_size = ren, 0
+  def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
+  def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
+
+class ISARenderer(Renderer):
+  pre_isel_matcher: PatternMatcher
+  isel_matcher: PatternMatcher
+  pre_regalloc_matcher: PatternMatcher
+  post_regalloc_matcher: PatternMatcher
+  linear_ctx_type: type = LinearContext
+
+  def is_two_address(self, x:UOp) -> bool: return False
+  def spill(self, spill_slot:Any, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_slot:Any, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
 
 # ***** X86 Ops *****
 
@@ -125,7 +172,7 @@ extra_matcher = PatternMatcher([
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
-  (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
+  (UPat(Ops.TRUNCMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.TRUNCDIV, y)),
   # scalar reg gated mops become cmovs
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate")),
     lambda addr,alt,gate: gate.where(addr.load(), alt) if is_regbuf(addr.src[0]) else None),
@@ -193,8 +240,8 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
 
 # a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
 def reg(dt:DType, r:Register) -> UOp: return UOp(Ops.INS, arg=(X86Ops.REG, dt, r))
-stack_pointer = reg(dtypes.uint64, RSP)
-args_pointer = reg(dtypes.uint64, RDI)
+def stack_pointer() -> UOp: return reg(dtypes.uint64, RSP)
+def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, named by its identity
@@ -261,7 +308,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint32, x.dtype.itemsize))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, the stack pointer by byte
-  scale = 1 if base in (stack_pointer, args_pointer) else base.dtype.itemsize
+  scale = 1 if base in (stack_pointer(), args_pointer()) else base.dtype.itemsize
   sz = imm(dtypes.uint32, base.dtype.itemsize)
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
     return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale), sz)
@@ -271,7 +318,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x), dtype=dtypes.uint64)
 def abi(ctx:IselContext, x:UOp) -> UOp:
-  src = fold_address(args_pointer.index(UOp.cconst(ctx.arg_offsets[x], dtypes.uint32)))
+  src = fold_address(args_pointer().index(UOp.cconst(ctx.arg_offsets[x], dtypes.uint32)))
   return x.ins(X86Ops.MOV, dtype=x.dtype if x.addrspace is AddrSpace.ALU else dtypes.uint64, src=src)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
@@ -359,7 +406,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.floats).index(UPat.cvar("c").cast(), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, c.val * x.dtype.itemsize))) if _is_vec_xmm(y) else None),
   # int binary
-  ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
+  ((UPat(dtype=dtypes.ints).alu(Ops.TRUNCDIV, UPat())).named("x"), idiv),
   # int binary with immediate
   (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.val)))),
   (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.val)))),
@@ -452,10 +499,10 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
-  nx = UOp(Ops.INS, fold_address(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32))),
+  nx = UOp(Ops.INS, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))),
            (X86Ops.LEA, x.dtype, Register(f"s{ctx.stack_size}", 0, WGPR, 8)))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
-  return nx, [stack_pointer, nx]
+  return nx, [stack_pointer(), nx]
 
 # TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
@@ -670,8 +717,8 @@ class X86LinearContext(LinearContext):
         after.append(self.ren.fill(slot,a,r))
 
     if self.stack_size > 0:
-      before.insert(0, stack_pointer.ins(X86Ops.SUBi, RSP, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
-      after.append(stack_pointer.ins(X86Ops.ADDi, RSP, src=(stack_pointer,imm(dtypes.int32, self.stack_size))))
+      before.insert(0, stack_pointer().ins(X86Ops.SUBi, RSP, src=(stack_pointer(),imm(dtypes.int32, self.stack_size))))
+      after.append(stack_pointer().ins(X86Ops.ADDi, RSP, src=(stack_pointer(),imm(dtypes.int32, self.stack_size))))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
@@ -702,11 +749,11 @@ class X86Renderer(ISARenderer):
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)) + (x,), arg=(op, dtypes.void))
+    return UOp(Ops.INS, src=fold_address(stack_pointer().index(disp)) + (x,), arg=(op, dtypes.void))
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype, reg))
+    return UOp(Ops.INS, src=fold_address(stack_pointer().index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype, reg))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"

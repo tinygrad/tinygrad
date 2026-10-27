@@ -7,7 +7,7 @@ from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.uop import Ops
 import numpy as np
 import pytest
@@ -296,6 +296,19 @@ class TestDTypeALU(unittest.TestCase):
       self.assertEqual(((x//2+1)//2).tolist(), [(dt.max+1)//4])
     x = Tensor([2**31-2], dtype=dtypes.int32)
     self.assertEqual(((x//2+2**29)//2).tolist(), [805306367])
+
+  def test_div_div_no_overflow(self):
+    self.assertEqual(((Tensor([2**31-1, -5], dtype=dtypes.int32)//65536)//65536).tolist(), [0, -1])
+
+  def test_fused_div_matches_unfused(self):
+    x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
+    for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):
+      np.testing.assert_equal(g(f()).numpy(), g(f().realize()).numpy())
+
+  @unittest.skipIf(Device.DEFAULT == "CL", "rusticl fdiv scaling reassociates (x*c)*0.25 past inf")
+  def test_fused_recip_const_matches_unfused(self):
+    x = Tensor([3e38, 1e30, 1.7])
+    np.testing.assert_equal((1/(x*3)).numpy(), (1/(x*3).realize()).numpy())
 
   def test_unsigned_mul_max(self):
     for dt in (dtypes.uint32, dtypes.uint64):
