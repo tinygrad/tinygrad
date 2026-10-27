@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW
+  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -836,6 +836,13 @@ class TransformerBlock(FFNBlock):
 
 class Indexer:
   _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: the slots, their positions, the regions of the cache, see _region_views)
+  shard = 0  # (SEQ_IDX_SHARD: the devices the pooled keys are split over)
+  def pk_rows(self, t:Tensor) -> Tensor:
+    """the pooled keys (or a pool of the slots') as rows: the local ones of every device if split (SEQ_IDX_SHARD, see slot_rows_view)"""
+    return MLATransformerBlock.slot_rows_view(t) if self.shard else t
+  def pk_slot(self) -> int:
+    """the rows of a slot's pooled keys (of a device if split)"""
+    return int(self.slot_pk[0].shape[0]) // (self.shard or 1)
   pool_pk:Tensor  # batched decoding: the caches of every slot, and of all of them (MLATransformerBlock._init_slots)
   pool_ring:Tensor
   slot_pk:list[Tensor]
@@ -860,7 +867,18 @@ class Indexer:
     row, dt = ((IDX_FP8_ROW,), dtypes.uint32) if fp8 else ((idx.head_dim,), dtypes.half if self.sparse else dtypes.float32)
     self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), max_pools, *row, dtype=dt, device=x.device).contiguous()
     ring = round_up(max(2*idx.kpool, self.rewind + idx.kpool - 1), idx.kpool)
-    if self.sparse and (reg:=self._regions) is not None:
+    # (SEQ_IDX_SHARD with a sequence sharded cache: the pooled keys split on their pools as the cache on its positions, a device stores and
+    # scores its own, see pool_index_shard)
+    self.shard = len(cast(tuple, x.device)) if self.sparse and bool(getenv("SEQ_IDX_SHARD", 0)) and seq_sharded(x.device) else 0
+    if self.shard:
+      devs, local = cast(tuple[str, ...], x.device), seq_rows(self.max_context, self.shard) // idx.kpool
+      self.cache_pk = Tensor.empty(self.shard*local, *row, dtype=dt, device=devs, axis=0)
+      if (reg:=self._regions) is not None:
+        n, S, R = reg
+        Pl = seq_rows(S, self.shard) // idx.kpool
+        views = _region_views(devs, 0, row, dt, R*Pl, [(0, local), (Pl, n*Pl)] + [((i+1)*Pl, Pl) for i in range(n)])
+        self.cache_pk, self.pool_pk, self.slot_pk = views[0], views[1], views[2:]
+    elif self.sparse and (reg:=self._regions) is not None:
       # (the slots' pooled keys in the same buffer, past the model's first slot's worth: see MLATransformerBlock._init_state)
       n, S, R = reg
       P = S // idx.kpool
@@ -892,7 +910,9 @@ class Indexer:
       qb = iq[r0:r0+block].contiguous()
       if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # after the last block's lists: its scores are done
       if picks is None: picks = Tensor.empty(rows, k*idx.kpool + idx.kpool + 1, dtype=dtypes.int32, device=x.device)
-      picks = pool_index_rows(indexer_scores(qb, pk, weights[r0:r0+block], pools), start_pos, pools, k, idx.kpool, row0=r0, out=picks)
+      sc = indexer_scores(qb, pk, weights[r0:r0+block], pools, idx.kpool)
+      picks = pool_index_shard(sc, start_pos, pools, k, idx.kpool, row0=r0, out=picks) if self.shard else \
+              pool_index_rows(sc, start_pos, pools, k, idx.kpool, row0=r0, out=picks)
     return unwrap(picks)[:Tq]
 
   def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
@@ -1054,7 +1074,7 @@ class MLATransformerBlock(FFNBlock):
     # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor
     assert idx is not None and len({T for _, T in groups}) == 1, "batched decoding: the sparse attention of the indexer, groups of the same rows"
     scale, positions = 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
-    P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
+    P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
     # (prefills: the slots of the prompts, their token counts)
     slots, counts = (pf.slots.to(x.device), pf.counts.to(x.device)) if (pf:=_batch_prefill[0]) is not None else (None, None)
     pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R, slots, counts))
@@ -1086,6 +1106,7 @@ class MLATransformerBlock(FFNBlock):
       else: self.pool_k, self.slot_k = _slot_pool(n, self.cache_k, (1, 1, ctx, self.cache_k.shape[-1]))
     if (idx:=self.indexer) is not None:
       pools = round_up(ctx, idx.idx.kpool) // idx.idx.kpool
+      if idx.shard: pools = idx.shard * (seq_rows(ctx, idx.shard) // idx.idx.kpool)  # (every device its pools of every slot)
       if len(getattr(idx, "slot_pk", [])) < n: idx.pool_pk, idx.slot_pk = _slot_pool(n, idx.cache_pk, (pools, idx.cache_pk.shape[-1]))
       idx.pool_ring, idx.slot_ring = _slot_pool(n, idx.ring)
 
@@ -1657,8 +1678,9 @@ class Transformer:
         if b.seq_sharded: copies.append(rows(b.slot_rows_view(b.pool_s), slot*(n:=b.slot_rows()), n).assign(rows(b.slot_rows_view(b.cache_s), 0, n)))
         else: copies.append(rows(b.pool_k, slot).assign(b.cache_k[:, :, :int(b.slot_k[0].shape[2])]))
         if (idx:=b.indexer) is not None:
-          P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
-          copies += [rows(idx.pool_pk, slot*P, P).assign(idx.cache_pk[:P]), rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
+          P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
+          copies += [rows(idx.pk_rows(idx.pool_pk), slot*P, P).assign(rows(idx.pk_rows(idx.cache_pk), 0, P)),
+                     rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
     Tensor.realize(*copies)
 
   def _slot_load_copy(self, slot:UOp, rp:UOp, wp:UOp, wpc:UOp, hrow:UOp):
@@ -1678,8 +1700,9 @@ class Transformer:
         if b.seq_sharded: copies.append(rows(b.slot_rows_view(b.cache_s), 0, n:=b.slot_rows()).assign(rows(b.slot_rows_view(b.pool_s), slot*n, n)))
         else: copies.append(b.cache_k[:, :, :int(b.slot_k[0].shape[2])].assign(rows(b.pool_k, slot)))
         if (idx:=b.indexer) is not None:
-          P, R = int(idx.slot_pk[0].shape[0]), int(idx.slot_ring[0].shape[0])
-          copies += [idx.cache_pk[:P].assign(rows(idx.pool_pk, slot*P, P)), idx.ring.assign(rows(idx.pool_ring, slot*R, R))]
+          P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
+          copies += [rows(idx.pk_rows(idx.cache_pk), 0, P).assign(rows(idx.pk_rows(idx.pool_pk), slot*P, P)),
+                     idx.ring.assign(rows(idx.pool_ring, slot*R, R))]
     Tensor.realize(*copies)
 
   def _slot_pools(self) -> list[tuple[Tensor, int]]:
@@ -1690,7 +1713,7 @@ class Transformer:
         pools += [(b.pool_rec, int(b.slot_rec[0].shape[0]))] + [(p, int(b.slot_conv[0][0].shape[0])) for p in b.pool_conv]
       if isinstance(b, MLATransformerBlock):
         pools.append((b.slot_rows_view(b.pool_s), b.slot_rows()) if b.seq_sharded else (b.pool_k, 1))
-        if (idx:=b.indexer) is not None: pools += [(idx.pool_pk, int(idx.slot_pk[0].shape[0])), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
+        if (idx:=b.indexer) is not None: pools += [(idx.pk_rows(idx.pool_pk), idx.pk_slot()), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
     return pools
   def _slot_move_copy(self, src:UOp, dst:UOp):
     def rows(t:Tensor, start:UOp, n:int) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
@@ -1766,6 +1789,8 @@ class Transformer:
         else: add(b.cache_k, 2, rows)
         if (idx:=b.indexer) is not None:
           pools = (rows + idx.idx.kpool - 1) // idx.idx.kpool
+          # (split: every device's pools of the positions, see seq_rows)
+          if idx.shard: pools = (rows + SEQ_BLK*idx.shard - 1) // (SEQ_BLK*idx.shard) * (SEQ_BLK // idx.idx.kpool)
           if idx.sparse: add(idx.cache_pk, 0, pools), add(idx.ring)
           else: add(idx.cache_pk, 1, pools), add(idx.cache_kg, 1, pools * idx.idx.kpool)
     # (the recurrent states' row of the end only: through the staging rows, see _host_rows)
