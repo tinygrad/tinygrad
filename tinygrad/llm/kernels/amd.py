@@ -4096,7 +4096,9 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=top,
                                                                                            kpool=kpool, n=n))[0]
   flat = cand.reshape(n, rows*top*2)
-  allc = g if (g:=host_allgather(flat)) is not None else all_gather(flat, 0, dtypes.float32)
+  # (a ring of copies: the peer to peer kernel is slower past a few rows' (IDX_P2P_ROWS))
+  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 4) else None
+  allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
   return Tensor.custom_kernel(out, allc.reshape(n, rows, top, 2).contiguous(), *extra,
                               fxn=functools.partial(_pool_merge_kernel, q_start=qs, pools=pu, k=top, kpool=kpool, row0=row0))[0]
 

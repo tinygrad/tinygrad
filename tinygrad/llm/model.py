@@ -550,6 +550,9 @@ class FFNBlock:
          xr.shape[1] > 32:
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
         logits = xr.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
+      elif isinstance(T:=xr.shape[1], int) and 16 < T < 128 and T % 16 and getenv("ROUTER_PAD", 1):
+        # (the rows of batched decoding (3 a sequence): padded to whole tiles of 16, the matmul's kernel of 60 rows is several times slower)
+        logits = router(xr.pad((None, (0, round_up(T, 16) - T), None)))[:, :T]
       else: logits = router(xr)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
