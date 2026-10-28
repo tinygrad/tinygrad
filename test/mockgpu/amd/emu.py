@@ -73,9 +73,6 @@ from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to
 
 MASK32 = 0xFFFFFFFF
 
-# sqtt traces are consumed by amdgpu.py; the lifter does not emit them yet.
-sqtt_traces: list[bytes] = []
-
 def _c(val, dtype=dtypes.uint32): return UOp.const(val, dtype)
 
 def _u64(lo: UOp, hi: UOp) -> UOp:
