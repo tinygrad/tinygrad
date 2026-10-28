@@ -1,7 +1,6 @@
 import ctypes, time
 from dataclasses import replace
 from test.mockgpu.gpu import VirtGPU
-from test.mockgpu.helpers import PythonRemu
 from tinygrad.helpers import getbits, to_mv, getenv, DEV
 from tinygrad.runtime.support import c
 
@@ -40,8 +39,6 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
-
-remu = PythonRemu()
 
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
@@ -217,14 +214,9 @@ class PM4Executor(AMDQueue):
     scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
 
     assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
-    # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to the emulator
-    remu.valid_mem_ranges = self.gpu.mapped_ranges
-    remu.rsrc2 = rsrc2
-    remu.scratch_size = scratch_size
-    remu.arch = self.gpu.arch
-    remu.user_data = user_data
-    remu.name = self.kernel_name
-    err = remu.run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr)
+    from test.mockgpu.amd.emu import run_asm
+    err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr,
+                  rsrc2, scratch_size, self.gpu.arch, user_data, self.kernel_name)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_indirect_buffer(self, n):

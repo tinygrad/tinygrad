@@ -137,7 +137,6 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
   if val.dtype == dtypes.float32: return val.bitcast(dtypes.uint32)
   if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)
-  if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
 _pcode_fixes = {
@@ -230,10 +229,9 @@ def _write_val(bits: int, val: UOp, wfn, reg_or_addr, *args, is_mem: bool = Fals
   """Write value, splitting 64-bit if needed. bits=64 for 64-bit writes, otherwise 32-bit."""
   return _write_64bit(val, wfn, reg_or_addr, is_mem, *args) if bits == 64 else [wfn(reg_or_addr, _to_u32(val), *args)]
 
-def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, data_bits: int = 32) -> list[UOp]:
+def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
   """Conditional memory store with sub-word support. Returns list of store UOps."""
-  adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
-  word_addr = addr >> UOp.const(2, adt)
+  word_addr = addr >> UOp.const(2, dtypes.uint64)
   idx = mem.index(word_addr.valid(active))
   if data_bits == 32: return _mem_store_bytes(mem.bitcast(dtypes.uint8), addr, val, active)
   # Sub-word store: read-modify-write with mask
@@ -247,7 +245,7 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   is_cross = byte_pos.eq(_c(3))
   cross_word0 = (idx & _c(0x00FFFFFF)) | ((val_u32 & _c(0xFF)) << _c(24))
   store0 = idx.store(active.where(is_cross.where(cross_word0, new_word), idx))
-  next_idx = mem.index((word_addr + UOp.const(1, adt)).valid(active & is_cross))
+  next_idx = mem.index((word_addr + UOp.const(1, dtypes.uint64)).valid(active & is_cross))
   cross_word1 = (next_idx & _c(0xFFFFFF00)) | ((val_u32 >> _c(8)) & _c(0xFF))
   return [store0, next_idx.store((active & is_cross).where(cross_word1, next_idx))]
 
@@ -336,12 +334,9 @@ class _Ctx:
   def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
     """Combine lane bits into a mask using RANGE+REDUCE (32-bit for RDNA, 64-bit for CDNA)."""
     lane = self.range()
-    if self.wave_size <= 32:
-      bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
-      result = bit.reduce(lane, arg=Ops.ADD)
-    else:
-      bit = get_lane_bit(lane).cast(dtypes.uint64) << lane.cast(dtypes.uint64)
-      result = bit.reduce(lane, arg=Ops.ADD)
+    dtype = dtypes.uint32 if self.wave_size <= 32 else dtypes.uint64
+    bit = get_lane_bit(lane).cast(dtype) << lane.cast(dtype)
+    result = bit.reduce(lane, arg=Ops.ADD)
     return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:
@@ -1634,7 +1629,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
         if data_bits < 32 and is_lds: return [wmem(val[0], val[1], active, data_bits)]
         return _write_val(data_bits, val[1], wmem, val[0], active, is_mem=True)
       if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
-      return _mem_store(mem, val[0], val[1], active, 64, data_bits)
+      return _mem_store(mem, val[0], val[1], active, data_bits)
     if dest.startswith('RETURN_DATA') and writes_return_data:
       write_gpr = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
       _wdata = lambda r, v, l, e: write_gpr(r, l, v, e)  # noqa: E731  (arg order: reg, val, lane, exec)
@@ -1778,10 +1773,6 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes|memoryview) -> tuple[int, int, int, str]:
-  base, mask, size = ctx.canonical_mask(inst_bytes)
-  return base, mask, size, f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
-
 _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 _BARRIER_SOP1_OPS: set = set()
@@ -1846,7 +1837,8 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[Instructio
   # dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
   ctx = _Ctx(inst.size(), _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
-  base, mask, _, name = _canonical_info(inst, ctx, inst_bytes)
+  base, mask, size = ctx.canonical_mask(inst_bytes)
+  name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
   entries.append((base, mask, ret))
   return ret
