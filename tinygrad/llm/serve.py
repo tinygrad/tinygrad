@@ -532,7 +532,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def finish(self, req:Request, error:Exception|None=None) -> bool:
     if req.done: return False
     req.done, req.error = True, error
-    self.ckpt_free(req)
+    # (its checkpoint's host memory after its slot_done: a reply's end is emitted before it, see schedule)
+    if req.ckpt_buf is not None: self.ckpt_later = (self.ckpt_later or []) + [req]
     et, n = time.perf_counter(), len(req.generated)
     total = f"total:{et-req.st:6.2f}s"
     pre = (len(req.ids) - req.cache_start) / ((req.pt or et) - req.st)
@@ -557,6 +558,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # (SLOT_HOST: the model's conversation is a prompt decoded in a slot: its whole conversation is saved when done, see slot_done)
   main_moved = False
   ckpt_pool: list|None = None  # (host memory for requests' checkpoints, see ckpt_keep)
+  ckpt_later: list|None = None  # (the requests done, their checkpoints' host memory freed next)
   STASH_MIN = getenv("STASH_MIN", 512)  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
   def stash_main(self, busy:set[int]):
     """
@@ -765,6 +767,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not pool: return
     req.ckpt_buf, req.ckpt_tokens = pool.pop(), list(req.ids)
     model.ckpt_copy(True, req.ckpt_buf)
+    trace(f"ckpt_keep req {req.rid} len {len(req.ids)}")
   def ckpt_free(self, req:Request):
     if req.ckpt_buf is not None:
       self.ckpt_pool = self.ckpt_pool or []
@@ -840,6 +843,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           except queue.Empty: self.host_prepare()
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
+        for r in self.ckpt_later or []: self.ckpt_free(r)
+        self.ckpt_later = []
         self.inflight = len(active) + len(pending)
         # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains, see preempt), then it
         # goes on alone. else it waits for no request to be decoded: while agents take turns that's never)

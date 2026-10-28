@@ -866,12 +866,16 @@ class TestStash(unittest.TestCase):
       m._ckpt_tokens = list(range(7))  # (the model's checkpoint another prompt's while it decodes)
       req.generated = list(range(20000, 20012))
       req.mtp, req.j, req.par, req.pos = 5011, 2, 0, 5013
+      # (its end emitted: done, then its slot_done: the checkpoint still its own)
+      self.server.inflight = 0
+      self.server.finish(req)
+      self.assertIs(req.ckpt_buf, buf)
       self.server.slot_done(1, req, {0: None, 2: None})
       self.assertEqual(m.ckpt_copy.call_args.args, (False, buf))
       self.assertEqual([(e.tokens[:5000], e.ckpt) for e in self.server.host], [(prompt, 5000)])
       # its next turn: the reply without its reasoning (differs right after the prompt): from the prompt's end
       self.assertEqual(self.server.stash_hit(prompt + [1, 2, 3], set()), 5000)
-      self.server.ckpt_free(req)  # (when it's done: finish)
+      for r in self.server.ckpt_later: self.server.ckpt_free(r)  # (the scheduler's next iteration)
       self.assertEqual((req.ckpt_buf, self.server.ckpt_pool), (None, [buf]))
       # that turn decoded in a slot too: its conversation replaces the older turn's (continued from its checkpoint), not kept beside it
       req2 = Request(prompt + [1, 2, 3], "", None, 0.0)
