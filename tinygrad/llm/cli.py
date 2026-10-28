@@ -99,7 +99,9 @@ class SimpleTokenizer:
     if cache and cut is not None:
       with self._enc_lock:
         keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0])]
-        self._enc_cache = keep[len(keep)-getenv("ENCODE_CACHE", 16)+1:] + [(text[:cut], tokens[:cut_n])]
+        # (a conversation's own each: a server's clients (agents and their side requests) are dozens, a 250k token prompt encoded again takes
+        # seconds. one is a few MB)
+        self._enc_cache = keep[len(keep)-getenv("ENCODE_CACHE", 64)+1:] + [(text[:cut], tokens[:cut_n])]
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
