@@ -76,7 +76,7 @@ base_rewrite = PatternMatcher([
 
   # call to LINEAR renders the call in SOURCE
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src if u.op is Ops.PARAM))});"),
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in [(u.arg.slot,u) for u in body.src if u.op is Ops.PARAM])});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
