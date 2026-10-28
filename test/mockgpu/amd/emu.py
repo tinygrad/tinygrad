@@ -292,8 +292,7 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
     # D0 range: 16 for the *_U16/*_I16 result-narrow ops, else 32 (mad*32* D0 is u32/i32; mul operands have op-fmt width)
     narrow_dt = dtypes.uint16 if is_16bit and '32' not in op_name else (dtypes.int32 if is_signed else dtypes.uint32)
     wide_dt = dtypes.int64
-    narrow_max, narrow_min = ((0xFFFF, 0) if narrow_dt == dtypes.uint16 else
-                              ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0)))
+    narrow_max, narrow_min = ((0xFFFF, 0) if narrow_dt == dtypes.uint16 else ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0)))
     def to_mulin(x: UOp) -> UOp:  # mul-source: extract the op-fmt-width suboperand with sext for signed
       mask = (1 << op_bits) - 1
       if op_bits == 32: return x.bitcast(narrow_dt) if x.dtype.itemsize == 4 else x.cast(narrow_dt)
@@ -717,15 +716,13 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     sdst_off = ctx.inst_field(type(inst).sdst)
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     ssrc1_off = ctx.inst_field(type(inst).ssrc1)
-    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
-            'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal), 'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     if literal is not None: srcs['SIMM32'] = literal
     dst_off, dst_size = sdst_off, bits['d'] // 32
   elif isinstance(inst, (ir3.SOPC, ir4.SOPC, irc.SOPC)):
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     ssrc1_off = ctx.inst_field(type(inst).ssrc1)
-    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
-            'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal), 'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     dst_off, dst_size = _c(0), 0  # SOPC writes to SCC, not sdst
   else:
     raise RuntimeError(f"unknown SOP type: {type(inst).__name__}")
@@ -774,8 +771,7 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
   row_base, lane_in_row = lane_i & _c(~15, dtypes.int), lane_i & _c(15, dtypes.int)
   row = lane_i // _c(16, dtypes.int)
   bank = lane_in_row >> _c(2, dtypes.int)
-  enabled = (((_c(row_mask) >> row.cast(dtypes.uint32)) & _c(1)).ne(_c(0)) &
-             (((_c(bank_mask) >> bank.cast(dtypes.uint32)) & _c(1)).ne(_c(0))))
+  enabled = (((_c(row_mask) >> row.cast(dtypes.uint32)) & _c(1)).ne(_c(0)) & (((_c(bank_mask) >> bank.cast(dtypes.uint32)) & _c(1)).ne(_c(0))))
   op, arg = decode_dpp16(dpp)
   src_lane, valid = lane_i, UOp.const(True)
 
@@ -799,8 +795,7 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
 
 def _load_dpp16_src0(ctx: _Ctx, inst, lane: UOp, fallback: UOp) -> UOp:
   """Load a DPP16-swizzled src0 value from vsrc0."""
-  src_lane, enabled, valid = _dpp16_ctrl(lane, _iattr(inst, 'dpp'), _iattr(inst, 'row_mask', 0xf),
-                                         _iattr(inst, 'bank_mask', 0xf), ctx.wave_size)
+  src_lane, enabled, valid = _dpp16_ctrl(lane, _iattr(inst, 'dpp'), _iattr(inst, 'row_mask', 0xf), _iattr(inst, 'bank_mask', 0xf), ctx.wave_size)
   safe_src_lane = (enabled & valid).where(src_lane, _c(0, dtypes.int))
   swizzled = ctx.rvgpr_dyn(ctx.inst_field(type(inst).vsrc0), safe_src_lane)
   invalid = UOp.const(0, fallback.dtype) if _iattr(inst, 'bc') else fallback
@@ -1621,8 +1616,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     if is_atomic:
       atomic_data = _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) \
         if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane)
-      return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
-              'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
+      return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active, 'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
     vdata = _rvdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
       else _rvdata(vdst_reg, lane) if 'D16' in op_name else UOp.const(0, dtypes.uint32)
     if 'STORE' in op_name and data_bits_mem >= 64:
@@ -1832,10 +1826,8 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int
                                      ((UOp.const(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
   lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
   tid = wave*wave_size+lane
-  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store(
-      (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32))
-                             for i,v in dict(initial).items()))
+  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
+  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32)) for i,v in dict(initial).items()))
 
 @uopfunc
 def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
