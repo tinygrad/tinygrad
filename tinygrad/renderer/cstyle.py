@@ -146,6 +146,7 @@ class CStyleLanguage(Renderer):
     dtypes.f32: "float", dtypes.f64: "double"}
   infinity: str = "INFINITY"
   nan: str = "NAN"
+  inline_prefix: str | None = None
   code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
@@ -502,6 +503,7 @@ class HIPRenderer(CStyleLanguage):
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+  inline_prefix = "static inline void __attribute__((device))"
 
   @staticmethod
   def is_cdna(arch): return arch in {"gfx942", "gfx950"}
