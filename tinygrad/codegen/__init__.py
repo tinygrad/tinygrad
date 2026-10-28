@@ -1,5 +1,5 @@
 from dataclasses import replace, dataclass, field
-import itertools, functools
+import itertools, functools, collections
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
@@ -192,6 +192,16 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   acc_out = acc_initted.store(acc_initted.alu(op, ret)).end(*r.src[1:])
   return acc.after(acc_out)
 
+def chain_acc(ctx:collections.Counter[UOp], st:UOp, ld:UOp, x:UOp):
+  # an ADD nothing else uses folds into the accumulator one operand at a time, so each add can fuse a mul
+  def fold(acc:UOp, t:UOp) -> UOp: return fold(fold(acc, t.src[0]), t.src[1]) if t.op is Ops.ADD and ctx[t] == 1 else acc.alu(Ops.ADD, t)
+  if st.src[0].addrspace is AddrSpace.REG and ld.src[0] is st.src[0] and x.op is Ops.ADD and ctx[x] == 1:
+    return st.replace(src=(st.src[0], fold(ld, x), *st.src[2:]))
+
+pm_chain_acc = PatternMatcher([
+  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.LOAD, name="ld")+UPat.var("x")), allow_any_len=True, name="st"), chain_acc),
+])
+
 pm_reduce_local = pm_wmma_add+PatternMatcher([
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
@@ -323,6 +333,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
+
+  # threads hide the loop-carried latency, so accumulators take their sums one add at a time
+  if ren.has_local:
+    sink = graph_rewrite(sink, pm_chain_acc, ctx=collections.Counter(s for u in sink.toposort() for s in u.src), name="chain accumulators")
 
   sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
