@@ -2051,13 +2051,13 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       dispatch_cache[key] = lift(amd_decode(code, arch), arch, renderer, dispatch, f"emu {name}")
       seen, relift_count, relift_lib = set(), RELIFT.value, code
       while relift_count:
-        try:
-          ret = lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}")
-          if (relift_lib:=get_elf_section(ret.src[3].arg, ".text").content) in seen: break
-          seen.add(relift_lib)
+        try: ret = lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}")
         except Exception:
           print("relift err", traceback.format_exc())
           break
+        if (relift_lib:=get_elf_section(ret.src[3].arg, ".text").content) in seen: break
+        seen.add(relift_lib)
+        relift_count -= 1
     prg = dispatch_cache[key]
   vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
   with _MXCSRContext():
