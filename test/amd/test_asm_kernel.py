@@ -8,7 +8,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -252,6 +252,7 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
+  @Context(RELIFT=1)
   def test_cfg_branch_diamond(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):
