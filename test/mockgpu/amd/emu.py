@@ -1,4 +1,4 @@
-# RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
+# RDNA3 emulator v2 - piles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
 #   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
@@ -56,9 +56,9 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import Context, DEV, to_mv, getenv
+from tinygrad.helpers import Context, DEV, to_mv, ContextVar
 from tinygrad.runtime.autogen import hsa
-from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
+from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
 
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
@@ -2037,6 +2037,8 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
 
 dispatch_cache:dict[tuple, UOp] = {}
 
+RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
+
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
@@ -2047,10 +2049,15 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
       dispatch_cache[key] = lift(amd_decode(code, arch), arch, renderer, dispatch, f"emu {name}")
-      if getenv("RELIFT"):
+      seen, relift_count, relift_lib = set(), RELIFT.value, code
+      while relift_count:
         try:
-          lift(amd_decode(code, arch), arch, Device['AMD'].renderer, dispatch, f"relift {name}")
-        except Exception: print("relift err", traceback.format_exc())
+          ret = lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}")
+          if (relift_lib:=get_elf_section(ret.src[3].arg, ".text").content) in seen: break
+          seen.add(relift_lib)
+        except Exception:
+          print("relift err", traceback.format_exc())
+          break
     prg = dispatch_cache[key]
   vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
   with _MXCSRContext():
