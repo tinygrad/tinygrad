@@ -5,7 +5,6 @@
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
-from __future__ import annotations
 import ctypes, functools, itertools, re, struct, platform, subprocess, tempfile
 from typing import Callable
 
@@ -71,11 +70,6 @@ from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
 from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, _bitreverse, _countbits
-
-MASK32 = 0xFFFFFFFF
-
-# sqtt traces are consumed by amdgpu.py; the lifter does not emit them yet.
-sqtt_traces: list[bytes] = []
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(val, dtype)
 
@@ -143,7 +137,6 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
   if val.dtype == dtypes.float32: return val.bitcast(dtypes.uint32)
   if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)
-  if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
 _pcode_fixes = {
@@ -236,10 +229,9 @@ def _write_val(bits: int, val: UOp, wfn, reg_or_addr, *args, is_mem: bool = Fals
   """Write value, splitting 64-bit if needed. bits=64 for 64-bit writes, otherwise 32-bit."""
   return _write_64bit(val, wfn, reg_or_addr, is_mem, *args) if bits == 64 else [wfn(reg_or_addr, _to_u32(val), *args)]
 
-def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, data_bits: int = 32) -> list[UOp]:
+def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
   """Conditional memory store with sub-word support. Returns list of store UOps."""
-  adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
-  word_addr = addr >> UOp.const(2, adt)
+  word_addr = addr >> UOp.const(2, dtypes.uint64)
   idx = mem.index(word_addr.valid(active))
   if data_bits == 32: return _mem_store_bytes(mem.bitcast(dtypes.uint8), addr, val, active)
   # Sub-word store: read-modify-write with mask
@@ -253,7 +245,7 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   is_cross = byte_pos.eq(_c(3))
   cross_word0 = (idx & _c(0x00FFFFFF)) | ((val_u32 & _c(0xFF)) << _c(24))
   store0 = idx.store(active.where(is_cross.where(cross_word0, new_word), idx))
-  next_idx = mem.index((word_addr + UOp.const(1, adt)).valid(active & is_cross))
+  next_idx = mem.index((word_addr + UOp.const(1, dtypes.uint64)).valid(active & is_cross))
   cross_word1 = (next_idx & _c(0xFFFFFF00)) | ((val_u32 >> _c(8)) & _c(0xFF))
   return [store0, next_idx.store((active & is_cross).where(cross_word1, next_idx))]
 
@@ -296,8 +288,7 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
     # D0 range: 16 for the *_U16/*_I16 result-narrow ops, else 32 (mad*32* D0 is u32/i32; mul operands have op-fmt width)
     narrow_dt = dtypes.uint16 if is_16bit and '32' not in op_name else (dtypes.int32 if is_signed else dtypes.uint32)
     wide_dt = dtypes.int64
-    narrow_max, narrow_min = ((0xFFFF, 0) if narrow_dt == dtypes.uint16 else
-                              ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0)))
+    narrow_max, narrow_min = ((0xFFFF, 0) if narrow_dt == dtypes.uint16 else ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0)))
     def to_mulin(x: UOp) -> UOp:  # mul-source: extract the op-fmt-width suboperand with sext for signed
       mask = (1 << op_bits) - 1
       if op_bits == 32: return x.bitcast(narrow_dt) if x.dtype.itemsize == 4 else x.cast(narrow_dt)
@@ -326,20 +317,12 @@ class _Ctx:
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
-  # Cache PARAM UOps by wave_size so all _Ctx instances with same wave_size share identical UOp references
-  _vgpr_cache: dict[int, UOp] = {}
-  _accvgpr_cache: dict[int, UOp] = {}
 
   def __init__(self, inst_size: int, wave_size: int = 32):
     self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
-    self.vgpr = _Ctx._vgpr_cache[wave_size]
-    if wave_size == 64:
-      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr")
-      self.accvgpr = _Ctx._accvgpr_cache[wave_size]
-    else:
-      self.accvgpr = self.vgpr
+    self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
+    self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr") if wave_size == 64 else self.vgpr
     self.branch_cond: UOp | None = None
 
   def range(self, n: int | None = None) -> UOp:
@@ -351,12 +334,9 @@ class _Ctx:
   def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
     """Combine lane bits into a mask using RANGE+REDUCE (32-bit for RDNA, 64-bit for CDNA)."""
     lane = self.range()
-    if self.wave_size <= 32:
-      bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
-      result = bit.reduce(lane, arg=Ops.ADD)
-    else:
-      bit = get_lane_bit(lane).cast(dtypes.uint64) << lane.cast(dtypes.uint64)
-      result = bit.reduce(lane, arg=Ops.ADD)
+    dtype = dtypes.uint32 if self.wave_size <= 32 else dtypes.uint64
+    bit = get_lane_bit(lane).cast(dtype) << lane.cast(dtype)
+    result = bit.reduce(lane, arg=Ops.ADD)
     return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:
@@ -436,14 +416,14 @@ class _Ctx:
 
   def wmask_lane_bit(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> list[UOp]:
     """Set/clear bit `lane` of the mask at `reg` from val for exec-active lanes, preserving memory for inactive lanes"""
-    active, bit = _lane_active(exec_mask, lane), _to_u32(val)
+    active, bit, mask32 = _lane_active(exec_mask, lane), _to_u32(val), _c(0xFFFFFFFF)
     if self.wave_size <= 32:
       old = self.rsgpr_dyn(reg)
       mask = _c(1) << lane.cast(dtypes.uint32)
-      return [self.wsgpr_dyn(reg, active.where((old & (mask ^ _c(MASK32))) | (bit << lane.cast(dtypes.uint32)), old))]
+      return [self.wsgpr_dyn(reg, active.where((old & (mask ^ mask32)) | (bit << lane.cast(dtypes.uint32)), old))]
     off = (lane & _c(31, dtypes.int)).cast(dtypes.uint32)
     mask = _c(1) << off
-    def half(old: UOp, sel: UOp) -> UOp: return sel.where(active.where((old & (mask ^ _c(MASK32))) | (bit << off), old), old)
+    def half(old: UOp, sel: UOp) -> UOp: return sel.where(active.where((old & (mask ^ mask32)) | (bit << off), old), old)
     return [self.wsgpr_dyn(reg, half(self.rsgpr_dyn(reg), lane < _c(32, dtypes.int))),
             self.wsgpr_dyn(reg + _c(1), half(self.rsgpr_dyn(reg + _c(1)), _c(32, dtypes.int) <= lane))]
 
@@ -729,15 +709,13 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     sdst_off = ctx.inst_field(type(inst).sdst)
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     ssrc1_off = ctx.inst_field(type(inst).ssrc1)
-    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
-            'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal), 'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     if literal is not None: srcs['SIMM32'] = literal
     dst_off, dst_size = sdst_off, bits['d'] // 32
   elif isinstance(inst, (ir3.SOPC, ir4.SOPC, irc.SOPC)):
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     ssrc1_off = ctx.inst_field(type(inst).ssrc1)
-    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
-            'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal), 'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     dst_off, dst_size = _c(0), 0  # SOPC writes to SCC, not sdst
   else:
     raise RuntimeError(f"unknown SOP type: {type(inst).__name__}")
@@ -786,8 +764,7 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
   row_base, lane_in_row = lane_i & _c(~15, dtypes.int), lane_i & _c(15, dtypes.int)
   row = lane_i // _c(16, dtypes.int)
   bank = lane_in_row >> _c(2, dtypes.int)
-  enabled = (((_c(row_mask) >> row.cast(dtypes.uint32)) & _c(1)).ne(_c(0)) &
-             (((_c(bank_mask) >> bank.cast(dtypes.uint32)) & _c(1)).ne(_c(0))))
+  enabled = (((_c(row_mask) >> row.cast(dtypes.uint32)) & _c(1)).ne(_c(0)) & (((_c(bank_mask) >> bank.cast(dtypes.uint32)) & _c(1)).ne(_c(0))))
   op, arg = decode_dpp16(dpp)
   src_lane, valid = lane_i, UOp.const(True)
 
@@ -811,8 +788,7 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
 
 def _load_dpp16_src0(ctx: _Ctx, inst, lane: UOp, fallback: UOp) -> UOp:
   """Load a DPP16-swizzled src0 value from vsrc0."""
-  src_lane, enabled, valid = _dpp16_ctrl(lane, _iattr(inst, 'dpp'), _iattr(inst, 'row_mask', 0xf),
-                                         _iattr(inst, 'bank_mask', 0xf), ctx.wave_size)
+  src_lane, enabled, valid = _dpp16_ctrl(lane, _iattr(inst, 'dpp'), _iattr(inst, 'row_mask', 0xf), _iattr(inst, 'bank_mask', 0xf), ctx.wave_size)
   safe_src_lane = (enabled & valid).where(src_lane, _c(0, dtypes.int))
   swizzled = ctx.rvgpr_dyn(ctx.inst_field(type(inst).vsrc0), safe_src_lane)
   invalid = UOp.const(0, fallback.dtype) if _iattr(inst, 'bc') else fallback
@@ -1633,8 +1609,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     if is_atomic:
       atomic_data = _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) \
         if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane)
-      return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
-              'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
+      return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active, 'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
     vdata = _rvdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
       else _rvdata(vdst_reg, lane) if 'D16' in op_name else UOp.const(0, dtypes.uint32)
     if 'STORE' in op_name and data_bits_mem >= 64:
@@ -1654,7 +1629,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
         if data_bits < 32 and is_lds: return [wmem(val[0], val[1], active, data_bits)]
         return _write_val(data_bits, val[1], wmem, val[0], active, is_mem=True)
       if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
-      return _mem_store(mem, val[0], val[1], active, 64, data_bits)
+      return _mem_store(mem, val[0], val[1], active, data_bits)
     if dest.startswith('RETURN_DATA') and writes_return_data:
       write_gpr = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
       _wdata = lambda r, v, l, e: write_gpr(r, l, v, e)  # noqa: E731  (arg order: reg, val, lane, exec)
@@ -1798,10 +1773,6 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _canonical_info(inst:Inst, ctx:_Ctx, inst_bytes:bytes|memoryview) -> tuple[int, int, int, str]:
-  base, mask, size = ctx.canonical_mask(inst_bytes)
-  return base, mask, size, f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
-
 _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 _BARRIER_SOP1_OPS: set = set()
@@ -1844,10 +1815,8 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int
                                      ((UOp.const(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
   lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
   tid = wave*wave_size+lane
-  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store(
-      (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32))
-                             for i,v in dict(initial).items()))
+  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
+  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(UOp.const(v, dtypes.uint32)) for i,v in dict(initial).items()))
 
 @uopfunc
 def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
@@ -1860,8 +1829,7 @@ def lower_body(sink:UOp, name:str) -> tuple[UOp, list[UOp]]:
   return body.call(*bufs, name=name), bufs
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[InstructionCall|None, UOp|None]:
-  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
-                                          *(x.value for x in to_program_config)), [])
+  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
@@ -1869,7 +1837,8 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[Instructio
   # dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
   ctx = _Ctx(inst.size(), _wave_size(arch))
   sink = _get_handler(inst)(inst, ctx)
-  base, mask, _, name = _canonical_info(inst, ctx, inst_bytes)
+  base, mask, size = ctx.canonical_mask(inst_bytes)
+  name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
   entries.append((base, mask, ret))
   return ret
@@ -2008,8 +1977,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
   route = UOp.param(6, dtypes.int, (1,), name="route")
-  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU)
-                        for i,name in enumerate(("taken", "fallthrough"), 7)]
+  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
   init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), args_ptr, gx, gy, lx, ly, total_threads, wave_size,
                    scratch_size, rsrc2, arch, user_data_count)
@@ -2033,7 +2001,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
       values = {taken:UOp.const(dsts[COND_TAKEN], dtypes.int), fallthrough:UOp.const(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
-        else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
+          else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
       instructions.append((branch_pc, lower_body(route[0].store(target).sink(), "asm_branch")))
     if not instructions: return end
     off = instructions[0][0]
@@ -2055,8 +2023,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # waves that exited keep their route while the remaining waves repeat the loop.
-        check = loop_active(routes.after(end, *scopes, loop).index(0), active,
-                            UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
+        check = loop_active(routes.after(end, *scopes, loop).index(0), active, UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # complete the block for every participating wave before entering its successors, including barrier successors.
