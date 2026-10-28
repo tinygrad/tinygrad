@@ -139,12 +139,6 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
-  # stacked INDEX is many INDEX
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="b"), UPat(Ops.STACK, name="s")), name="x"),
-   lambda b,s,x: UOp.stack(*[x.replace(src=(b,u)) for u in s.src])),
-  # INDEX into RESHAPE moves the RESHAPE
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="b"), UPat(Ops.RESHAPE, name="s"))),
-   lambda b,s: b.index(s.src[0]).reshape(s.shape)),
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
@@ -215,7 +209,7 @@ pm_reduce_local = pm_wmma_add+PatternMatcher([
 def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != u.src[0].shape
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_add_loads = PatternMatcher([
-  (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA,Ops.STACK}, name="x"),
+  (UPat(GroupOp.Elementwise|{Ops.WMMA,Ops.STACK}, name="x"),
    lambda x: None if is_shape_changing_bitcast(x) else x.replace(src=tuple(map(maybe_load, x.src)))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
