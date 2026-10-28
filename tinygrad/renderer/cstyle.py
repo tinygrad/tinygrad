@@ -75,7 +75,7 @@ base_rewrite = PatternMatcher([
    f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)}}});"),
 
   # call to LINEAR statically renders the call in SOURCE
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{ctx.fn_names[body]}("
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
    f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in sorted((u.arg.slot,u) for u in body.src if u.op is Ops.PARAM))});"),
 
   # custom passes through with format
@@ -281,21 +281,19 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    call_bodies, self.fn_names = [], dict[UOp, str]()
-    calls = [u for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL]
-    prefix = [f"extern void {f}();" for f in dedup(u.body.arg.name for u in calls if u.body.op is Ops.CUSTOM_FUNCTION)]
-    for body in dedup(u.body for u in calls if u.body.op in {Ops.LINEAR, Ops.PROGRAM}):
-      if body.op is Ops.LINEAR:
-        self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "")
-        _, call, bufs = self._render(body.src)
-        params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
-        prefix.append(f"static inline {self.inline_prefix} void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
-        call_bodies.extend(body.src)
-      else:
+    prefix, all_uops = [], list(uops)
+    for body in dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL):
+      if body.op is Ops.CUSTOM_FUNCTION: prefix.append(f"extern void {body.arg.name}();")
+      elif body.op is Ops.PROGRAM:
         name = body.src[0].arg.function_name
-        prefix.append(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in body.arg.params) +
-                      f"}}; extern void {name}(const struct {name}_args*);")
-    return self.render_kernel(*self._render(uops), call_bodies+uops, prefix or None)
+        fields = ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in body.arg.params)
+        prefix.append(f"struct {name}_args {{ {fields}}}; extern void {name}(const struct {name}_args*);")
+      elif body.op is Ops.LINEAR:
+        _, lines, bufs = self._render(list(body.src))
+        params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
+        prefix.append(f"static inline {self.inline_prefix} void {body.arg}({params}) {{\n" + '\n'.join(lines) + "\n}")
+        all_uops.extend(body.src)
+    return self.render_kernel(*self._render(uops), all_uops, prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"

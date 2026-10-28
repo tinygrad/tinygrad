@@ -418,16 +418,15 @@ class LowerCallsCtx:
   names: dict[str, dict[UOp, int]] = field(default_factory=dict)
 
 def lower_call(ctx:LowerCallsCtx, call:UOp) -> UOp|None:
+  if not ctx.renderer.inline_prefix and call.body.op is Ops.PROGRAM and call.body.src[-1].op is Ops.BINARY: return None
+  bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
+  name += f"_{i}" if (i:=bodies.setdefault(call.body, len(bodies))) else ""
   if ctx.renderer.inline_prefix:
-    if (body:=to_program_cache.get(key:=to_program_key(call.body, ctx.renderer))) is None:
-      body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-      lst = list(body.src[1].src) if body.op is Ops.PROGRAM else linearize(full_rewrite_to_sink(body, ctx.renderer, optimize=False))
-      to_program_cache[key] = body = UOp(Ops.LINEAR, src=tuple(line_rewrite(lst, pm_linearize_cleanups+pm_alloc_to_buf)))
-    body = body.replace(arg=to_function_name(call.arg.name))
+    body = graph_rewrite(call.body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
+    lst = list(body.src[1].src) if body.op is Ops.PROGRAM else linearize(full_rewrite_to_sink(body, ctx.renderer, optimize=False))
+    body = UOp(Ops.LINEAR, src=tuple(line_rewrite(lst, pm_linearize_cleanups+pm_alloc_to_buf)), arg=name)
   else:
-    if call.body.op is Ops.PROGRAM and call.body.src[-1].op is Ops.BINARY: return None
-    bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
-    ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(call.body, len(bodies))) else ""), optimized=True)
+    ki = KernelInfo(name, optimized=True)
     body = call.body.substitute({call.body.src[0]:call.body.src[0].replace(arg=ki)}) if call.body.op is Ops.PROGRAM else call.body.replace(arg=ki)
     body = to_program(body, ctx.renderer)
   return call.replace(src=(body, *call.src[1:]))
