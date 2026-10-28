@@ -783,6 +783,7 @@ class TestCallInKernel(unittest.TestCase):
     self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
 
+  @unittest.skipIf(Device[Device.DEFAULT].renderer.inline_prefix is not None, "backend inlines calls instead of linking")
   def test_compile_cache(self):
     @uopfunc
     def plus2(out:UOp, A:UOp): return out[0].store(A[0]+2).sink()

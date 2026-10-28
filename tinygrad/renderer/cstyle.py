@@ -151,7 +151,6 @@ class CStyleLanguage(Renderer):
     dtypes.f32: "float", dtypes.f64: "double"}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  inline_prefix: str | None = None
   code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
@@ -282,24 +281,21 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    # inlining calls
-    if self.inline_prefix:
-      prefix, call_bodies, self.fn_names = [], [], dict[UOp, str]()
-      topo = UOp.sink(*uops).toposort(enter_calls=True)
-      prefix += [f"extern void {f}();" for f in dedup(u.arg.name for u in topo if u.op is Ops.CUSTOM_FUNCTION)] # symbols to link
-      for body in (u for u in topo if u.op is Ops.LINEAR):
-        self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "") # a name traced with other args
+    call_bodies, self.fn_names = [], dict[UOp, str]()
+    calls = [u for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL]
+    prefix = [f"extern void {f}();" for f in dedup(u.body.arg.name for u in calls if u.body.op is Ops.CUSTOM_FUNCTION)]
+    for body in dedup(u.body for u in calls if u.body.op in {Ops.LINEAR, Ops.PROGRAM}):
+      if body.op is Ops.LINEAR:
+        self.fn_names[body] = body.arg + (f"_{n}" if (n:=sum(b.arg == body.arg for b in self.fn_names)) else "")
         _, call, bufs = self._render(body.src)
         params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
         prefix.append(f"static inline {self.inline_prefix} void {self.fn_names[body]}({params}) {{\n" + '\n'.join(call) + "\n}")
         call_bodies.extend(body.src)
-      return self.render_kernel(*self._render(uops), call_bodies+list(uops), prefix or None)
-    # linking impl
-    fns = {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
-    prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
-                f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
-              *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
-    return self.render_kernel(*self._render(uops), uops, prefix or None)
+      else:
+        name = body.src[0].arg.function_name
+        prefix.append(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in body.arg.params) +
+                      f"}}; extern void {name}(const struct {name}_args*);")
+    return self.render_kernel(*self._render(uops), call_bodies+uops, prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"

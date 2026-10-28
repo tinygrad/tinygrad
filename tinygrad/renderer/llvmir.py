@@ -163,7 +163,6 @@ class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {**{k:lambda:None for v in lop.values() for k in v.keys()}, **{op: lambda: None for op in llvm_intrinsics}}
-  inline_prefix: str | None = None
 
   def __init__(self, target:Target):
     super().__init__(target)
