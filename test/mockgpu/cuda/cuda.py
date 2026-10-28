@@ -2,8 +2,10 @@
 import ctypes, re
 from typing import Any, Callable
 from tinygrad.runtime.autogen import cuda
-from tinygrad.helpers import mv_address, round_up
+from tinygrad.helpers import mv_address, round_up, getenv
 from test.mockgpu.helpers import ptx_run
+
+MOCKGPU_ASYNC = getenv("MOCKGPU_ASYNC", 0)
 
 memory:dict[int, bytearray] = {}
 modules:list[ctypes.Array] = [] # a function handle is the address of its module's ptx
@@ -14,15 +16,17 @@ def out(p, value, t=ctypes.c_uint64) -> int:
   return cuda.CUDA_SUCCESS
 def handle(p) -> int: return ctypes.cast(p, ctypes.c_void_p).value or 0
 
+def srun() -> bool:
+  progress = False
+  for q in streams.values():
+    while q and q[0]():
+      q.pop(0)
+      progress = True
+  return progress
+
 def enqueue(stream, work:Callable[[], Any]) -> int:
   streams[handle(stream)].append(work)
-  progress = True
-  while progress: # run whatever can proceed, a stream waits at its head
-    progress = False
-    for q in streams.values():
-      while q and q[0]():
-        q.pop(0)
-        progress = True
+  while not MOCKGPU_ASYNC and srun(): pass # run whatever can proceed, a stream waits at its head
   return cuda.CUDA_SUCCESS
 
 def alloc(p, size:int) -> int:
