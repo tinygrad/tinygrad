@@ -1039,9 +1039,8 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   if 'V_S_' in op_name:
     src0 = _apply_src_mods(ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), _c(0, dtypes.int), bits['s0'], literal), 0, abs_bits, neg_bits, bits['s0'])
     srcs = {**ctx.base_srcs(exec_mask, _c(0, dtypes.int)), 'S0': src0}
-    _, assigns = parse_pcode(get_pcode(inst.op), srcs)
-    stores = [ctx.wsgpr_dyn(vdst_reg, _val_to_u32(val)) for dest, val in assigns if dest.startswith('D0')]
-    return UOp.sink(*stores)
+    pcode_vars, _ = parse_pcode(get_pcode(inst.op), srcs)
+    return UOp.sink(ctx.wsgpr_dyn(vdst_reg, _val_to_u32(pcode_vars['D0'])))
 
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
