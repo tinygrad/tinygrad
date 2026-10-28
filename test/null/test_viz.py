@@ -1248,11 +1248,14 @@ class TestCLI(unittest.TestCase):
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
+      source = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View Source")[1]["value"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
     self.assertCountEqual(programs, [f"do_to_program for {name}" for name in ("inner", "outer", "nested_calls")])
     self.assertEqual(len(codegen_count), 1)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
+    self.assertEqual(len([s for s in source.splitlines() if "inner(" in s]), 4) # define + declare + 2 calls
+    self.assertEqual(len([s for s in source.splitlines() if "nested_calls(" in s]), 1)
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):

@@ -636,7 +636,9 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, src=2, alt="View Program")) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.arg, "lang":"cpp"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ast = unwrap(get_sink_at(("do_render",), viz_data, i, data, src=0, alt="View Program"))
+    return {"src":"\n".join([sink.arg]+[u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, True) if u.op is Ops.SOURCE]), "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data
