@@ -1,6 +1,6 @@
 """Shared test helpers for AMD tests."""
 import ctypes
-from tinygrad.helpers import unwrap, ContextVar
+from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import llvm
 from tinygrad.runtime.support.elf import elf_loader
 
@@ -9,8 +9,6 @@ ARCH_TO_TARGET:dict[str, list[str]] = {
   "rdna4":["gfx1200", "gfx1201"],
   "cdna":["gfx950", "gfx942"],
 }
-
-RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 
 TARGET_TO_ARCH:dict[str, str] = {t:arch for arch,targets in ARCH_TO_TARGET.items() for t in targets}
 
