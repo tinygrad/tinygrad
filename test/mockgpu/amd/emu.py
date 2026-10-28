@@ -339,8 +339,8 @@ class _Ctx:
     result = bit.reduce(lane, arg=Ops.ADD)
     return result & exec_mask if apply_exec else result
 
-  @staticmethod
-  def inst_word(dword_idx: int) -> UOp: return UOp.param(-2-dword_idx, dtypes.uint32, name=f"inst_word{dword_idx}", addrspace=AddrSpace.ALU)
+  def inst_word(self, dword_idx: int) -> UOp:
+    return UOp.param(-2-dword_idx, dtypes.uint32, name=f"inst_word{dword_idx}", addrspace=AddrSpace.ALU)
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -1832,18 +1832,15 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[Instructio
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
-    if bits & mask == base: break
-  else:
-    # dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
-    ctx = _Ctx(inst.size(), _wave_size(arch))
-    sink = _get_handler(inst)(inst, ctx)
-    base, mask, size = ctx.canonical_mask(inst_bytes)
-    name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
-    ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
-    entries.append((base, mask, ret))
-  call, cond = ret
-  words = {_Ctx.inst_word(i):_c(int.from_bytes(inst_bytes[i*4:(i+1)*4], "little")) for i in range(inst.size()//4)}
-  return (call[0], [words.get(b, b) for b in call[1]]) if call is not None else None, cond.substitute(words) if cond is not None else None
+    if bits & mask == base: return ret
+  # dynamic operand fields share one body; construct and rewrite it only on a canonical cache miss.
+  ctx = _Ctx(inst.size(), _wave_size(arch))
+  sink = _get_handler(inst)(inst, ctx)
+  base, mask, size = ctx.canonical_mask(inst_bytes)
+  name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+  ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
+  entries.append((base, mask, ret))
+  return ret
 
 def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({b for _,(_,bs) in instructions for b in bs if b.op is Ops.PARAM and b.arg.slot != -1}, key=lambda b:b.arg.slot)
@@ -1993,8 +1990,9 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       call, branch_cond = instruction_call(inst, arch, renderer)
-      if branch_cond is not None: cond, branch_pc = branch_cond, off
-      if call is not None: instructions.append((off, call))
+      words = {ctx.inst_word(i):_c(w) for i,w in enumerate(struct.unpack(f"<{inst.size()//4}I", inst.to_bytes()))}
+      if branch_cond is not None: cond, branch_pc = branch_cond.substitute(words), off
+      if call is not None: instructions.append((off, (call[0], [words.get(b, b) for b in call[1]])))
     values = {}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
