@@ -1,4 +1,4 @@
-# RDNA3 emulator v2 - piles pcode to UOps executed via tinygrad CPU backend
+# RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
 #   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
