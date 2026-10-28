@@ -55,7 +55,9 @@ def cuDeviceGet(device, ordinal): return out(device, ordinal, ctypes.c_int32)
 def cuDeviceComputeCapability(major, minor, dev): return out(major, 3, ctypes.c_int32) or out(minor, 5, ctypes.c_int32)
 def cuCtxCreate_v2(pctx, flags, dev): return out(pctx, dev + 1)
 def cuCtxSetCurrent(ctx): return cuda.CUDA_SUCCESS
-def cuCtxSynchronize(): return cuda.CUDA_SUCCESS
+def cuCtxSynchronize(): #TODO Compiled._wait_signal -> CPU hang
+  while MOCKGPU_ASYNC and srun(): pass
+  return cuda.CUDA_SUCCESS
 def cuStreamCreate(pstream, flags):
   streams[sid:=len(streams) + 1] = []
   return out(pstream, sid)
