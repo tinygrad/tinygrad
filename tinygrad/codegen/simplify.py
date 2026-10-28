@@ -16,8 +16,8 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.END), name="r"), flatten_range),
 ])
 
-# index/range arithmetic uses FLOORDIV/FLOORMOD prior to late rewrite
-def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
+# index/range arithmetic uses DIV/MOD prior to late rewrite
+def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.DIV, Ops.MOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
@@ -119,10 +119,10 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
 ])+symbolic
 
 pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
-  # lift x+y out of reduce on ne
-  ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
+  # lift x+y out of reduce on eq
+  ((UPat.var("x")+UPat.var("y")).or_casted().eq(UPat.var("c")), lambda x,y,c: x.eq(c.cast(y.dtype)-y) if no_range(y) and no_range(c) else None),
   # reduce on gated load becomes can substitute the range and remove the reduce
-  ((UPat.var("idx")!=(UPat(Ops.RANGE, name="r").or_casted())).where(0, UPat.var("expr")).reduce(UPat.var("r"), arg=Ops.ADD),
+  (UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted()).where(UPat.var("expr"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
 ])
 

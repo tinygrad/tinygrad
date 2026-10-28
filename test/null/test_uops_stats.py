@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from test.helpers import replace_opts
 
 def flops_mem(uops, ignore_indexing=False):

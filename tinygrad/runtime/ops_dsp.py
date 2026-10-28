@@ -56,7 +56,7 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram(Program['DSPDevice']):
-  def __init__(self, dev:DSPDevice, obj:TinyELF): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
+  def __init__(self, dev:DSPDevice, obj:TinyELF, links=None): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     bufs = [b for b,(_,a,_,_) in zip(args, self.signature) if a is not AddrSpace.ALU]
@@ -274,7 +274,7 @@ class MockDSPRenderer(DSPRenderer):
     return '\n'.join(msrc)
 
 class MockDSPProgram(Program[DSPDevice]):
-  def __init__(self, dev:DSPDevice, obj:TinyELF): self.lib, self.signature = obj.lib, obj.signature
+  def __init__(self, dev:DSPDevice, obj:TinyELF, links=None): self.lib, self.signature = obj.lib, obj.signature
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)

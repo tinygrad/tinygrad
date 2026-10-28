@@ -46,9 +46,11 @@ wgsl_matcher = PatternMatcher([
   (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
-  # fix nan check: 'a != a -> is_nan()'. the decomp rewrites (a != a).logical_not() to CMPEQ, so match both forms
-  (UPat.var("a", dtypes.floats) != UPat.var("a"), is_nan),
-  (UPat.var("a", dtypes.floats).alu(Ops.CMPEQ, UPat.var("a")), lambda a: is_nan(a).ne(True)),
+  # fix nan checks after decomp, which can emit either comparison
+  (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("a")), is_nan),
+  (UPat.var("a", dtypes.floats).eq(UPat.var("a")), lambda a: is_nan(a).logical_not()),
+  # WGSL float != can be ordered: explicitly include unordered (NaN) operands.
+  (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("b")), lambda a,b: (a<b)|(b<a)|is_nan(a)|is_nan(b.cast(a.dtype))),
   ])
 
 class WGSLRenderer(CStyleLanguage):

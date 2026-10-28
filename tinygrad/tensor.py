@@ -486,7 +486,7 @@ class Tensor(RandMixin):
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
-    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop._base_buffer_is_realized()
+    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop.base.without_after.is_realized
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))

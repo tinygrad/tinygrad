@@ -1182,14 +1182,16 @@ class TestCLI(unittest.TestCase):
     with save_viz() as viz:
       for _ in range(CNT:=4):
         # use kernel names unique to this test
-        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k1_test_viz_dedup")))[0].realize()
-        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k2_test_viz_dedup")))[0].realize()
-    with write_files(viz) as files, Context(NO_COLOR=1):
-      name = run_cli(*files, "-s", "NULL")[0]["name"]
-      with Context(DEBUG=3):
-        select = run_cli(*files, "-s", "NULL", name)
-    self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
-    self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
+        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(f"{colored('k1', 'cyan')}_viz")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(f"{colored('k2', 'cyan')}_viz")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(16, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(f"{colored('g1', 'cyan')}_viz")))[0].realize()
+    with write_files(viz) as files, Context(DEBUG=3):
+      k1q = run_cli(*files, "-s", "NULL", "-q", "k1")
+      both_kq = run_cli(*files, "-s", "NULL", "-q", "k1|k2")
+    self.assertEqual(len([s for s in k1q if s.get("value")]), 1, "debug output was not deduped")
+    self.assertEqual(len([s for s in k1q if s.get("dur_ms")]), CNT, "expected 4 runs for k1")
+    self.assertEqual(len([s for s in both_kq if s.get("value")]), 2)
+    self.assertEqual(len([s for s in both_kq if s.get("dur_ms")]), CNT*2)
 
   @needs_tracked_pm
   def test_call_graph(self):
@@ -1242,13 +1244,18 @@ class TestCLI(unittest.TestCase):
     with save_viz() as viz, Context(SCACHE=0):
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
     with write_files(viz) as files:
+      programs = [s["name"] for s in run_cli(*files, "-s", "TINY") if s.get("name", "").startswith("do_to_program for ")]
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
+      source = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View Source")[1]["value"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
-    self.assertEqual(len(codegen_count), 3)
+    self.assertCountEqual(programs, [f"do_to_program for {name}" for name in ("inner", "outer", "nested_calls")])
+    self.assertEqual(len(codegen_count), 1)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
+    self.assertEqual(len([s for s in source.splitlines() if "inner(" in s]), 4) # define + declare + 2 calls
+    self.assertEqual(len([s for s in source.splitlines() if "nested_calls(" in s]), 1)
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):

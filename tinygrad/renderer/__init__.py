@@ -63,6 +63,7 @@ class Estimates:
 class Renderer:
   target: Target
   suffix: str = ""
+  inline_prefix: str|None = None
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
