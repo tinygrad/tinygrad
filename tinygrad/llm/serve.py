@@ -335,7 +335,7 @@ class Handler(VizHandler):
       # (whitespace before JSON is JSON): a proxy that drops a connection quiet for a while doesn't drop it, a client doesn't ask again)
       hold = 0.0 if body.get("stream") else getenv("HOLD_JSON", 5.0)
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
+                              max_tokens=max_tokens, temperature=self.server.temperature if (t:=body.get("temperature")) is None else float(t),
                               reasoning=rendered.rstrip().endswith("<think>"), log=log,
                               top_p=float(tp) if (tp:=body.get("top_p")) is not None else None, keepalive=hold or None)
       if body.get("stream"): self.stream_json(chunks)
@@ -392,7 +392,8 @@ class Handler(VizHandler):
                                         "message": f"prompt is too long: {len(ids)} tokens > {n-1} maximum"}}).encode(), status_code=400)
     # (the API's default temperature is 1)
     chunks = self.run_model(ids, body.get("model", self.server.model_name), True, max_tokens=body.get("max_tokens"),
-                            temperature=float(body.get("temperature", 1.0)), reasoning=rendered.rstrip().endswith("<think>"), log=log,
+                            temperature=float(t if (t:=body.get("temperature")) is not None else 1.0),
+                            reasoning=rendered.rstrip().endswith("<think>"), log=log,
                             keepalive=getenv("KEEPALIVE", 15.0) if body.get("stream") else None,
                             top_p=float(tp) if (tp:=body.get("top_p")) is not None else None)
     events = anthropic_events(chunks, body.get("model", self.server.model_name), len(ids))
@@ -466,9 +467,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   """
   daemon_threads = True
   request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0):
-    # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf)
+  temperature = 0.0  # a chat completion's without one
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
+               temperature:float=0.0):
+    # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf); temperature: a chat completion's
     self.model, self.model_name, self.tok, self.template, self.top_p = model, model_name, tok, template, top_p
+    self.temperature = temperature
     self.waiting: queue.Queue[Request] = queue.Queue()
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.stats = BatchStats()

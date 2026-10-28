@@ -333,6 +333,20 @@ class TestLLMServer(unittest.TestCase):
       with self.assertRaises(APIError):
         for _ in client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}], stream=True): pass
 
+  def test_default_temperature(self):
+    # a chat completion without a temperature (or a null one) samples at the server's (TEMPERATURE)
+    import urllib.request
+    seen = []
+    def generate(ids, **kwargs):
+      seen.append(kwargs.get("temperature"))
+      yield from (300, 999)
+    with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.server, "temperature", 1.0, create=True):
+      for extra in ({}, {"temperature": None}, {"temperature": 0.3}):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}], **extra}).encode())
+        urllib.request.urlopen(req).read()
+    self.assertEqual(seen, [1.0, 1.0, 0.3])
+
   def test_slow_reply_held(self):
     # a reply not streamed and slow: spaces while it's made (a proxy doesn't drop the quiet connection), then its JSON
     import urllib.request

@@ -217,7 +217,9 @@ def main():
   # start server
   # (a request's top_p without one: TOP_P, else the model's recommended one)
   top_p = float(getenv("TOP_P", 0.0) or kv.get("general.sampling.top_p", 1.0))
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, top_p=top_p).serve_forever()
+  # (a chat completion's temperature without one: TEMPERATURE, else greedy)
+  temperature = float(getenv("TEMPERATURE", 0.0))
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, top_p=top_p, temperature=temperature).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
