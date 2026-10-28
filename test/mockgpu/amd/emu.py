@@ -2029,7 +2029,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
     return end
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
-  sink = UOp.sink(body, arg=KernelInfo(name=name, optimized=True))
+  sink = UOp.sink(ctx.vmem, body, arg=KernelInfo(name=name, optimized=True))
   return to_program(sink, renderer)
 
 dispatch_cache:dict[tuple, UOp] = {}
