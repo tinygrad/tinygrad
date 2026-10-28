@@ -5,7 +5,7 @@ from tinygrad import Device, Tensor, Variable, nn
 from tinygrad.helpers import DEV
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
 from tinygrad.llm.gguf import gguf_load, gguf_parse, gguf_shard, ggml_data_to_tensor
-from tinygrad.llm.kernels.amd import Linear, ExpertWeights, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, ExpertWeights, amd_custom_kernels_supported, moe_linear
 from test.helpers import not_support_multi_device
 
 DEVICES = (Device.DEFAULT, f"{Device.DEFAULT}:1")
@@ -105,16 +105,19 @@ class TestTensorParallel(unittest.TestCase):
     typ = Q.Q4_K
     data = random_data(shape, typ).reshape(-1)
     w = ggml_data_to_tensor(Tensor(data, device='CPU'), E*O*I, typ).reshape(shape).float().numpy()
-    sel = np.array([[[3, 1]]], dtype=np.int32)
-    for axis in (1, 2):
-      with self.subTest(axis=axis):
+    sel = np.array([[[3, 1], [0, 2], [1, 3]]], dtype=np.int32)
+    for axis, tokens in itertools.product((1, 2), (1, Variable('T', 1, 3).bind(2))):
+      with self.subTest(axis=axis, tokens=tokens):
         layer = ExpertWeights(E, I, O)
         layer.weight = gguf_shard({'w': (Tensor(data, device='CPU'), shape, typ)}, DEVICES, {'w': axis})['w'].half()
-        x = np.random.default_rng(1).normal(size=(1, 1, 1 if axis == 1 else 2, I)).astype(np.float16)
-        ref = np.stack([w[e] @ x[0, 0, j % x.shape[2]].astype(np.float32) for j, e in enumerate(sel[0, 0])])
-        got = layer(Tensor(sel).shard(DEVICES), Tensor(x).shard(DEVICES, 3 if axis == 2 else None)).float().to(Device.DEFAULT).numpy()
+        x = np.random.default_rng(1).normal(size=(1, 3, 1 if axis == 1 else 2, I)).astype(np.float16)
+        ref = np.stack([[w[e] @ x[0, t, j % x.shape[2]].astype(np.float32) for j, e in enumerate(sel[0, t])] for t in range(3)])
+        layer.set_quantized()
         self.assertEqual(layer.ggml_type, typ)
-        np.testing.assert_allclose(got[0, 0], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
+        got = moe_linear(layer, Tensor(sel).shard(DEVICES)[:, :tokens], Tensor(x).shard(DEVICES, 3 if axis == 2 else None)[:, :tokens])
+        n = tokens if isinstance(tokens, int) else tokens.unbind()[1]
+        got = got.pad_to(got.max_shape).float().to(Device.DEFAULT).numpy()[0, :n]
+        np.testing.assert_allclose(got, ref[:n], rtol=2e-2, atol=2e-2*np.abs(ref).max())
 
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "too heavy for mock GPUs")
   def test_model(self):

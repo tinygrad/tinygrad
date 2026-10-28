@@ -156,7 +156,7 @@ class ExpertWeights:
       if self.ggml_type is None: self.use_custom_quant = supported = False  # not a supported quant format
     if self.weight_scale_inv is not None:
       ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
-    elif self.ggml_type is not None and supported and isinstance(x.shape[1], int) and x.shape[1] == 1: ret = moe_linear(self, sel, x)
+    elif self.ggml_type is not None and supported: ret = moe_linear(self, sel, x)
     else: ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
@@ -375,6 +375,7 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, xtoken, "moe_")
 
 def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
+  if not isinstance(T:=sel.shape[1], int): return moe_linear(layer, sel.pad_to(sel.max_shape), x.pad_to(x.max_shape))[:, :T]
   B, T, slots = cast(tuple[int, int, int], sel.shape[-3:]) # sel: (B, T, k), weight: (E, O, I)
   in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2]) # gate/up: (B, T, 1, D), down: (B, T, k, H)
   assert x_slots in (1, slots), f"x has {x_slots} rows per token, expected 1 or {slots}"
