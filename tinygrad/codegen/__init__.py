@@ -428,6 +428,18 @@ pm_lower_calls = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), allow_any_len=True, name="call"), lower_call),
 ])
 
+def lower_call_inline(ctx:Renderer, call:UOp) -> UOp:
+  key = (call.body.key, type(ctx), ctx.target, *[x.value for x in to_program_config])
+  if (body:=to_program_cache.get(key)) is None:
+    body = graph_rewrite(call.body, pm_lower_calls_inline, ctx=ctx, name="lower calls", walk=True)
+    body = full_rewrite_to_sink(body, ctx, optimize=False)
+    to_program_cache[key] = body = UOp(Ops.LINEAR, src=tuple(line_rewrite(linearize(body), pm_linearize_cleanups+pm_alloc_to_buf)))
+  return call.replace(src=(body.replace(arg=to_function_name(call.arg.name)),)+call.src[1:])
+
+pm_lower_calls_inline = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="call"), lower_call_inline),
+])
+
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)
@@ -488,7 +500,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer), name="lower calls", walk=True)
+  if renderer.inline_prefix: ast = graph_rewrite(ast, pm_lower_calls_inline, ctx=renderer, name="lower calls (inline)", walk=True)
+  else: ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer), name="lower calls", walk=True)
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
