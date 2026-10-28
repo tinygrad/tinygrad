@@ -46,6 +46,13 @@ def parse_tool_call(s:str, tags:dict[str, str]=TEXT_TAGS) -> tuple[str, typing.A
       return fm.group(1), args
   return None
 
+# (the model's images, video and audio aren't served: a block of them is this note to the model, not an empty placeholder it takes for one it
+# saw, so it looks at the file with tools)
+MEDIA_NOTE = "[{kind} not shown: this server doesn't give images, video or audio to the model. inspect the file with tools (e.g. code) instead]"
+MEDIA_KINDS = {"image": "image", "image_url": "image", "video": "video", "video_url": "video", "audio": "audio", "audio_url": "audio",
+               "input_audio": "audio", "document": "document"}
+def media_note(part:dict) -> str: return MEDIA_NOTE.format(kind=MEDIA_KINDS.get(part.get("type", ""), part.get("type", "content")))
+
 def normalize_messages(messages:list[dict]) -> None:
   # chat templates expect tool_call arguments as dicts (OpenAI clients send JSON strings)
   for m in messages:
@@ -55,7 +62,9 @@ def normalize_messages(messages:list[dict]) -> None:
         except json.JSONDecodeError: pass
     # string-only templates need text parts joined and explicit null content emptied
     if m.get("content", "") is None: m["content"] = ""
-    elif isinstance(c := m.get("content"), list) and all(p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
+    elif isinstance(c := m.get("content"), list):
+      c = m["content"] = [p if not isinstance(p, dict) or p.get("type") not in MEDIA_KINDS else {"type": "text", "text": media_note(p)} for p in c]
+      if all(isinstance(p, dict) and p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
 
 # ** the Anthropic Messages API (/v1/messages): requests as the chat completions' messages and tools, replies as its content blocks and events
 
@@ -63,9 +72,11 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
   """an Anthropic request's system, messages and tools as chat completions' (thinking blocks: reasoning_content, tool results: tool messages)"""
   def text_of(c) -> str:
     if isinstance(c, str): return c
-    return "".join(b.get("text", "") if b.get("type") == "text" else "[image]" if b.get("type") == "image" else "" for b in c or [])
+    return "".join(b.get("text", "") if b.get("type") == "text" else media_note(b) if b.get("type") in MEDIA_KINDS else "" for b in c or [])
   msgs:list[dict] = []
-  if (system:=body.get("system")): msgs.append({"role": "system", "content": text_of(system)})
+  # (Claude Code's system starts with a block of its billing metadata, "x-anthropic-billing-header: cc_version=...;": not the model's prompt)
+  if isinstance(system:=body.get("system"), list): system = [b for b in system if not b.get("text", "").startswith("x-anthropic-billing-header:")]
+  if system: msgs.append({"role": "system", "content": text_of(system)})
   for m in body.get("messages", []):
     content = m.get("content")
     if isinstance(content, str) or m["role"] == "system":

@@ -552,6 +552,25 @@ class TestLLMToolCalls(unittest.TestCase):
     for content in ("update", [{"type":"text", "text":"update"}]):
       self.assertEqual(anthropic_messages({"messages":[{"role":"system", "content":content}]})[0], [{"role":"system", "content":"update"}])
 
+  def test_anthropic_billing_header(self):
+    # Claude Code's billing metadata block isn't the model's system prompt
+    from tinygrad.llm.serve import anthropic_messages
+    system = [{"type":"text", "text":"x-anthropic-billing-header: cc_version=2.1.207.614; cc_entrypoint=sdk-cli;"},
+              {"type":"text", "text":"You are an agent."}, {"type":"text", "text":"\nBe brief."}]
+    self.assertEqual(anthropic_messages({"system":system, "messages":[]})[0], [{"role":"system", "content":"You are an agent.\nBe brief."}])
+
+  def test_media_note(self):
+    # an image (a tool result's, a user's) isn't served to the model: a note says so, not a placeholder the model takes for an image it saw
+    from tinygrad.llm.serve import anthropic_messages, normalize_messages, MEDIA_NOTE
+    img = {"type":"image", "source":{"type":"base64", "media_type":"image/png", "data":"AAAA"}}
+    msgs, _ = anthropic_messages({"messages":[{"role":"user", "content":[{"type":"tool_result", "tool_use_id":"t1", "content":[img]},
+                                                                   {"type":"text", "text":"look"}, img]}]})
+    note = MEDIA_NOTE.format(kind="image")
+    self.assertEqual(msgs, [{"role":"tool", "tool_call_id":"t1", "content":note}, {"role":"user", "content":"look" + note}])
+    chat = [{"role":"user", "content":[{"type":"text", "text":"what is "}, {"type":"image_url", "image_url":{"url":"data:..."}}]}]
+    normalize_messages(chat)
+    self.assertEqual(chat, [{"role":"user", "content":"what is " + note}])
+
   def test_anthropic_ping(self):
     # a request waiting for the model: ping events in the stream, nothing in the reply
     from tinygrad.llm.serve import anthropic_events, anthropic_message
