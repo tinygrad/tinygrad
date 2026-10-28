@@ -5,7 +5,6 @@
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
-from __future__ import annotations
 import ctypes, functools, itertools, re, struct, platform, subprocess, tempfile
 from typing import Callable
 
