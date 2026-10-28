@@ -417,21 +417,19 @@ class LowerCallsCtx:
   renderer: Renderer
   names: dict[str, dict[UOp, int]] = field(default_factory=dict)
 
-def lower_call(ctx:LowerCallsCtx, call:UOp, body:UOp) -> UOp|None:
-  if body.op is Ops.PROGRAM and body.src[-1].op is Ops.BINARY: return None
+def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
+  if b.op is Ops.PROGRAM and b.src[-1].op is Ops.BINARY: return None
   bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
-  if (i:=bodies.setdefault(body, len(bodies))): name += f"_{i}"
+  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True)
   if ctx.renderer.inline_prefix:
-    body = graph_rewrite(body, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-    lst = list(body.src[1].src) if body.op is Ops.PROGRAM else linearize(full_rewrite_to_sink(body, ctx.renderer, optimize=False))
-    body = UOp(Ops.LINEAR, src=tuple(line_rewrite(lst, pm_linearize_cleanups+pm_alloc_to_buf)), arg=name)
-  else:
-    ki = KernelInfo(name, optimized=True)
-    body = to_program(body.substitute({body.src[0]:body.src[0].replace(arg=ki)}) if body.op is Ops.PROGRAM else body.replace(arg=ki), ctx.renderer)
-  return call.replace(src=(body,)+call.src[1:])
+    b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
+    b = UOp(Ops.LINEAR, src=tuple(line_rewrite(list(b.src[1].src) if b.op is Ops.PROGRAM \
+        else linearize(full_rewrite_to_sink(b, ctx.renderer, optimize=False)), pm_linearize_cleanups+pm_alloc_to_buf)), arg=ki.name)
+  else: b = to_program(b.substitute({b.src[0]:b.src[0].replace(arg=ki)}) if b.op is Ops.PROGRAM else b.replace(arg=ki), ctx.renderer)
+  return call.replace(src=(b,)+call.src[1:])
 
 pm_lower_calls = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="body"),), allow_any_len=True, name="call"), lower_call),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="b"),), allow_any_len=True, name="call"), lower_call),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
