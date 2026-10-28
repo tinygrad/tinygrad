@@ -1773,16 +1773,7 @@ class Transformer:
     """
     rows = self._host_len(length)
     parts:list[tuple[Buffer, int, int]] = []
-    def add(t:Tensor, axis:int=0, n:int|None=None, start:int=0):
-      # (the first n rows of axis (all of it), a prefix of every device's buffer past the axes of one before it)
-      bufs = [u.buffer for u in t.uop.toposort() if u.op is Ops.BUFFER]
-      assert len(bufs) == 1, f"a state of {len(bufs)} buffers"
-      per = bufs[0].bufs if isinstance(bufs[0], MultiBuffer) else [bufs[0]]
-      shape = list(t.shape)
-      if isinstance(t.device, tuple) and (sa:=t.uop.axis) is not None: shape[sa] //= len(t.device)
-      assert prod(shape[:axis]) == 1 and per[0].nbytes == prod(shape) * t.dtype.itemsize, f"{t.shape} isn't rows of a buffer on axis {axis}"
-      row = int(prod(shape[axis+1:])) * t.dtype.itemsize
-      parts.extend((b, start*row, (int(shape[axis]) if n is None else n)*row) for b in per)
+    def add(t:Tensor, axis:int=0, n:int|None=None): parts.extend(self._state_parts(t, axis, n))
     if self.config.spec_drafts: add(self._spec_h)
     for b in self._slot_blocks():
       if isinstance(b, MLATransformerBlock):
@@ -1801,6 +1792,18 @@ class Transformer:
     if ckpt:
       for t in getattr(self, "_ckpt", []): add(t)
     return parts
+
+  @staticmethod
+  def _state_parts(t:Tensor, axis:int=0, n:int|None=None) -> list[tuple[Buffer, int, int]]:
+    """the first n rows of a state's axis (all of it): a prefix of every device's buffer, past the axes of one before it"""
+    bufs = [u.buffer for u in t.uop.toposort() if u.op is Ops.BUFFER]
+    assert len(bufs) == 1, f"a state of {len(bufs)} buffers"
+    per = bufs[0].bufs if isinstance(bufs[0], MultiBuffer) else [bufs[0]]
+    shape = list(t.shape)
+    if isinstance(t.device, tuple) and (sa:=t.uop.axis) is not None: shape[sa] //= len(t.device)
+    assert prod(shape[:axis]) == 1 and per[0].nbytes == prod(shape) * t.dtype.itemsize, f"{t.shape} isn't rows of a buffer on axis {axis}"
+    row = int(prod(shape[axis+1:])) * t.dtype.itemsize
+    return [(b, 0, (int(shape[axis]) if n is None else n)*row) for b in per]
 
   def _host_rows(self, length:int|None=None, save:bool=True) -> list[Tensor]:
     """
@@ -1836,21 +1839,24 @@ class Transformer:
     """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save keeps it)"""
     ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
     return len(ck) if 0 < len(ck) < len(tokens) and tokens[:len(ck)] == ck else 0
-  def host_alloc(self) -> Buffer:
+  def host_alloc(self, nbytes:int|None=None) -> Buffer:
     """a chunk of host memory for host_save (CPU memory: the devices copy to it, mapped on them here once: used again, not made again)"""
-    buf = Buffer("CPU", self.HOST_CHUNK, options=BufferSpec(nolru=True)).allocate()
+    buf = Buffer("CPU", nbytes or self.HOST_CHUNK, options=BufferSpec(nolru=True)).allocate()
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): buf.get_buf(d)
     return buf
 
   def _host_copy(self, save:bool, chunks:list[Buffer], length:int, ckpt:bool=True):
-    # the copies of a bucket between the model and these chunks: a program made once (building and compiling ~2000 copies takes ~0.5 s),
-    # the devices copy at once (CPU memory is the devices' to copy to, none staged)
-    if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
-    # (the bucket of its positions, its checkpoint or not)
-    key = (save, tuple(id(c) for c in chunks), self._host_len(length), ckpt)
     if save: self._host_rows(length, True)  # (the row of its end to the staging rows, before the copies)
+    # (the bucket of its positions, its checkpoint or not)
+    self._host_run((save, tuple(id(c) for c in chunks), self._host_len(length), ckpt), save, chunks, lambda: self._host_parts(length, ckpt))
+    if not save: self._host_rows(length, False)  # (the staging rows to the row of its end)
+
+  def _host_run(self, key:tuple, save:bool, chunks:list[Buffer], parts_of:Callable[[], list[tuple[Buffer, int, int]]]):
+    # the copies between the model's states (parts_of) and these chunks: a program made once (building and compiling ~2000 copies takes
+    # ~0.5 s), the devices copy at once (CPU memory is the devices' to copy to, none staged)
+    if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
     if (prg:=self._host_programs.pop(key, None)) is None:
-      parts = self._host_parts(length, ckpt)
+      parts = parts_of()
       layout = self._host_layout(parts)
       assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
       pairs = [(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)]
@@ -1863,7 +1869,20 @@ class Transformer:
     for d in devs: Device[d].synchronize()  # (run ahead steps of the model)
     run_linear(prg, jit=True, update_stats=False)
     for d in devs + ("CPU",): Device[d].synchronize()
-    if not save: self._host_rows(length, False)  # (the staging rows to the row of its end)
+
+  # ** a request's checkpoint while it's decoded in a slot (the model's own is the next prompt's by then): copied to host memory after its
+  # prefill, back into the model's before its conversation's host_save. a client that doesn't send the model's reasoning back has the
+  # conversation of its next turn differ right after this prompt: it goes on from there, not from the start
+  def _ckpt_parts(self) -> list[tuple[Buffer, int, int]]: return [p for t in getattr(self, "_ckpt", []) for p in self._state_parts(t)]
+  def ckpt_alloc(self) -> Buffer|None:
+    """host memory for a copy of the model's checkpoint (ckpt_copy): its size, not a chunk's. None without one"""
+    if not (parts:=self._ckpt_parts()): return None
+    layout = self._host_layout(parts)
+    assert layout[-1][0] == 0, "a checkpoint past a chunk of host memory"
+    return self.host_alloc(layout[-1][1] + parts[-1][2])
+  def ckpt_copy(self, save:bool, buf:Buffer):
+    """the model's checkpoint into buf (save), or back from it (the caller sets _ckpt_tokens)"""
+    self._host_run(("ckpt", save, id(buf)), save, [buf], self._ckpt_parts)
 
   def _host_len(self, length:int) -> int:
     """the positions of a conversation host_save copies: rounded up to HOST_BUCKET, (aliased) not past batch_ctx if it fits (the slots')"""

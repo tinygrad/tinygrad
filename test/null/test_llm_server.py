@@ -841,6 +841,45 @@ class TestStash(unittest.TestCase):
       self.assertEqual(m.host_save.call_count, 1)
       self.assertEqual(self.server.stash_hit(conv + [7, 8], set()), 5012)
 
+  def test_batched_done_ckpt(self):
+    # (SLOT_HOST) a request decoded in a slot keeps a copy of the model's checkpoint at its prompt's end (taken after its prefill): its
+    # conversation's host_save has it, a next turn without the reply's reasoning goes on from the prompt's end. the copy is used again
+    from tinygrad.llm.serve import Request
+    from tinygrad.helpers import getenv
+    m = self.model
+    m.HOST_CHUNK, m.host_ckpt = 1000, Mock(side_effect=lambda t: len(m._ckpt_tokens) if t[:len(m._ckpt_tokens)] == m._ckpt_tokens else 0)
+    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
+    m.ckpt_alloc = Mock(side_effect=lambda: Mock())
+    self.server.spec, self.server.main_moved = 2, True
+    prompt = list(range(5000))
+    req = Request(prompt, "", None, 0.0)
+    self.addCleanup(getenv.cache_clear)
+    with patch.dict(os.environ, {"HOST_STASH": "0.001"}):
+      getenv.cache_clear()
+      m._ckpt_tokens = list(range(7))  # (another prompt's: not this request's checkpoint)
+      self.server.ckpt_keep(req)
+      self.assertIsNone(req.ckpt_buf)
+      m._ckpt_tokens = list(prompt)  # (after its prefill)
+      self.server.ckpt_keep(req)
+      buf = req.ckpt_buf
+      self.assertEqual((m.ckpt_copy.call_args.args, req.ckpt_tokens), ((True, buf), prompt))
+      m._ckpt_tokens = list(range(7))  # (the model's checkpoint another prompt's while it decodes)
+      req.generated = list(range(20000, 20012))
+      req.mtp, req.j, req.par, req.pos = 5011, 2, 0, 5013
+      self.server.slot_done(1, req, {0: None, 2: None})
+      self.assertEqual(m.ckpt_copy.call_args.args, (False, buf))
+      self.assertEqual([(e.tokens[:5000], e.ckpt) for e in self.server.host], [(prompt, 5000)])
+      # its next turn: the reply without its reasoning (differs right after the prompt): from the prompt's end
+      self.assertEqual(self.server.stash_hit(prompt + [1, 2, 3], set()), 5000)
+      self.server.ckpt_free(req)  # (when it's done: finish)
+      self.assertEqual((req.ckpt_buf, self.server.ckpt_pool), (None, [buf]))
+      # that turn decoded in a slot too: its conversation replaces the older turn's (continued from its checkpoint), not kept beside it
+      req2 = Request(prompt + [1, 2, 3], "", None, 0.0)
+      req2.generated = list(range(30000, 30012))
+      req2.mtp, req2.j, req2.par, req2.pos = 5014, 2, 0, 5016
+      self.server.slot_done(1, req2, {0: None, 2: None})
+      self.assertEqual([e.tokens[:5003] for e in self.server.host], [prompt + [1, 2, 3]])
+
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []

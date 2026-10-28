@@ -434,6 +434,9 @@ class Request:
     # batched speculative decoding: the last step's sampled tokens, the position the MTP layer catches up from, the drafts accepted, the parity
     self.y:list[int] = []
     self.mtp, self.j, self.par = 0, 0, 1
+    # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
+    self.ckpt_buf: typing.Any = None
+    self.ckpt_tokens: list[int] = []
   def spec_start(self, first:int, pos:int, k:int):
     """the slot's state after a prefill (or the model alone): the token at pos is the next step's input"""
     self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
@@ -529,6 +532,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def finish(self, req:Request, error:Exception|None=None) -> bool:
     if req.done: return False
     req.done, req.error = True, error
+    self.ckpt_free(req)
     et, n = time.perf_counter(), len(req.generated)
     total = f"total:{et-req.st:6.2f}s"
     pre = (len(req.ids) - req.cache_start) / ((req.pt or et) - req.st)
@@ -552,6 +556,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # there is stored in a free slot first, a request that continues a stored one takes its states back (an agent's turn isn't prefilled again)
   # (SLOT_HOST: the model's conversation is a prompt decoded in a slot: its whole conversation is saved when done, see slot_done)
   main_moved = False
+  ckpt_pool: list|None = None  # (host memory for requests' checkpoints, see ckpt_keep)
   STASH_MIN = getenv("STASH_MIN", 512)  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
   def stash_main(self, busy:set[int]):
     """
@@ -591,11 +596,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
     k = model.host_chunks(len(tokens), bool(ckpt))
     # (an older turn of it out first: its chunks are this one's, in their order (its copies the same program). then free ones, new ones up to
-    # the GB, the least recently used one's)
-    older = [e for e in self.host if tokens[:len(e.tokens)] == e.tokens]
+    # the GB, the least recently used one's. one this continues from its checkpoint is an older turn too: its client sent the reply back
+    # without its reasoning, that reply isn't coming back)
+    older = [e for e in self.host if starts(tokens, e.tokens) or (0 < e.ckpt < len(tokens) and starts(tokens, e.tokens, e.ckpt))]
     chunks = max((e.chunks for e in older), key=len, default=[])[:k]
     self.host_free += [c for e in older for c in e.chunks if not any(c is x for x in chunks)]
-    self.host = [e for e in self.host if tokens[:len(e.tokens)] != e.tokens]
+    self.host = [e for e in self.host if not any(e is o for o in older)]
     made = 0
     while len(self.host_free) < k - len(chunks):
       if self.host_made < most:
@@ -733,12 +739,37 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       if not self.main_moved: self.stash_main(set(active) | {i})
       self.model.slot_load(i, n, hrow)
       self.model._cached_tokens, self.model._ckpt_tokens, self.main_moved = (req.ids + req.generated)[:n], [], False
+      # (its prompt's checkpoint too: a next turn without its reasoning goes on from there)
+      if req.ckpt_buf is not None and len(ck:=req.ckpt_tokens) < n and starts(self.model._cached_tokens, ck):
+        self.model.ckpt_copy(False, req.ckpt_buf)
+        self.model._ckpt_tokens = list(ck)
       self.host_save(self.model._cached_tokens)
       trace(f"slot_host req {req.rid} slot {i} len {n} in {time.perf_counter()-st:.2f} s")
     if i <= max(active, default=-1) or n < max(self.STASH_MIN, start + 1) or n >= self.model.batch_ctx() - k - 2: return
     self.stash.pop(i, None)
     self.stash[i] = ((req.ids + req.generated)[:n], hrow)
     trace(f"slot_done req {req.rid} slot {i} len {n} hrow {self.stash[i][1]} active {sorted(active)}")
+
+  def ckpt_keep(self, req:Request):
+    """
+    (SLOT_HOST) req goes on in a slot after its prompt: the model's checkpoint (the states at its prompt's end) copied to host memory, its
+    conversation's host_save has it (the model's own checkpoint is another prompt's by then). a client that doesn't send the model's reasoning
+    back (its next turn: the reply without it, a tool's result) has the conversation differ right after the prompt: without the checkpoint
+    it's prefilled from the start every turn
+    """
+    model = self.model
+    if not self.slot_host() or not getenv("SLOT_CKPT", 1) or req.ckpt_buf is not None or len(req.ids) < getenv("HOST_MIN", 4096): return
+    if not callable(getattr(model, "ckpt_copy", None)) or getattr(model, "_ckpt_tokens", None) != req.ids: return
+    pool = self.ckpt_pool = self.ckpt_pool or []
+    if not pool and (buf:=model.ckpt_alloc()) is not None: pool.append(buf)
+    if not pool: return
+    req.ckpt_buf, req.ckpt_tokens = pool.pop(), list(req.ids)
+    model.ckpt_copy(True, req.ckpt_buf)
+  def ckpt_free(self, req:Request):
+    if req.ckpt_buf is not None:
+      self.ckpt_pool = self.ckpt_pool or []
+      self.ckpt_pool.append(req.ckpt_buf)
+    req.ckpt_buf, req.ckpt_tokens = None, []
 
   def preempt(self, active:dict, pending:list[Request]):
     """
@@ -783,6 +814,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # another request: this one goes on batched (the model's states after its last token's position are the slot's)
           _close(g)
           req.pos = len(model._cached_tokens)
+          self.ckpt_keep(req)
           self.slot_taken(0)
           trace(f"alone to batch req {req.rid} slot 0 pos {req.pos} row {getattr(model, '_spec_row', 0)}")
           model.slot_store(0, req.pos, getattr(model, "_spec_row", 0))
@@ -848,6 +880,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
           pending.remove(req)
           req.pos = len(req.ids) + len(req.generated)
+          self.ckpt_keep(req)
           trace(f"slot_store req {req.rid} slot {slot} pos {req.pos}")
           model.slot_store(slot, req.pos)
           self.main_moved = True
