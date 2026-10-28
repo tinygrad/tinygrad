@@ -417,15 +417,19 @@ class LowerCallsCtx:
   renderer: Renderer
   names: dict[str, dict[UOp, int]] = field(default_factory=dict)
 
-def lower_call(ctx:LowerCallsCtx, call:UOp) -> UOp|None:
-  if call.body.op is Ops.PROGRAM and call.body.src[-1].op is Ops.BINARY: return None
+def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
+  if b.op is Ops.PROGRAM and b.src[-1].op is Ops.BINARY: return None
   bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
-  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(call.body, len(bodies))) else ""), optimized=True)
-  body = call.body.substitute({call.body.src[0]:call.body.src[0].replace(arg=ki)}) if call.body.op is Ops.PROGRAM else call.body.replace(arg=ki)
-  return call.replace(src=(to_program(body, ctx.renderer), *call.src[1:]))
+  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True)
+  if ctx.renderer.inline_prefix:
+    b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
+    b = UOp(Ops.LINEAR, src=tuple(line_rewrite(list(b.src[1].src) if b.op is Ops.PROGRAM \
+        else linearize(full_rewrite_to_sink(b, ctx.renderer, optimize=False)), pm_linearize_cleanups+pm_alloc_to_buf)), arg=ki.name)
+  else: b = to_program(b.substitute({b.src[0]:b.src[0].replace(arg=ki)}) if b.op is Ops.PROGRAM else b.replace(arg=ki), ctx.renderer)
+  return call.replace(src=(b,)+call.src[1:])
 
 pm_lower_calls = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), allow_any_len=True, name="call"), lower_call),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="b"),), allow_any_len=True, name="call"), lower_call),
 ])
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:

@@ -69,9 +69,14 @@ base_rewrite = PatternMatcher([
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
+  # call to PROGRAM links BINARY at runtime
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
    f"{body.src[0].arg.function_name}(&(struct {body.src[0].arg.function_name}_args){{"
    f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)}}});"),
+
+  # call to LINEAR renders the call in SOURCE
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in [(u.arg.slot,u) for u in body.src if u.op is Ops.PARAM])});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -276,11 +281,15 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    fns = {u.body:u.body.src[0].arg.function_name for u in uops if u.op is Ops.CALL and u.body.op is Ops.PROGRAM}
-    prefix = [*(f"struct {name}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
-                f"}}; extern void {name}(const struct {name}_args*);" for b,name in fns.items()),
-              *(f"extern void {f}();" for f in dedup(u.body.arg.name for u in uops if u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION))]
-    return self.render_kernel(*self._render(uops), uops, prefix or None)
+    bodies = dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL)
+    fns = {b:b.src[0].arg.function_name for b in bodies if b.op is Ops.PROGRAM}
+    inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
+    prefix = [f"extern void {b.arg.name}();" if b.op is Ops.CUSTOM_FUNCTION else
+              f"struct {fns[b]}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
+              f"}}; extern void {fns[b]}(const struct {fns[b]}_args*);" if b.op is Ops.PROGRAM else
+              f"static inline {self.inline_prefix} void {b.arg}({', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
+              '\n'.join(inlines[b][1]) + "\n}" for b in bodies]
+    return self.render_kernel(*self._render(uops), uops+[u for b in inlines for u in b.src], prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
@@ -502,6 +511,7 @@ class HIPRenderer(CStyleLanguage):
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+  inline_prefix = "__attribute__((device))"
 
   @staticmethod
   def is_cdna(arch): return arch in {"gfx942", "gfx950"}

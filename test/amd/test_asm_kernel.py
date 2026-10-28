@@ -8,12 +8,13 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
 from test.amd.helpers import TARGET_TO_ARCH
+from test.mockgpu.amd.emu import RELIFT
 from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
@@ -252,6 +253,7 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
+  @Context(RELIFT=1)
   def test_cfg_branch_diamond(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):
@@ -340,6 +342,22 @@ class TestAsmKernel(unittest.TestCase):
     b = Tensor.eye(N, dtype=dtypes.float).clone()
     out = a@b
     self.assertEqual(out.tolist(), (a.numpy()@b.numpy()).tolist())
+
+  def test_relift_simple(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def k(out:UOp):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        s_mov_b32(s[2], 2), s_add_u32(s[2], s[2], 2),
+        v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], s[2]),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
+      ]
+      sink = UOp.sink(out.base, arg=KernelInfo("k"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor.empty(1, dtype=dtypes.uint32).custom_kernel(fxn=k)[0]
+    with Context(RELIFT=max(RELIFT.value, 1)):
+      out.realize()
+    self.assertListEqual(out.tolist(), [4])
 
 if __name__ == "__main__":
   unittest.main()

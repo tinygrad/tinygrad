@@ -5,7 +5,7 @@
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
-import ctypes, functools, itertools, re, struct, platform, subprocess, tempfile
+import ctypes, functools, itertools, re, struct, platform, subprocess, tempfile, traceback
 from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
@@ -56,9 +56,9 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import Context, DEV, to_mv
+from tinygrad.helpers import Context, DEV, to_mv, ContextVar
 from tinygrad.runtime.autogen import hsa
-from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND
+from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
 
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
@@ -2032,10 +2032,12 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
   # operand bits are read from the runtime code pointer; identical call graphs can share machine code.
-  sink = UOp.sink(body, arg=KernelInfo(name=f"emu {name}", optimized=True))
+  sink = UOp.sink(body, arg=KernelInfo(name=name, optimized=True))
   return to_program(sink, renderer)
 
 dispatch_cache:dict[tuple, UOp] = {}
+
+RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
@@ -2046,7 +2048,15 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, len(user_data or []))
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = lift(amd_decode(code, arch), arch, renderer, dispatch, name)
+      dispatch_cache[key] = lift(amd_decode(code, arch), arch, renderer, dispatch, f"emu {name}")
+      relift_lib = code
+      for relift_count in range(1, RELIFT.value+1):
+        try:
+          ret = lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}")
+        except Exception:
+          print("relift err", traceback.format_exc())
+          break
+        relift_lib = get_elf_section(ret.src[3].arg, ".text").content
     prg = dispatch_cache[key]
   vals = {"lib":lib, "args_ptr":args_ptr, **{f"user_data_{i}":v for i,v in enumerate(user_data or [])}}
   with _MXCSRContext():
