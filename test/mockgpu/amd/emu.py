@@ -71,8 +71,6 @@ from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
 from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, _bitreverse, _countbits
 
-MASK32 = 0xFFFFFFFF
-
 def _c(val, dtype=dtypes.uint32): return UOp.const(val, dtype)
 
 def _u64(lo: UOp, hi: UOp) -> UOp:
@@ -423,14 +421,14 @@ class _Ctx:
 
   def wmask_lane_bit(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> list[UOp]:
     """Set/clear bit `lane` of the mask at `reg` from val for exec-active lanes, preserving memory for inactive lanes"""
-    active, bit = _lane_active(exec_mask, lane), _to_u32(val)
+    active, bit, mask32 = _lane_active(exec_mask, lane), _to_u32(val), _c(0xFFFFFFFF)
     if self.wave_size <= 32:
       old = self.rsgpr_dyn(reg)
       mask = _c(1) << lane.cast(dtypes.uint32)
-      return [self.wsgpr_dyn(reg, active.where((old & (mask ^ _c(MASK32))) | (bit << lane.cast(dtypes.uint32)), old))]
+      return [self.wsgpr_dyn(reg, active.where((old & (mask ^ mask32)) | (bit << lane.cast(dtypes.uint32)), old))]
     off = (lane & _c(31, dtypes.int)).cast(dtypes.uint32)
     mask = _c(1) << off
-    def half(old: UOp, sel: UOp) -> UOp: return sel.where(active.where((old & (mask ^ _c(MASK32))) | (bit << off), old), old)
+    def half(old: UOp, sel: UOp) -> UOp: return sel.where(active.where((old & (mask ^ mask32)) | (bit << off), old), old)
     return [self.wsgpr_dyn(reg, half(self.rsgpr_dyn(reg), lane < _c(32, dtypes.int))),
             self.wsgpr_dyn(reg + _c(1), half(self.rsgpr_dyn(reg + _c(1)), _c(32, dtypes.int) <= lane))]
 
