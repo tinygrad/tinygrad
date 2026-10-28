@@ -740,6 +740,19 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.stash[i] = ((req.ids + req.generated)[:n], hrow)
     trace(f"slot_done req {req.rid} slot {i} len {n} hrow {self.stash[i][1]} active {sorted(active)}")
 
+  def preempt(self, active:dict, pending:list[Request]):
+    """
+    (PREEMPT_LONG) the batch drains for a request that doesn't fit a slot: the requests decoding stop now, not after their replies (thousands
+    of tokens: the server mostly idle meanwhile). each goes on after it as one that fills its slot does, its conversation kept (in host memory)
+    """
+    stopped = []
+    for i, req in sorted(active.items(), reverse=True):
+      del active[i]
+      self.slot_done(i, req, active)
+      stopped.append(req)
+    trace(f"preempt reqs {[r.rid for r in stopped]}")
+    pending[:0] = sorted(stopped, key=lambda r: r.st)
+
   def prefill(self, req:Request, busy:set[int]|None=None, target:int|None=None) -> int:
     """the prompt (and what req generated, a continuation) through the model (into slot target): the first sampled token"""
     ids = req.ids + req.generated
@@ -796,9 +809,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
         self.inflight = len(active) + len(pending)
-        # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains), then it goes on
-        # alone. else it waits for no request to be decoded: while agents take turns that's never)
+        # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains, see preempt), then it
+        # goes on alone. else it waits for no request to be decoded: while agents take turns that's never)
         drain = any(not self.batchable(r) and time.perf_counter() - r.st > self.STARVE_LONG for r in pending)
+        if drain and active and getenv("PREEMPT_LONG", 1): self.preempt(active, pending)
         if not active and pending:
           # one request (or one that doesn't fit a slot): alone
           if len(pending) == 1 or not self.batchable(pending[0]) or drain:

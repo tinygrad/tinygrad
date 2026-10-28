@@ -803,6 +803,20 @@ class TestStash(unittest.TestCase):
     self.server.slot_done(1, req, {0: None, 2: None})  # a slot a step writes (before an active one): not kept
     self.assertNotIn(1, self.server.stash)
 
+  def test_preempt(self):
+    # the batch drains for a long request: the ones decoding stop now (each as one done in its slot), they go on first after it, oldest first
+    from tinygrad.llm.serve import Request
+    self.server.spec = 2
+    reqs = [Request(list(range(90)), "", None, 0.0) for _ in range(3)]
+    for r, st in zip(reqs, (3.0, 1.0, 2.0)): r.st = st
+    long, active = Request(list(range(9000)), "", None, 0.0), {0: reqs[0], 1: reqs[1], 2: reqs[2]}
+    with patch.object(self.server, "slot_done") as done:
+      pending = [long]
+      self.server.preempt(active, pending)
+    self.assertEqual(active, {})
+    self.assertEqual(pending, [reqs[1], reqs[2], reqs[0], long])
+    self.assertEqual([c.args[0] for c in done.call_args_list], [2, 1, 0])
+
   def test_batched_done_to_host(self):
     # (SLOT_HOST with HOST_STASH) a request done in a slot: its whole conversation into the model's states and from them to host memory (the
     # slot is taken by another request before its next turn), even in a slot a step writes. the model's conversation was a prompt moved to a
