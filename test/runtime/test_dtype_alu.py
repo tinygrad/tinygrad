@@ -312,6 +312,9 @@ class TestDTypeALU(unittest.TestCase):
   def test_neg_add_no_overflow(self):
     self.assertEqual((-(Tensor([1, 2], dtype=dtypes.int32)+(-2**31))==2**31-1).tolist(), [True, False])
 
+  def test_neg_add_signed_zero(self):
+    self.assertEqual((1/-(Tensor([0.])+Tensor([-0.]))).tolist(), [-math.inf])
+
   def test_add_mul_no_overflow(self):
     self.assertEqual((((Tensor([-715827887, 0], dtype=dtypes.int32)+5)*3)==-2**31+2).tolist(), [True, False])
 
