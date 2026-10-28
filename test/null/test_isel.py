@@ -4,8 +4,7 @@ from tinygrad.helpers import Target, Context
 from tinygrad.codegen import to_program
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
-from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
-from tinygrad.renderer.isa import IselContext
+from tinygrad.renderer.x86 import X86Renderer, X86Ops, IselContext
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
 def lane(y:UOp, i:int) -> UOp: return y.index(UOp.cconst(i, dtypes.int))
@@ -26,7 +25,7 @@ class TestIselX86(unittest.TestCase):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     b = UOp.variable("b", 0, 0, dtypes.int32)
     c = (a < b).where(a, b)
-    d = (a != b).where(a, b)
+    d = a.alu(Ops.CMPNE, b).where(a, b)
     f = c + d
     n = self.isel_rewrite(f)
     self.assertTrue(n.src[0].arg[0] is X86Ops.CMOVL and n.src[1].arg[0] is X86Ops.CMOVNE)

@@ -40,7 +40,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, ParamArg
+from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
 from tinygrad.uop.render import render_uir, render_index, uops_colors, _inline, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
@@ -130,6 +130,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
+    if isinstance(u.arg, ProgramInfo):
+      argst = word_wrap(repr(u.arg).replace(f"params={u.arg.params!r}", "params=(\n" + '\n'.join(render_uir(p) for p in u.arg.params) + "\n)"))
     label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
@@ -634,7 +636,10 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, src=2, alt="View Program")) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.arg, "lang":"cpp"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ast = unwrap(get_sink_at(("do_render",), viz_data, i, data, src=0, alt="View Program"))
+    extern_srcs = [u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, enter_calls=True) if u.op is Ops.SOURCE]
+    return {"src":"\n".join([sink.arg, *reversed(extern_srcs)]), "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data

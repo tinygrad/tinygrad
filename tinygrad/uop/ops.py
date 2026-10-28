@@ -146,7 +146,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
       return dtypes.bool
-    case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIPROCAL:
+    case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIP:
       return dtypes.bool if src[0].base.is_invalid else least_upper_float(src[0].dtype)
     case Ops.WHERE:
       if src[0].dtype != dtypes.bool: raise RuntimeError(f"where cond must be bool, got {src[0].dtype}")
@@ -937,12 +937,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
     return self.op in GroupOp.Defines
 
-  def _base_buffer_is_realized(self) -> bool:
-    """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
-    u = self.base
-    while u.op is Ops.AFTER: u = u.src[0]
-    return u.is_realized
-
   @functools.cached_property
   def _buffer_view(self) -> tuple[UOp, int]:
     # Cache only the UOp and byte offset, never an allocated Buffer view.
@@ -1091,20 +1085,20 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return wrapped(self.dtype, t[0] << t[2], t[1] << t[2])
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
-      if self.op is Ops.CMOD:
+      if self.op is Ops.TRUNCMOD:
         if (c:=s1_vmin) == s1_vmax > 0:
           return (0 if s0_vmin > 0 else s0_vmin if 0 >= s0_vmin > -c else -(s1_vmax-1), 0 if s0_vmax < 0 else s0_vmax if 0 <= s0_vmax < c else c-1)
         if s1_vmin > 0: return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), 0) if s0_vmax <= 0 else (-(s1_vmax-1), s1_vmax-1)
         if s1_vmax < 0: return (0, -s1_vmin-1) if s0_vmin >= 0 else (-(-s1_vmin-1), 0) if s0_vmax <= 0 else (-(-s1_vmin-1), -s1_vmin-1)
-      if self.op is Ops.CDIV:
+      if self.op is Ops.TRUNCDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if s1_vmin*s1_vmax>0:
           return min(vals:=(cdiv(s0_vmin, s1_vmin), cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin), cdiv(s0_vmax, s1_vmax))), max(vals)
-      if self.op is Ops.FLOORDIV:
+      if self.op is Ops.DIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if s0_vmin > s0_vmax: return 0, 0  # numerator range is empty (e.g. RANGE with end=0)
         if s1_vmin*s1_vmax>0: return min(vals:=(s0_vmin//s1_vmin, s0_vmin//s1_vmax, s0_vmax//s1_vmin, s0_vmax//s1_vmax)), max(vals)
-      if self.op is Ops.FLOORMOD:
+      if self.op is Ops.MOD:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if s0_vmin > s0_vmax: return 0, 0  # numerator range is empty (e.g. RANGE with end=0)
         if (c:=s1_vmin) == s1_vmax > 0: return (s0_vmin%c, s0_vmax%c) if s0_vmin//c == s0_vmax//c else (0, c-1)
@@ -1117,7 +1111,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return 0, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
-      if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
+      if self.op is Ops.CMPEQ: return (s0_vmin == s0_vmax == s1_vmin == s1_vmax, not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
       if self.op is Ops.OR and self.dtype == dtypes.bool: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
       if self.op is Ops.AND and self.dtype == dtypes.bool: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
     if self.op is Ops.WHERE: return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
@@ -1151,7 +1145,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
-    ns: dict[str, Any] = {"max": max, "cdiv": cdiv, "cmod": cmod, "floordiv": floordiv, "floormod": floormod, "bitcast": bitcast, "dtypes": dtypes}
+    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast, "dtypes": dtypes}
     exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
     return ns["_f"], varnames
 
@@ -1399,12 +1393,12 @@ def safe_pow(x, y):
 
 python_alu: dict[Ops, Callable]  = {
   Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: safe_exp2,
-  Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIPROCAL: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
+  Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow,
   Ops.TRUNC: lambda x: math.modf(x)[1] if isinstance(x, float) else x,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
-  Ops.CMOD: cmod, Ops.CDIV: cdiv, Ops.FLOORDIV: floordiv, Ops.FLOORMOD: floormod,
+  Ops.TRUNCMOD: cmod, Ops.TRUNCDIV: cdiv, Ops.DIV: floordiv, Ops.MOD: floormod,
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
 def exec_alu(op:Ops, dtype:DType, operands):
@@ -1510,12 +1504,12 @@ class UPat(RandMixin):
     y = self.ufix(y)
     return (y, self) if reverse else (self, y)
   def ufix(self, x): return UPat.cvar(arg=x) if not isinstance(x, UPat) else x
-  def __floordiv__(self, x): return self._binop(Ops.FLOORDIV, x, False)
-  def __rfloordiv__(self, x): return self._binop(Ops.FLOORDIV, x, True)
-  def mod(self, x, reverse=False): return self._binop(Ops.FLOORMOD, x, reverse)
+  def __floordiv__(self, x): return self._binop(Ops.DIV, x, False)
+  def __rfloordiv__(self, x): return self._binop(Ops.DIV, x, True)
+  def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
-    return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
+    return UPat(op, dtypes.bool if op in GroupOp.Comparison else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])

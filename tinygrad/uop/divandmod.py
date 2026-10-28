@@ -8,11 +8,11 @@ from tinygrad.helpers import unwrap
 def fold_divmod_general(d: UOp) -> UOp|None:
   x, y = d.src
 
-  if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
+  if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.DIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   # x//y is constant
-  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
+  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.MOD else xdiv.const_like(xdiv.vmin)
   # PARAM // c is irreducible
-  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.val == 0: return d.const_like(0) if d.op is Ops.FLOORMOD else None
+  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.val == 0: return d.const_like(0) if d.op is Ops.MOD else None
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -22,13 +22,13 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.val) > 0:
     # nested_div: (x%(k*c))//c -> (x//c)%k (requires k>0); the mod case is handled by remove_nested_mod below
-    if d.op is Ops.FLOORDIV and x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None and k.vmin > 0: return x.src[0] // y % k
+    if d.op is Ops.DIV and x.op is Ops.MOD and (k := x.src[1].divides(c)) is not None and k.vmin > 0: return x.src[0] // y % k
 
     # remove_nested_mod in sum: (a%4 + b)%2 -> (a+b)%2
-    if d.op is Ops.FLOORMOD:
+    if d.op is Ops.MOD:
       new_xs, changed = [], False
       for u in uops_no_const:
-        if u.op is Ops.FLOORMOD and u.src[1].divides(c) is not None:
+        if u.op is Ops.MOD and u.src[1].divides(c) is not None:
           u = u.src[0]
           changed = True
         new_xs.append(u)
@@ -44,22 +44,22 @@ def fold_divmod_general(d: UOp) -> UOp|None:
     rem_choices = [(r, r-c) if (r:=f%c)*2 == c or len(terms)==1 else (min(r, r-c, key=abs),) for f in factors]
     for rems in itertools.product(*rem_choices):
       if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
-        if d.op is Ops.FLOORMOD: return rem - rem.vmin//c*c
+        if d.op is Ops.MOD: return rem - rem.vmin//c*c
         return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
 
     # gcd_with_remainder: factor out common gcd from numerator
     if (g:=math.gcd(*factors, c)) > 1:
       new_x = unwrap(x_peeled.divides(g)).simplify() + (const//g)%(c//g)
       if new_x.vmin >= 0:
-        if d.op is Ops.FLOORMOD: return new_x % (c//g) * g + const%g
+        if d.op is Ops.MOD: return new_x % (c//g) * g + const%g
         return new_x // (c//g) + const//c
 
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
-    # FLOORDIV identity holds for any sign of x; FLOORMOD reconstruction needs x.vmin>=0
+    # DIV identity holds for any sign of x; MOD reconstruction needs x.vmin>=0
     results = []
     for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op is not Ops.CONST and 1 < abs(f) < c and (c%f)==0}:
       if (newxs := fold_divmod_general(x//div)) is not None:
-        if d.op is Ops.FLOORDIV:
+        if d.op is Ops.DIV:
           results.append((len(newxs.backward_slice), newxs // (c // div)))
         elif x.vmin >= 0 and newxs.vmin >= 0:
           b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
@@ -78,7 +78,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   gcd = UOp.gcd(*all_uops, y).simplify()
   if not (gcd.op is Ops.CONST and gcd.val==1):
     ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
-    return ret*gcd if d.op is Ops.FLOORMOD else ret
+    return ret*gcd if d.op is Ops.MOD else ret
 
   # factor_remainder: (d*x+y)//d -> x+y//d
   if y.vmin<0 or x.vmin<0: return None
@@ -87,23 +87,23 @@ def fold_divmod_general(d: UOp) -> UOp|None:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
     elif y.op is Ops.CONST and (c:=u.const_factor())%y.val!=c:
       rem.append(u.divides(c)*(c%y.val))
-      quo.append(u.divides(c)*(c//y.val) if d.op is Ops.FLOORDIV else u.const_like(0))
+      quo.append(u.divides(c)*(c//y.val) if d.op is Ops.DIV else u.const_like(0))
     else: rem.append(u)
 
   if not quo: return None
   new_x = sum(rem)+x.const_like(0)
   if new_x.vmin<0: return None
-  return new_x%y if d.op is Ops.FLOORMOD else new_x//y+sum(quo)
+  return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
 
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   # (x//c+a)//d -> (x+a*c)//(c*d) for c>0, d>0
   ((UPat.var("x", dtypes.weakint)//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if d.vmin>0 else None),
   # (x+c)//d -> (x+c%d)//d + c//d ; (x+c)%d -> (x+c%d)%d  (split the multiple of d out of the const, holds for any d!=0)
-  (UPat((Ops.FLOORDIV, Ops.FLOORMOD), src=(UPat.var("x", dtypes.weakint)+UPat.cvar("c"), UPat.cvar("d")), name="n"),
+  (UPat((Ops.DIV, Ops.MOD), src=(UPat.var("x", dtypes.weakint)+UPat.cvar("c"), UPat.cvar("d")), name="n"),
     lambda n,x,c,d: None if d.val==0 or c.val%d.val==c.val else
-      (x+c.val%d.val)//d + c.val//d.val if n.op is Ops.FLOORDIV else (x+c.val%d.val)%d),
+      (x+c.val%d.val)//d + c.val//d.val if n.op is Ops.DIV else (x+c.val%d.val)%d),
 
   # ** 2. Slow Rules **
-  (UPat((Ops.FLOORDIV, Ops.FLOORMOD), dtypes.weakint, name="d"), lambda d: fold_divmod_general(d)),
+  (UPat((Ops.DIV, Ops.MOD), dtypes.weakint, name="d"), lambda d: fold_divmod_general(d)),
 ])

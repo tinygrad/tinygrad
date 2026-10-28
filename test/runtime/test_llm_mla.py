@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.llm.model import TransformerConfig, apply_rope, MLATransformerBlock, precompute_freqs_cis, e4m3fn_to_fnuz
+from tinygrad.llm.model import TransformerConfig, apply_rope, MLATransformerBlock, precompute_freqs_cis
+from tinygrad.llm.hf import e4m3fn_to_fnuz
 from test.runtime.test_llm_quantized import fp8_reference
 
 class TestMLA(unittest.TestCase):

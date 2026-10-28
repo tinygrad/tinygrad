@@ -162,38 +162,38 @@ class TestExecALU(unittest.TestCase):
     self.assertIs(exec_alu(Ops.CMPNE, dtypes.bool, (Invalid, 1)), Invalid)
     self.assertIs(exec_alu(Ops.ADD, dtypes.weakint, (Invalid, 1)), Invalid)
 
+  def test_truncdiv(self):
+    self.assertEqual(exec_alu(Ops.TRUNCDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.TRUNCDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.TRUNCDIV, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.TRUNCDIV, dtypes.int8, (-50, 6)), -8)
+
   def test_div(self):
-    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (8, 2)), 4)
-    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (7, 3)), 2)
-    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (7, -3)), -2)
-    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (-50, 6)), -8)
+    self.assertEqual(exec_alu(Ops.DIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.DIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.DIV, dtypes.int8, (7, -3)), -3)
+    self.assertEqual(exec_alu(Ops.DIV, dtypes.int8, (-7, 3)), -3)
+    self.assertEqual(exec_alu(Ops.DIV, dtypes.int8, (-50, 6)), -9)
 
-  def test_floordiv(self):
-    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (8, 2)), 4)
-    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, 3)), 2)
-    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, -3)), -3)
-    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-7, 3)), -3)
-    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-50, 6)), -9)
+  def test_mod(self):
+    self.assertEqual(exec_alu(Ops.MOD, dtypes.int8, (8, 2)), 0)
+    self.assertEqual(exec_alu(Ops.MOD, dtypes.int8, (7, 3)), 1)
+    self.assertEqual(exec_alu(Ops.MOD, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.MOD, dtypes.int8, (-7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.MOD, dtypes.int8, (-50, 6)), 4)
 
-  def test_floormod(self):
-    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (8, 2)), 0)
-    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, 3)), 1)
-    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, -3)), -2)
-    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-7, 3)), 2)
-    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-50, 6)), 4)
-
-    np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
-    np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIP, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIP, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
 
   def test_recip(self):
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (8,)), 1/8)
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (7,)), 1/7)
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (-3,)), 1/-3)
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (-50,)), 1/-50)
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (8,)), 1/8)
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (7,)), 1/7)
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (-3,)), 1/-3)
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (-50,)), 1/-50)
 
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, ((32+521+3),)), 1/(32+521+3))
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, ((34**2),)), 1/(34**2))
-    np.testing.assert_allclose(exec_alu(Ops.RECIPROCAL, dtypes.float32, (10,)), 1/10)
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, ((32+521+3),)), 1/(32+521+3))
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, ((34**2),)), 1/(34**2))
+    np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (10,)), 1/10)
 
   def test_int_pow(self):
     self.assertEqual(exec_alu(Ops.POW, dtypes.int32, (11, 7)), 11**7)
@@ -239,6 +239,29 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
 
 class TestGatedStoreRewrite(unittest.TestCase):
+  def test_store_back_loaded_value(self):
+    idx = UOp.param(0, dtypes.float, 8).index(UOp.special(8, 'gidx0'))
+    gate = UOp.param(1, dtypes.bool, 1).index(UOp.const(0)).load()
+    val = UOp.const(42.0)
+    for keep_when_true in (False, True):
+      with self.subTest(keep_when_true=keep_when_true):
+        expr = gate.where(idx.load(), val) if keep_when_true else gate.where(val, idx.load())
+        store = graph_rewrite(idx.store(expr), sym)
+        self.assertIs(store.src[1], val)
+        self.assertIs(store.src[0].src[1].get_valid(), gate.logical_not() if keep_when_true else gate)
+        self.assertNotIn(idx.load(), store.toposort())
+
+  def test_nested_store_back_loaded_value(self):
+    idx = UOp.param(0, dtypes.float, 8).index(UOp.special(8, 'gidx0'))
+    gates = UOp.param(1, dtypes.bool, 2)
+    a, b = gates.index(UOp.const(0)).load(), gates.index(UOp.const(1)).load()
+    store = graph_rewrite(idx.store(a.where(b.where(idx.load(), 42.0), idx.load())), sym)
+    self.assertNotIn(idx.load(), store.toposort())
+    gate = store.src[0].src[1].get_valid()
+    for av in (False, True):
+      for bv in (False, True):
+        self.assertEqual(gate.substitute({a:UOp.const(av), b:UOp.const(bv)}).simplify().val, av and not bv)
+
   def test_tiny_gate_store(self):
     gmem = UOp.param(0, dtypes.float, 8)
     gidx0 = UOp.special(4, 'gidx0')
@@ -302,51 +325,51 @@ class TestFastIdiv(unittest.TestCase):
       g = UOp.param(0, dt, 3)
       c = UOp.const(2)
       l = g.index(c)
-      a = UOp(Ops.CDIV, src=(l, c))
+      a = UOp(Ops.TRUNCDIV, src=(l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
-      self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
+      self.assertNotIn(Ops.TRUNCDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
   def test_floormod_power_of_two(self):
-    # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
+    # MOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, 9)
       c = UOp.const(8)
-      a = UOp(Ops.FLOORMOD, src=(g.index(c), c))
+      a = UOp(Ops.MOD, src=(g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
-      self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
-      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
-      self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
+      self.assertIn(Ops.AND, ops, f"For dtype={dt} MOD by pow2 did not simplify to AND")
+      self.assertNotIn(Ops.TRUNCMOD, ops, f"For dtype={dt} MOD by pow2 left a TRUNCMOD")
+      self.assertNotIn(Ops.MOD, ops, f"For dtype={dt} MOD survived past late rewrite")
 
   def test_max_keeps_bound_for_idiv(self):
     # MAX is lowered to CMPLT+WHERE only after floordiv_to_idiv, so the bound it carries still proves the division same-sign
     x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).maximum(0) + 1
     ops = [u.op for u in to_uops_list([x // 3], ren=CStyleLanguage(Target()))]
     self.assertNotIn(Ops.MAX, ops, "the renderer has no MAX")
-    self.assertNotIn(Ops.CMOD, ops, "a provably positive dividend kept the round toward zero correction")
+    self.assertNotIn(Ops.TRUNCMOD, ops, "a provably positive dividend kept the round toward zero correction")
 
   def test_floordiv_power_of_two(self):
-    # FLOORDIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)
+    # DIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)
     for dt in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64):
       g = UOp.param(0, dt, 3)
       c = UOp.const(2)
-      a = UOp(Ops.FLOORDIV, src=(g.index(c), c))
+      a = UOp(Ops.DIV, src=(g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
-      self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
-      self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
-      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORDIV by pow2 kept the round toward zero correction")
-      self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
+      self.assertIn(Ops.SHR, ops, f"For dtype={dt} DIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.TRUNCDIV, ops, f"For dtype={dt} DIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.TRUNCMOD, ops, f"For dtype={dt} DIV by pow2 kept the round toward zero correction")
+      self.assertNotIn(Ops.DIV, ops, f"For dtype={dt} DIV survived past late rewrite")
 
   def test_unsigned_floordiv_is_cdiv(self):
-    for op in (Ops.FLOORDIV, Ops.FLOORMOD):
+    for op in (Ops.DIV, Ops.MOD):
       a, b = (UOp.param(i, dtypes.uint32, 3).index(UOp.const(2)) for i in range(2))
       ops = [x.op for x in to_uops_list([UOp(op, src=(a, b))], ren=Device[Device.DEFAULT].renderer)]
       self.assertNotIn(Ops.CMPLT, ops, f"{op} on unsigned kept the sign correction")
-      self.assertEqual(ops.count(Ops.CDIV) + ops.count(Ops.CMOD), 1)
+      self.assertEqual(ops.count(Ops.TRUNCDIV) + ops.count(Ops.TRUNCMOD), 1)
 
   @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "fast_idiv widens uint32 to uint64")
@@ -354,25 +377,25 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp.param(0, dtypes.uint32, 4)
     c = UOp.const(3)
     l = g.index(c)
-    a = UOp(Ops.CDIV, src=(l, c))
+    a = UOp(Ops.TRUNCDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.CDIV, ops)
+    self.assertNotIn(Ops.TRUNCDIV, ops)
 
-    b = UOp(Ops.CMOD, src=(l, c))
+    b = UOp(Ops.TRUNCMOD, src=(l, c))
     uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.CMOD, ops)
+    self.assertNotIn(Ops.TRUNCMOD, ops)
 
   @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_nonpositive_divisor(self):
     ridx = UOp.range(20, 0)
     for d in (-3, 0):
-      for op in (Ops.CDIV, Ops.CMOD):
+      for op in (Ops.TRUNCDIV, Ops.TRUNCMOD):
         ops = [x.op for x in to_uops_list([ridx.alu(op, UOp.const(d))], ren=Device[Device.DEFAULT].renderer)]
         self.assertNotIn(Ops.SHR, ops, f"fast_idiv fired on {op} by {d}")
 
@@ -381,17 +404,17 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_cmod_kept_when_idiv_declines(self):
     ren = Device[Device.DEFAULT].renderer
     d = UOp.param(0, dtypes.int32, 4).index(UOp.const(0))
-    ops = [x.op for x in to_uops_list([UOp.range(30, 0).alu(Ops.CMOD, d)], ren=ren)]
-    self.assertIn(Ops.CMOD, ops, "CMOD by a non-const divisor should be left alone")
+    ops = [x.op for x in to_uops_list([UOp.range(30, 0).alu(Ops.TRUNCMOD, d)], ren=ren)]
+    self.assertIn(Ops.TRUNCMOD, ops, "TRUNCMOD by a non-const divisor should be left alone")
     big = UOp.param(1, dtypes.uint64, 4).index(UOp.const(0))
-    ops = [x.op for x in to_uops_list([big.alu(Ops.CMOD, UOp.const(3, dtypes.uint64))], ren=ren)]
-    self.assertIn(Ops.CMOD, ops, "CMOD should be left alone when fast_idiv declines")
+    ops = [x.op for x in to_uops_list([big.alu(Ops.TRUNCMOD, UOp.const(3, dtypes.uint64))], ren=ren)]
+    self.assertIn(Ops.TRUNCMOD, ops, "TRUNCMOD should be left alone when fast_idiv declines")
 
   @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_bounded_numerator_zero(self):
     x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
     for val in range(2):
-      self.assertEqual(eval_uop(x.alu(Ops.CDIV, UOp.const(3)), vals=(val,)), cdiv(val, 3))
+      self.assertEqual(eval_uop(x.alu(Ops.TRUNCDIV, UOp.const(3)), vals=(val,)), cdiv(val, 3))
 
   @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
@@ -400,7 +423,7 @@ class TestFastIdiv(unittest.TestCase):
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
     self.assertNotIn(dtypes.long, [x.dtype for x in uops])
-    self.assertNotIn(Ops.CDIV, [x.op for x in uops])
+    self.assertNotIn(Ops.TRUNCDIV, [x.op for x in uops])
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
@@ -408,23 +431,23 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp.param(0, dtypes.uint32, 8)
     c = UOp.const(7).cast(dtypes.uint)
     l = UOp(Ops.LOAD, src=(g.index(c),))
-    a = UOp(Ops.CDIV, src=(l, c))
+    a = UOp(Ops.TRUNCDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.CDIV, ops)
+    self.assertNotIn(Ops.TRUNCDIV, ops)
 
   def test_disable_fast_idiv(self):
     g = UOp.param(0, dtypes.uint32, 4)
     c = UOp.const(3)
     l = g.index(c)
-    a = UOp(Ops.CDIV, src=(l, c))
+    a = UOp(Ops.TRUNCDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     self.assertNotIn(Ops.SHR, ops)
-    self.assertIn(Ops.CDIV, ops)
+    self.assertIn(Ops.TRUNCDIV, ops)
 
 class TestNegLowering(unittest.TestCase):
   def test_int_neg(self):
@@ -433,6 +456,16 @@ class TestNegLowering(unittest.TestCase):
       self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
 
 class TestUOpMethod(unittest.TestCase):
+  def test_cmpeq_canonical(self):
+    a, b = UOp.variable("a", 0, 10), UOp.variable("b", 0, 10)
+    eq = a.eq(b)
+    self.assertIs(eq.op, Ops.CMPEQ)
+    self.assertIs(eq.dtype, dtypes.bool)
+    self.assertIs(a.ne(b), eq.eq(False))
+    self.assertIs(eq.logical_not(), eq.eq(False))
+    self.assertIs(eq.logical_not().logical_not().simplify(), eq)
+    self.assertIs(eq.eq(True).simplify(), eq)
+
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
     a = UOp.const(2.0)
@@ -463,6 +496,7 @@ class TestUOpMethod(unittest.TestCase):
       x = Tensor.empty(*shape, dtype=dtypes.int).uop
       self.assertIs((x < x).simplify(), x.const_like(False, dtypes.bool))
       self.assertIs((x != x).simplify(), x.const_like(False, dtypes.bool))
+      self.assertIs(x.eq(x).simplify(), x.const_like(True, dtypes.bool))
 
   def test_replace(self):
     x = UOp.param(0, dtypes.int, 1)
@@ -633,6 +667,13 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.CMPEQ, ops)
     self.assertNotIn(Ops.CMPNE, ops)
+
+  def test_use_cmpne(self):
+    x = UOp.param(0, dtypes.uint32, 8).index(UOp.const(0))
+    uops = to_uops_list([x.ne(7)], ren=self.renderer)
+    self.renderer.render(uops)
+    self.assertEqual(sum(u.op is Ops.CMPNE for u in uops), 1)
+    self.assertNotIn(Ops.CMPEQ, [u.op for u in uops])
 
   def test_int_compare_without_negation(self):
     for dt in (dtypes.int32, dtypes.uint32):

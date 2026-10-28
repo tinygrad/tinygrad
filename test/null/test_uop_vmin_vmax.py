@@ -14,6 +14,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     for copy in (src.contiguous(), src.copy_to_device("NULL")):
       self.assertEqual((copy.vmin, copy.vmax), (0, 3))
 
+  def test_vmin_vmax_cmpeq(self):
+    x = UOp.variable('x', 10, 20)
+    for y, bounds in [(9, (False, False)), (21, (False, False)), (10, (False, True)),
+                      (UOp.variable('y', 15, 25), (False, True))]:
+      cmp = x.eq(y)
+      self.assertEqual((cmp.vmin, cmp.vmax), bounds)
+    cmp = UOp.const(42).eq(42)
+    self.assertEqual((cmp.vmin, cmp.vmax), (True, True))
+
   def test_vmin_vmax_cmpne(self):
     uop = UOp.const(42)
     def test_bool(u, x):
@@ -239,14 +248,14 @@ class TestVminVmaxDivMod(unittest.TestCase):
 
   def test_vmin_vmax_floordiv_floormod(self):
     x = UOp.variable('x', -7, 7)
-    floordiv = x.alu(Ops.FLOORDIV, UOp.const(3))
+    floordiv = x.alu(Ops.DIV, UOp.const(3))
     self.assertEqual(floordiv.vmin, -3)
     self.assertEqual(floordiv.vmax, 2)
-    floormod = x.alu(Ops.FLOORMOD, UOp.const(3))
+    floormod = x.alu(Ops.MOD, UOp.const(3))
     self.assertEqual(floormod.vmin, 0)
     self.assertEqual(floormod.vmax, 2)
     # negative const divisor: floormod range is [c+1, 0]
-    floormod_neg = x.alu(Ops.FLOORMOD, UOp.const(-3))
+    floormod_neg = x.alu(Ops.MOD, UOp.const(-3))
     self.assertEqual(floormod_neg.vmin, -2)
     self.assertEqual(floormod_neg.vmax, 0)
 

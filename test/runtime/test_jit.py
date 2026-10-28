@@ -5,7 +5,7 @@ from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_s
 from tinygrad import Tensor, TinyJit, Device, dtypes, Context, UOp
 from tinygrad.helpers import DEV, GlobalCounters
 from tinygrad.engine.jit import JitError
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):

@@ -23,7 +23,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
-               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
+               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788", Ops.PROGRAM: "#a0a0a0",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
                Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
@@ -78,10 +78,10 @@ def render_uir(root:UOp|list[UOp]) -> str:
 
 
 # for debug
-syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.FLOORDIV: "//", Ops.FLOORMOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
-         Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
+syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.DIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
+         Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.CMPEQ: "==", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
 # comparison operators are not in here because they are chained in python, not left-associative
-precedence = {Ops.MUL:1, Ops.FLOORDIV:1, Ops.FLOORMOD:1, Ops.ADD:2, Ops.SUB:2, Ops.SHL:3, Ops.SHR:3, Ops.AND:4, Ops.XOR:5, Ops.OR:6}
+precedence = {Ops.MUL:1, Ops.DIV:1, Ops.MOD:1, Ops.ADD:2, Ops.SUB:2, Ops.SHL:3, Ops.SHR:3, Ops.AND:4, Ops.XOR:5, Ops.OR:6}
 def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
   if x.op not in precedence: return code_for_op(left, right)
   return code_for_op(strip_parens(left) if precedence.get(x.src[0].op,99)<=precedence[x.op] else left, strip_parens(right) if
@@ -112,8 +112,8 @@ renderer = PatternMatcher([
   (UPat.cvar("c").cast(), lambda c: str(c.val)),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
-  (UPat(Ops.RECIPROCAL, name="x"), lambda ctx,x: f"(1/{ctx[x.src[0]]})"),
-  (UPat((Ops.MAX, Ops.CDIV, Ops.CMOD), name="x"), lambda ctx,x: f"{x.op.name.lower()}({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
+  (UPat(Ops.RECIP, name="x"), lambda ctx,x: f"(1/{ctx[x.src[0]]})"),
+  (UPat((Ops.MAX, Ops.TRUNCDIV, Ops.TRUNCMOD), name="x"), lambda ctx,x: f"{x.op.name.lower()}({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.MULACC, name="x"), lambda ctx,x: f"({ctx[x.src[0]]}*{ctx[x.src[1]]}+{ctx[x.src[2]]})"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})"),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx, x)})"),
@@ -127,7 +127,7 @@ renderer = PatternMatcher([
 ])
 
 renderer_infer = PatternMatcher([
-  (UPat((Ops.FLOORMOD, Ops.FLOORDIV), name="x"), lambda ctx,x: f"{x.op.name.lower()}({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
+  (UPat((Ops.MOD, Ops.DIV), name="x"), lambda ctx,x: f"{x.op.name.lower()}({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.CAST, name="x"),
     lambda ctx,x: f"{'float' if dtypes.is_float(x.dtype) else 'bool' if x.dtype is dtypes.bool else 'int'}({ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast({ctx[x.src[0]]}, {x.src[0].dtype!r}, {x.dtype!r})"),

@@ -54,14 +54,14 @@ class Ops(FastEnum):
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
-  SQRT = auto(); RECIPROCAL = auto(); NEG = auto(); TRUNC = auto()
+  SQRT = auto(); RECIP = auto(); NEG = auto(); TRUNC = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); CDIV = auto(); MAX = auto(); CMOD = auto()
+  ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); TRUNCDIV = auto(); MAX = auto(); TRUNCMOD = auto()
   CMPLT = auto(); CMPNE = auto(); CMPEQ = auto()
   XOR = auto(); OR = auto(); AND = auto()
   THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto()
-  FLOORDIV = auto(); FLOORMOD = auto()
+  DIV = auto(); MOD = auto()
 
   # TernaryOps
   WHERE = auto(); MULACC = auto()
@@ -101,9 +101,9 @@ class Ops(FastEnum):
   PYLITERAL = auto()
 
 class GroupOp:
-  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
-  Binary = {Ops.ADD, Ops.MUL, Ops.CDIV, Ops.MAX, Ops.CMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
-            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.FLOORDIV, Ops.FLOORMOD}
+  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
+  Binary = {Ops.ADD, Ops.MUL, Ops.TRUNCDIV, Ops.MAX, Ops.TRUNCMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
+            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.DIV, Ops.MOD}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
   Broadcastable = set.union(Binary, Ternary)
@@ -120,7 +120,7 @@ class GroupOp:
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
-  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
+  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX, Ops.XOR}
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}

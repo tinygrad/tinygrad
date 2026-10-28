@@ -39,7 +39,7 @@ class NullQueue(HWQueue):
   def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0], name="doorbell"))
 
 class NullProgram(Program['NullDevice']):
-  def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
+  def __init__(self, dev, obj, links=None): self.streams = [(i,prod(s)) for i,(n,_,_,s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
   def __call__(self, *args, **kwargs):
     st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(args[i], n, fmt='Q')[:]]
     # timestamps are emulated: every exec and copy takes 1us
