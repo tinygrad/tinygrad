@@ -1851,8 +1851,7 @@ def lower_body(sink:UOp, name:str) -> tuple[UOp, list[UOp]]:
   return body.call(*bufs, name=name), bufs
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[InstructionCall|None, UOp|None]:
-  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target,
-                                          *(x.value for x in to_program_config)), [])
+  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
@@ -1999,8 +1998,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
   route = UOp.param(6, dtypes.int, (1,), name="route")
-  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU)
-                        for i,name in enumerate(("taken", "fallthrough"), 7)]
+  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
   init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), args_ptr, gx, gy, lx, ly, total_threads, wave_size,
                    scratch_size, rsrc2, arch, user_data_count)
@@ -2024,7 +2022,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
       values = {taken:UOp.const(dsts[COND_TAKEN], dtypes.int), fallthrough:UOp.const(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
-        else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
+          else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
       instructions.append((branch_pc, lower_body(route[0].store(target).sink(), "asm_branch")))
     if not instructions: return end
     off = instructions[0][0]
@@ -2046,8 +2044,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # waves that exited keep their route while the remaining waves repeat the loop.
-        check = loop_active(routes.after(end, *scopes, loop).index(0), active,
-                            UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
+        check = loop_active(routes.after(end, *scopes, loop).index(0), active, UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # complete the block for every participating wave before entering its successors, including barrier successors.
