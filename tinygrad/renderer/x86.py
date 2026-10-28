@@ -153,7 +153,7 @@ extra_matcher = PatternMatcher([
   (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
   # casting uint64 to float requires special handling
   (UPat.var("y", dtypes.uint64).cast(dtypes.floats, name="x"), lambda y,x:
-   (y >> 1).cast(dtypes.int64).cast(x.dtype) * 2 + (y & 1).cast(dtypes.int64).cast(x.dtype)),
+   (y < 2**63).where(y.cast(dtypes.int64).cast(x.dtype), ((y >> 1) | (y & 1)).cast(dtypes.int64).cast(x.dtype) * 2)),
   # no int8 mul or cmove, cast to int16
   (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
@@ -169,8 +169,8 @@ extra_matcher = PatternMatcher([
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
    lambda m,a,b,w: m.cast(w.dtype).ne(UOp.cconst(0, w.dtype)).where(a, b)
     if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
-  # rewrite -x -> 0 - x
-  (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
+  # rewrite -x -> -0.0 - x
+  (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(-0.0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
   (UPat(Ops.TRUNCMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.TRUNCDIV, y)),
   # scalar reg gated mops become cmovs
