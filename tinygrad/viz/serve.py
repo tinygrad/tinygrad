@@ -638,7 +638,8 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, src=2, alt="View Program")) is None: return {"src":"No source found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     ast = unwrap(get_sink_at(("do_render",), viz_data, i, data, src=0, alt="View Program"))
-    return {"src":"\n".join([sink.arg]+[u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, True) if u.op is Ops.SOURCE]), "lang":"cpp"}
+    extern_srcs = [u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, enter_calls=True) if u.op is Ops.SOURCE]
+    return {"src":"\n".join([sink.arg, *reversed(extern_srcs)]), "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data
