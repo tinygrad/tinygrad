@@ -281,19 +281,15 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
-    prefix, all_uops = [], list(uops)
-    for body in dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL):
-      if body.op is Ops.CUSTOM_FUNCTION: prefix.append(f"extern void {body.arg.name}();")
-      elif body.op is Ops.PROGRAM:
-        name = body.src[0].arg.function_name
-        fields = ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in body.arg.params)
-        prefix.append(f"struct {name}_args {{ {fields}}}; extern void {name}(const struct {name}_args*);")
-      elif body.op is Ops.LINEAR:
-        _, lines, bufs = self._render(list(body.src))
-        params = ', '.join(f"{self.param_type(p)} {n}" for n,(p,_) in bufs)
-        prefix.append(f"static inline {self.inline_prefix} void {body.arg}({params}) {{\n" + '\n'.join(lines) + "\n}")
-        all_uops.extend(body.src)
-    return self.render_kernel(*self._render(uops), all_uops, prefix or None)
+    bodies = dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL)
+    fns = {b:b.src[0].arg.function_name for b in bodies if b.op is Ops.PROGRAM}
+    inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
+    prefix = [f"extern void {b.arg.name}();" if b.op is Ops.CUSTOM_FUNCTION else
+              f"struct {fns[b]}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
+              f"}}; extern void {fns[b]}(const struct {fns[b]}_args*);" if b.op is Ops.PROGRAM else
+              f"static inline {self.inline_prefix} void {b.arg}({', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
+              '\n'.join(inlines[b][1]) + "\n}" for b in bodies]
+    return self.render_kernel(*self._render(uops), uops+[u for b in inlines for u in b.src], prefix or None)
 
 class ClangRenderer(CStyleLanguage):
   float4 = "(float4)"
