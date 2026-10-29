@@ -620,7 +620,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
     vcc, exec_val = ctx.rmask(_c(VCC_LO.offset)), ctx.rexec()
-    srcs: dict[str, UOp|int] = {'PC': _c(0, dtypes.uint32), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
+    srcs = {'PC': _c(0, dtypes.uint32), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
             'VCCZ': vcc.eq(UOp.const(0, vcc.dtype)).cast(dtypes.uint32), 'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest.startswith('PC') and val.op is Ops.WHERE: ctx.branch_cond = val.src[0]
