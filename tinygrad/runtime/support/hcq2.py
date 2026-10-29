@@ -371,16 +371,15 @@ class HWQueue:
 
   def q(self, *words:UOp|int) -> int:
     for w in words:
-      if isinstance(w, int):
-        self.blob += struct.pack("I", truncate[dtypes.u32](w))
-        continue
-      c = w
-      while c.op is Ops.CAST: c = c.src[0]
-      if c.op is Ops.BINARY: self.blob += c.arg
-      elif c.op is not Ops.CONST:
-        self.patches.append((len(self.blob), w))
-        self.blob += bytes(w.dtype.itemsize)
-      else: self.blob += struct.pack(unwrap(w.dtype.fmt), truncate[w.dtype](c.val))
+      if isinstance(w, int): self.blob += struct.pack("I", truncate[dtypes.u32](w))
+      else:
+        c = w
+        while c.op is Ops.CAST: c = c.src[0]
+        if c.op is Ops.BINARY: self.blob += c.arg
+        elif c.op is not Ops.CONST:
+          self.patches.append((len(self.blob), w))
+          self.blob += bytes(w.dtype.itemsize)
+        else: self.blob += struct.pack(unwrap(w.dtype.fmt), truncate[w.dtype](c.val))
     return len(self.blob)
 
   def loop(self, body:UOp, r:UOp):
