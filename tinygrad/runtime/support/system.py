@@ -223,9 +223,10 @@ class PCIDevice:
     try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
     except PermissionError: raise PermissionError(f"Cannot access PCI device {pcibus}: run `extra/amdpci/setup_python_cap.sh` or use sudo")
 
-    # behind an iommu, vfio_group binds the device (and its group) to vfio-pci
+    # behind an iommu, vfio_group binds the device (and its group) to vfio-pci. VFIO=1: an identity group too (devices of a process share
+    # one address space: some groups forced identity, e.g. pasid capable gpus, and others translated can't mix physical addresses and iovas)
     grp = f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"
-    use_vfio = FileIOInterface.exists(grp) and FileIOInterface(f"{grp}/type").read().strip() != "identity"
+    use_vfio = FileIOInterface.exists(grp) and (getenv("VFIO", 0) or FileIOInterface(f"{grp}/type").read().strip() != "identity")
     if not use_vfio and FileIOInterface.exists(drv:=f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(self.pcibus)
       if FileIOInterface.exists(drv): raise RuntimeError(f"Driver is bound to {pcibus}")
