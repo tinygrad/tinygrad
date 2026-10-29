@@ -47,7 +47,7 @@ def replay_asm(ast:UOp, code:bytes, arch:str, renderer:Renderer, dispatch:tuple,
     ren = {"clang":ClangRenderer, "llvm":CPULLVMRenderer, "amd":HIPRenderer}[backend](target)
     good_outs.append(get_output(to_program(ast, ren), ren, asm))
     compare_outs.append(get_output(to_program(compare, ren), ren, asm))
-  return "\n".join(compare_outs), "\n".join(good_outs), (name, backends, dispatch)
+  return "\n".join(good_outs), "\n".join(compare_outs), (name, backends, dispatch)
 
 if __name__ == "__main__":
   from test.external.process_replay.process_replay import main
