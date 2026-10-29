@@ -69,7 +69,7 @@ replayers["do_to_program"] = replay_to_program
 
 # *** run replayers on captured rows and print diffs
 
-def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]], table_name:str=TABLE_NAME) -> None:
+def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]], table_name=TABLE_NAME) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
@@ -132,4 +132,5 @@ def main(fxns:dict[str, Callable], table_name:str=TABLE_NAME) -> None:
     logging.info(f"process replay err: {e}")
     exit(int(ASSERT_DIFF))
 
-if __name__ == "__main__": main(replayers)
+if __name__ == "__main__":
+  main(replayers)
