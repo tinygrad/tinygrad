@@ -275,9 +275,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     # q/k are normalized as x/sqrt(sum(x²)+1e-6) like FLA: tiny vectors aren't scaled up to unit length
     ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True)
     block = GatedDeltaNetBlock(self._make_config(dim=16, n_heads=2, ssm=ssm), ssm)
-    block.attn_q.weight = block.attn_k.weight = Tensor.full((16, 16), 1e-4/16)  # x of ones: q = k = 1e-4, v = 1
-    block.attn_v.weight, block.ssm_beta.weight = Tensor.full((16, 16), 1/16), Tensor.zeros(2, 16)
-    block.ssm_conv1d_q["weight"] = block.ssm_conv1d_k["weight"] = block.ssm_conv1d_v["weight"] = Tensor.ones(16, 4)
+    # x of ones: q = k = 1e-4, v = 1
+    block.attn_q.weight, block.attn_k.weight = Tensor.full((16, 16), 1e-4/16), Tensor.full((16, 16), 1e-4/16)
+    block.attn_v.weight = Tensor.ones(16, 16)/16
+    block.ssm_conv1d["weight"], block.ssm_beta.weight = Tensor.ones(3, 16, 4), Tensor.zeros(2, 16)
     x = Tensor.ones(1, 1, 16)
     block._init_state(x)
     block._attention(x, 0).realize()

@@ -1,9 +1,10 @@
 from __future__ import annotations
 import enum, functools, itertools, json, math, pathlib, re
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, \
+  res_mix_norm, RES_GROUPS, mla_bmm, all_gather_p2p, kda_decode, mla_decode_attention, q8_act, q8_rms_norm
 from tinygrad.llm.gguf import gguf_parse, gguf_shard
 from tinygrad.llm.hf import hf_load
 from tinygrad.uop.ops import resolve
@@ -36,7 +37,9 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return (freqs.cos() * concentration).cat(freqs.sin() * concentration, dim=-1).clone(device)
 
-def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None, up_bias:float=0.0) -> Tensor:
+def gated_activation(gate:Tensor, up:Tensor, *, alpha:float=1.0, limit:float|None=None,
+                     up_bias:float=0.0, situ:tuple[float, float]|None=None) -> Tensor:
+  if situ is not None: return (gate / situ[0]).tanh() * situ[0] * gate.sigmoid() * (up / situ[1]).tanh() * situ[1]
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
   # TODO: remove the need for this contiguous
   return gate * (gate * alpha).sigmoid().contiguous() * (up + up_bias)
@@ -70,6 +73,7 @@ class SSMConfig:
   inner_size: int
   kda: bool = False
   gate_lower_bound: float|None = None  # kda: bounded decay gate
+  full_rank_gate: bool = False
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -129,8 +133,38 @@ class TransformerConfig:
   sliding_window_pattern: int = 0
   hc: HCConfig|None = None
   indexer: IndexerConfig|None = None
+  expert_latent_dim: int = 0
+  situ: tuple[float, float]|None = None
+  attn_res_block_size: int = 0
   indexer_shared: tuple[bool, ...] = ()
   rope_interleave: bool = False
+  streamed_experts: bool = False  # the routed experts aren't model weights: FFNBlock.routed_experts computes them
+
+class AttentionResidual:
+  def __init__(self, config:TransformerConfig):
+    self.weight, self.norm_eps, self.new_block = Tensor.zeros(config.dim), config.norm_eps, False
+
+  def mix(self, xs:Tensor) -> Tensor:
+    scores = (xs.rmsnorm(eps=self.norm_eps) * self.weight).sum(-1, keepdim=True)
+    return (scores.softmax(2) * xs).sum(2)
+
+  def fused(self, xs:Tensor, norm:nn.RMSNorm) -> bool:  # tokens of a sequence on amd: mix, norm and the q8 of the next linears in kernels
+    return xs.shape[0] == 1 and isinstance(xs.shape[1], int) and xs.shape[-1] % (RES_GROUPS * 32) == 0 and norm.weight is not None and \
+      amd_custom_kernels_supported(xs.device)
+
+  def mix_norm(self, xs:Tensor, norm:nn.RMSNorm) -> Tensor:
+    # (one stream mixes to itself: a plain norm)
+    if xs.shape[2] > 1 and self.fused(xs, norm):
+      return res_mix_norm(xs, self.weight, cast(Tensor, norm.weight), self.norm_eps, norm.eps)[0]
+    return norm(self.mix(xs))
+
+  def update(self, xs:Tensor, out:Tensor) -> Tensor:
+    return xs.cat(out, dim=2) if self.new_block else xs[:, :, :-1].cat(xs[:, :, -1:] + out, dim=2)
+
+  def update_mix_norm(self, xs:Tensor, out:Tensor, prev:AttentionResidual, norm:nn.RMSNorm) -> tuple[Tensor, Tensor]:
+    """the streams updated with the output of the sublayer before (prev's update), then this sublayer's input: in the kernels when fused"""
+    if not self.fused(xs, norm): return self.mix_norm(xs:=prev.update(xs, out), norm), xs
+    return res_mix_norm(xs, self.weight, cast(Tensor, norm.weight), self.norm_eps, norm.eps, out=out, new_block=prev.new_block)
 
 class HyperConnection:
   def __init__(self, config:TransformerConfig):
@@ -151,60 +185,85 @@ class HyperConnection:
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
-    self.config = config
+    self.config, self.verify = config, False
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
     self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
     if config.hc is not None: self.hc_attn, self.hc_ffn = HyperConnection(config), HyperConnection(config)
+    if config.attn_res_block_size:
+      self.attn_res_score, self.ffn_res_score = AttentionResidual(config), AttentionResidual(config)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
       self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=config.expert_proj_bias)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim, bias=config.expert_proj_bias)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim, bias=config.expert_proj_bias)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim, bias=config.expert_proj_bias)
+      expert_dim = config.expert_latent_dim or config.dim
+      if config.streamed_experts: self.routed_experts:Callable[[Tensor, Tensor], Tensor]|None = None  # (x, latent h) -> (B, T, D)
+      else:
+        self.ffn_gate_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias)
+        self.ffn_up_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias)
+        self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, expert_dim, bias=config.expert_proj_bias)
       if config.shared_expert_dim > 0:
         self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_down_shexp = Linear(config.shared_expert_dim, config.dim, bias=False)
         if config.shared_expert_gate: self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
+      if config.expert_latent_dim:
+        self.ffn_routed_down, self.ffn_routed_up = Linear(config.dim, expert_dim, bias=False), Linear(expert_dim, config.dim, bias=False)
+        self.ffn_routed_norm = nn.RMSNorm(expert_dim, config.norm_eps)
     else:
       self.ffn_gate    = Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_up      = Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_down    = Linear(config.hidden_dim, config.dim, bias=False)
 
   def _feed_forward(self, x:Tensor) -> Tensor:
-    if hasattr(self, 'ffn_gate_exps'):
-      h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits = self.ffn_gate_inp(x)
-      bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
-      gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
-      # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
-      if gating == ExpertGating.SOFTMAX and bias is None and normalize_topk:
-        gating, normalize_topk = ExpertGating.SOFTMAX_WEIGHT, False
-      if   gating == ExpertGating.SOFTMAX_WEIGHT: scores = logits
-      elif gating == ExpertGating.SOFTMAX:        scores = logits.softmax(-1)
-      elif gating == ExpertGating.SIGMOID:        scores = logits.sigmoid()
-      elif gating == ExpertGating.SQRT_SOFTPLUS:  scores = logits.softplus().sqrt()
+    if hasattr(self, 'ffn_gate_inp'):
+      h = (self.ffn_routed_down(x) if self.config.expert_latent_dim else x).unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
+      if self.config.streamed_experts:  # the router is part of the streamed experts
+        out = self.routed_experts(x, h) if self.routed_experts is not None else h.squeeze(2).zeros_like()
+      else:
+        logits = self.ffn_gate_inp(x)
+        # a router split over the experts: gather the logits on every device
+        if logits.uop.axis is not None: logits = Tensor(logits.uop.copy_to_device(cast(tuple, logits.device)))
+        bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
+        gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
+        # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
+        if gating == ExpertGating.SOFTMAX and bias is None and normalize_topk:
+          gating, normalize_topk = ExpertGating.SOFTMAX_WEIGHT, False
+        if   gating == ExpertGating.SOFTMAX_WEIGHT: scores = logits
+        elif gating == ExpertGating.SOFTMAX:        scores = logits.softmax(-1)
+        elif gating == ExpertGating.SIGMOID:        scores = logits.sigmoid()
+        elif gating == ExpertGating.SQRT_SOFTPLUS:  scores = logits.softplus().sqrt()
 
-      _, sel = pairwise_topk(scores if bias is None else scores + bias, self.config.num_experts_per_tok)
-      probs = scores.gather(-1, sel)
-      # SOFTMAX_WEIGHT applies softmax after top-k selection
-      if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
-      if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
-      probs = probs * self.config.routed_scaling_factor
-      gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
-      act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
-      x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+        _, sel = pairwise_topk(scores if bias is None else scores + bias, self.config.num_experts_per_tok)
+        probs = scores.gather(-1, sel)
+        # SOFTMAX_WEIGHT applies softmax after top-k selection
+        if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
+        if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
+        probs = probs * self.config.routed_scaling_factor
+        gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
+        act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit,
+                               up_bias=self.config.swiglu_up_bias, situ=self.config.situ)
+        x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D)
+        out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      if self.config.expert_latent_dim:
+        out = self.ffn_routed_up(q8_rms_norm(self.ffn_routed_norm, out) if amd_custom_kernels_supported(out.device) else self.ffn_routed_norm(out))
+        # split over its outputs: gather them on every device
+        if out.uop.axis is not None:
+          # on amd: the p2p kernel, else the copies
+          gathered = all_gather_p2p(out) if amd_custom_kernels_supported(out.device) else None
+          out = gathered if gathered is not None else Tensor(out.uop.copy_to_device(cast(tuple, out.device)))
       if hasattr(self, 'ffn_gate_shexp'):
-        shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous())
+        sact = functools.partial(gated_activation, limit=self.config.swiglu_limit, situ=self.config.situ)
+        gate, up = self.ffn_gate_shexp(x), self.ffn_up_shexp(x)
+        # (on amd the act in the q8 kernel of the down linear's input)
+        hs = q8_act(sact, gate, up).reshape(gate.shape) if amd_custom_kernels_supported(x.device) else sact(gate, up).contiguous()
+        shexp = self.ffn_down_shexp(hs)
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
-    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit))
+    return self.ffn_down(gated_activation(self.ffn_gate(x), self.ffn_up(x), limit=self.config.swiglu_limit, situ=self.config.situ))
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -219,14 +278,22 @@ class FFNBlock:
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None):
-      def attend(h:Tensor) -> tuple[Tensor, Tensor|None]:
-        h = self.attn_norm(h)
+      def attend(h:Tensor) -> tuple[Tensor, Tensor|None]:  # (h normed)
         mask = self._indexer_mask(h, start_pos, idx_mask)
         return self._attention(h, start_pos, mask), mask
-      res_attn = res_ffn = lambda xs, sublayer: (xs + (ret:=sublayer(xs))[0], ret[1])
-      if self.config.hc is not None: res_attn, res_ffn = self.hc_attn, self.hc_ffn
-      x, idx_mask = res_attn(x, attend)
-      out = res_ffn(x, lambda h: (self._feed_forward(self.ffn_norm(h)), None))[0].contiguous()
+      if self.config.attn_res_block_size:
+        attn, ffn = self.attn_res_score, self.ffn_res_score
+        attn_out, idx_mask = attend(attn.mix_norm(x, self.attn_norm))
+        # (the attention's update and the ffn's mix in one: the mix's input isn't a lazy update)
+        h, xs = ffn.update_mix_norm(x, attn_out.unsqueeze(2), attn, self.ffn_norm)
+        out = ffn.update(xs, self._feed_forward(h).unsqueeze(2)).contiguous()
+      elif self.config.hc is not None:
+        xs, idx_mask = self.hc_attn(x, lambda h: attend(self.attn_norm(h)))
+        out = self.hc_ffn(xs, lambda h: (self._feed_forward(self.ffn_norm(h)), None))[0].contiguous()
+      else:
+        attn_out, idx_mask = attend(self.attn_norm(x))
+        h = x + attn_out
+        out = (h + self._feed_forward(self.ffn_norm(h))).contiguous()
       return (out, idx_mask) if idx_mask is not None else out
     out = _run(x, start_pos, idx_mask)
     return out if isinstance(out, tuple) else (out, None)
@@ -355,6 +422,7 @@ class MLATransformerBlock(FFNBlock):
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
     self.indexer = Indexer(config) if config.indexer else None
+    if config.attn_output_gate: self.attn_gate = Linear(config.dim, config.n_heads * config.v_head_dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
@@ -363,9 +431,11 @@ class MLATransformerBlock(FFNBlock):
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T], self.config.rope_interleave)
+    # a few tokens on amd (as the decode gemvs: a verify step's): the absorb matmuls a wave a row of the weights, not generic reduces
+    bmm = B == 1 and isinstance(T, int) and T <= 8 and amd_custom_kernels_supported(x.device) and 'weight_scale_inv' not in self.attn_k_b
     if 'weight_scale_inv' in self.attn_k_b:
       q_nope = fp8_matmul(q_nope, self.attn_k_b['weight'], self.attn_k_b['weight_scale_inv'], self.kv_b_block_size[::-1])
-    else: q_nope = q_nope @ self.attn_k_b['weight'].transpose(-1, -2)
+    else: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"]) if bmm else q_nope @ self.attn_k_b["weight"].transpose(-1, -2)
     q = q_nope.cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
@@ -374,18 +444,22 @@ class MLATransformerBlock(FFNBlock):
     if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T], self.config.rope_interleave)
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
-    k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
+    cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.cast(self.cache_k.dtype).uop)))
+    k = cache[:, :, 0:start_pos+T, :]
     v = k[..., :self.config.kv_lora_rank]
 
-    attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
-    if (mask:=self._attn_mask(x, start_pos, idx_mask)) is not None: attn = attn + mask
-    attn = attn.softmax(-1)
-    attn = attn @ v
-    if 'weight_scale_inv' in self.attn_v_b:
-      attn = fp8_matmul(attn, self.attn_v_b['weight'], self.attn_v_b['weight_scale_inv'], self.kv_b_block_size)
-    else: attn = attn @ self.attn_v_b['weight'].transpose(-1, -2)
+    if bmm:  # (and the attention in the flash decoding kernels, causal or the indexer's mask)
+      attn = mla_decode_attention(q, cache, start_pos+T, self.config.kv_lora_rank, self.config.head_dim ** -0.5, idx_mask)
+      attn = mla_bmm(attn, self.attn_v_b["weight"])
+    else:
+      attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
+      if (mask:=self._attn_mask(x, start_pos, idx_mask)) is not None: attn = attn + mask
+      attn = attn.softmax(-1) @ v
+      if 'weight_scale_inv' in self.attn_v_b:
+        attn = fp8_matmul(attn, self.attn_v_b['weight'], self.attn_v_b['weight_scale_inv'], self.kv_b_block_size)
+      else: attn = attn @ self.attn_v_b["weight"].transpose(-1, -2)
     attn = attn.transpose(1, 2).reshape(B, T, -1)
-    return self.attn_output(attn)
+    return self.attn_output(attn * self.attn_gate(x).sigmoid() if self.config.attn_output_gate else attn)
 
   def _attn_mask(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor|None:  # (1, 1, T, start_pos+T), None: everything is visible
     if idx_mask is not None: return idx_mask
@@ -400,7 +474,8 @@ class MLATransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
+      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, dtype=dtypes.half,
+                                  device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
                                             device=x.device, yarn=self.config.yarn)
     if self.indexer: self.indexer._init_state(x)
@@ -412,11 +487,12 @@ class GatedDeltaNetBlock(FFNBlock):
     assert self.num_v_heads % self.num_k_heads == 0
     self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
+    self.conv_shape = (3, self.q_dim) if ssm.kda else (self.conv_channels,)
+    if ssm.kda: self.attn_q, self.attn_k, self.attn_v = (Linear(config.dim, self.q_dim, bias=False) for _ in range(3))
+    else: self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
     if ssm.kda:
-      self.qkv_dims = (self.q_dim, self.q_dim, ssm.inner_size)
-      self.attn_q, self.attn_k, self.attn_v = (Linear(config.dim, d, bias=False) for d in self.qkv_dims)
-      self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v = ({"weight": Tensor.zeros(d, 1, ssm.conv_kernel)} for d in self.qkv_dims)
-      self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
+      if ssm.full_rank_gate: self.ssm_g = Linear(config.dim, ssm.inner_size, bias=False)
+      else: self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
       self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
     else:
       self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
@@ -424,9 +500,11 @@ class GatedDeltaNetBlock(FFNBlock):
       self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
       self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
+    self.ssm_conv1d = {"weight": Tensor.zeros(*self.conv_shape, self.ssm_conv_kernel)}
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
+    self.kept:list[tuple[Tensor, Tensor]] = []  # (verify) the conv and recurrent states after each token of a step but the last
 
   def _attention(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
@@ -439,31 +517,45 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # input processing
     x = x.half()
-    out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
+    lb = unwrap(self.config.ssm).gate_lower_bound
+    if not symbolic and (T == 1 or self.verify and T <= 4) and is_kda and hasattr(self, "ssm_g") and lb is not None \
+       and amd_custom_kernels_supported(x.device):
+      # a token at a time, the rest of it in one kernel. a verify step (of up to 4) keeps the states after each token but the last
+      # (rollback): token t reads the states after t-1 (kept) and writes those after t (kept, the last token into the block's)
+      lin = [f(x) for f in (self.attn_q, self.attn_k, self.attn_v, self.ssm_g, self.ssm_beta)] + [self.ssm_f_b(self.ssm_f_a(x))]
+      while len(self.kept) < T - 1: self.kept.append((self.conv_state.empty_like().realize(), self.recurrent_state.empty_like().realize()))
+      (q, k, v, g, b, f), states, z = lin, [(self.conv_state, self.recurrent_state), *self.kept[:T - 1]], None
+      src = states[0] if T > 1 else None
+      for t in range(T):  # (the kernel reads and writes token t's rows)
+        conv, state = states[(t + 1) % T]
+        z, conv, state = kda_decode(q, k, v, g, b, conv, self.ssm_conv1d["weight"], f, self.ssm_dt["bias"], self.ssm_a, state,
+                                    cast(Tensor, self.ssm_norm.weight), start_pos + t, lb, self.ssm_norm.eps, src=src, token=t, z=z)
+        src = (conv, state)
+      return self.ssm_out(cast(Tensor, z))
+    out_gate = (self.ssm_g(x) if hasattr(self, "ssm_g") else self.ssm_g_b(self.ssm_g_a(x))) if is_kda else self.attn_gate(x)
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
     g, a = (alpha.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1), self.ssm_a.reshape(self.num_v_heads, -1)
     # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(g * -A) * lb
-    log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
+    log_alpha = g.softplus() * a if lb is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
-    def conv(conv_state:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
-      # assemble the conv window in a static-size buffer: [conv_state | proj rows | zero-pad].
-      # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
-      conv_window = initial.where(0, conv_state).cat(proj.cast(conv_state.dtype), dim=1)
-      conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
-      # the last conv_kernel-1 columns of the window become the next conv state
-      store = conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(conv_state.dtype).uop)
-      return functools.reduce(lambda a,b: a+b, (conv_window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
-    projs = (self.attn_q, self.attn_k, self.attn_v) if is_kda else (self.attn_qkv,)
-    convs = (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v) if is_kda else (self.ssm_conv1d,)
-    states = self.conv_states if is_kda else [self.conv_state]
-    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"].flatten(1)) for s, proj, w in zip(states, projs, convs)))
+    conv_state = initial.where(0, self.conv_state)
+    # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
+    # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
+    proj = Tensor.stack(self.attn_q(x), self.attn_k(x), self.attn_v(x), dim=2) if is_kda else self.attn_qkv(x)
+    conv_window = conv_state.cat(proj.cast(conv_state.dtype), dim=1)
+    conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, *self.conv_shape)).contiguous()
+    # the last conv_kernel-1 columns of the window become the next conv state
+    conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
+
+    conv_out = functools.reduce(lambda a,b: a+b,
+      (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][..., i] for i in range(self.ssm_conv_kernel))).silu()
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
-    q, k, v = conv_outs if is_kda else conv_outs[0].split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
+    q, k, v = (conv_out[:, :, i] for i in range(3)) if is_kda else conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim) for z in (q, k))
     # l2 norm x/sqrt(sum(x²)+1e-6) as in the FLA kernels, then the v heads share the k heads
     q, k = ((z.rmsnorm(eps=1e-6/self.head_k_dim) / self.head_k_dim**0.5).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
@@ -476,7 +568,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
-      state = Tensor(self.recurrent_state.uop.after(*conv_state_stores))  # carry the conv write into this graph
+      state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
       core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
@@ -491,8 +583,7 @@ class GatedDeltaNetBlock(FFNBlock):
 
       # store the updated recurrent state in place, then read the stacked outputs after the state and conv writes
       state_store = self.recurrent_state.uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop))
-      conv_writes = [c.uop.after(st) for c, st in zip(states, conv_state_stores)]
-      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, *conv_writes))
+      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, self.conv_state.uop.after(conv_state_store)))
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
@@ -500,18 +591,17 @@ class GatedDeltaNetBlock(FFNBlock):
     return self.ssm_out(z.reshape(B, T, -1))
 
   def _init_state(self, x):
-    if not hasattr(self, "recurrent_state"):
-      if kda:=unwrap(self.config.ssm).kda:
-        self.conv_states = [Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, d, device=x.device, axis=-1).clone() for d in self.qkv_dims]
-      else: self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
-      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device,
-                                          axis=1 if kda else None).clone()
+    if not hasattr(self, "conv_state"):
+      kda = unwrap(self.config.ssm).kda
+      self.conv_state = Tensor.empty(x.shape[0], self.ssm_conv_kernel-1, *self.conv_shape, device=x.device, axis=-1 if kda else None)
+      self.recurrent_state = Tensor.empty(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device, axis=1 if kda else None)
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     self.config = config
+    self.residual_streams = config.hc.count if config.hc is not None else int(config.attn_res_block_size > 0)
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
     self.blk:list[FFNBlock] = []
     for i in range(config.num_blocks):
@@ -519,26 +609,46 @@ class Transformer:
       if config.sliding_window_pattern != 0 and (i+1) % config.sliding_window_pattern == 0: c = replace(c, sliding_window=0)
       if config.indexer_shared and config.indexer_shared[i]: c = replace(c, indexer=None)
       self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else block_cls(c))
+      if config.attn_res_block_size: self.blk[-1].attn_res_score.new_block = i % config.attn_res_block_size == 0
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
+    if config.attn_res_block_size: self.output_res_score = AttentionResidual(config)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
+    # (a speculative decoding verify: forward returns the greedy token after every input token, the recurrent blocks keep their states
+    # after each token: rollback(n) takes them back to the first n)
+    self.verify, self.rollbacks = False, cast(dict[int, Callable[[], None]], {})
+    # the residual streams after these blocks, kept in hidden by forward (the inputs of a draft model)
+    self.keep_hidden:tuple[int, ...] = ()
+    self.hidden:dict[int, Tensor] = {}
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+    for block in self.blk: block.verify = self.verify
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
-    if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
+    if self.residual_streams: x = x.unsqueeze(2).expand(*x.shape[:2], self.residual_streams, x.shape[-1]).contiguous()
     idx_mask = None
-    for block in self.blk: x, idx_mask = block(x, start_pos, idx_mask)
-    if hc is not None: x = x.mean(2)
-    # only run the output projection on the last token
+    for i, block in enumerate(self.blk):
+      x, idx_mask = block(x, start_pos, idx_mask)
+      if i in self.keep_hidden: self.hidden[i] = x
+    if self.residual_streams: x = self.output_res_score.mix(x) if self.config.attn_res_block_size else x.mean(2)
+    # only run the output projection on the last token (verify: on every token, the greedy next one after each)
+    if self.verify: return self.output(self.output_norm(x)).to(tokens.device).argmax(-1)
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+
+  def rollback(self, n:int):
+    """(after a verify step) the recurrent blocks' states after its first n tokens"""
+    def restore():  # (fresh tensors of the states' buffers: an assign to the blocks' own would chain every rollback onto them)
+      Tensor.realize(*[Tensor(s.uop).assign(k) for b in self.blk if isinstance(b, GatedDeltaNetBlock)
+                       for s, k in zip((b.conv_state, b.recurrent_state), b.kept[n - 1])])
+    if n not in self.rollbacks: self.rollbacks[n] = TinyJit(restore)
+    self.rollbacks[n]()
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
@@ -559,8 +669,10 @@ class Transformer:
       rules = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'ffn_gate.weight',
         'ffn_up.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
         **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')}, 'ffn_down_exps.weight':2}
-      if arch in ('kimi-linear', 'glm5-next'): rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight', 'ssm_conv1d_v.weight',
-        'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g_b.weight')})
+      if arch == 'kimi-k3': rules.update({'ffn_down_exps.weight': 1, 'ffn_gate_shexp.weight': 0, 'ffn_up_shexp.weight': 0, 'ffn_down_shexp.weight': 1,
+                                          'ffn_routed_down.weight': 1, 'ffn_routed_up.weight': 0, 'ffn_gate_inp.weight': 0, 'attn_gate.weight': 0})
+      if arch in ('kimi-linear', 'glm5-next', 'kimi-k3'): rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight',
+        'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     state_dict = gguf_shard(entries, devices, shard_map)
@@ -588,14 +700,16 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
-    elif arch in ('kimi-linear', 'glm5-next'):
+    elif arch in ('kimi-linear', 'glm5-next', 'kimi-k3'):
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]
       n_kv_heads = max(n_kv_heads)
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True,
-                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'))
+                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), full_rank_gate=arch == 'kimi-k3')
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)
+        state_dict[f"blk.{i}.ssm_conv1d.weight"] = Tensor.stack(*(state_dict.pop(f"blk.{i}.ssm_conv1d_{c}.weight") for c in "qkv")) \
+          .squeeze(2).contiguous()
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
     if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
@@ -610,7 +724,7 @@ class Transformer:
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
-      if arch in ('kimi-linear', 'glm5-next'): continue
+      if arch in ('kimi-linear', 'glm5-next', 'kimi-k3'): continue
       if ('attn_q.weight' in name or 'attn_q_b.weight' in name) and (arch == 'llama' or kv_lora_rank):
         state_dict[name] = permute_rope(state_dict[name], n_heads, rope_dim)
       elif arch == 'llama' and 'attn_k.weight' in name:
@@ -638,7 +752,7 @@ class Transformer:
         kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe', 'kimi-k3'), ssm=ssm,
       ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
@@ -646,10 +760,17 @@ class Transformer:
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer)
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer,
+      expert_latent_dim=kv.get(f'{arch}.expert_latent_length', 0), attn_res_block_size=kv.get(f'{arch}.attn_res.block_size', 0),
+      situ=(kv[f'{arch}.activation.situ_beta'], kv[f'{arch}.activation.situ_linear_beta']) if f'{arch}.activation.situ_beta' in kv else None,
+      streamed_experts=bool(kv.get(f'{arch}.expert_count')) and not any(n.endswith('ffn_gate_exps.weight') for n in entries))
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    # the residual stream mixes and their norms are custom kernel inputs (res_mix_norm): plain buffers, not views of the gguf
+    if config.attn_res_block_size:
+      ws = [w for b in model.blk for w in (b.attn_res_score.weight, b.ffn_res_score.weight, b.attn_norm.weight, b.ffn_norm.weight)]
+      Tensor.realize(*[w.replace(w.contiguous()) for w in ws if w is not None])
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
