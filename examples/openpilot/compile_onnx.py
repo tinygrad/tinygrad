@@ -7,6 +7,7 @@ from tinygrad.dtype import _to_np_dtype
 from tinygrad.helpers import fetch, DEBUG
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
 from tinygrad.engine.realize import lower_and_compile
+from tinygrad.uop.ops import UOp
 from examples.openpilot.helpers import allocate_inputs, dump_pickle, load_pickle, make_retargetable, benchmark
 
 def onnx_metadata(path):
@@ -25,6 +26,20 @@ def onnx_metadata(path):
         else: parser.reader.skip_field(wire_type)
     else: parser.reader.skip_field(wire_type)
   return metadata, output_shapes
+
+def validate_shared_buffers(run, make_inputs):
+  separate, shared = make_inputs(42), make_inputs(42)
+  state_pairs = {k:f'next_{k}' for k in shared if f'next_{k}' in shared['output_buffers']}
+  if not state_pairs: return
+  for name, next_name in state_pairs.items():
+    state, output = shared[name], shared['output_buffers'][next_name]
+    assert (state.shape, state.dtype, state.device) == (output.shape, output.dtype, output.device)
+    view = state._buffer().view(state.numel() * state.dtype.itemsize, 0).ensure_allocated()
+    shared['output_buffers'][next_name] = Tensor(UOp.from_buffer(view, state.dtype)).reshape(state.shape)
+  for _ in range(3):
+    np.testing.assert_equal(benchmark(run, **shared), benchmark(run, **separate))
+    for name, next_name in state_pairs.items():
+      separate[name], separate['output_buffers'][next_name] = separate['output_buffers'][next_name], separate[name]
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description=__doc__)
@@ -55,7 +70,9 @@ if __name__ == '__main__':
 
   @TinyJit(prune=True)
   def run(output_buffers, **inputs):
-    outputs = runner({k:v.to(Device.DEFAULT) for k,v in inputs.items()})
+    outputs = {k:v.contiguous() for k,v in runner({k:v.to(Device.DEFAULT) for k,v in inputs.items()}).items()}
+    # Finish reading inputs before writing outputs that may share their storage.
+    Tensor.realize(*outputs.values())
     Tensor.realize(*(output_buffers[k].assign(v) for k,v in outputs.items()))
 
   with Context(DEBUG=max(DEBUG.value, 1)): expected = benchmark(run, **(inputs:=make_inputs(42)))
@@ -78,3 +95,4 @@ if __name__ == '__main__':
   loaded = load_pickle(args.output, out_of_band=args.out_of_band)
   if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
   np.testing.assert_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
+  validate_shared_buffers(loaded['run'], make_inputs)
