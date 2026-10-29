@@ -1985,7 +1985,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     w = UOp.range(n_waves, 0, AxisType.LOOP, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
                                                             1, AxisType.LOOP, dtype=dtypes.int),)
-    call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*buffers[b][1]) for b,p in zip(bufs, params)]
+    call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
+                 if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args, name="asm_block"), *gates, w).end(*gates).end(w).sink()
     return block.call(*args, name="asm_waves")
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
