@@ -80,6 +80,20 @@ class _System:
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
+  @functools.cache
+  def vfio_group(self, grp:str) -> FileIOInterface:
+    # a group is opened once per process and is viable only when all its endpoints are on vfio-pci (bridges stay on pcieport)
+    for dev in FileIOInterface(f"/sys/kernel/iommu_groups/{grp}/devices").listdir():
+      if FileIOInterface(f"/sys/bus/pci/devices/{dev}/class").read().startswith("0x06"): continue
+      if FileIOInterface.exists(drv:=f"/sys/bus/pci/devices/{dev}/driver") and FileIOInterface.readlink(drv).endswith("/vfio-pci"): continue
+      if FileIOInterface.exists(drv): FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(dev)
+      FileIOInterface(f"/sys/bus/pci/devices/{dev}/driver_override", os.O_WRONLY).write("vfio-pci")
+      FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(dev)
+    self.vfio = self.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
+    vfio.VFIO_GROUP_SET_CONTAINER(group:=FileIOInterface(f"/dev/vfio/{grp}", os.O_RDWR), ctypes.c_int(self.vfio.fd))
+    with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(self.vfio, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
+    return group
+
   def vfio_map(self, vaddr:int, size:int, align:int=1) -> int:
     iova = self.iova.alloc(size, align)
     flags = vfio.VFIO_DMA_MAP_FLAG_READ | vfio.VFIO_DMA_MAP_FLAG_WRITE
@@ -209,23 +223,20 @@ class PCIDevice:
     try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
     except PermissionError: raise PermissionError(f"Cannot access PCI device {pcibus}: run `extra/amdpci/setup_python_cap.sh` or use sudo")
 
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
+    # behind an iommu, vfio_group binds the device (and its group) to vfio-pci
+    grp = f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"
+    use_vfio = FileIOInterface.exists(grp) and FileIOInterface(f"{grp}/type").read().strip() != "identity"
+    if not use_vfio and FileIOInterface.exists(drv:=f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+      FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(self.pcibus)
+      if FileIOInterface.exists(drv): raise RuntimeError(f"Driver is bound to {pcibus}")
 
     # remove sibling functions of the gpu, if any
     for fn in range(1, 8):
       if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
-    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group") and FileIOInterface(f"{grp}/type").read().strip() != "identity":
+    if use_vfio:
       if not FileIOInterface.exists("/sys/module/vfio_pci"): raise RuntimeError("IOMMU is on: run `sudo modprobe vfio-pci disable_idle_d3=1`")
-      FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
-      FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
-      vfio_fd = System.vfio = System.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-      self.vfio_group = FileIOInterface(f"/dev/vfio/{FileIOInterface.readlink(grp).split('/')[-1]}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(vfio_fd.fd))
-
-      with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
+      self.vfio_group = System.vfio_group(FileIOInterface.readlink(grp).split('/')[-1])
       self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
       self.irq_fd = FileIOInterface.eventfd(0, 0)
