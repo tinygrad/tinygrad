@@ -340,7 +340,8 @@ class _Ctx:
     return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:
-    return UOp.param(-2-dword_idx, dtypes.uint32, name=f"inst_word{dword_idx}", addrspace=AddrSpace.ALU)
+    """Read instruction dword from vmem at PC + dword_idx*4."""
+    return self.vmem.index((self.inst_addr >> 2) + dword_idx).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -1038,9 +1039,8 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   if 'V_S_' in op_name:
     src0 = _apply_src_mods(ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), _c(0, dtypes.int), bits['s0'], literal), 0, abs_bits, neg_bits, bits['s0'])
     srcs = {**ctx.base_srcs(exec_mask, _c(0, dtypes.int)), 'S0': src0}
-    _, assigns = parse_pcode(get_pcode(inst.op), srcs)
-    stores = [ctx.wsgpr_dyn(vdst_reg, _val_to_u32(val)) for dest, val in assigns if dest.startswith('D0')]
-    return UOp.sink(*stores)
+    pcode_vars, _ = parse_pcode(get_pcode(inst.op), srcs)
+    return UOp.sink(ctx.wsgpr_dyn(vdst_reg, _val_to_u32(pcode_vars['D0'])))
 
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
@@ -1843,19 +1843,21 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[Instructio
   return ret
 
 def instruction_block(instructions:list[tuple[int, InstructionCall]]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({b for _,(_,bs) in instructions for b in bs if b.op is Ops.PARAM and b.arg.slot != -1}, key=lambda b:b.arg.slot)
+  bufs = sorted({b for _,(_,bs) in instructions for b in bs if b.arg.slot != -1}, key=lambda b:b.arg.slot)
+  base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU) + \
+         UOp.param(len(bufs)+1, dtypes.uint64, name="block_offset", addrspace=AddrSpace.ALU)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   seen = set(linear)
   for off,(template,bs) in instructions:
-    args = [b if b.op is not Ops.PARAM else UOp.const(off, dtypes.uint64) if b.arg.slot == -1 else params[b] for b in bs]
+    args = [base+UOp.const(off, dtypes.uint64) if b.arg.slot == -1 else params[b] for b in bs]
     inputs = UOp.sink(*args)
     nodes = inputs.toposort(lambda u:u not in seen)
     nodes.pop(inputs)
     seen.update(nodes)
     linear.extend(nodes)
     linear.append(template.replace(src=(template.body, *args)))
-  # the assembly is already linear: keep calls in instruction order and supply constant instruction offsets.
+  # the assembly is already linear: keep calls in instruction order and compute their addresses immediately before use.
   sink = UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
@@ -1990,9 +1992,8 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       call, branch_cond = instruction_call(inst, arch, renderer)
-      words = {ctx.inst_word(i):_c(w) for i,w in enumerate(struct.unpack(f"<{inst.size()//4}I", inst.to_bytes()))}
-      if branch_cond is not None: cond, branch_pc = branch_cond.substitute(words), off
-      if call is not None: instructions.append((off, (call[0], [words.get(b, b) for b in call[1]])))
+      if branch_cond is not None: cond, branch_pc = branch_cond, off
+      if call is not None: instructions.append((off, call))
     values = {}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
@@ -2001,9 +2002,10 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
           else {taken:UOp.const(next(iter(dsts.values()), -1), dtypes.int)}
       instructions.append((branch_pc, lower_body(route[0].store(target).sink(), "asm_branch")))
     if not instructions: return end
-    body, bufs = instruction_block(instructions)
+    off = instructions[0][0]
+    body, bufs = instruction_block([(pc-off, info) for pc,info in instructions])
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
-    args += [UOp.const(block_pc, dtypes.int).after(end, *scopes)]
+    args += [lib_addr.after(end, *scopes), UOp.const(off, dtypes.uint64), UOp.const(block_pc, dtypes.int)]
     params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
                         else AddrSpace.GLOBAL) for i,a in enumerate(args)]
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
@@ -2011,7 +2013,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
                                                             1, AxisType.LOOP, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*buffers[b][1]) for b,p in zip(bufs, params)]
-    block = UOp.group(body.call(*call_args, name="asm_block"), *gates, w).end(*gates).end(w).sink()
+    block = UOp.group(body.call(*call_args, *params[-3:-1], name="asm_block"), *gates, w).end(*gates).end(w).sink()
     return block.call(*args, name="asm_waves")
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
@@ -2027,7 +2029,8 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
     return end
 
   body = emit_dispatch(regions, (wg,), initialized).end(wg)
-  sink = UOp.sink(ctx.vmem, body, arg=KernelInfo(name=name, optimized=True))
+  # operand bits are read from the runtime code pointer; identical call graphs can share machine code.
+  sink = UOp.sink(body, arg=KernelInfo(name=name, optimized=True))
   return to_program(sink, renderer)
 
 dispatch_cache:dict[tuple, UOp] = {}
