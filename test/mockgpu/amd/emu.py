@@ -291,14 +291,14 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond')
+  __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond')
   sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
 
-  def __init__(self, inst_size: int, wave_size: int = 32):
-    self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
+  def __init__(self, wave_size: int = 32):
+    self._axis_id, self.wave_size = 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
     self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
     self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr") if wave_size == 64 else self.vgpr
@@ -352,26 +352,21 @@ class _Ctx:
     sign_bit = 1 << (width - 1)
     return (val.cast(dtypes.int) ^ _c(sign_bit, dtypes.int)) - _c(sign_bit, dtypes.int)
 
-  def canonical_mask(self, inst_bytes: bytes|memoryview) -> tuple[int, int, int]:
-    """Compute canonical (base, mask, size) for cache lookup.
+  def canonical_mask(self, inst_bytes: bytes|memoryview) -> tuple[int, int]:
+    """Compute canonical (base, mask) for cache lookup.
     base = instruction bits with dynamic fields zeroed
-    mask = bitmask with 1s for static bits, 0s for dynamic bits
-    size = instruction size in bytes"""
-    size = self.inst_size
-    base = int.from_bytes(inst_bytes[:size], 'little')
-    mask = (1 << (size * 8)) - 1  # all 1s initially
+    mask = bitmask with 1s for static bits, 0s for dynamic bits"""
+    base = int.from_bytes(inst_bytes, 'little')
+    mask = (1 << (len(inst_bytes) * 8)) - 1  # all 1s initially
     for lo, hi in self.dyn_fields:
       field_mask = ((1 << (hi - lo + 1)) - 1) << lo
       base &= ~field_mask  # zero dynamic bits in base
       mask &= ~field_mask  # zero dynamic bits in mask
-    return base, mask, size
+    return base, mask
 
   def rexec(self) -> UOp:
     """Read full EXEC mask (32-bit for RDNA, 64-bit for CDNA)."""
-    lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
-    if self.wave_size <= 32: return lo
-    hi = self.rsgpr_dyn(_c(EXEC_LO.offset + 1))
-    return _u64(lo, hi)
+    return self.rmask(_c(EXEC_LO.offset))
 
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
@@ -426,11 +421,10 @@ class _Ctx:
     idx = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
     return self.accvgpr.index(idx.valid(valid)).load() if valid is not None else self.accvgpr.index(idx).load()
 
-  def waccvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
+  def waccvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
     """Write ACCVGPR with dynamic register index (CDNA only)."""
-    buf = self.accvgpr.after(after) if after is not None else self.accvgpr
     offset = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
-    return buf.index(offset.valid(_lane_active(exec_mask, lane))).store(val.cast(dtypes.uint32))
+    return self.accvgpr.index(offset.valid(_lane_active(exec_mask, lane))).store(val.cast(dtypes.uint32))
 
   def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False, do_cast: bool = True) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
@@ -1808,10 +1802,10 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
   for base, mask, ret in entries:
     if bits & mask == base: break
   else:
-    ctx = _Ctx(inst.size(), _wave_size(arch))
+    ctx = _Ctx(_wave_size(arch))
     sink = _get_handler(inst)(inst, ctx)
-    base, mask, size = ctx.canonical_mask(inst_bytes)
-    name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+    base, mask = ctx.canonical_mask(inst_bytes)
+    name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
     ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
     entries.append((base, mask, ret))
   call, cond = ret
@@ -1943,7 +1937,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   scratch = UOp.alloc((max(scratch_size*wave_size*n_waves, 1),), dtypes.uint8, 4, AddrSpace.REG)
   accvgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
-  ctx = _Ctx(4, wave_size)
+  ctx = _Ctx(wave_size)
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
