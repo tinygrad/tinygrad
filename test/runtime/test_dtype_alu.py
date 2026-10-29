@@ -334,6 +334,15 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((t+t*(2**31-1))//2).tolist(), [-2**30, 0])
     self.assertEqual((((u+t*(2**31-1))+t)//2).tolist(), [-2**30, 0])
 
+  def test_reassociate_no_overflow(self):
+    t, c = Tensor.arange(3, dtype=dtypes.int32), Tensor([False, True])
+    a, b, x, y = (Tensor(v, dtype=dtypes.int32) for v in ([1, 0], [1, 1], [2, 0], [2**30, 1]))
+    self.assertEqual((((t*2**29-2**30)+t*2**29) < 2**29).tolist(), [True, True, False])
+    self.assertEqual((((t-2**30)+t*(2**30-1)) < 2**29).tolist(), [True, True, False])
+    self.assertEqual((((a*2**30-2**30)+b*2**30) < 2**29).tolist(), [False, True])
+    self.assertEqual((((x*-1)*y) < -1).tolist(), [True, False])
+    self.assertEqual((((c.where(0, b*2**30)-2**30)+c.where(0, b*2**30)) < 2**29).tolist(), [False, True])
+
   def test_fused_div_matches_unfused(self):
     x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
     for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):

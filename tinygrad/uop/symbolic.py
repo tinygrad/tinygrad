@@ -30,6 +30,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
 def fold_const_alu(a:UOp) -> UOp: return a.const_like(exec_alu(a.op, a.dtype, [const_arg(s) for s in a.src]))
 # a fold mints a signed const only if it fits, the mint would wrap it. unsigned ring ops wrap by definition
 def fits(x:UOp, v:PyConst) -> bool: return x.dtype not in dtypes.sints or x.dtype.min <= v <= x.dtype.max
+# a rewrite that introduces a signed intermediate must keep its range in the dtype, overflow is UB
+def no_overflow(u:UOp) -> bool: return fits(u, u.vmin) and fits(u, u.vmax)
 
 def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
@@ -250,10 +252,12 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1) if fits(x, c0.vmin+c1.vmin) else None),
   ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"),
-   lambda x,y,c0,c1: y+x*(c0+c1) if fits(x, c0.vmin+c1.vmin) else None),
+   lambda x,y,c0,c1: y+m if fits(x, c0.vmin+c1.vmin) and no_overflow(m:=x*(c0+c1)) else None),
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1) if fits(x, c.vmin+1) else None), # (x+x*c)-> x*(c+1)
-  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1) if fits(x, c.vmin+1) else None),
-  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c")) + UPat.var("x"), lambda x,y,c: y+x*(c+1) if fits(x, c.vmin+1) else None),
+  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"),
+   lambda x,y,c: y+m if fits(x, c.vmin+1) and no_overflow(m:=x*(c+1)) else None),
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c")) + UPat.var("x"),
+   lambda x,y,c: y+m if fits(x, c.vmin+1) and no_overflow(m:=x*(c+1)) else None),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
   (((UPat.var("y") + UPat.var("x")) + UPat.var("x")).named("a"),
    lambda a,y,x: y+x*2 if fits(a, 2*x.vmin) and fits(a, 2*x.vmax) else None),
@@ -275,7 +279,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # if its a plus we add the associative variation too
   ((UPat.var("y")+UPat.var("c").where(UPat.var("t"), UPat.var("f"))) + UPat.var("c").where(UPat.var("tt"), UPat.var("ff")), \
-   lambda y,c,t,tt,f,ff: y+c.where(t+tt, f+ff) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+   lambda y,c,t,tt,f,ff: y+m if (t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST) and no_overflow(m:=c.where(t+tt, f+ff)) else None),
   # complementary zero branches under the same condition select directly
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
   # ALU/variable min==max -> CONST
@@ -301,8 +305,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
    lambda x,d,c: (x<c.val*d.val) if d.val > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
-  ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1 if y.op is not Ops.CONST else None),
-  ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1 if y.op is not Ops.CONST else None),
+  ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: m+c1 if y.op is not Ops.CONST and no_overflow(m:=x+y) else None),
+  ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: m*c1 if y.op is not Ops.CONST and no_overflow(m:=x*y) else None),
   # *** rules from symbolic ***
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.val)),
