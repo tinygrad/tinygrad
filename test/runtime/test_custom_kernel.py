@@ -368,6 +368,13 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor([1., 2, 3, 4])
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
 
+  def test_range_bound_after_outer_range(self):
+    def kernel(C:UOp) -> UOp:
+      i = UOp.range(3, 0, AxisType.LOOP)
+      j = UOp.range(UOp.const(2, dtypes.weakint).after(i), 1, AxisType.LOOP)
+      return C[0].set(C.after(i, j)[0] + 1, end=(j, i)).sink(arg=KernelInfo())
+    self.assertEqual(Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[0].tolist(), [6])
+
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
     N = 16
@@ -595,6 +602,10 @@ class TestCustomKernel(unittest.TestCase):
       data = UOp(Ops.BINARY, arg=payload)
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
+
+  def test_one_lane_stack_runtime_index(self):
+    def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
 @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
                      or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),

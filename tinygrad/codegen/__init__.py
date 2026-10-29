@@ -141,6 +141,8 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
+  # a scalar index into a one-lane STACK is its lane, 0 is the only in-bounds index
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=(UPat.var("x"),)), UPat.var("i"))), lambda x,i: x if i.shape == () else None),
 ])
 
 def fix_group_for_reduce(x:UOp):
