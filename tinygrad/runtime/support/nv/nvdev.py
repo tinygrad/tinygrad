@@ -16,8 +16,8 @@ class NVUSBPCIDevice(USBPCIDevice):
     if (pci_id:=self.read_config(pci.PCI_VENDOR_ID, 4)) != 0x220410DE: raise RuntimeError(f"Expected RTX 3090, found PCI ID {pci_id:#010x}")
 
   def reset(self) -> None:
-    self.usb.set_pcie_power(False)
-    self.usb.set_pcie_power(True)
+    self.write_config(0x78 + pci.PCI_EXP_DEVCTL, self.read_config(0x78 + pci.PCI_EXP_DEVCTL, 2) | pci.PCI_EXP_DEVCTL_BCR_FLR, 2)
+    time.sleep(0.1)
     self._bar_info = System.pci_setup_usb_bars(self.usb, self.gpu_bus, mem_base=0x10000000, pref_mem_base=(32 << 30))
 
   def stream_gsp_boot(self, flcn:NV_FLCN, base:int) -> None:
@@ -138,7 +138,8 @@ class NVDev:
     self.is_booting = False
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
-    for ip in [self.flcn, self.gsp]: ip.init_hw()
+    if self.flcn.init_hw(): return NVDev.__init__(self, pci_dev)
+    self.gsp.init_hw()
 
   def fini(self):
     if self.finalized: return

@@ -1,4 +1,5 @@
 import ctypes, struct, time, functools, itertools
+from typing import cast
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
@@ -215,8 +216,8 @@ def usb_zeros(dev:str) -> UOp: return usb_host(dev)[64 + 2 * HALF:]
 
 def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev, name="usb_go") # chunk + 1: read armed
 
-def usb_asm24(dev:str) -> UOp:
-  return UOp.alloc((Compiled.link_bufs[to_name(dev, "usb_asm24")].nbytes,), dtypes.uint8, 0, device=dev, name="usb_asm24") # sys, cq, sram
+def usb_asm24(dev:str) -> UOp: # sys, cq, sram
+  return UOp.alloc((cast(Buffer, Compiled.link_bufs[to_name(dev, "usb_asm24")]).nbytes,), dtypes.uint8, 0, device=dev, name="usb_asm24")
 def usb_fence(dev:str) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # gpu chunks done
 def usb_cq(dev:str) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue
 def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:]
@@ -452,7 +453,7 @@ def usb_ctrl_buffer(iface, size:int=2 * HALF) -> Buffer:
                 opaque=BufferStorage(vaddr, host=iface.pci_dev.dma_view(0xa000, 0x5000 + size)))
 
 def usb_reset(dev):
-  host, ctrl = (Compiled.link_bufs[to_name(dev.device, n)] for n in ("usb_host", "usb_asm24"))
+  host, ctrl = (cast(Buffer, Compiled.link_bufs[to_name(dev.device, n)]) for n in ("usb_host", "usb_asm24"))
   for buf, off, n in ((ctrl, 0x800, 4), (ctrl, 0x5000, ctrl.nbytes - 0x5000), (host, 16, 8)): buf.host.view(off, n)[:] = bytes(n)
   for t in map(libusb.struct_libusb_transfer.from_address, host.host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 

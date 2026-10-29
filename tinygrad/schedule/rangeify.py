@@ -186,7 +186,13 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     return root.replace(src=tuple(stage(ctx, s) if s.op in GroupOp.Elementwise and s.device is not None else s for s in root.src))
-pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs)])
+
+def fix_store_hazard(ctx:LimitBufsContext, dst:UOp, src:UOp):
+  loads = [u for u in src.toposort(gate=lambda u: u.op not in {Ops.STAGE, Ops.AFTER}) if u.op is Ops.INDEX and u.buf_uop is dst.buf_uop]
+  if any(u.src[1].get_idx() is not dst.src[1].get_idx() for u in loads): return dst.store(stage(ctx, src))
+
+pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs),
+  (UPat(Ops.INDEX, name="dst").store(UPat.var("src")), fix_store_hazard)])
 
 # *****************
 # 4. put in buffers for bufferize

@@ -437,14 +437,10 @@ class Tensor(RandMixin):
     if device not in Tensor._device_seeds:
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
       Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint64)
     counter = Tensor._device_rng_counters[device]
-    new_low = counter[0:1] + (num & 0xffffffff)
-    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
-    counter.assign(new_low.cat(new_high))
-    low = counter[0:1] - (num & 0xffffffff)
-    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
-    return Tensor._device_seeds[device], low.cat(high)
+    counter.assign(counter + num)
+    return Tensor._device_seeds[device], (counter - num).bitcast(dtypes.uint32)
 
   # ***** toposort and backward pass *****
 
@@ -490,7 +486,7 @@ class Tensor(RandMixin):
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
-    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop._base_buffer_is_realized()
+    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop.base.without_after.is_realized
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))

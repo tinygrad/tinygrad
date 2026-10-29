@@ -14,6 +14,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     for copy in (src.contiguous(), src.copy_to_device("NULL")):
       self.assertEqual((copy.vmin, copy.vmax), (0, 3))
 
+  def test_vmin_vmax_cmpeq(self):
+    x = UOp.variable('x', 10, 20)
+    for y, bounds in [(9, (False, False)), (21, (False, False)), (10, (False, True)),
+                      (UOp.variable('y', 15, 25), (False, True))]:
+      cmp = x.eq(y)
+      self.assertEqual((cmp.vmin, cmp.vmax), bounds)
+    cmp = UOp.const(42).eq(42)
+    self.assertEqual((cmp.vmin, cmp.vmax), (True, True))
+
   def test_vmin_vmax_cmpne(self):
     uop = UOp.const(42)
     def test_bool(u, x):
@@ -239,14 +248,14 @@ class TestVminVmaxDivMod(unittest.TestCase):
 
   def test_vmin_vmax_floordiv_floormod(self):
     x = UOp.variable('x', -7, 7)
-    floordiv = x.alu(Ops.FLOORDIV, UOp.const(3))
+    floordiv = x.alu(Ops.DIV, UOp.const(3))
     self.assertEqual(floordiv.vmin, -3)
     self.assertEqual(floordiv.vmax, 2)
-    floormod = x.alu(Ops.FLOORMOD, UOp.const(3))
+    floormod = x.alu(Ops.MOD, UOp.const(3))
     self.assertEqual(floormod.vmin, 0)
     self.assertEqual(floormod.vmax, 2)
     # negative const divisor: floormod range is [c+1, 0]
-    floormod_neg = x.alu(Ops.FLOORMOD, UOp.const(-3))
+    floormod_neg = x.alu(Ops.MOD, UOp.const(-3))
     self.assertEqual(floormod_neg.vmin, -2)
     self.assertEqual(floormod_neg.vmax, 0)
 
@@ -411,10 +420,6 @@ class TestConstFactor(unittest.TestCase):
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
 
-  def test_const_factor_variable_multiple_of(self):
-    x = UOp.variable('x', 16, 32, multiple_of=4)
-    self.assertEqual(x.const_factor(), 4)
-
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):
     # Divides a constant by an exact divisor
@@ -452,16 +457,6 @@ class TestDivides(unittest.TestCase):
     uop = x * 4
     result = uop.divides(3)
     self.assertIsNone(result)  # Cannot divide by 3, since 4 is not divisible by 3
-
-  def test_divides_variable_multiple_of_exact(self):
-    x = UOp.variable('x', 16, 32, multiple_of=4)
-    result = x.divides(4)
-    self.assertIsNotNone(result)
-
-  def test_divides_variable_multiple_of_factor(self):
-    x = UOp.variable('x', 16, 32, multiple_of=4)
-    result = x.divides(2)
-    self.assertIsNotNone(result)
 
 if __name__ == '__main__':
   unittest.main()

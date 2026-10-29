@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.isa import ISARenderer, Register, rdef, regs, with_regs, LinearContext
+from tinygrad.renderer.x86 import ISARenderer, Register, rdef, regs, with_regs, LinearContext
 from typing import Any
 from dataclasses import replace
 
@@ -25,7 +25,7 @@ class LinearScanRegallocContext:
       for v in defs + tuple(rdef(s) for s in dedup(u.src)):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
-        if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
+        if (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src and x.op not in PSEUDO_OPS)
 
     # allocate registers
@@ -104,7 +104,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else with_regs(x, (r,))
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
-    if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
+    if (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
       reg = replace(ctx.reals[i][v], size=v.size)
       if v in ctx.spills:
         fill = ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg)

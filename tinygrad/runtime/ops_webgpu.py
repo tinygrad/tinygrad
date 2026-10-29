@@ -51,7 +51,7 @@ AdapterRequestDevice = synchronous(webgpu.enum_WGPURequestDeviceStatus, True)(we
 QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webgpu.wgpuQueueOnSubmittedWorkDone2)
 
 class WebGPUProgram(Program['WebGpuDevice']):
-  def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
+  def __init__(self, dev:'WebGpuDevice', obj:TinyELF, links=None):
     self.dev, self.name, self.signature = dev, to_wgpu_str(obj.name), obj.signature
 
     # Creating shader module

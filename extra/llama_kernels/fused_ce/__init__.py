@@ -57,7 +57,7 @@ def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
     seq_per_dev = SEQ
   # NOTE: .mean() backward gives same grad per row (1/N), so broadcast is safe; take scalar
   scale = Tensor(gradient, device=device).float().reshape(-1)[0:1].contiguous()
-  logits_t = Tensor(logits_u.after(kernel), device=device)
+  logits_t = Tensor(logits_u, device=device)
   lse_t = Tensor(lse_u.after(kernel), device=device)
   targets_t = Tensor(targets_u, device=device)
   fxn = functools.partial(_custom_fused_ce_loss_bwd, vocab=VOCAB, rows=rows_per_dev, seq=seq_per_dev, label_smoothing=label_smoothing)

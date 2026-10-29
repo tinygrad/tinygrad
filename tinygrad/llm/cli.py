@@ -30,10 +30,11 @@ class SimpleTokenizer:
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     contr, r_l, r_n = "(?i:'s|'t|'re|'ve|'m|'ll|'d)", f"[^\\r\\n{r_p_N}{r_p_L}]?", f"[{r_p_N}]" if preset == "tekken" else f"[{r_p_N}]{{1,3}}"
     r_p, r_w, r_t = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*", f"{contr}|{r_l}[{r_p_L}]+", f"[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
-    if preset in ("tekken", "gpt-4o"):
+    if preset in ("tekken", "gpt-4o", "kimi-k2"):
       r_up, r_lo = ucat_range(("Lu","Lt","Lm","Lo","M")), ucat_range(("Ll","Lm","Lo","M"))
-      sfx = f"{contr}?" if preset == "gpt-4o" else ""
-      r_p, r_w = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*", f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+      sfx = "" if preset == "tekken" else f"{contr}?"
+      r_w = f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+      if preset != "kimi-k2": r_p = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*"
     self._split_to_word = re.compile(f"{r_w}|{r_n}|{r_p}|{r_t}")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
@@ -155,7 +156,8 @@ from tinygrad.llm.serve import LLMServer
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
+  parser.add_argument("--model", "-m", default=list(models.keys())[0],
+                      help=f"Model choice ({', '.join(models.keys())}) or local GGUF file/HF checkpoint directory")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
@@ -169,15 +171,16 @@ def main():
   # load the model
   st = time.perf_counter()
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
-    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard)
-  model_name = kv.get('general.name') or kv.get('general.basename') or args.model
+    path = fetch(models.get(args.model, args.model))
+    model, kv = (Transformer.from_hf if path.is_dir() else Transformer.from_gguf)(path, args.max_context, shard=args.shard)
+  model_name = kv.get('general.name') or kv.get('general.basename') or kv.get('_name_or_path') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
         f"and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer
-  tok = SimpleTokenizer.from_gguf_kv(kv)
+  tok = SimpleTokenizer.from_hf(path, preset='glm4') if path.is_dir() else SimpleTokenizer.from_gguf_kv(kv)
 
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)

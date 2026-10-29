@@ -64,13 +64,13 @@ def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
-  (UPat(Ops.RECIPROCAL, name="ret"), lambda ctx, ret: (-ctx * ret * ret,)),
+  (UPat(Ops.RECIP, name="ret"), lambda ctx, ret: (-ctx * ret * ret,)),
   (UPat(Ops.SIN, name="ret"), lambda ctx, ret: ((math.pi/2 - ret.src[0]).sin() * ctx,)),
   (UPat(Ops.LOG2, name="ret"), lambda ctx, ret: (ctx / (ret.src[0] * math.log(2)),)),
   (UPat(Ops.EXP2, name="ret"), lambda ctx, ret: (ret * ctx * math.log(2),)),
   (UPat(Ops.SQRT, name="ret"), lambda ctx, ret: (ctx / (ret*2),)),
   (UPat(Ops.TRUNC), lambda ctx: (ctx.const_like(0),)),
-  (UPat((Ops.CMPLT, Ops.CMPNE)), lambda: (None, None)),
+  (UPat((Ops.CMPLT, Ops.CMPEQ)), lambda: (None, None)),
   (UPat(Ops.ADD), lambda ctx: (ctx, ctx)),
   (UPat(Ops.POW, name="ret", src=(UPat.var("b"), UPat.var("e"))), lambda ctx, ret, b, e:
     (ctx * e.eq(0).where(e, e*b.pow(e-1)), ctx * b.eq(0).where((e<0).where(ret.const_like(-math.inf), 0), ret*b.log2()*math.log(2.0)))),

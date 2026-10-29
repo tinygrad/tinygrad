@@ -11,6 +11,7 @@ from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
 from tinygrad.runtime.autogen.amd.common import OpType
+from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -40,7 +41,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, ParamArg
+from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
 from tinygrad.uop.render import render_uir, render_index, uops_colors, _inline, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
@@ -130,6 +131,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
+    if isinstance(u.arg, ProgramInfo):
+      argst = word_wrap(repr(u.arg).replace(f"params={u.arg.params!r}", "params=(\n" + '\n'.join(render_uir(p) for p in u.arg.params) + "\n)"))
     label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
@@ -229,7 +232,6 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
       for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(device_ts_diffs, ent.device)), e.sigs[ent.en_id]+diff]
-      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # normalize event timestamps and attach kernel metadata
@@ -554,9 +556,11 @@ def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") el
 
 def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
   addr_table:dict[int, Inst] = {}
+  code_end = s_code_end().to_bytes()
   offset, view = 0, memoryview(buf)
   while offset < len(buf):
     remaining = view[offset:]
+    if remaining[:4] == code_end: break
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
@@ -635,7 +639,10 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, src=2, alt="View Program")) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.arg, "lang":"cpp"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ast = unwrap(get_sink_at(("do_render",), viz_data, i, data, src=0, alt="View Program"))
+    extern_srcs = [u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, enter_calls=True) if u.op is Ops.SOURCE]
+    return {"src":"\n".join([sink.arg, *reversed(extern_srcs)]), "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data
