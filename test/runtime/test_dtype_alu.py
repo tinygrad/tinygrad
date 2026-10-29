@@ -290,6 +290,10 @@ class TestDTypeALU(unittest.TestCase):
       self.assertEqual(((x*x)>>4).tolist(), [0, 0])
       self.assertEqual(((x+1)<1).tolist(), [True, False])
 
+  def test_pow_one_keeps_dtype(self):
+    self.assertEqual(((1**Tensor([2], dtype=dtypes.uint8))+255).cast(dtypes.uint32).tolist(), [0])
+    self.assertEqual((1**Tensor([2], dtype=dtypes.int8)).bitcast(dtypes.uint8).tolist(), [1])
+
   def test_div_add_div_no_overflow(self):
     for dt in (dtypes.uint32, dtypes.uint64):
       x = Tensor([dt.max-1], dtype=dt)
