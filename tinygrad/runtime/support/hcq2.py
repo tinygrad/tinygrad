@@ -9,6 +9,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx
 from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates
+from tinygrad.runtime.support.c import Struct
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
 
 # **** calls
@@ -55,7 +56,7 @@ def make_program(prg:UOp, size:int, device:str) -> UOp:
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
   return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
-def make_submit(*cmds, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
+def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
   kind = to_name(dev.split(":")[0], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
   q = UOp.param(0, dtypes.u8, 1, dev, name=queue) # the queue instance: its device and name
   return UOp.sink(*cmds, arg=KernelInfo(kind)).call(q).after(*deps)
@@ -84,7 +85,7 @@ def announce(slots:dict[str, UOp], num_queues:dict[str, int], dep:UOp) -> list[U
   bumped = [timeline(dev).after(dep).index(1).store(timeline_value(dev) + 1) for dev in slots]
   return bumped + [buf.after(dep).index(2 * num_queues[dev]).store(timeline_value(dev) + 1) for dev, buf in slots.items()]
 
-def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
+def ins(name:str, *src:UOp|int) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
 
 # **** patchers
 
@@ -124,7 +125,7 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
   ret = dtypes.void if fn.restype is None else getattr(dtypes, fn.restype.__name__[2:], dtypes.u64) # void, c_int -> int, pointers -> u64
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.i32) if isinstance(a, int) else a for a in args])
 
-def cstruct(struct_t, **fields:UOp|int) -> UOp:
+def cstruct(struct_t:type[Struct], **fields:UOp|int) -> UOp:
   flds = {n: (o, {d.itemsize: d for d in dtypes.uints}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)}
   rows = [(flds[n][0], UOp.const(v, flds[n][1])) for n, v in fields.items()]
   buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.u8, device=HCQ_RUNTIME_DEV.device, name=struct_t.__name__)
@@ -368,17 +369,18 @@ class HWQueue:
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
 
-  def q(self, *words) -> int:
+  def q(self, *words:UOp|int) -> int:
     for w in words:
+      if isinstance(w, int):
+        self.blob += struct.pack("I", truncate[dtypes.u32](w))
+        continue
       c = w
-      while isinstance(c, UOp) and c.op is Ops.CAST: c = c.src[0]
-      if isinstance(c, UOp) and c.op is Ops.BINARY: self.blob += c.arg
-      elif isinstance(c, UOp) and c.op is not Ops.CONST:
+      while c.op is Ops.CAST: c = c.src[0]
+      if c.op is Ops.BINARY: self.blob += c.arg
+      elif c.op is not Ops.CONST:
         self.patches.append((len(self.blob), w))
         self.blob += bytes(w.dtype.itemsize)
-      else:
-        v, dt = (c.val, w.dtype) if isinstance(w, UOp) else (c, dtypes.u32)
-        self.blob += struct.pack(unwrap(dt.fmt), truncate[dt](v))
+      else: self.blob += struct.pack(unwrap(w.dtype.fmt), truncate[w.dtype](c.val))
     return len(self.blob)
 
   def loop(self, body:UOp, r:UOp):
@@ -537,7 +539,7 @@ pm_resolve_link = PatternMatcher([
 hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False) -> UOp:
+def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
   if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
 
   if cache and input_uops is not None:
