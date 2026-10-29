@@ -98,7 +98,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   if x.op is Ops.INDEX and len(ctx.range_map[x][0]) == len(ctx.range_map[x][1]): return None
-  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
+  if (bx:=create_bufferize_and_index_based_on_ranges(ctx, x)).src[0] is x: return None
   valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
   return valid.where(bx.src[0], UOp.const(x.dtype.const(0)))
 
