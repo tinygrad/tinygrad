@@ -1007,6 +1007,8 @@ class TestSymbolic(unittest.TestCase):
     x = Variable("x", -10, 10)
     self.helper_test_variable((x < 0).where(0, x), 0, 10, "x.maximum(0)")
     self.helper_test_variable((0 < x).where(x, 0), 0, 10, "x.maximum(0)")
+    self.helper_test_variable(((x+3) < 0).where(0, x+3), 0, 13, "(x+3).maximum(0)")
+    self.helper_test_variable((5 < x).where(5, x), -10, 5, "(5<x).where(5, x)")
 
   def test_where_combine(self):
     cond = Variable("x", 0, 3) < 2

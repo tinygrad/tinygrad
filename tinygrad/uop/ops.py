@@ -1091,7 +1091,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if self.op is Ops.CMPEQ: return (s0_vmin == s0_vmax == s1_vmin == s1_vmax, not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
       if self.op is Ops.OR and self.dtype == dtypes.bool: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
       if self.op is Ops.AND and self.dtype == dtypes.bool: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
-    if self.op is Ops.WHERE: return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
+    if self.op is Ops.WHERE:
+      # int (a<b).where(a,b) is min(a,b)
+      if dtypes.is_int(self.dtype) and self.src[0].op is Ops.CMPLT and self.src[0].src == self.src[1:]:
+        return min(self.src[1].vmin, self.src[2].vmin), min(self.src[1].vmax, self.src[2].vmax)
+      return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
