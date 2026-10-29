@@ -198,7 +198,7 @@ class NV_FLCN(NV_IP):
       # unlock FEAT registers
       code = ([0xffffffff, 0x19c, 0xd44, 0x19c, 0x19c, 0x19c, 0x823804, 0x19c, 0x1fce, 0x19c, 0x19c, 0x0, 0x19c, 0x1101, 0x84c8, 0x8e18, 0x19c,
                0x84c8, 0x0, 0x19c, 0x1fce, 0x19c, 0x19c, 0xffbc, 0x19c, 0x5789, 0x19c, 0x19c, 0x19c, 0xd44, 0x19c, 0x19c, 0x19c, 0x3, 0x19c, 0x1fce,
-               0x19c, 0x19c, 0x19c, 0x19c, 0xd52, 0x81ee, 0x19c, 0x19c, 0x19c, 0x19c] if self.nvdev.chip_name == "GA102" else
+               0x19c, 0x19c, 0x19c, 0x19c, 0xd52, 0x81ee, 0x19c, 0x19c, 0x19c, 0x19c] if self.nvdev.chip_name.startswith("GA1") else
               [0xfffff0ff, 0x19c, 0x21b2, 0x19c, 0x19c, 0x19c, 0x1fa7cc, 0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f, 0x7a02, 0x9a0148,
                0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f, 0x7a02, 0x1fa7c4, 0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f,
                0x7a02, 0x823804, 0x19c, 0x33fc, 0x19c, 0x19c, 0x67b00001, 0x19c, 0x256f, 0x7a02, 0x19c, 0x19c, 0x31b5, 0x771e])
@@ -219,14 +219,14 @@ class NV_FLCN(NV_IP):
     mbx = self.execute_hs(self.sec2, self.booter_image_paddr, code_off=self.booter_code_off, data_off=self.booter_data_off,
       imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
       pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem,
-      wait_for=(lambda: self.nvdev.rreg(0x823804) == 0xffffffff) if needs_mid_reset and self.nvdev.chip_name == "GA102" else None)
+      wait_for=(lambda: self.nvdev.rreg(0x823804) == 0xffffffff) if needs_mid_reset and self.nvdev.chip_name.startswith("GA1") else None)
     assert needs_mid_reset or mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
     if needs_mid_reset: return True
 
     if speed_override:
       for off, val in (regs:={0x82381c:0x88888888, 0x823820:0x8}).items(): self.nvdev.wreg(off, val)
       assert all(self.nvdev.rreg(off) == v for off, v in regs.items()) and \
-        (self.nvdev.chip_name == "GA102" or not self.nvdev.rreg(0x823818) & 0x07ffffff), "FEAT not latched"
+        (self.nvdev.chip_name.startswith("GA1") or not self.nvdev.rreg(0x823818) & 0x07ffffff), "FEAT not latched"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
     assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
