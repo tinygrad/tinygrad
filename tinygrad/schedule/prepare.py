@@ -195,9 +195,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # remove DETACH/CONTIGUOUS_BACKWARD (TODO: this is copied in allocations)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
-  # SINK only ever references the base
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(y.unsharded_base for y in x.src))),
-
   # ** copy rules **
 
   # a copy to the same device as the source is not allowed: it is a no-op, STAGE materializes on the same device
