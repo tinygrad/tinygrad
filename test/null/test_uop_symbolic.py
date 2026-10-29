@@ -792,7 +792,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
   def test_gcd_with_remainder(self):
-    # gcd_with_remainder: factor GCD out of non-constant terms and denominator
+    # nest_by_factor on the GCD of non-constant terms and denominator
     a = Variable("a", 0, 2)
     self.helper_test_variable((a*4)//6, 0, 1, "(a*2//3)")
     self.helper_test_variable((a*4+1)//6, 0, 1, "(a*2//3)")
@@ -802,6 +802,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*4+1)%6, 1, 5, "(a*2%3*2+1)")
     self.helper_test_variable((a*4+2)%6, 0, 4, "((a*2+1)%3*2)")
     self.helper_test_variable((a*4+3)%6, 1, 5, "((a*2+1)%3*2+1)")
+
+  def test_gcd_with_remainder_negative(self):
+    a, b = Variable("a", -3, 5), Variable("b", 0, 7)
+    self.helper_test_variable((a*18+1)//4, -14, 22, "(a*9//2)")
+    self.helper_test_variable((a*12+b*18+5)//12, -3, 15, "((a*2+b*3)//2)")
 
   def test_div_by_factor_tie_break(self):
     a = Variable("a", 0, 1)
