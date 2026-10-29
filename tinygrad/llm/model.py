@@ -1761,6 +1761,41 @@ class Transformer:
     return (UOp.variable("slot", 0, self.batch_slots()-1).bind(i), rp, UOp.variable("slot_wp", 0, S-1).bind(length % S),
             UOp.variable("slot_wpc", 0, SC-1).bind(length % SC), UOp.variable("slot_hrow", 0, 2*self.config.spec_drafts+1).bind(hrow))
 
+  def prefix_to_slot(self, tokens:list[int], slot:int) -> int:
+    """
+    the states of the longest prefix of tokens the model has (its conversation, or its checkpoint restored) into slot: the position the rest
+    starts at (a batch_prefill continues it there). at most len(tokens)-1
+    """
+    start, restore = self._reuse(tokens) if self.has_recurrent_block else (self.get_start_pos(tokens), False)
+    if restore: self._checkpoint(tokens, save=False)
+    start = min(start, len(tokens) - 1)
+    self.slot_store(slot, start)
+    return start
+
+  def _ckpt_from_slot_copy(self, slot:UOp, wp:UOp, wpc:UOp):
+    """the states of a slot at a position (its recurrent ones in wp, its conv ones in wpc) as the model's checkpoint (_ckpt, in its order)"""
+    k = self.config.spec_drafts
+    def rows(t:Tensor, start:UOp|int, n:int=1) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
+    srcs:list[Tensor] = [rows(self.pool_spec_h, slot*2*(k+1), 2*(k+1))] if hasattr(self, "_spec_h") else []
+    for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
+      if isinstance(b, GatedDeltaNetBlock) and hasattr(b, "recurrent_state"):
+        S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
+        srcs += [rows(b.pool_rec, slot*S + wp)] + [rows(p, slot*SC + wpc) for p in b.pool_conv]
+      if (idx:=getattr(b, "indexer", None)) is not None and hasattr(idx, "ring"):
+        R = int(idx.slot_ring[0].shape[0])
+        srcs.append(rows(idx.pool_ring, slot*R, R))
+    assert len(srcs) == len(self._ckpt), f"{len(srcs)} states of a slot, a checkpoint of {len(self._ckpt)}"
+    Tensor.realize(*[d.assign(s.cast(d.dtype)) for d, s in zip(self._ckpt, srcs)])
+  def ckpt_from_slot(self, i:int, length:int):
+    """
+    the states of slot i at position `length` (a batch_prefill's prompt end) as the model's checkpoint (the caller sets _ckpt_tokens): the
+    checkpoint of a prompt prefilled in a slot, see the server's ckpt_keep
+    """
+    if not hasattr(self, "_ckpt"): return
+    if not hasattr(self, "_ckpt_slot_jit"): self._ckpt_slot_jit = TinyJit(self._ckpt_from_slot_copy, capture_first=True)
+    v = self._slot_store_vars(i, length, 0)
+    self._ckpt_slot_jit(v[0], v[2], v[3])
+
   def slot_move(self, src:int, dst:int):
     """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
     self._slot_jits()
@@ -2022,7 +2057,7 @@ class Transformer:
     temperatures in _batch_temp. the model and the MTP layer on all of them (the caches and states of the slots), the token after every one's
     last. returns (1, G) the tokens
     """
-    G, P, devs, k = self.BPF_G, self.BPF_P, self.token_embd.weight.device, self.config.spec_drafts
+    G, P, devs, k = len(vs) // 3, self.BPF_P, self.token_embd.weight.device, self.config.spec_drafts
     cvars, svars, stvars = vs[:G], vs[G:2*G], vs[2*G:3*G]
     # (a stack of variables has no device: onto zeros of the devices)
     def ints(xs:tuple[UOp, ...]) -> Tensor:
@@ -2031,7 +2066,7 @@ class Transformer:
     _batch_rows[0] = [(st, P) for st in stvars] if stvars else [(UOp.const(0, dtypes.weakint), P)] * G
     _batch_prefill[0], Q8_ROWS_I8[0] = pf, False
     try:
-      emb = self.token_embd(self._bpf_in.to(devs)).float()
+      emb = self.token_embd(self._bpf_in[:, :G*P].to(devs)).float()
       x = emb
       if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
       if hc is not None and self.sequence_parallel(G*P):
@@ -2062,9 +2097,14 @@ class Transformer:
     return self.BPF_G if self.batch_sizes() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
       (not seq_sharded(self.token_embd.weight.device) or getenv("BPF_SEQ", 0)) and \
       self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
-  def _bpf_jit(self):
-    if not hasattr(self, "_bpf_jit_"): self._bpf_jit_ = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)
-    return self._bpf_jit_
+  def bpf_sizes(self) -> tuple[int, ...]:
+    """the prompts of a batch_prefill step (a jit each): BPF_GS (sizes up to BPF_G), a batch of n runs the smallest one of n or more"""
+    return tuple(sorted({g for g in (int(x) for x in str(getenv("BPF_GS", "")).split(",") if x) if 0 < g <= self.BPF_G} | {self.BPF_G}))
+  def _bpf_jit(self, G:int|None=None):
+    if not hasattr(self, "_bpf_jits"): self._bpf_jits:dict[int, Any] = {}
+    if (G:=G or self.BPF_G) not in self._bpf_jits:
+      self._bpf_jits[G] = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)
+    return self._bpf_jits[G]
   def _bpf_vars(self, counts:list[int], slots:list[int], starts:list[int]|None=None) -> list[UOp]:
     return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
            [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)] + \
@@ -2075,7 +2115,8 @@ class Transformer:
     starts: the positions they start at (a conversation continued from its states in the slot at the position), None: 0
     """
     self._init_slots()
-    G, P, n = self.BPF_G, self.BPF_P, len(prompts)
+    P, n = self.BPF_P, len(prompts)
+    G = next(g for g in self.bpf_sizes() if g >= n)
     assert 0 < n <= G and all(0 < len(t) <= P for t, _, _ in prompts)
     starts = (starts or [0] * n) + [(starts or [0] * n)[-1]] * (G - n)
     assert all(st + P <= self.batch_ctx() for st in starts), "a prompt past its slot"
@@ -2085,7 +2126,7 @@ class Transformer:
       self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
       self._batch_host_temp[2*g:2*g+2] = _temp_pair(temp)
     self._bpf_host_out[:G] = array.array('i', [-1] * G)
-    self._bpf_jit()(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts], starts))
+    self._bpf_jit(G)(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts], starts))
     st = time.perf_counter()
     while min(self._bpf_host_out[:G]) < 0:
       if time.perf_counter() - st > 10:
@@ -2428,7 +2469,9 @@ class Transformer:
       if m > self.batch_slots(): continue
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
       else: self.batch_step([(0, 1, 0.0)] * m)
-    if self.batch_prefills(): self.batch_prefill([([0], 0, 0.0)])
+    if self.batch_prefills():
+      for G in self.bpf_sizes(): self.batch_prefill([([0], 0, 0.0)] * G)
+      self.ckpt_from_slot(0, 1)  # (a prompt prefilled in a slot: its checkpoint, see the server)
     # (the staging rows of host_save and host_load: their copies captured)
     self._host_rows(1, True), self._host_rows(1, False)
     self._cached_tokens, self._ckpt_tokens = [], []
@@ -2478,8 +2521,10 @@ class Transformer:
       for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit): setattr(j, "link_later", True)
       # (and the prefills of several prompts)
       if self.batch_prefills():
-        calls.append((bpf:=self._bpf_jit(), lambda: bpf(*self._bpf_vars([1]*self.BPF_G, [0]*self.BPF_G, [0]*self.BPF_G))))
-        bpf.link_later = True
+        for G in self.bpf_sizes():
+          bpf = self._bpf_jit(G)
+          calls.append((bpf, functools.partial(bpf, *self._bpf_vars([1]*G, [0]*G, [0]*G))))
+          bpf.link_later = True
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile():
       # (the jits of the computations left run after: they're compiled meanwhile)

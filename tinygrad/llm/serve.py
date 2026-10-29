@@ -443,6 +443,9 @@ class Request:
 
 # short prompts prefilled together (Transformer.batch_prefill) from this many: a step of them costs about what three alone do
 BATCH_PREFILL_MIN = getenv("BATCH_PREFILL_MIN", 3)
+# (BCP) requests prefilled together from this many: continuations of their conversations, the rest of each prompt in its slot (see Transformer.
+# batch_prefill's starts): a step of the model's weights for all of them, not one each. fewer: one at a time (a step is G of P rows)
+BCP_MIN = getenv("BCP_MIN", 2)
 
 class BatchStats:
   """batched decoding's status line every few seconds while it runs: the requests decoding and waiting now, the tokens generated a second and
@@ -774,6 +777,48 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.ckpt_pool.append(req.ckpt_buf)
     req.ckpt_buf, req.ckpt_tokens = None, []
 
+  def batch_continue(self, batch:list[Request], active:dict, pending:list[Request]):
+    """
+    (BCP) requests into free slots in steps of the model for all of them: each one's conversation (the model's, a kept one, its checkpoint)
+    into its slot, the rest of its prompt prefilled there (batch_prefill from its start, in chunks of P), its first token. its prompt's
+    checkpoint (in its slot: the model's isn't its) kept with it (ckpt_keep)
+    """
+    model, k, P = self.model, self.spec, self.model.BPF_P
+    _p0 = time.perf_counter()
+    free = [i for i in range(self.slots) if i not in active][:len(batch)]
+    starts, lens = [], []
+    for req, slot in zip(batch, free):
+      ids = req.ids + req.generated
+      busy = set(active) | set(free)
+      trace(f"batch_continue req {req.rid} ids {len(ids)} slot {slot}")
+      self.miss_log(ids, self.stash_hit(ids, busy, slot))
+      self.stash_load(ids, busy, slot)
+      starts.append(model.prefix_to_slot(ids, slot))
+      lens.append(len(ids))
+      # (the model's conversation is in the slot: not saved again)
+      self.main_moved = True
+      self.slot_taken(slot)
+    pos, firsts = list(starts), [0] * len(batch)
+    while (todo:=[g for g in range(len(batch)) if pos[g] < lens[g]]):
+      chunks:list[tuple[list[int], int, float|tuple[float, float]]] = \
+        [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], (batch[g].temperature, batch[g].top_p)) for g in todo]
+      outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo])
+      for g, out in zip(todo, outs): pos[g], firsts[g] = min(lens[g], pos[g] + P), out
+    self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + time.perf_counter() - _p0
+    for g, (req, slot) in enumerate(zip(batch, free)):
+      pending.remove(req)
+      req.cache_start, req.pos = starts[g], lens[g]
+      # (its prompt's checkpoint from its slot, as ckpt_keep's: the model's own is another prompt's)
+      if self.slot_host() and getenv("SLOT_CKPT", 1) and not req.generated and lens[g] >= getenv("HOST_MIN", 4096) and \
+         callable(getattr(model, "ckpt_from_slot", None)):
+        model.ckpt_from_slot(slot, lens[g])
+        model._ckpt_tokens = list(req.ids)
+        self.ckpt_keep(req)
+        model._ckpt_tokens = []
+      trace(f"batch_continue done req {req.rid} slot {slot} start {starts[g]} pos {req.pos}")
+      req.spec_start(firsts[g], req.pos, k)
+      if self.emit(req, firsts[g]): active[slot] = req
+
   def preempt(self, active:dict, pending:list[Request]):
     """
     (PREEMPT_LONG) the batch drains for a request that doesn't fit a slot: the requests decoding stop now, not after their replies (thousands
@@ -861,6 +906,21 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               traceback.print_exc()
               self.finish(req, e)
             continue
+        # (BCP) new requests into free slots, prefilled together: each one's conversation from the model's or a kept one into its slot, the rest
+        # of its prompt (in chunks of P) continued there
+        if (G:=model.batch_prefills()) and getenv("BCP", 0) and callable(getattr(model, "prefix_to_slot", None)) and not drain:
+          room, most = model.batch_ctx() - model.BPF_P, getenv("BCP_MAX_NEW", 1536)
+          # (a prompt of many new tokens: alone, in big chunks (the prefill's chunks of up to 1536 rows run faster than a batch's of P))
+          def cont(r:Request) -> bool:
+            n = len(r.ids) + len(r.generated)
+            return self.batchable(r) and n <= room and n - self.stash_hit(r.ids + r.generated, set(active)) <= most
+          # (fewer than a step's worth while others decode: they wait BCP_WAIT seconds at most for more, agents' turns come one at a time)
+          while len(batch:=[r for r in pending if cont(r)][:min(G, slots - len(active))]) >= BCP_MIN and \
+                (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > getenv("BCP_WAIT", 1.5)):
+            self.batch_continue(batch, active, pending)
+          # (the ones that wait for more: not prefilled alone meanwhile. one that waited long enough is, if no others came)
+          waiting_bcp = {r for r in pending if cont(r) and time.perf_counter() - r.st <= getenv("BCP_WAIT", 1.5)} if active else set()
+        else: waiting_bcp = set()
         # new requests into free slots: short prompts prefilled together into theirs, (the others) prefilled, their states copied into the slot
         def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]
         # (with a step's worth waiting, they wait for that many free slots)
@@ -876,7 +936,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             req.cache_start, req.pos = 0, len(req.ids)
             req.spec_start(first, req.pos, k)
             if self.emit(req, first): active[slot] = req
-        for req in [r for r in pending if self.batchable(r) and not (defer and r in shorts())]:
+        for req in [r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp]:
           if len(active) >= slots or drain: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
