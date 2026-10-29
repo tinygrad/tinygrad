@@ -73,7 +73,7 @@ def hcq_fence(slots:UOp, tl:UOp, last:int) -> UOp: # wait for the previous run o
 
   loop = UOp.range(UOp(Ops.NOOP).after(start:=get_time_ms(target:=slots.index(last).load())), next(UOp.unique_num), dtype=dtypes.void)
   done = tl.after(target, loop).index(0).load()
-  return done.backedge(loop, (done < target) & (get_time_ms(done) - start < 30000)).sink()
+  return done.backedge(loop, (done < target) & (get_time_ms(done) - start < int(Compiled.wait_timeout_ms))).sink()
 
 def make_fence(slots:dict[str, UOp], num_queues:dict[str, int]) -> UOp:
   fences = [hcq_fence(patch(b, [], bytes(b.nbytes())), timeline(dev), 2 * num_queues[dev], name=to_name("fence", dev)) for dev, b in slots.items()]

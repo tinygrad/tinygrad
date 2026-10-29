@@ -407,6 +407,11 @@ class TestUint64DType(TestDType):
   @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
   def test_uint64_cast_double(self):
     assert Tensor([2**32 + 1], dtype=dtypes.uint64).cast(dtypes.double).numpy() == 2**32 + 1
+  def test_uint64_cast_float_rounds_once(self):
+    self.assertEqual(Tensor([2**25+3], dtype=dtypes.uint64).cast(dtypes.float32).tolist(), [2**25+4])
+  @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
+  def test_uint64_cast_double_rounds_once(self):
+    self.assertEqual(Tensor([2**63+2**10+1], dtype=dtypes.uint64).cast(dtypes.double).tolist(), [2**63+2**11])
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedUInt64DType(TestUint64DType):

@@ -1,7 +1,7 @@
 # all of symbolic lives here now
 import math
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype, identity_element
 from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, IMAGE, dedup, ceildiv
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -75,10 +75,13 @@ def const_arg(u:UOp):
 
 def lift_reduce_gate(red:UOp, cond:UOp, x:UOp, i:UOp) -> UOp|None:
   # a REDUCE moves inside the gate clauses without its ranges: they invalidate every lane at once, so that gate lifts out
-  if red.arg[1] != 0: return None
+  # the clauses with its ranges invalidate single lanes, an Invalid lane is the reduce's identity
+  op, horizontal = red.arg
+  if horizontal != 0: return None
   keep, lift = partition(cond.split_uop(Ops.AND), lambda c: any(rr in c.ranges for r in red.src[1:] for rr in r.ranges))
-  inner = keep[0].uprod(*keep[1:]).where(x, i) if keep else x
-  return lift[0].uprod(*lift[1:]).where(red.replace(src=(inner,)+red.src[1:]), i) if lift else None
+  inner = keep[0].uprod(*keep[1:]).where(x, x.const_like(identity_element(op, red.dtype))) if keep else x
+  ret = red.replace(src=(inner,)+red.src[1:])
+  return lift[0].uprod(*lift[1:]).where(ret, i) if lift else ret
 
 pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(name="s"), lambda i,s: i.expand(s.shape)),
@@ -475,8 +478,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
   # ** combine terms (opinionated) **
-  # -(x+y) -> -x + -y
-  (-1 * (UPat.var("x") + UPat.var("y")).named("a"), lambda a,x,y: (-x)+(-y) if fits(a, -x.vmin) and fits(a, -y.vmin) else None),
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.weakint) + UPat.var("y")).named("a") * UPat.cvar("c"),
    lambda a,x,y,c: x*c+y*c if all(fits(a, v*c.vmin) for v in (x.vmin, x.vmax, y.vmin, y.vmax)) else None),
