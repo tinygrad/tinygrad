@@ -2026,11 +2026,10 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
     return end
 
   sink = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
-  return to_program(sink, renderer)
+  return sink
 
 @rewrite_group(replay="emu_process_replay")
-@Context(CAPTURE_PROCESS_REPLAY=0)
-def compile_asm(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str) -> UOp:
+def lift_asm(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str) -> UOp:
   return lift(amd_decode(code, arch), arch, renderer, dispatch, name)
 
 dispatch_cache:dict[tuple, UOp] = {}
@@ -2046,11 +2045,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, len(user_data or []))
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = compile_asm(code, arch, renderer, dispatch, f"emu {name}")
+      dispatch_cache[key] = to_program(lift_asm(code, arch, renderer, dispatch, f"emu {name}"), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
-          ret = lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}")
+          ret = to_program(lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"),
+                           Device["AMD"].renderer)
         except Exception:
           print("relift err", traceback.format_exc())
           break
