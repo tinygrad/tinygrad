@@ -111,8 +111,7 @@ pm_data_invalid = PatternMatcher([
 
 pm_remove_invalid = PatternMatcher([
   (invalid_gate.named("w"), lambda cond,x,i,w: w.replace(src=(cond,x,w.const_like(0)))),
-  (UPat(Ops.STACK, name="s"), lambda s: s.replace(src=tuple(UOp.const(0, s.dtype) if x.is_invalid else x for x in s.src))
-   if any(x.is_invalid for x in s.src) else None),
+  (UPat(Ops.STACK, name="s"), lambda s: s.replace(src=tuple(UOp.const(0, s.dtype) if x.is_invalid else x for x in s.src))),
 ])
 
 def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
@@ -288,7 +287,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # max folding
   ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
   ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("a")), lambda a,b,c: UOp.maximum(a,b) if b.val == c.val else None),
-  (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
   # (x//c1)//c2 -> x//(c1*c2) for c2>0 when c1*c2 fits
@@ -298,9 +297,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # c0+x<c1 -> x < c1-c0
   ((UPat.cvar("c0") + UPat.var("x", dtype=dtypes.sints+(dtypes.weakint,))) < UPat.cvar("c1"),
    lambda x,c0,c1: x<(c1-c0) if fits(x, c1.vmin-c0.vmin) else None),
-  # x//d<c -> x<c*d for d>0, and -> c*d<x for d<0
+  # x//d<c -> x<c*d for d>0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
-   lambda x,d,c: (x<c.val*d.val) if d.val > 0 else (x>c.val*d.val) if d.val < 0 else None),
+   lambda x,d,c: (x<c.val*d.val) if d.val > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1 if y.op is not Ops.CONST else None),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1 if y.op is not Ops.CONST else None),
@@ -331,8 +330,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
                         else y.src for y in x.src[1:]]))))),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
-  # ranges can be subbed for CONSTs, remove them from ENDs. BACKEDGE conditions are never range selectors.
-  (UPat(Ops.END, name="x"), lambda x: x.replace(src=(x.src[0],)+tuple(r for r in x.src[1:] if r.op is not Ops.CONST))),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
 ])+div_and_mod_symbolic+pm_uncast_const
 
