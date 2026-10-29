@@ -24,11 +24,16 @@ class HCQInfo:
 
   skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
 
+# custom functions that run on a device queue. hostsignal/hostwait sync a graph with the host: the gpu tells the host something is ready
+# (hostsignal: the first buffer is set to 1 once the work before it is done) and waits for the host (hostwait: until the first buffer is 1,
+# then the caches are flushed so data the host or a peer device wrote is visible)
+QUEUE_FUNCTIONS = ("encdec", "hostsignal", "hostwait")
+
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
-  if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
+  if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name in QUEUE_FUNCTIONS): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
@@ -247,13 +252,6 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
 
-  # add barriers when a call deps on another call of its queue
-  barriers, last_barrier = set[int](), dict[tuple[str, str], int]()
-  for tag, (deps, queue) in enumerate(zip(dep_tags, queue_of)):
-    if any(queue_of[t] == queue and t >= last_barrier.get(queue, 0) for t in deps):
-      barriers.add(tag)
-      last_barrier[queue] = tag
-
   # keep only latest tags to wait for each queue
   call_waits = [{queue_of[t]: t for t in sorted(deps) if queue_of[t] != queue_of[tag]} for tag, deps in enumerate(dep_tags)]
 
@@ -273,6 +271,21 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
 
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
+
+  # kernels on a queue may overlap: a kernel waits for the earlier ones (exec_barrier) only if it accesses what they write or writes what
+  # they access. the (writes, accesses) since the last barrier per queue, as byte ranges (buffers in the jit's arena share a base)
+  barriers:set[int] = set()
+  pending:dict[tuple[str, str], tuple[list, list]] = {}
+  for tag, (call, dev, queue) in enumerate(ctx.batch):
+    if not (call.op is Ops.CALL and call.body.op is Ops.PROGRAM): continue
+    bufs = [(base, lane, off, off + b.max_numel() * b.dtype.itemsize) for b in get_call_arg_uops(call) for base, lane, off in [unwrap_lane(b)]]
+    pos = [k for k, a in enumerate(call.src[1:]) if not a.is_variable]
+    writes, (pw, pa) = [bufs[pos.index(i)] for i in get_call_outs_ins(call)[0]], pending.setdefault((dev, queue), ([], []))
+    if any(x[:2] == y[:2] and x[2] < y[3] and y[2] < x[3] for xs, ys in ((pw, bufs), (pa, writes)) for x in xs for y in ys):
+      barriers.add(tag)
+      del pw[:], pa[:]
+    pw.extend(writes)
+    pa.extend(bufs)
 
   def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
     barrier = [ins("exec_barrier")] if tag in barriers else []
@@ -323,7 +336,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 
   def queue_for(c:UOp) -> str:
     if c.body.op is Ops.PROGRAM: return "COMPUTE:0"
-    if c.body.op is Ops.CUSTOM_FUNCTION: return "ENCDEC:0"
+    if c.body.op is Ops.CUSTOM_FUNCTION: return "ENCDEC:0" if c.body.arg.name == "encdec" else "COMPUTE:0"
     return f"COPY:{copy_of.get((c.src[1].device, c.src[2].device), 0)}"
 
   devs = [get_enqueue_devs(c) for c in l.src]
@@ -345,6 +358,10 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
      lambda ctx, dst, src: ctx.copy(dst, src, src.max_numel() * src.dtype.itemsize)),
     (UPat(Ops.CALL, src=(UPat.custom_function("encdec", name="s"),), name="c", allow_any_len=True), lambda ctx, c, s: ctx.encdec(c, s)),
+    (UPat(Ops.CALL, src=(UPat.custom_function("hostsignal"), UPat(name="dst")), allow_any_len=True),
+     lambda ctx, dst: ctx.signal(dst, UOp.const(1, dtypes.u64))),
+    (UPat(Ops.CALL, src=(UPat.custom_function("hostwait"), UPat(name="dst")), allow_any_len=True),
+     lambda ctx, dst: (ctx.wait(dst, UOp.const(1, dtypes.u64)), ctx.memory_barrier())),
 
     # ins
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),

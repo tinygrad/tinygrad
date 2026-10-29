@@ -860,7 +860,7 @@ class AMDDevice(Compiled):
     super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, arch=self.arch)
 
     # Scratch setup
-    self.max_private_segment_size = 0
+    self.max_private_segment_size, self.old_scratch = 0, cast(list[Buffer], [])
     # the ring and its pointers of every queue it can make, made on first use
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
@@ -960,6 +960,8 @@ class AMDDevice(Compiled):
       mem_alignment_size = 256 if self.target[0] != 9 else 1024
       size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
       size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt
+      # the old scratch stays: kernels queued before may still use it, and freeing it synchronizes (a graph waiting on the host deadlocks)
+      if (old:=getattr(self, "scratch", None)) is not None: self.old_scratch.append(old)
       self.scratch = Buffer(self.device, size_per_xcc * self.xccs, options=BufferSpec(nolru=True), preallocate=True)
       self.max_private_segment_size = private_segment_size
       if hasattr(self, 'aql_desc'): self.aql_scratch()

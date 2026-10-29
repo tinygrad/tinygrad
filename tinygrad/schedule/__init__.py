@@ -1,5 +1,4 @@
-import time, inspect
-from collections import deque
+import heapq, itertools, time, inspect
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
@@ -27,6 +26,10 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
   if invalid := [s for s in remaining if s.op is not Ops.STORE]:
     raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
   return tuple(kernels), tuple(deps)
+
+def _host_sync(k:UOp, name:str) -> bool:
+  call = k.src[0] if k.op is Ops.END else k
+  return call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg.name == name
 
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
@@ -64,17 +67,33 @@ def create_schedule(sched_sink:UOp) -> UOp:
             in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
-    queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
+    # ready kernels go in order, but a graph that syncs with the host gets the host its signal as early as possible (the kernels a
+    # hostsignal needs first) and waits for it as late as possible (a hostwait only when nothing else is ready): the host works under
+    # the gpu's independent kernels
+    urgent = {k for k in in_degree if _host_sync(k, "hostsignal")}
+    if urgent:
+      parents: dict[UOp, list[UOp]] = {}
+      for p, cs in children.items():
+        for c in cs: parents.setdefault(c, []).append(p)
+      todo = list(urgent)
+      while todo:
+        new = [p for p in parents.get(todo.pop(), []) if p not in urgent]
+        urgent.update(new)
+        todo += new
+    def prio(k:UOp) -> int: return 0 if k in urgent else 2 if _host_sync(k, "hostwait") else 1
+    seq = itertools.count()
+    queue = [(prio(k), next(seq), k) for k,v in in_degree.items() if v == 0]
+    heapq.heapify(queue)
     linearized: list[UOp] = []
     while len(queue):
-      rk = queue.popleft()
+      rk = heapq.heappop(queue)[2]
       k = rk.src[0] if rk.op is Ops.END else rk
       assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
       buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
       linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+        if in_degree[x] == 0: heapq.heappush(queue, (prio(x), next(seq), x))
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
   return UOp(Ops.LINEAR, src=tuple(linearized))
 

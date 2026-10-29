@@ -27,6 +27,9 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.STORE: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
+  # hostsignal writes its flag after the buffers it follows, hostwait guards the buffers after its flag: the host fills them
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "hostsignal": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "hostwait": return tuple(range(1, len(get_call_arg_uops(call)))), (0,)
   return (), ()
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
@@ -45,6 +48,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   if ast.op is Ops.PROGRAM: return ast.src[0].arg.name
   if ast.op is Ops.STORE: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name in ("hostsignal", "hostwait"): return colored(ast.arg.name, "yellow")
   raise NotImplementedError("get_call_name is not implemented")
 
 # **************** Stat ****************
