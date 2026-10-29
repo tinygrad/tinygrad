@@ -2027,7 +2027,7 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
         end = emit_block(pc, end, scopes)
     return end
 
-  sink = emit_dispatch(regions, (wg,), initialized).end(wg).sink(arg=KernelInfo(name=name, optimized=True))
+  sink = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
   return to_program(sink, renderer)
 
 dispatch_cache:dict[tuple, UOp] = {}
