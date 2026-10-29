@@ -185,8 +185,7 @@ class NV_FLCN(NV_IP):
 
   def init_hw(self) -> bool:
     self.falcon, self.sec2 = 0x00110000, 0x00840000
-    ga102 = self.nvdev.chip_name == "GA102"
-    feats = getenv("NV_FULLRATE", 0) and self.nvdev.pci_dev.read_config(pci.PCI_DEVICE_ID, 2) in {0x2203, 0x2204, 0x2206, 0x220a, 0x2216, 0x2684}
+    speed_override = getenv("NV_OVERRIDE", 1) and self.nvdev.pci_dev.read_config(pci.PCI_DEVICE_ID, 2) in {0x2203,0x2204,0x2206,0x220a,0x2216,0x2684}
 
     self.reset(self.falcon)
     self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
@@ -195,13 +194,15 @@ class NV_FLCN(NV_IP):
       pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
     assert self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0, "WPR2 is not initialized"
 
-    if full_speed:=(feats and self.nvdev.rreg(0x823804) != 0xffffffff):
+    if needs_mid_reset:=(speed_override and self.nvdev.rreg(0x823804) != 0xffffffff):
       # unlock FEAT registers
-      code = ('ffffffff 19c d44 19c 19c 19c 823804 19c 1fce 19c 19c 0 19c 1101 84c8 8e18 19c 84c8 0 19c 1fce 19c 19c ffbc 19c 5789 19c '
-              '19c 19c d44 19c 19c 19c 3 19c 1fce 19c 19c 19c 19c d52 81ee 19c 19c 19c 19c' if ga102 else
-              'fffff0ff 19c 21b2 19c 19c 19c 1fa7cc 19c 33fc 19c 19c ffffffff 19c 256f 7a02 9a0148 19c 33fc 19c 19c ffffffff 19c 256f '
-              '7a02 1fa7c4 19c 33fc 19c 19c ffffffff 19c 256f 7a02 823804 19c 33fc 19c 19c 67b00001 19c 256f 7a02 19c 19c 31b5 771e')
-      desc = bytes(array.array('I', [7 if i == 0x1100 else 0x19c for i in range(0, 0xf948, 4)] + [int(x, 16) for x in code.split()]))
+      code = ([0xffffffff, 0x19c, 0xd44, 0x19c, 0x19c, 0x19c, 0x823804, 0x19c, 0x1fce, 0x19c, 0x19c, 0x0, 0x19c, 0x1101, 0x84c8, 0x8e18, 0x19c,
+               0x84c8, 0x0, 0x19c, 0x1fce, 0x19c, 0x19c, 0xffbc, 0x19c, 0x5789, 0x19c, 0x19c, 0x19c, 0xd44, 0x19c, 0x19c, 0x19c, 0x3, 0x19c, 0x1fce,
+               0x19c, 0x19c, 0x19c, 0x19c, 0xd52, 0x81ee, 0x19c, 0x19c, 0x19c, 0x19c] if self.nvdev.chip_name == "GA102" else
+              [0xfffff0ff, 0x19c, 0x21b2, 0x19c, 0x19c, 0x19c, 0x1fa7cc, 0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f, 0x7a02, 0x9a0148,
+               0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f, 0x7a02, 0x1fa7c4, 0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f,
+               0x7a02, 0x823804, 0x19c, 0x33fc, 0x19c, 0x19c, 0x67b00001, 0x19c, 0x256f, 0x7a02, 0x19c, 0x19c, 0x31b5, 0x771e])
+      desc = bytes(array.array('I', [7 if i == 0x1100 else 0x19c for i in range(0, 0xf948, 4)] + code))
       _, _, desc_addrs = self.nvdev._alloc_boot_mem(len(desc), data=desc, contiguous=True)
       meta = nv.GspFwWprMeta.from_buffer_copy(bytes(self.nvdev.gsp.wpr_meta[:ctypes.sizeof(nv.GspFwWprMeta)]))
       meta.sysmemAddrOfSignature, meta.sizeOfSignature = desc_addrs[0], len(desc)
@@ -217,15 +218,15 @@ class NV_FLCN(NV_IP):
     self.reset(self.sec2)
     mbx = self.execute_hs(self.sec2, self.booter_image_paddr, code_off=self.booter_code_off, data_off=self.booter_data_off,
       imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
-      pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
-    assert full_speed or mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
-    if full_speed: # GA102 doesn't set a mailbox marker
-      assert (ga102 or mbx[0] == 0x67b00001) and self.nvdev.rreg(0x823804) == 0xffffffff, f"FEAT setup failed, {mbx[0]:#x}"
-      return True # request reset
+      pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem,
+      wait_for=(lambda: self.nvdev.rreg(0x823804) == 0xffffffff) if needs_mid_reset and self.nvdev.chip_name == "GA102" else None)
+    assert needs_mid_reset or mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
+    if needs_mid_reset: return True
 
-    if feats:
+    if speed_override:
       for off, val in (regs:={0x82381c:0x88888888, 0x823820:0x8}).items(): self.nvdev.wreg(off, val)
-      assert all(self.nvdev.rreg(off) == v for off, v in regs.items()) and (ga102 or not self.nvdev.rreg(0x823818) & 0x07ffffff), "FEAT not latched"
+      assert all(self.nvdev.rreg(off) == v for off, v in regs.items()) and \
+        (self.nvdev.chip_name == "GA102" or not self.nvdev.rreg(0x823818) & 0x07ffffff), "FEAT not latched"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
     assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
@@ -255,7 +256,8 @@ class NV_FLCN(NV_IP):
 
   def wait_cpu_halted(self, base): wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_CPUCTL.with_base(base).read_bitfields()['halted'], msg="not halted")
 
-  def execute_hs(self, base, img_paddr, code_off, data_off, imemPa, imemVa, imemSz, dmemPa, dmemVa, dmemSz, pkc_off, engid, ucodeid, mailbox=None):
+  def execute_hs(self, base, img_paddr, code_off, data_off, imemPa, imemVa, imemSz, dmemPa, dmemVa, dmemSz, pkc_off, engid, ucodeid,
+                 mailbox=None, wait_for=None):
     self.disable_ctx_req(base)
 
     # target=0 is FB (not in published headers)
@@ -281,7 +283,8 @@ class NV_FLCN(NV_IP):
       self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
 
     self.start_cpu(base)
-    self.wait_cpu_halted(base)
+    if wait_for is None: self.wait_cpu_halted(base)
+    else: wait_cond(wait_for, msg="Firmware did not complete")
 
     if mailbox is not None:
       return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
