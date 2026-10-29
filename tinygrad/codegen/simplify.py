@@ -21,8 +21,8 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
-    # check same type
-    if r0.axis_type == r1.axis_type:
+    # check same type and neither bound depends on the other range
+    if r0.axis_type == r1.axis_type and r0 not in r1.ranges and r1 not in r0.ranges:
       # check if the ranges to merge are in the same reduces
       if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
         s0, s1 = r0.src[0], r1.src[0]
