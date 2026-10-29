@@ -37,6 +37,8 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     v = Variable("v", 0, 2).bind(1)
     self.assertEqual(Tensor(UOp.stack(*[UOp.const(x, dtypes.int) for x in (42, 43, 44)]).index(v)).item(), 43)
     self.assertEqual(Tensor((Tensor([1, 2, 3]).realize().uop + 1).index(v)).item(), 3)
+    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(v)).item(), 2)
+    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(Tensor([2]).realize()[0].uop % 3)).item(), 3)
     self.assertEqual([Tensor((Tensor([1, 2, 3]).realize().uop + 1).pad(((1, 1),)).index(Variable("p", 0, 4).bind(i))).item() for i in range(5)],
                      [0, 2, 3, 4, 0])
     stack = UOp.stack(UOp.const(42, dtypes.int)).pad(((1, 1),))
