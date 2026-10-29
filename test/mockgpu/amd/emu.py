@@ -50,7 +50,7 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, uopfunc, AxisType
+from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, uopfunc, AxisType, rewrite_group
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
@@ -2028,6 +2028,11 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
   sink = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
   return to_program(sink, renderer)
 
+@rewrite_group(replay="emu_process_replay")
+@Context(CAPTURE_PROCESS_REPLAY=0)
+def compile_asm(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str) -> UOp:
+  return lift(amd_decode(code, arch), arch, renderer, dispatch, name)
+
 dispatch_cache:dict[tuple, UOp] = {}
 
 RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
@@ -2035,13 +2040,13 @@ RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None, name: str = "asm") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0,
+  with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="",
                DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
     code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, len(user_data or []))
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = lift(amd_decode(code, arch), arch, renderer, dispatch, f"emu {name}")
+      dispatch_cache[key] = compile_asm(code, arch, renderer, dispatch, f"emu {name}")
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:

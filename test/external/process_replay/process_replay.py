@@ -69,12 +69,12 @@ replayers["do_to_program"] = replay_to_program
 
 # *** run replayers on captured rows and print diffs
 
-def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
+def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]], table_name:str=TABLE_NAME) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
     if changed > MAX_DIFF_PCT:
@@ -105,28 +105,32 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
 
 # *** generic runner to map rows of a table to a function in parallel
 
-def _pmap(fxns:dict[str, Callable]) -> None:
+def _pmap(fxns:dict[str, Callable], table_name:str=TABLE_NAME) -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  try: row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
   except sqlite3.OperationalError:
-    raise RuntimeError(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    raise RuntimeError(f"{table_name} isn't accessible in master, did DB_VERSION change?")
   finally:
     cur.close()
 
+  if not row_count: return
   with ProcessPoolExecutor(multiprocessing.cpu_count(), mp_context=multiprocessing.get_context("spawn")) as pool:
     with tqdm(total=row_count) as bar:
-      for _ in pool.map(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(min(s, row_count-bar.n))
+      for _ in pool.map(functools.partial(diff, fxns=fxns, table_name=table_name), range(0, row_count, s:=min(PAGE_SIZE, row_count))):
+        bar.update(min(s, row_count-bar.n))
 
 # *** main loop
 
-if __name__ == "__main__":
+def main(fxns:dict[str, Callable], table_name:str=TABLE_NAME) -> None:
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
 
   logging.info(f"running process replay with {ASSERT_DIFF=}")
-  try: _pmap(replayers)
+  try: _pmap(fxns, table_name)
   except Exception as e:
     logging.info(f"process replay err: {e}")
     exit(int(ASSERT_DIFF))
+
+if __name__ == "__main__": main(replayers)
