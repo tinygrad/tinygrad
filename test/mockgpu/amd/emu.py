@@ -1845,8 +1845,6 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
 
 def instruction_block(instructions:list[tuple[int, UOp]]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({b for _,call in instructions for b in call.src[1:] if b.op is Ops.PARAM and b.arg.slot != -1}, key=lambda b:b.arg.slot)
-  base = UOp.param(len(bufs), dtypes.uint64, name="code_base", addrspace=AddrSpace.ALU) + \
-         UOp.param(len(bufs)+1, dtypes.uint64, name="block_offset", addrspace=AddrSpace.ALU)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   seen = set(linear)
