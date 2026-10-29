@@ -229,28 +229,8 @@ def _write_val(bits: int, val: UOp, wfn, reg_or_addr, *args, is_mem: bool = Fals
   """Write value, splitting 64-bit if needed. bits=64 for 64-bit writes, otherwise 32-bit."""
   return _write_64bit(val, wfn, reg_or_addr, is_mem, *args) if bits == 64 else [wfn(reg_or_addr, _to_u32(val), *args)]
 
-def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
-  """Conditional memory store with sub-word support. Returns list of store UOps."""
-  word_addr = addr >> UOp.const(2, dtypes.uint64)
-  idx = mem.index(word_addr.valid(active))
-  if data_bits == 32: return _mem_store_bytes(mem.bitcast(dtypes.uint8), addr, val, active)
-  # Sub-word store: read-modify-write with mask
-  byte_pos = addr.cast(dtypes.uint32) & _c(3)
-  byte_shift = byte_pos * _c(8)
-  val_u32, size_mask = val.cast(dtypes.uint32), _c(0xFF if data_bits == 8 else 0xFFFF)
-  mask = size_mask << byte_shift
-  new_word = (idx & (mask ^ _c(0xFFFFFFFF))) | ((val_u32 & size_mask) << byte_shift)
-  if data_bits == 8: return [idx.store(active.where(new_word, idx))]
-  # 16-bit cross-word case: byte_pos == 3 means value spans two words
-  is_cross = byte_pos.eq(_c(3))
-  cross_word0 = (idx & _c(0x00FFFFFF)) | ((val_u32 & _c(0xFF)) << _c(24))
-  store0 = idx.store(active.where(is_cross.where(cross_word0, new_word), idx))
-  next_idx = mem.index((word_addr + UOp.const(1, dtypes.uint64)).valid(active & is_cross))
-  cross_word1 = (next_idx & _c(0xFFFFFF00)) | ((val_u32 >> _c(8)) & _c(0xFF))
-  return [store0, next_idx.store((active & is_cross).where(cross_word1, next_idx))]
-
 def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
-  """Store to byte-addressable memory (scratch). addr is byte offset, mem is uint8 buffer."""
+  """Store to byte-addressable memory. addr is byte offset, mem is uint8 buffer."""
   stores = []
   val_u32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
   for i in range(data_bits // 8):
@@ -1626,8 +1606,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       if is_lds or is_atomic:
         if data_bits < 32 and is_lds: return [wmem(val[0], val[1], active, data_bits)]
         return _write_val(data_bits, val[1], wmem, val[0], active, is_mem=True)
-      if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
-      return _mem_store(mem, val[0], val[1], active, data_bits)
+      return _mem_store_bytes(mem if is_scratch else mem.bitcast(dtypes.uint8), val[0], val[1], active, data_bits)
     if dest.startswith('RETURN_DATA') and writes_return_data:
       write_gpr = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
       _wdata = lambda r, v, l, e: write_gpr(r, l, v, e)  # noqa: E731  (arg order: reg, val, lane, exec)
