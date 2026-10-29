@@ -23,7 +23,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
              if st.op is Ops.STORE and st.src[0].unsharded_base.op is Ops.PARAM} if fxn.op is Ops.SINK and fxn.arg is None else {}
   if k.arg.grad_fxn is not None:
     real = [g.clone(device=args[i].device) if g.device is None else g
-            for i,g in enumerate(ctx.src if ctx.op is Ops.SINK else (ctx,)) if g.op is not Ops.NOOP]
+            for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
     git = iter(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return (None,) + tuple(None if i in outputs else next(git) for i in range(len(args)))
   assert outputs, f"expected a CALL with output STOREs or a grad_fxn, got {fxn.op}"
