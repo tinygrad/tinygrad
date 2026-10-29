@@ -2,8 +2,9 @@
 # usage: replay.py [clang,llvm,amd] [asm]
 import functools, re, sys
 from dataclasses import replace
-from test.mockgpu.amd.emu import lift_asm
+from test.mockgpu.amd.emu import lift
 from tinygrad.codegen import to_program
+from tinygrad.device import Device
 from tinygrad.helpers import VERSION, Target
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import ClangRenderer, HIPRenderer
@@ -38,11 +39,11 @@ def get_output(p:UOp, renderer:Renderer, asm:bool=False) -> str:
 
 def replay_asm(ast:UOp, code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str,
                backends:tuple[str, ...], asm:bool=False) -> tuple[str, str, tuple]:
-  compare = lift_asm(code, arch, renderer, dispatch, name)
+  compare = lift(code, arch, renderer, dispatch, name)
   good_outs, compare_outs = [], []
   for backend in backends:
     target = Target("AMD", "HIP", {"rdna3":"gfx1100", "rdna4":"gfx1200", "cdna":"gfx950"}[arch]) if backend == "amd" else \
-      replace(renderer.target, device="CPU", renderer=backend.upper())
+      replace(Device["CPU"].renderer.target, renderer=backend.upper())
     ren = {"clang":ClangRenderer, "llvm":CPULLVMRenderer, "amd":HIPRenderer}[backend](target)
     good_outs.append(get_output(to_program(ast, ren), ren, asm))
     compare_outs.append(get_output(to_program(compare, ren), ren, asm))
@@ -51,4 +52,4 @@ def replay_asm(ast:UOp, code:bytes, arch:str, renderer:Renderer, dispatch:tuple,
 if __name__ == "__main__":
   from test.external.process_replay.process_replay import main
   backends = tuple((sys.argv[1] if len(sys.argv) > 1 else "clang").split(","))
-  main({"lift_asm":functools.partial(replay_asm, backends=backends, asm=bool(sys.argv[2:]))}, f"emu_process_replay_{VERSION}")
+  main({"lift":functools.partial(replay_asm, backends=backends, asm=bool(sys.argv[2:]))}, f"emu_process_replay_{VERSION}")

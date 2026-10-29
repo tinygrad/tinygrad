@@ -1931,7 +1931,9 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     return regions
   return build(set(order))
 
-def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+@rewrite_group(replay="emu_process_replay")
+def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+  insts = amd_decode(code, arch)
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
     if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"AMD lifter does not support {inst_st}")
@@ -2028,10 +2030,6 @@ def lift(insts:dict[int, Inst], arch:str, renderer:Renderer, dispatch:tuple, nam
   sink = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
   return sink
 
-@rewrite_group(replay="emu_process_replay")
-def lift_asm(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str) -> UOp:
-  return lift(amd_decode(code, arch), arch, renderer, dispatch, name)
-
 dispatch_cache:dict[tuple, UOp] = {}
 
 RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
@@ -2045,11 +2043,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, len(user_data or []))
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift_asm(code, arch, renderer, dispatch, f"emu {name}"), renderer)
+      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}"), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
-          ret = to_program(lift(amd_decode(relift_lib, arch), arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"),
+          ret = to_program(lift(relift_lib, arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"),
                            Device["AMD"].renderer)
         except Exception:
           print("relift err", traceback.format_exc())
