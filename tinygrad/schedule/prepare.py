@@ -151,6 +151,24 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def _stacked_buffers(x:UOp) -> bool:
+  # the values of the devices stacked, each materialized (a buffer, or a STAGE: materialized by itself), reshaped: a multi device value
+  while x.op is Ops.RESHAPE: x = x.src[0]
+  return x.op is Ops.MSTACK and all(s.has_buffer_identity(after_ok=True) or s.op is Ops.STAGE for s in x.src)
+
+def _stageable(x:UOp) -> bool:
+  # a computed value a STAGE materializes (not a view of a buffer, one materialized already, a scalar or a variable)
+  return x.op not in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM, Ops.LOAD, Ops.CALL, Ops.COPY, Ops.STAGE,
+                      Ops.UNSHARD, *GroupOp.Movement} and not x.is_variable and x._shape is not None and x.shape != () and \
+    not (x.has_buffer_identity(after_ok=True) or _stacked_buffers(x))
+
+def stage_custom_kernel_srcs(c:UOp) -> UOp|None:
+  # the inputs of a custom kernel are buffers: a computed one gets its own (from tinygrad PR 18863)
+  def staged(s:UOp) -> UOp:
+    if s.op is Ops.RESHAPE: return staged(s.src[0]).reshape(s.shape) if _stageable(s.src[0]) else s
+    return s.contiguous() if _stageable(s) else s
+  return c.replace(src=(c.src[0], *new)) if (new:=tuple(staged(s) for s in c.src[1:])) != c.src[1:] else None
+
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
@@ -214,7 +232,13 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
   (UPat(Ops.STAGE, src=(UPat.var("x"),)),
-   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY or _stacked_buffers(x) else None),
+
+  # the inputs of a custom kernel are materialized: a STAGE of them too (one buffer for it and a STAGE of the same value, not a copy)
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), allow_any_len=True, name="c"), stage_custom_kernel_srcs),
+  # a STAGE of a reshape is the reshape of the STAGE (the same buffer as a STAGE of the value)
+  (UPat(Ops.STAGE, src=(UPat(Ops.RESHAPE, name="r"),)),
+   lambda r: r if r.src[0].op is Ops.STAGE else r.src[0].contiguous().reshape(r.shape) if _stageable(r.src[0]) else None),
 
   # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
   (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
