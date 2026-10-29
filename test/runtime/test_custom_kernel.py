@@ -289,6 +289,16 @@ class TestCustomKernel(unittest.TestCase):
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
+  def test_unused_reduce_dependency(self):
+    for value in (UOp.const(2), UOp.const((1, 2, 3, 4)).reshape((2, 2))):
+      with self.subTest(shape=value.shape):
+        def kernel(C:UOp) -> UOp:
+          i = UOp.range(3, 0, AxisType.LOOP)
+          cell = C.after(i)[0]
+          v = value.after(cell.store(cell + 1))
+          return C.after(v.reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+        self.assertEqual(Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [3])
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
     # j%2 splits j into two ranges, both are still LOCAL
