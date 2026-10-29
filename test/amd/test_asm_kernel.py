@@ -316,7 +316,7 @@ class TestAsmKernel(unittest.TestCase):
 
   def test_readlane(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
-    def readlane_kernel(out:UOp):
+    def readlane_kernel(out:UOp, threads:int):
       insts = [
         s_load_b64(s[0:1], s[0:1], soffset=NULL),
         s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
@@ -327,10 +327,11 @@ class TestAsmKernel(unittest.TestCase):
         global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
         s_endpgm(),
       ]
-      sink = UOp.sink(out.base, UOp.special(64, "lidx0"), arg=KernelInfo("wave_sgprs"))
+      sink = UOp.sink(out.base, UOp.special(threads, "lidx0"), arg=KernelInfo(f"wave_sgprs_{threads}"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
-    out = Tensor(np.full(64, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=readlane_kernel)[0]
-    self.assertListEqual(out.tolist(), [0]*32 + [32]*32)
+    for t in [31, 55, 64]:
+      out = Tensor(np.full(t, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=functools.partial(readlane_kernel, threads=t))[0]
+      self.assertListEqual(out.tolist(), [i//32*32 for i in range(t)])
 
   def test_plus_tensor(self):
     out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
