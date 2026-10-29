@@ -150,8 +150,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # (x&mask)>>k -> x>>k when mask only clears bits below k
   ((UPat.var("x") & UPat.cvar("mask")) >> UPat.cvar("k"),
    lambda x,mask,k: x >> k.val if x.dtype.const(mask.val | ((1 << k.val) - 1)) == x.dtype.const(-1) else None),
-  ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
-   lambda x,mask,c: x // c.val if c.val > 0 and c.val & (c.val-1) == 0 and x.dtype.const(mask.val | (c.val-1)) == x.dtype.const(-1) else None),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).eq(UPat.var("x")),
    lambda x: x.const_like(True, dtypes.bool)), # x == x -> True (only ints)
   # ** constant folding **

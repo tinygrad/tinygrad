@@ -480,17 +480,9 @@ class TestSymbolic(unittest.TestCase):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
 
-  def test_masked_idiv_fold(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
-    self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
-
   def test_masked_shr_fold_committed_mask(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) >> 2, 0, 63, "(x>>2)")
-
-  def test_masked_idiv_fold_committed_mask(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
-    self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) // 4, 0, 63, "(x//4)")
 
   def test_signed_const_wraps(self):
     c = UOp.const(2**31, dtypes.int32)
