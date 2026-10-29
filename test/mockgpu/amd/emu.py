@@ -366,10 +366,7 @@ class _Ctx:
 
   def rexec(self) -> UOp:
     """Read full EXEC mask (32-bit for RDNA, 64-bit for CDNA)."""
-    lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
-    if self.wave_size <= 32: return lo
-    hi = self.rsgpr_dyn(_c(EXEC_LO.offset + 1))
-    return _u64(lo, hi)
+    return self.rmask(_c(EXEC_LO.offset))
 
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
