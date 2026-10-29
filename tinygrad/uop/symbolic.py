@@ -284,7 +284,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.cvar().or_casted(),), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
-  ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("a")), lambda a,b,c: UOp.maximum(a,b) if b.val == c.val else None),
+  # (a<b).where(c, a+(c-b)) -> max(a+(c-b), c), the shift needs a signed int so the unselected arm can't wrap
+  ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("y")), lambda a,b,c,y: UOp.maximum(y,c) if (y is a and b.val == c.val) or
+   (dtypes.is_int(a.dtype) and not dtypes.is_unsigned(a.dtype) and y is a+(c.val-b.val)) else None),
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
