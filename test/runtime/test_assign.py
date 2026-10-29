@@ -792,6 +792,21 @@ class TestAssignOrdering(unittest.TestCase):
     Tensor.realize(x, y, z)
     np.testing.assert_equal(z.numpy(), [18.0, 20.0])
 
+  def test_war_contiguous_view_reader(self):
+    a = Tensor([1, 2, 3]).realize()
+    b = Tensor([0]).realize()
+    b.assign(a[2:].contiguous())
+    a.assign(Tensor([4, 5, 6]))
+    Tensor.realize(a, b)
+    self.assertEqual(b.tolist(), [3])
+
+  def test_war_copied_slice_reader(self):
+    a = Tensor([1, 2, 3]).realize()
+    b = a[1:].to("CPU:1")
+    a += 1
+    Tensor.realize(a, b)
+    self.assertEqual(b.tolist(), [2, 3])
+
   def test_war_multi_read_then_assign(self):
     devices = ("CPU:0", "CPU:1")
     for realize_reader_first in (False, True):
