@@ -2933,8 +2933,9 @@ def grouped_rows(buf:Tensor, rows:Tensor, positions:Tensor, stride:int, slots:Te
                               fxn=functools.partial(_grouped_rows_kernel, stride=stride))[0]
 
 @functools.cache
-def _slot_scatter_kernel(dst:UOp, src:UOp, slots:UOp, counts:UOp, S:int, shift:int) -> UOp:
-  # row slots[g]*S + counts[g]%S of dst (n*S, rows, F) <- rows shift*counts[g].. (rows of them) of src[g] (G, R, F), cast to dst's dtype
+def _slot_scatter_kernel(dst:UOp, src:UOp, slots:UOp, counts:UOp, *starts:UOp, S:int, shift:int) -> UOp:
+  # row slots[g]*S + (starts[g]+counts[g])%S of dst (n*S, rows, F) <- rows shift*counts[g].. (rows of them) of src[g] (G, R, F), cast to
+  # dst's dtype (no starts: 0)
   G, _, F = cast(tuple[int, int, int], src.shape)
   rows = cast(int, dst.shape[1])
   L = math.gcd(F, 256)
@@ -2942,15 +2943,34 @@ def _slot_scatter_kernel(dst:UOp, src:UOp, slots:UOp, counts:UOp, S:int, shift:i
                      UOp.range(L, 3, AxisType.LOCAL))
   f, cnt = blk * L + lane, counts[g].load().cast(dtypes.weakint)
   value = src[g, shift * cnt + r, f].load().cast(dst.dtype)
-  store = dst[slots[g].load().cast(dtypes.weakint) * S + cnt % S, r, f].store(value)
+  pos = cnt + starts[0][g].load().cast(dtypes.weakint) if starts else cnt
+  store = dst[slots[g].load().cast(dtypes.weakint) * S + pos % S, r, f].store(value)
   return store.end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_scatter", opts_to_apply=()))
 
-def slot_scatter(pool:Tensor, src:Tensor, slots:Tensor, counts:Tensor, S:int, shift:int=0) -> Tensor:
+def slot_scatter(pool:Tensor, src:Tensor, slots:Tensor, counts:Tensor, S:int, shift:int=0, starts:Tensor|None=None) -> Tensor:
   """
-  the states of G sequences into their slots: pool (n*S, rows, F) row slots[g]*S + counts[g]%S (a slot's S rows, the one of position
-  counts[g]) is rows shift*counts[g].. (rows of them) of src[g] (G, R, F). returns pool after
+  the states of G sequences into their slots: pool (n*S, rows, F) row slots[g]*S + (starts[g]+counts[g])%S (a slot's S rows, the one of
+  position starts[g]+counts[g], no starts: 0) is rows shift*counts[g].. (rows of them) of src[g] (G, R, F). returns pool after
   """
-  return Tensor.custom_kernel(pool, src, slots, counts, fxn=functools.partial(_slot_scatter_kernel, S=S, shift=shift))[0]
+  return Tensor.custom_kernel(pool, src, slots, counts, *([starts] if starts is not None else []),
+                              fxn=functools.partial(_slot_scatter_kernel, S=S, shift=shift))[0]
+
+@functools.cache
+def _slot_gather_kernel(dst:UOp, pool:UOp, slots:UOp, starts:UOp, S:int) -> UOp:
+  # dst[g] (G, rows, F) <- row slots[g]*S + starts[g]%S of pool (n*S, rows, F), cast to dst's dtype
+  G, rows, F = cast(tuple[int, int, int], dst.shape)
+  L = math.gcd(F, 256)
+  g, r, blk, lane = (UOp.range(G, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(F // L, 2, AxisType.GLOBAL),
+                     UOp.range(L, 3, AxisType.LOCAL))
+  f = blk * L + lane
+  row = slots[g].load().cast(dtypes.weakint) * S + starts[g].load().cast(dtypes.weakint) % S
+  return dst[g, r, f].store(pool[row, r, f].load().cast(dst.dtype)).end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_gather", opts_to_apply=()))
+
+def slot_gather(pool:Tensor, slots:Tensor, starts:Tensor, S:int, dtype:DType) -> Tensor:
+  """the states of G sequences at their positions from their slots: (G, rows, F) of rows slots[g]*S + starts[g]%S of pool (n*S, rows, F)"""
+  out = Tensor.empty(int(slots.shape[0]), *pool.shape[1:], dtype=dtype, device=pool.device,
+                     axis=None if pool.uop.axis is None else pool.uop.axis)
+  return Tensor.custom_kernel(out, pool, slots, starts, fxn=functools.partial(_slot_gather_kernel, S=S))[0]
 
 def _slot_of(slots:tuple[UOp, ...], g:UOp) -> UOp:
   """the slot of sequence g of a grouped kernel: g, or slots[g]"""

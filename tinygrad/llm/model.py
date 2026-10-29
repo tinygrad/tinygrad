@@ -8,7 +8,7 @@ from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
-  indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, \
+  indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, slot_gather, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
@@ -289,6 +289,8 @@ class BatchPrefill:
   """a step of prefills of G prompts into slots (Transformer.forward_batch_prefill): P rows each, their token counts and slots (tensors and the
   variables they're of), the effects of the blocks (the states into the slots) realized with the step"""
   P:int; counts:Tensor; slots:Tensor; count_vars:tuple[UOp, ...]; slot_vars:tuple[UOp, ...]; effects:list = field(default_factory=list) # noqa: E702
+  # (the positions the prompts start at: a continuation of the conversation in the slot, from its states at the position. None: all at 0)
+  starts:Tensor|None = None
   @property
   def real(self) -> Tensor:
     """(G*P,) the rows that are tokens (the others pad a prompt to P rows)"""
@@ -1194,8 +1196,16 @@ class GatedDeltaNetBlock(FFNBlock):
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
     beta, log_alpha = real.where(beta, 0), real.unsqueeze(-1).where(log_alpha, 0)
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
-    # the windows of the prompts from position 0 (zeros before), the conv state of a slot the last C-1 inputs before its prompt's end
-    windows = [proj(xg).float().pad(((0, 0), (C-1, 0), (0, 0))).contiguous() for proj in (self.attn_q, self.attn_k, self.attn_v)]
+    slots = pf.slots.to(x.device)
+    starts = pf.starts.to(x.device) if pf.starts is not None else None
+    # the windows of the prompts: the C-1 inputs before a prompt (its slot's conv state at its start, zeros at position 0) and its rows, the conv
+    # state of a slot the last C-1 inputs before its prompt's end
+    if starts is None: windows = [proj(xg).float().pad(((0, 0), (C-1, 0), (0, 0))).contiguous() for proj in (self.attn_q, self.attn_k, self.attn_v)]
+    else:
+      cont = (starts > 0).reshape(G, 1, 1)
+      SC = int(self.slot_conv[0][0].shape[0])
+      before = [cont.where(slot_gather(pool.reshape(pool.shape[0], C-1, -1), slots, starts, SC, dtypes.float), 0) for pool in self.pool_conv]
+      windows = [b.cat(proj(xg).float(), dim=1).contiguous() for b, proj in zip(before, (self.attn_q, self.attn_k, self.attn_v))]
     if self.head_k_dim == self.head_v_dim and self.num_v_heads == self.num_k_heads and K % 32 == 0 and amd_custom_kernels_supported(x.device):
       # the convolutions and norms of q, k and v in a kernel (as _attention's): the windows one after another, a prompt's output rows the ones
       # of its window (the rows across two windows are dropped)
@@ -1211,16 +1221,22 @@ class GatedDeltaNetBlock(FFNBlock):
       v = convs[2].reshape(G, P, H, V)
       q, k, v = (z.transpose(1, 2).float() for z in (q, k, v))
       q, kq = q * K**-0.5, None
-    state = Tensor.empty(G, H, V, K, dtype=dtypes.float32, device=x.device, axis=self.recurrent_state.uop.axis and 1).zeros_like().contiguous()
+    S = int(self.slot_rec[0].shape[0])
+    if starts is None:
+      state = Tensor.empty(G, H, V, K, dtype=dtypes.float32, device=x.device, axis=self.recurrent_state.uop.axis and 1).zeros_like().contiguous()
+    else:
+      # (a continuation: its slot's state of its start position, zeros at position 0)
+      rec = slot_gather(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), slots, starts, S, dtypes.float).reshape(G, H, V, K)
+      state = (starts > 0).reshape(G, 1, 1, 1).where(rec, 0).contiguous()
     core = gated_delta_prefill(q, k, v, beta.transpose(1, 2).float(), log_alpha.transpose(1, 2).exp(), state, kq=kq).transpose(1, 2)
     # the states into the slots (the scan updated state in place: after it)
-    S = int(self.slot_rec[0].shape[0])
     state = Tensor(state.uop.after(core.uop))
-    slots, counts = pf.slots.to(x.device), pf.counts.to(x.device)
-    pf.effects.append(slot_scatter(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), state.reshape(G, 1, -1), slots, counts, S))
+    counts = pf.counts.to(x.device)
+    pf.effects.append(slot_scatter(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), state.reshape(G, 1, -1), slots, counts, S,
+                                   starts=starts))
     # (a conv state: the window's rows count.. of the prompt, the C-1 inputs before its end)
-    pf.effects.extend(slot_scatter(pool.reshape(pool.shape[0], C-1, -1), window, slots, counts, int(self.slot_conv[0][0].shape[0]), shift=1)
-                      for pool, window in zip(self.pool_conv, windows))
+    pf.effects.extend(slot_scatter(pool.reshape(pool.shape[0], C-1, -1), window, slots, counts, int(self.slot_conv[0][0].shape[0]), shift=1,
+                                   starts=starts) for pool, window in zip(self.pool_conv, windows))
     z = (self.ssm_norm(core) * out_gate.sigmoid()).cast(x.dtype).contiguous()
     return _out(self.ssm_out, z.reshape(Bt, Tq, -1))
 
@@ -1557,6 +1573,16 @@ class Transformer:
     v_mtp, v_j, v_pos, v_par, v_chain = self._spec_vars
     self._spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature, *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
 
+  def _wait_host(self, get:Callable[[], Any], what:str) -> Any:
+    """the value a step writes to host memory (polled: -1 until then). a step that doesn't come (the devices' errors): an error, not a hang"""
+    st = time.perf_counter()
+    while isinstance(v:=get(), int) and v < 0:
+      if time.perf_counter() - st > 10:
+        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+        if isinstance(v:=get(), int) and v < 0: raise RuntimeError(f"{what}: none after the devices finished")
+        break
+    return v
+
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
     k, host, host_out = self.config.spec_drafts, self._spec_host, self._spec_host_out
@@ -1569,7 +1595,7 @@ class Transformer:
     host[0], mtp_pos, j, par = tokens[-1], len(tokens) - 1, 0, 1
     launched = launch(mtp_pos, j, par)
     while launched:
-      while min(out:=host_out.tolist()) < 0: pass
+      out = self._wait_host(lambda: min(o:=host_out.tolist()) >= 0 and o or -1, "a step of speculative decoding")
       sampled, drafts = out[:k+1], out[k+1:]
       j, pos = next((i for i in range(k) if drafts[i] != sampled[i]), k), mtp_pos + j
       host[0:k+1] = array.array('i', sampled)
@@ -1997,12 +2023,13 @@ class Transformer:
     last. returns (1, G) the tokens
     """
     G, P, devs, k = self.BPF_G, self.BPF_P, self.token_embd.weight.device, self.config.spec_drafts
-    cvars, svars = vs[:G], vs[G:2*G]
+    cvars, svars, stvars = vs[:G], vs[G:2*G], vs[2*G:3*G]
     # (a stack of variables has no device: onto zeros of the devices)
     def ints(xs:tuple[UOp, ...]) -> Tensor:
       return (Tensor.zeros(len(xs), dtype=dtypes.int32, device=devs) + Tensor.stack(*[Tensor(x) for x in xs]).cast(dtypes.int32)).contiguous()
-    pf = BatchPrefill(P, ints(cvars), ints(svars), cvars, svars)
-    _batch_rows[0], _batch_prefill[0], Q8_ROWS_I8[0] = [(UOp.const(0, dtypes.weakint), P)] * G, pf, False
+    pf = BatchPrefill(P, ints(cvars), ints(svars), cvars, svars, starts=ints(stvars) if stvars else None)
+    _batch_rows[0] = [(st, P) for st in stvars] if stvars else [(UOp.const(0, dtypes.weakint), P)] * G
+    _batch_prefill[0], Q8_ROWS_I8[0] = pf, False
     try:
       emb = self.token_embd(self._bpf_in.to(devs)).float()
       x = emb
@@ -2033,26 +2060,32 @@ class Transformer:
     context of 64K or less (as the slots of more sequences)
     """
     return self.BPF_G if self.batch_sizes() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
-      not seq_sharded(self.token_embd.weight.device) and \
+      (not seq_sharded(self.token_embd.weight.device) or getenv("BPF_SEQ", 0)) and \
       self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
   def _bpf_jit(self):
     if not hasattr(self, "_bpf_jit_"): self._bpf_jit_ = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)
     return self._bpf_jit_
-  def _bpf_vars(self, counts:list[int], slots:list[int]) -> list[UOp]:
+  def _bpf_vars(self, counts:list[int], slots:list[int], starts:list[int]|None=None) -> list[UOp]:
     return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
-           [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)]
-  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]]) -> list[int]:
-    """prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one"""
+           [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)] + \
+           [UOp.variable(f"bpf_start{g}", 0, self.batch_ctx()-1).bind(st) for g, st in enumerate(starts or [0]*len(counts))]
+  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]], starts:list[int]|None=None) -> list[int]:
+    """
+    prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one.
+    starts: the positions they start at (a conversation continued from its states in the slot at the position), None: 0
+    """
     self._init_slots()
     G, P, n = self.BPF_G, self.BPF_P, len(prompts)
     assert 0 < n <= G and all(0 < len(t) <= P for t, _, _ in prompts)
+    starts = (starts or [0] * n) + [(starts or [0] * n)[-1]] * (G - n)
+    assert all(st + P <= self.batch_ctx() for st in starts), "a prompt past its slot"
     # (the rest of the G: the last one again, the same writes)
     prompts = prompts + [prompts[-1]] * (G - n)
     for g, (toks, _, temp) in enumerate(prompts):
       self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
       self._batch_host_temp[2*g:2*g+2] = _temp_pair(temp)
     self._bpf_host_out[:G] = array.array('i', [-1] * G)
-    self._bpf_jit()(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts]))
+    self._bpf_jit()(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts], starts))
     st = time.perf_counter()
     while min(self._bpf_host_out[:G]) < 0:
       if time.perf_counter() - st > 10:
@@ -2445,7 +2478,7 @@ class Transformer:
       for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit): setattr(j, "link_later", True)
       # (and the prefills of several prompts)
       if self.batch_prefills():
-        calls.append((bpf:=self._bpf_jit(), lambda: bpf(*self._bpf_vars([1]*self.BPF_G, [0]*self.BPF_G))))
+        calls.append((bpf:=self._bpf_jit(), lambda: bpf(*self._bpf_vars([1]*self.BPF_G, [0]*self.BPF_G, [0]*self.BPF_G))))
         bpf.link_later = True
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile():
@@ -2570,7 +2603,7 @@ class Transformer:
       # the end of the prompt: a checkpoint of the recurrent state (before any step of the reply)
       if self.has_recurrent_block and start_pos == prompt_len and getenv("CHECKPOINT", 1): self._checkpoint(tokens, save=True)
       if spec:
-        while (tok:=self._token_host[start_pos]) < 0: pass
+        tok = self._wait_host(lambda: self._token_host[start_pos], "a token of generate")
         tokens.append(tok)
         self._cached_tokens, self._spec_row = tokens[:-1], 0
         yield tok
@@ -2580,7 +2613,7 @@ class Transformer:
         # run ahead: submit the next step (it reads this token on the device) before waiting for this one. it writes the recurrent states of
         # the next position, the ones before it are kept (see GatedDeltaNetBlock._attention): the caches still hold every token but the last
         if ahead:=len(tokens) + 1 < self.max_context: self(t[:, (sp:=v_start_pos.bind(start_pos)):sp+1], sp, temp)
-        while (tok:=self._token_host[start_pos]) < 0: pass
+        tok = self._wait_host(lambda: self._token_host[start_pos], "a token of generate")
       tokens.append(tok if fast else int(cast(Tensor, out).item()))
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]
