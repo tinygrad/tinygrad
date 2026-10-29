@@ -747,12 +747,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # base with UNSHARD
   @property
-  def unsharded_base(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
-    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
-    # TODO: why can't this be in normal base?
-    if self.op is Ops.UNSHARD: return self.src[0].base
-    return self
+  def unsharded_base(self) -> UOp: return self.src[0].base if self.op is Ops.UNSHARD else self.base
 
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
   @recursive_property
