@@ -2047,8 +2047,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
-          ret = to_program(lift(relift_lib, arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"),
-                           Device["AMD"].renderer)
+          ret = to_program(lift(relift_lib, arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"), Device["AMD"].renderer)
         except Exception:
           print("relift err", traceback.format_exc())
           break
