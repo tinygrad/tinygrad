@@ -1930,8 +1930,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   wg = UOp.range(gx*gy*gz, 0, AxisType.LOOP, dtype=dtypes.uint64)
   wave = UOp.range(n_waves, 1, AxisType.LOOP, dtype=dtypes.int)
   # alloc register and LDS buffers
-  sgpr = UOp.alloc((SGPR_COUNT*n_waves,), dtypes.uint32, 0, AddrSpace.REG)
-  vgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 1, AddrSpace.REG)
+  sgpr = UOp.alloc((n_waves*SGPR_COUNT,), dtypes.uint32, 0, AddrSpace.REG)
+  vgpr = UOp.alloc((n_waves*256*wave_size,), dtypes.uint32, 1, AddrSpace.REG)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT)*512
   lds = UOp.alloc((max(lds_size//4, 1),), dtypes.uint32, 3, AddrSpace.REG)
   scratch = UOp.alloc((max(scratch_size*wave_size*n_waves, 1),), dtypes.uint8, 4, AddrSpace.REG)
@@ -1946,8 +1946,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   route = UOp.param(6, dtypes.int, (1,), name="route")
   taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
-  init = init_wave(wg, wave, sgpr.index(wave*SGPR_COUNT), vgpr.index(wave*256*wave_size), args_ptr, gx, gy, lx, ly, total_threads, wave_size,
-                   scratch_size, rsrc2, arch, user_data_count)
+  init = init_wave(wg, wave, sgpr.shrink(((wave*SGPR_COUNT, (wave+1)*SGPR_COUNT),)), vgpr.shrink(((wave*256*wave_size, (wave+1)*256*wave_size),)),
+                   args_ptr, gx, gy, lx, ly, total_threads, wave_size, scratch_size, rsrc2, arch, user_data_count)
   user_vars = [u for u in init.body.toposort() if u.is_variable]
   init = init.replace(src=(init.body.substitute({u:UOp.param(len(init.src)-1+i, u.dtype, name=u.arg.name, addrspace=AddrSpace.ALU)
                                                  for i,u in enumerate(user_vars)}, walk=True), *init.src[1:], *user_vars))
@@ -1979,7 +1979,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     w = UOp.range(n_waves, 0, AxisType.LOOP, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
                                                             1, AxisType.LOOP, dtype=dtypes.int),)
-    call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*buffers[b][1]) for b,p in zip(bufs, params)]
+    call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
+                 if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args, name="asm_block"), *gates, w).end(*gates).end(w).sink()
     return block.call(*args, name="asm_waves")
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
@@ -1988,7 +1989,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # waves that exited keep their route while the remaining waves repeat the loop.
-        check = loop_active(routes.after(end, *scopes, loop).index(0), active, UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
+        check = loop_active(routes.after(end, *scopes, loop), active, UOp.const(pc, dtypes.int), UOp.const(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # complete the block for every participating wave before entering its successors, including barrier successors.
