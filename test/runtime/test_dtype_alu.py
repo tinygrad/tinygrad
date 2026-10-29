@@ -5,6 +5,7 @@ from tinygrad.helpers import EMULATED_DTYPES, DEV, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.x86 import X86Renderer
@@ -334,6 +335,7 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((t+t*(2**31-1))//2).tolist(), [-2**30, 0])
     self.assertEqual((((u+t*(2**31-1))+t)//2).tolist(), [-2**30, 0])
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, CUDARenderer), "nvrtc folds (x+c)+y<d into x+y<d-c past int32 overflow")
   def test_reassociate_no_overflow(self):
     t, c = Tensor.arange(3, dtype=dtypes.int32), Tensor([False, True])
     a, b, x, y = (Tensor(v, dtype=dtypes.int32) for v in ([1, 0], [1, 1], [2, 0], [2**30, 1]))
