@@ -89,10 +89,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # the image dims are stored in the param's arg, the size stays the flat buffer len
   buf = buf.replace(arg=replace(buf.arg, image=(h, w)))
   shapes[buf.arg.slot] = (h, w)
-  if valid.op is not Ops.CONST or valid.val is not True:
-    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
-  else:
-    return buf.index(cidx.src[1], cidx.src[0])
+  return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
 
 def store_image(x:UOp, d:UOp) -> UOp:
   # image load/store is always float, a half image converts on store

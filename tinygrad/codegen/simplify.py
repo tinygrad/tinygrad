@@ -8,7 +8,6 @@ from tinygrad.dtype import dtypes
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
-  if not len(rngs): return None
   return r.replace(src=r.src[:off]+tuple(dedup(x for s in rngs for x in ((s,) if s.op is Ops.RANGE else s.ranges))))
 
 pm_flatten_range = PatternMatcher([
@@ -79,7 +78,6 @@ pm_split_ranges = PatternMatcher([
 def no_range(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
-  if red.arg[0] not in GroupOp.Reduce: return None
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
