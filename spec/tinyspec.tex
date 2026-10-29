@@ -59,7 +59,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
+\texttt{ParamArg} contains slot, dtype, value bounds, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}

@@ -11,8 +11,6 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.DIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   # x//y is constant
   if d.op is Ops.MOD and (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y
-  # PARAM // c is irreducible
-  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.val == 0: return d.const_like(0) if d.op is Ops.MOD else None
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
