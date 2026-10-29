@@ -190,6 +190,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       req.out.put(None)
 
   def shutdown(self):
+    # a request queued after the sentinel is never picked up, so its handler thread waits forever. fine since handlers are daemon threads
     super().shutdown()
     self.waiting.put(None)
 

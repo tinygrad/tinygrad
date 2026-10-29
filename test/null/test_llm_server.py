@@ -299,31 +299,24 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(results, {"first":"Hello", "second":"Hello"})
 
   def test_client_disconnect_stops_generation(self):
-    # a client that hangs up mid-generation must stop the model, whether it was streaming or waiting for the full response
-    import http.client
-    for stream in (True, False):
-      with self.subTest(stream=stream):
-        first_token_accepted, client_disconnected, model_finished = threading.Event(), threading.Event(), threading.Event()
-        tokens_produced: list[int] = []
-        def generate(ids, **kwargs):
-          try:
-            for token in range(300, 310):
-              tokens_produced.append(token)
-              yield token
-              if token == 300:
-                first_token_accepted.set()
-                client_disconnected.wait(5)
-          finally: model_finished.set()
-        with patch.object(self.mock_model, "generate", side_effect=generate):
-          conn = http.client.HTTPConnection("127.0.0.1", self.port)
-          body = json.dumps({"model":"test", "messages":[{"role":"user","content":"hi"}], "stream":stream})
-          conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type":"application/json"})
-          try:
-            self.assertTrue(first_token_accepted.wait(5))
-            conn.close()
-          finally: client_disconnected.set()
-          self.assertTrue(model_finished.wait(5))
-        self.assertLess(len(tokens_produced), 10, "the model kept going after the client hung up")
+    # once the client's socket closes, generate() must stop at its disconnect check instead of running the model to the end
+    client, server = socket.socketpair()
+    self.addCleanup(server.close)
+    client_closed, tokens_generated = threading.Event(), []
+    def generate(ids, **kwargs):
+      for token in range(300, 310):
+        tokens_generated.append(token)
+        yield token
+        client_closed.wait(5)
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      req = Request([200, 201, 202], lambda: disconnected(server))
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), req, "test")
+      next(stream)
+      next(stream)
+      client.close()
+      client_closed.set()
+      self.assertIsNone(req.out.get(timeout=2))
+    self.assertEqual(tokens_generated, [300, 301])
 
   def test_disconnected_while_queued(self):
     # a request whose client went away while it was still queued must not reach the model
