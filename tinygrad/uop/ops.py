@@ -677,12 +677,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     """(axis, RANGE) pairs this value is sharded over (the source of truth for shard bounds/counts)."""
     return tuple(zip(self.arg, self.src[1:])) if self.op is Ops.UNSHARD else ()
 
-  @property
-  def bounds(self):
-    if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
-    dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
-    return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in range(dcount)], initial=0)))
-
   @functools.cached_property
   def axis(self) -> int|None:
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
@@ -726,14 +720,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     copied = self.copy_to_device(devices)
     return copied if axis is None else copied._shard(axis, UOp.range(len(devices), 0, AxisType.DEVICE)).unshard(axis)
 
-  def copy_to_device(self, device:str|tuple[str, ...], arg=None):
+  def copy_to_device(self, device:str|tuple[str, ...]):
     if is_disk_device(device):
       raise RuntimeError("COPY to DISK is not allowed; use STORE to an explicit disk buffer")
-    assert arg is None or isinstance(self.device, tuple)
-    inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
-    if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
+    if self.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {self.dtype}")
     # multi-device COPYs carry the DEVICE range as src[1] (like UNSHARD's sharding ranges)
-    return UOp(Ops.COPY, src=(inp, *UOp.device_range_src(device)), arg=device)
+    return UOp(Ops.COPY, src=(self, *UOp.device_range_src(device)), arg=device)
   def store_call(self, src:UOp) -> UOp:
     """Executable bulk transfer into this buffer."""
     return self.param_like(0).store(src.param_like(1)).call(self, src)
