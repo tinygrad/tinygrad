@@ -38,6 +38,7 @@ SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE"
 # uncomment this to disable by default
 #SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
+if REF == "update_benchmark": SKIP_PROCESS_REPLAY = "[pr]" not in os.getenv("COMMIT_MESSAGE", "").lower()
 class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
@@ -53,7 +54,11 @@ def replay_to_program(p:UOp, ast:UOp, renderer:Renderer) -> tuple[str, str, tupl
   def to_str(ret:UOp) -> str:
     src = next(x.arg for x in ret.src if x.op is Ops.SOURCE)
     # PYTHON renderer pickles UOps, first unpickle and decode here
-    if device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(src))])
+    # a nested PROGRAM prints its LINEAR, its SOURCE/BINARY are pickles of that LINEAR whose bytes depend on object identity
+    if device.startswith("PYTHON"):
+      uops = pickle.loads(base64.b64decode(src))
+      pickles = {u:u.replace(arg=None) for u in UOp.sink(*uops).toposort(enter_calls=True) if u.op in (Ops.SOURCE, Ops.BINARY)}
+      return "\n".join([str(x.substitute(pickles, enter_calls=True)) for x in uops])
     return src
   # properly color the name arg
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")

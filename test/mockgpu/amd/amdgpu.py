@@ -1,7 +1,6 @@
 import ctypes, time
 from dataclasses import replace
 from test.mockgpu.gpu import VirtGPU
-from test.mockgpu.helpers import PythonRemu
 from tinygrad.helpers import getbits, to_mv, getenv, DEV
 from tinygrad.runtime.support import c
 
@@ -41,8 +40,6 @@ WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-remu = PythonRemu()
-
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
   structs = {}
@@ -77,7 +74,7 @@ class PM4Executor(AMDQueue):
   def __init__(self, gpu, base, size, rptr, wptr):
     self.gpu = gpu
     self.ib_executor: PM4Executor|None = None
-    self.kernel_name = ""
+    self.kernel_name, self.kernel_text_size  = "", 0
     super().__init__(base, size, rptr, wptr)
 
   def _next_dword(self):
@@ -111,7 +108,8 @@ class PM4Executor(AMDQueue):
       elif op == amd_gpu.PACKET3_INDIRECT_BUFFER: self._exec_indirect_buffer(n)
       elif op == amd_gpu.PACKET3_EVENT_WRITE: self._exec_event_write(n)
       elif op == amd_gpu.PACKET3_NOP:
-        self.kernel_name = b"".join(self._next_dword().to_bytes(4,"little") for _ in range(n+1)).rstrip(b"\x00").decode()
+        data = b"".join(self._next_dword().to_bytes(4,"little") for _ in range(n+1))
+        self.kernel_name, self.kernel_text_size = data[:-4].rstrip(b"\x00").decode(), int.from_bytes(data[-4:], "little")
       else: raise RuntimeError(f"PM4: Unknown opcode: {op}")
     return (self.rptr[0] - prev_rptr) + executed_in_ib
 
@@ -203,8 +201,8 @@ class PM4Executor(AMDQueue):
       except KeyError: user_data.append(0)
 
     prg_sz = 0
-    for st,sz in self.gpu.mapped_ranges:
-      if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
+    for st,sz in sorted(self.gpu.mapped_ranges):
+      if st <= prg_addr+prg_sz < st+sz: prg_sz = st+sz-prg_addr
 
     # Get scratch size from COMPUTE_TMPRING_SIZE register
     # WAVESIZE = ceildiv(lanes * size_per_thread, mem_alignment_size)
@@ -215,15 +213,10 @@ class PM4Executor(AMDQueue):
     wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25
     scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
 
-    assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to the emulator
-    remu.valid_mem_ranges = self.gpu.mapped_ranges
-    remu.rsrc2 = rsrc2
-    remu.scratch_size = scratch_size
-    remu.arch = self.gpu.arch
-    remu.user_data = user_data
-    remu.name = self.kernel_name
-    err = remu.run_asm(prg_addr, prg_sz, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr)
+    assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
+    from test.mockgpu.amd.emu import run_asm
+    err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr,
+                  rsrc2, scratch_size, self.gpu.arch, user_data, self.kernel_name)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_indirect_buffer(self, n):
@@ -242,9 +235,6 @@ class PM4Executor(AMDQueue):
     event_dw = self._next_dword()
     match (event_dw & 0xFF): # event type
       case SQTT_EVENTS.THREAD_TRACE_FINISH:
-        # Get the most recent trace from the emulator (if available)
-        from test.mockgpu.amd.emu import sqtt_traces
-        blob = sqtt_traces.pop(0) if sqtt_traces else b''
         old_idx = self.gpu.regs.grbm_index
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
@@ -253,13 +243,7 @@ class PM4Executor(AMDQueue):
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
           else:
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
-          # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
-          se_blob = blob if se == 0 else b''
-
-          # Write blob to trace buffer
-          if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
-          # RDNA3 has absolute address for wptr, RDNA4 has relative
-          wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
+          wptr_val = ((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) // 32) & 0x1FFFFFFF
           self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
         self.gpu.regs.grbm_index = old_idx
       case _: pass # NOTE: for now most events aren't emulated

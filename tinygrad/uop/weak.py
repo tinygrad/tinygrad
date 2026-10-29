@@ -2,6 +2,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid, least_upper_dtype, strong_dtype, weak_dtype
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, GroupOp, dtype_from_uop, promo_dtype
+from tinygrad.helpers import is_image_shape
 
 # the decomps and float emulation commit bare consts at a dtype another src already states
 def commit_weak_consts(u:UOp, dt:DType|None) -> UOp:
@@ -64,7 +65,14 @@ def lower_weak_node(u:UOp) -> UOp|None:
   src = src[:start]+tuple(s if s.base.is_invalid or s.dtype in dtypes.weaks else s.ccast(dt) for s in src[start:])
   return u.replace(src=src).cast(u.dtype)
 
+def narrow_image_coord(c:UOp) -> UOp:
+  if (idx:=c.get_idx()).dtype is not dtypes.long: return c
+  return idx.cast(dtypes.int) if idx is c else idx.cast(dtypes.int).valid(c.get_valid())
+
 pm_lower_weak = PatternMatcher([
+  # a long image coordinate narrows, image reads and writes take int coordinates
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("y"), UPat.var("x")), name="u"), lambda u,buf,y,x:
+   u.replace(src=(buf, narrow_image_coord(y), narrow_image_coord(x))) if is_image_shape(buf._shape) else None),
   # a gated long index into a small buffer narrows; its out-of-gate value is discarded
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),
         allow_any_len=True, name="u"),

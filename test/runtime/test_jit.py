@@ -5,7 +5,7 @@ from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_s
 from tinygrad import Tensor, TinyJit, Device, dtypes, Context, UOp
 from tinygrad.helpers import DEV, GlobalCounters
 from tinygrad.engine.jit import JitError
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -615,10 +615,8 @@ class TestJitFree(unittest.TestCase):
       return x
     for _ in range(5): fxn(Tensor([1]))
     self.assertEqual(x.item(), 6)
-    pre_free = GlobalCounters.mem_used
     fxn.captured.free_intermediates()
-    savings_after_free = pre_free - GlobalCounters.mem_used
-    self.assertEqual(savings_after_free, 0)
+    self.assertTrue(x.uop.base.buffer.is_allocated())
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 

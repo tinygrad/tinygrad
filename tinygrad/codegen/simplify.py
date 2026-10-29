@@ -1,6 +1,6 @@
 import itertools
 from typing import Callable
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType, identity_element
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
@@ -16,8 +16,8 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.END), name="r"), flatten_range),
 ])
 
-# index/range arithmetic uses FLOORDIV/FLOORMOD prior to late rewrite
-def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
+# index/range arithmetic uses DIV/MOD prior to late rewrite
+def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.DIV, Ops.MOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
@@ -79,16 +79,15 @@ pm_split_ranges = PatternMatcher([
 def no_range(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
-  if red.arg[0] not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
+  if red.arg[0] not in GroupOp.Reduce: return None
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
-  for r in reduce_unparented:
-    # an idempotent op (MAX, and bool ADD/MUL which are OR/AND) applied N times is the op once, or the identity when N is 0
-    if red.arg[0] is Ops.MAX or red.dtype is dtypes.bool: ret = (r.src[0] > 0).where(ret, ret.const_like(identity_element(red.arg[0], red.dtype)))
-    else: ret = ret * r.src[0] if red.arg[0] is Ops.ADD else ret ** r.src[0]
-  return ret
+  # the op applied n times, MAX and bool ADD/MUL (OR/AND) are idempotent. an empty range is the identity
+  n, op = UOp.uprod(*[r.src[0] for r in reduce_unparented]), red.arg[0]
+  if op is not Ops.MAX and red.dtype is not dtypes.bool: ret = ret*n if op is Ops.ADD else ret**n
+  return (n > 0).where(ret, ret.const_like(identity_element(op, red.dtype)))
 
 pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
@@ -97,10 +96,11 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
+  (UPat(Ops.ADD, dtypes.sints+dtypes.floats+dtypes.weaks, [UPat.var("x"), UPat.var("y")]) < UPat.var("c"),
+   lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
-  ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
-   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and dtypes.is_int(y.dtype) and y.vmin > 0 else None),
+  (UPat(Ops.MUL, dtypes.sints+(dtypes.weakint,), [UPat.var("x"), UPat.var("y")]) < UPat.var("c"),
+   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
   # sum over r in [0,N) of [lower<=r<upper]*val -> max(min(upper,N) - max(lower,0), 0) * val
   (UPat.any(
     (UPat(Ops.RANGE, name="r") < UPat.var("upper")).where(UPat.var("val"), 0),
@@ -119,10 +119,10 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
 ])+symbolic
 
 pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
-  # lift x+y out of reduce on ne
-  ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
+  # lift x+y out of reduce on eq
+  ((UPat.var("x")+UPat.var("y")).or_casted().eq(UPat.var("c")), lambda x,y,c: x.eq(c.cast(y.dtype)-y) if no_range(y) and no_range(c) else None),
   # reduce on gated load becomes can substitute the range and remove the reduce
-  ((UPat.var("idx")!=(UPat(Ops.RANGE, name="r").or_casted())).where(0, UPat.var("expr")).reduce(UPat.var("r"), arg=Ops.ADD),
+  (UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted()).where(UPat.var("expr"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
 ])
 
@@ -133,7 +133,7 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
-        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: continue
+        if s in included or s in replaces or s.op in GroupOp.Defines|{Ops.CONST}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")

@@ -14,6 +14,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     for copy in (src.contiguous(), src.copy_to_device("NULL")):
       self.assertEqual((copy.vmin, copy.vmax), (0, 3))
 
+  def test_vmin_vmax_cmpeq(self):
+    x = UOp.variable('x', 10, 20)
+    for y, bounds in [(9, (False, False)), (21, (False, False)), (10, (False, True)),
+                      (UOp.variable('y', 15, 25), (False, True))]:
+      cmp = x.eq(y)
+      self.assertEqual((cmp.vmin, cmp.vmax), bounds)
+    cmp = UOp.const(42).eq(42)
+    self.assertEqual((cmp.vmin, cmp.vmax), (True, True))
+
   def test_vmin_vmax_cmpne(self):
     uop = UOp.const(42)
     def test_bool(u, x):
@@ -142,6 +151,10 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.variable('x', -1, 10).cast(dtypes.uint8)._min_max, (0, 255))
     self.assertEqual(UOp.variable('x', 250, 260).cast(dtypes.uint8)._min_max, (0, 255))
 
+  def test_vmin_vmax_unsigned_sub(self):
+    x = UOp.variable('x', 0, 1, dtypes.uint32)
+    self.assertEqual(x.alu(Ops.SUB, x.const_like(1))._min_max, (0, dtypes.uint32.max))
+
   def test_vmin_vmax_xor_neg1(self):
     x = UOp.variable('x', 3, 7)
     uop = x ^ -1
@@ -189,7 +202,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.variable('x', 3e9, 4e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.variable('x', -4e9, -3e9, dtypes.float).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.variable('x', 200, 300, dtypes.int).cast(dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
-    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (dtypes.char.min, dtypes.char.max))
+    self.assertEqual(UOp.const(300, dtypes.char)._min_max, (44, 44))
     self.assertEqual(UOp.const(math.inf).cast(dtypes.int)._min_max, (dtypes.int.min, dtypes.int.max))
     self.assertEqual(UOp.const(math.nan, dtypes.float)._min_max, (-math.inf, math.inf))
     # a weak destination has no width to clamp to
@@ -235,14 +248,14 @@ class TestVminVmaxDivMod(unittest.TestCase):
 
   def test_vmin_vmax_floordiv_floormod(self):
     x = UOp.variable('x', -7, 7)
-    floordiv = x.alu(Ops.FLOORDIV, UOp.const(3))
+    floordiv = x.alu(Ops.DIV, UOp.const(3))
     self.assertEqual(floordiv.vmin, -3)
     self.assertEqual(floordiv.vmax, 2)
-    floormod = x.alu(Ops.FLOORMOD, UOp.const(3))
+    floormod = x.alu(Ops.MOD, UOp.const(3))
     self.assertEqual(floormod.vmin, 0)
     self.assertEqual(floormod.vmax, 2)
     # negative const divisor: floormod range is [c+1, 0]
-    floormod_neg = x.alu(Ops.FLOORMOD, UOp.const(-3))
+    floormod_neg = x.alu(Ops.MOD, UOp.const(-3))
     self.assertEqual(floormod_neg.vmin, -2)
     self.assertEqual(floormod_neg.vmax, 0)
 

@@ -159,7 +159,7 @@ pm_no_indexing_calls = PatternMatcher([
 # the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
 pm_no_views = PatternMatcher([
   (UPat((Ops.RESHAPE, Ops.SHRINK), name="v",
-        src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER, Ops.ALLOC)),), allow_any_len=True), lambda v: v.src[0]),
+        src=(UPat(GroupOp.Defines|{Ops.AFTER, Ops.UNSHARD, Ops.MSTACK}),), allow_any_len=True), lambda v: v.src[0]),
 ])
 
 DEVICE_MAX_BUFS = {"WEBGPU": 8} # TODO: get from device?
@@ -186,7 +186,13 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     return root.replace(src=tuple(stage(ctx, s) if s.op in GroupOp.Elementwise and s.device is not None else s for s in root.src))
-pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs)])
+
+def fix_store_hazard(ctx:LimitBufsContext, dst:UOp, src:UOp):
+  loads = [u for u in src.toposort(gate=lambda u: u.op not in {Ops.STAGE, Ops.AFTER}) if u.op is Ops.INDEX and u.buf_uop is dst.buf_uop]
+  if any(u.src[1].get_idx() is not dst.src[1].get_idx() for u in loads): return dst.store(stage(ctx, src))
+
+pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs),
+  (UPat(Ops.INDEX, name="dst").store(UPat.var("src")), fix_store_hazard)])
 
 # *****************
 # 4. put in buffers for bufferize
@@ -267,17 +273,18 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
 
 @dataclass
 class LocalAddBufferContext:
-  dg:int = 0
   map:dict = field(default_factory=dict)
-  range:int = 0
+  ranges:dict = field(default_factory=dict)
 
-def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  param = UOp.param(ctx.dg, buf.dtype, buf.max_numel(), addrspace=buf.addrspace, device=buf.device)
+def add_buf(ctx:LocalAddBufferContext, buf:UOp):
+  if buf not in ctx.map: ctx.map[buf] = buf
+  raise BottomUpGate
+
+def debuf(slot:int, buf:UOp):
+  param = UOp.param(slot, buf.dtype, buf.max_numel(), addrspace=buf.addrspace, device=buf.device)
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
-  if buf not in ctx.map: ctx.map[buf] = buf
-  ctx.dg += 1
   return ret
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
@@ -287,12 +294,6 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if buf not in ctx.map: ctx.map[buf] = after
   return buf
 
-def renumber_range(ctx:LocalAddBufferContext, r:UOp):
-  if r.tag != (): return None
-  ret = r.replace(arg=(r.axis_type, ctx.range)+r.axis_id[1:], tag=None)
-  ctx.range += 1
-  return ret
-
 def check_buf_states(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, UOp] = {}
@@ -301,10 +302,10 @@ def check_buf_states(x:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
-  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
+  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
   # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
-   None if buf.tag != () or buf.addrspace is AddrSpace.ALU else debuf(ctx, buf)),
+   None if buf.addrspace is AddrSpace.ALU else add_buf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
@@ -314,14 +315,11 @@ to_define_global = PatternMatcher([
   # remove device from local BUFFERIZE
   (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
 
-  # renumber the ranges starting with 0 so that kernel deduping works
-  (UPat(Ops.RANGE, name="r"), renumber_range),
+  (UPat(Ops.RANGE, name="r"), lambda ctx, r: ctx.ranges.setdefault(r.arg)),
 ])
 
-pm_add_param_range_tags = PatternMatcher([
-  # Scalar parameters keep their identity across the call boundary.
-  (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: None if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU else x.rtag(())),
-])
+# renumber the ranges starting with 0 so that kernel deduping works
+pm_renumber_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), lambda ctx, r: r.replace(arg=(r.axis_type, ctx[r.arg])+r.axis_id[1:]))])
 
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
@@ -330,6 +328,8 @@ def split_store(x:UOp) -> UOp|None:
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = ret.substitute({b:debuf(i, b) for i,b in enumerate(lctx.map)}, walk=True)
+  ret = graph_rewrite(ret, pm_renumber_range, ctx={a:i for i,a in enumerate(lctx.ranges)}, walk=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
   return ret.sink(arg=KernelInfo()).call(*lctx.map.values())
@@ -354,7 +354,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   # bufferize -> store
   slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.ALLOC]
   paramarg_start: int = max([-1]+slots) + 1
-  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_views, name="remove views from the kernel graph")

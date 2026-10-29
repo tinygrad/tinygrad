@@ -54,7 +54,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return self.cast(dtypes.bool).ne(True)
+    return self.cast(dtypes.bool).eq(False)
 
   def contiguous(self) -> Self:
     """
@@ -209,7 +209,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.FLOORMOD, b)
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.MOD, b)
     return a - a.div(b, rounding_mode="floor") * b
 
   def fmod(self, x: Self | ConstType) -> Self:
@@ -222,7 +222,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x)
-    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.CMOD, b)
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.TRUNCMOD, b)
     return a - a.div(b, rounding_mode="trunc") * b
 
   def div(self, x: 'Self|ConstType|UOp', reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
@@ -247,8 +247,8 @@ class ElementwiseMixin(CreationMixin):
     """
     a, b = self._broadcasted(x, reverse)
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
-      if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
-      if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
+      if rounding_mode == "trunc": return a.alu(Ops.TRUNCDIV, b)
+      if rounding_mode == "floor": return a.alu(Ops.DIV, b)
     if dtypes.is_int(a.dtype) or a.dtype == dtypes.bool: a = a.cast(dtypes.default_float)
     # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a weak CONST is kept weak)
     d = a.alu(Ops.MUL, b.reciprocal())
@@ -330,10 +330,10 @@ class ElementwiseMixin(CreationMixin):
     return (self > x).logical_not()
 
   def ne(self, x: Self | ConstType) -> Self:
-    return self._binop(Ops.CMPNE, x, False)
+    return self.eq(x).logical_not()
 
   def eq(self, x: Self | ConstType) -> Self:
-    return self.ne(x).logical_not()
+    return self._binop(Ops.CMPEQ, x, False)
 
   def __ne__(self, x: Self | ConstType) -> Self:  # type: ignore[override]
     return self.ne(x)
@@ -464,7 +464,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
     """
-    return self.alu(Ops.RECIPROCAL)
+    return self.alu(Ops.RECIP)
 
   def trunc(self) -> Self:
     """

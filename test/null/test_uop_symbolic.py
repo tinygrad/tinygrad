@@ -45,13 +45,13 @@ class TestSymbolic(unittest.TestCase):
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
-    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "(a<8).eq(False)")
 
   def test_ge(self):
     self.helper_test_variable(Variable("a", 3, 8) >= 77, 0, 0, "False")
     self.helper_test_variable(Variable("a", 3, 8) >= 9, 0, 0, "False")
-    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
-    self.helper_test_variable(Variable("a", 3, 8) >= 4, 0, 1, "((a<4)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "(a<8).eq(False)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 4, 0, 1, "(a<4).eq(False)")
     self.helper_test_variable(Variable("a", 3, 8) >= 3, 1, 1, "True")
     self.helper_test_variable(Variable("a", 3, 8) >= 2, 1, 1, "True")
 
@@ -373,14 +373,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", -5, 5)*4 < -13, 0, 1, "(a<-3)")
-    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "((a*-1)<4)")
+    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "(-4<a)")
     c0, c1 = 2, 2**54+1
     self.helper_test_variable(Variable("a", 0, c1)*c0 < c1, 0, 1, f"(a<{2**53+1})")
     c0, c1 = -2, -(2**54-1)
-    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"((a*-1)<{-(2**53-1)})")
-    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
-    self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
-    self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
+    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"({2**53-1}<a)")
+    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "(0<a)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "(a<3).eq(False)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "(a<4).eq(False)")
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
@@ -476,6 +476,14 @@ class TestSymbolic(unittest.TestCase):
     z = UOp.const(0.0)
     self.assertTrue(math.isnan(graph_rewrite(z/z, symbolic_simple, bottom_up=True).arg))
 
+  def test_two_stage_const_folding(self):
+    x = UOp.variable("x", 0, 10)
+    self.assertIs(graph_rewrite((x+1)+2, symbolic_simple), x+3)
+
+  def test_unpack_uint64_high(self):
+    x, y = UOp.variable("x", 0, 2**32-1, dtypes.uint64), UOp.variable("y", 0, 2**32-1, dtypes.uint32)
+    self.assertIs(graph_rewrite((((x<<32) | y.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32), symbolic_simple), x.cast(dtypes.uint32))
+
   def test_masked_shr_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
@@ -483,6 +491,19 @@ class TestSymbolic(unittest.TestCase):
   def test_masked_idiv_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
+
+  def test_masked_shr_fold_committed_mask(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) >> 2, 0, 63, "(x>>2)")
+
+  def test_masked_idiv_fold_committed_mask(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) // 4, 0, 63, "(x//4)")
+
+  def test_signed_const_wraps(self):
+    c = UOp.const(2**31, dtypes.int32)
+    self.assertEqual(c.val, -2**31)
+    self.assertIs((UOp.const(1, dtypes.int32) < c).simplify().arg, False)
 
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
@@ -772,7 +793,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
   def test_div_partial_quotient(self):
-    # FLOORDIV should extract partial quotients when const_factor > divisor, matching what FLOORMOD already does
+    # DIV should extract partial quotients when const_factor > divisor, matching what MOD already does
     # (f*x+c)//d -> (f%d*x+c)//d + (f//d)*x  when f >= d
     b = Variable("b", 0, 100)
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
@@ -817,7 +838,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((x%4)*-2 + ((x//4)%2)*-8, -14, 0, "(x%8*-2)")
 
   def test_mod_nest_by_factor(self):
-    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for FLOORMOD
+    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for MOD
     gidx0 = Variable("gidx0", 0, 15)
     lidx0 = Variable("lidx0", 0, 3)
     # f=4, k=2, c=8: (gidx0*4+lidx0)%8 = (gidx0%2)*4 + lidx0
@@ -831,7 +852,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b)%9, 0, 8, "(b+a%3*3)")
 
   def test_mod_nest_by_factor_with_const(self):
-    # nest_by_factor FLOORMOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
+    # nest_by_factor MOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
     a = Variable("a", 0, 7)
     b = Variable("b", 0, 1)
     # f=4, k=2, const=2: (a*4+b+2)%8 = (a%2)*4 + b + 2
@@ -843,7 +864,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
 
   def test_div_nest_by_factor_with_const(self):
-    # nest_by_factor FLOORDIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
+    # nest_by_factor DIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
     a = Variable("a", 0, 2)
     b = Variable("b", 0, 31)
     c = Variable("c", 0, 1)
@@ -959,16 +980,16 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", 0, 3)
     d = Variable("d", -3, 3)
     self.helper_test_variable((a<2), 0, 1, "(a<2)")
-    self.helper_test_variable((a<=2), 0, 1, "((2<a)!=True)")
+    self.helper_test_variable((a<=2), 0, 1, "(2<a).eq(False)")
     self.helper_test_variable((a>1), 0, 1, "(1<a)")
-    self.helper_test_variable((a>=1), 0, 1, "((a<1)!=True)")
-    self.helper_test_variable((a<1).ne(True), 0, 1, "((a<1)!=True)")
-    self.helper_test_variable((a+b<1).ne(True), 0, 1, "(((a+b)<1)!=True)")
-    self.helper_test_variable((a*3+b*4<1).ne(True), 0, 1, "(((a+b)<1)!=True)")
-    self.helper_test_variable((a*(-3)+b*4<1).ne(True), 0, 1, "((((a*-3)+(b*4))<1)!=True)")  # negative coeff, should not be simplified
-    self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
-    self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
-    self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
+    self.helper_test_variable((a>=1), 0, 1, "(a<1).eq(False)")
+    self.helper_test_variable((a<1).ne(True), 0, 1, "(a<1).eq(False)")
+    self.helper_test_variable((a+b<1).ne(True), 0, 1, "((a+b)<1).eq(False)")
+    self.helper_test_variable((a*3+b*4<1).ne(True), 0, 1, "((a+b)<1).eq(False)")
+    self.helper_test_variable((a*(-3)+b*4<1).ne(True), 0, 1, "(((a*-3)+(b*4))<1).eq(False)")  # negative coeff, should not be simplified
+    self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "(((a*3)+(d*4))<1).eq(False)")  # var can be negative, should not be simplified
+    self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "(((a+b)+c)<1).eq(False)")
+    self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "(((a+b)+c)<1).eq(False)")
 
   def test_mul_by_zero_casted_to_emulated_dtype(self):
     # a float zero cast to bfloat16 is one committed const, so the mul-by-zero fold still sees it
@@ -980,13 +1001,13 @@ class TestSymbolic(unittest.TestCase):
     # CAST(bool -> int) != 0  ->  cond
     self.helper_test_variable(cond.cast(dtypes.int).ne(0), 0, 1, "(a<2)")
     # CAST(bool -> int) != 1  ->  !cond
-    self.helper_test_variable(cond.cast(dtypes.int).ne(1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.cast(dtypes.int).ne(1), 0, 1, "(a<2).eq(False)")
     # CAST(bool -> int) != c (c not in {0,1})  ->  always True (CAST is 0 or 1)
     self.helper_test_variable(cond.cast(dtypes.int).ne(2), 1, 1, "True")
     self.helper_test_variable(cond.cast(dtypes.int).ne(-1), 1, 1, "True")
     # CAST(bool -> index) folds too
     self.helper_test_variable(cond.cast(dtypes.weakint).ne(0), 0, 1, "(a<2)")
-    self.helper_test_variable(cond.cast(dtypes.weakint).ne(1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.cast(dtypes.weakint).ne(1), 0, 1, "(a<2).eq(False)")
 
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
@@ -994,7 +1015,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
-    self.helper_test_variable(cond.where(u0, u1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.where(u0, u1), 0, 1, "(a<2).eq(False)")
     self.helper_test_variable(cond.where(u0, u1).where(u0, u1), 0, 1, "(a<2)")
 
   def test_equivalent_const_max(self):
@@ -1161,12 +1182,6 @@ class TestSymbolic(unittest.TestCase):
     r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.weakint), 0)
     self.helper_test_variable(r0, 0, 0, "r0")
 
-  def test_const_reciprocal(self):
-    a = Variable("a", 1, 10, dtypes.float)
-    # TODO: bounds for reciprocal
-    # TODO: should z3 work?
-    self.helper_test_variable(2*(2*a).reciprocal(), -math.inf, math.inf, "a.reciprocal()", test_z3=False)
-
   def test_trunc_noop(self):
     a = Variable("a", 1, 10, dtypes.int)
     self.helper_test_variable(a.trunc(), 1, 10, "a", test_z3=False)
@@ -1266,6 +1281,13 @@ class TestSymInfer(unittest.TestCase):
     # floor: 1 % -1000 = -999, 1 // -1000 = -1
     assert sym_infer(a%b, var_vals) == -999
     assert sym_infer(a//b, var_vals) == -1
+  def test_sym_infer_truncdiv_truncmod(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    for av, bv, div, mod in ((7, -3, -2, 1), (-7, 3, -2, -1), (7, 0, 0, 7)):
+      var_vals = {a.expr: av, b.expr: bv}
+      assert sym_infer(a.alu(Ops.TRUNCDIV, b), var_vals) == div
+      assert sym_infer(a.alu(Ops.TRUNCMOD, b), var_vals) == mod
   def test_sym_infer_with_cast(self):
     a = Variable("a", 0, 100, dtypes.int)
     assert sym_infer(a.cast(dtypes.long) + 1, {a.expr: 5}) == 6
@@ -1284,10 +1306,6 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
-  def test_sym_infer_tagged(self):
-    a = Variable("a", 0, 10)
-    assert sym_infer((a*3+1).rtag("t"), {a.expr: 2}) == 7
-
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
     # max(x, negative_const) can't be simplified when x can be negative, so nesting compounds
