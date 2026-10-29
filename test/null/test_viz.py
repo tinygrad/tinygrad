@@ -899,7 +899,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
-    self.assertEqual(len(cfg["blocks"]), 3)
+    self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_repeat(self):
     k = Kernel()
@@ -947,7 +947,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     ret = self.get_cfg("diamond", k)
     cfg = ret["data"]
-    self.assertEqual(len(cfg["blocks"]), 6)
+    self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
@@ -1105,7 +1105,7 @@ class TestCfg(unittest.TestCase):
     k.label("loop")
     k.emit(s_branch(), target="cmp")
     ret = self.get_cfg("endpgm", k)
-    self.assertEqual(len(ret["data"]["blocks"]), 6)
+    self.assertEqual(len(ret["data"]["blocks"]), 5)
     # the endpgm block has no path out
     endpc = next(pc for pc,s in ret["data"]["pc_tokens"].items() if s[0]["st"].startswith("s_endpgm"))
     self.assertEqual(len(ret["data"]["paths"][endpc]), 0)
