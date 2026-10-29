@@ -1,4 +1,4 @@
-import functools, itertools, math
+import functools, itertools
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import unwrap
@@ -44,13 +44,6 @@ def fold_divmod_general(d: UOp) -> UOp|None:
       if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
         if d.op is Ops.MOD: return rem - rem.vmin//c*c
         return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
-
-    # gcd_with_remainder: factor out common gcd from numerator
-    if (g:=math.gcd(*factors, c)) > 1:
-      new_x = unwrap(x_peeled.divides(g)).simplify() + (const//g)%(c//g)
-      if new_x.vmin >= 0:
-        if d.op is Ops.MOD: return new_x % (c//g) * g + const%g
-        return new_x // (c//g) + const//c
 
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
     # DIV identity holds for any sign of x; MOD reconstruction needs x.vmin>=0
