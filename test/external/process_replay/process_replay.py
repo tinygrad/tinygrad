@@ -114,7 +114,6 @@ def _pmap(fxns:dict[str, Callable], table_name:str=TABLE_NAME) -> None:
   finally:
     cur.close()
 
-  if not row_count: return
   with ProcessPoolExecutor(multiprocessing.cpu_count(), mp_context=multiprocessing.get_context("spawn")) as pool:
     with tqdm(total=row_count) as bar:
       for _ in pool.map(functools.partial(diff, fxns=fxns, table_name=table_name), range(0, row_count, s:=min(PAGE_SIZE, row_count))):
