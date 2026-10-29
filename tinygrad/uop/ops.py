@@ -1621,12 +1621,12 @@ def get_process_replay_loc() -> str:
   return f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
 
 if CAPTURE_PROCESS_REPLAY:
-  replay_capture: list[bytes] = []
+  replay_capture: list[tuple[str, bytes]] = []
   import atexit, uuid
   @atexit.register
   def save_to_diskcache():
     uid = uuid.uuid4() # one id per process
-    for i,v in enumerate(replay_capture): diskcache_put("process_replay", f"{uid}_{i}", v, prepickled=True)
+    for i,(k,v) in enumerate(replay_capture): diskcache_put(k, f"{uid}_{i}", v, prepickled=True)
 
 def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
@@ -1634,7 +1634,7 @@ def add_trace_group(kt:TracingKey) -> None:
 
 active_group:list[int] = []
 active_rewrites:list[TrackedGraphRewrite] = []
-def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False, new_ctx:bool=True):
+def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:str="", new_ctx:bool=True):
   if not new_ctx: assert not callable(name) and not replay, "name fxn and replay are only supported for new_ctx groups"
   def _decorator(func):
     def __wrapper(*args, **kwargs):
@@ -1670,7 +1670,7 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
       if CAPTURE_PROCESS_REPLAY and replay:
         # capture global context vars and all the args passed in
         with Context(PROCESS_REPLAY_LOC=get_process_replay_loc()):
-          replay_capture.append(pickle.dumps((fn, args, kwargs, ContextVar._cache, ret)))
+          replay_capture.append((replay, pickle.dumps((fn, args, kwargs, ContextVar._cache, ret))))
       return ret
     return __wrapper
   return _decorator
