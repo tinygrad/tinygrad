@@ -137,17 +137,19 @@ class TransformerConfig:
   expert_latent_dim: int = 0
   situ: tuple[float, float]|None = None
   attn_res_block_size: int = 0
+  attn_res_new_block: bool = False
 
 class AttentionResidual:
-  def __init__(self, config:TransformerConfig):
-    self.weight, self.norm_eps, self.new_block = Tensor.zeros(config.dim), config.norm_eps, False
+  def __init__(self, config:TransformerConfig, new_block:bool=False):
+    self.weight, self.norm_eps, self.new_block = Tensor.zeros(config.dim), config.norm_eps, new_block
 
   def mix(self, xs:Tensor) -> Tensor:
     scores = (xs.rmsnorm(eps=self.norm_eps) * self.weight).sum(-1, keepdim=True)
-    return (scores.softmax(2) * xs).sum(2)
+    return (scores.softmax(2) * xs).sum(2)  # xs: (B, T, N, D) streams: (B, T, D)
 
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
     out, aux = sublayer(self.mix(xs))
+    # (B, T, N+1, D) if new_block else (B, T, N, D)
     return (xs.cat(out.unsqueeze(2), dim=2) if self.new_block else xs[:, :, :-1].cat(xs[:, :, -1:] + out.unsqueeze(2), dim=2)), aux
 
 class HyperConnection:
@@ -175,7 +177,8 @@ class FFNBlock:
     self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
     self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
     if config.hc is not None: self.hc_attn, self.hc_ffn = HyperConnection(config), HyperConnection(config)
-    if config.attn_res_block_size: self.attn_res_score, self.ffn_res_score = AttentionResidual(config), AttentionResidual(config)
+    if config.attn_res_block_size:
+      self.attn_res_score, self.ffn_res_score = AttentionResidual(config, config.attn_res_new_block), AttentionResidual(config)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
@@ -548,8 +551,8 @@ class Transformer:
       c = dense_config if i < config.leading_dense_blocks else config
       if config.sliding_window_pattern != 0 and (i+1) % config.sliding_window_pattern == 0: c = replace(c, sliding_window=0)
       if config.indexer_shared and config.indexer_shared[i]: c = replace(c, indexer=None)
+      if config.attn_res_block_size and i % config.attn_res_block_size == 0: c = replace(c, attn_res_new_block=True)
       self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else block_cls(c))
-      if config.attn_res_block_size: self.blk[-1].attn_res_score.new_block = i % config.attn_res_block_size == 0
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     if config.attn_res_block_size: self.output_res_score = AttentionResidual(config)

@@ -163,7 +163,7 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith(("<think>", "<|open|>think<|sep|>")))
+                              reasoning=rendered.rstrip().endswith(tuple(f[0] for f in StreamRouter.FORMATS)))
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
