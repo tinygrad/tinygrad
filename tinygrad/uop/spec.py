@@ -90,7 +90,6 @@ spec_shared = PatternMatcher([
 
   # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
   (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  # REFPARAM is a PARAM at a u64 address instead of a slot
   (UPat(Ops.REFPARAM, src=(p_size, UPat(dtype=dtypes.uint64)), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
