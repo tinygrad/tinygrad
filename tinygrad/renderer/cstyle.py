@@ -611,18 +611,12 @@ class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target): super().__init__(target, use_hipcc=True)
 
 def _all_ones(k:UOp) -> bool:
-  c = k
-  while c.op is Ops.CAST: c = c.src[0]
-  return c.op is Ops.CONST and (c.arg & (mask:=(1 << k.dtype.bitsize) - 1)) == mask
+  return (c:=k.src[0] if k.op is Ops.CAST else k).op is Ops.CONST and (c.arg & (mask:=(1 << k.dtype.bitsize) - 1)) == mask
 
 def _render_int_min(ctx, x:UOp, p:UOp, q:UOp, k:UOp) -> str|None:
-  if not _all_ones(k): return None
-  t = ctx.render_type(x)
-  for n, o in ((p, q), (q, p)):
-    if n.op is not Ops.XOR: continue
-    for a, ones in (n.src, n.src[::-1]):
-      if _all_ones(ones): return f"min(({t})({ctx[a]}),({t})({ctx[o]}^{ctx[k]}))"
-  return None
+  n, o = (p, q) if p.op is Ops.XOR else (q, p)
+  if n.op is not Ops.XOR or not _all_ones(k) or not _all_ones(n.src[1]): return None
+  return f"min({ctx.render_cast(x, ctx[n.src[0]])},{ctx.render_cast(x, f'{ctx[o]}^{ctx[k]}')})"
 
 class QCOMCLRenderer(OpenCLRenderer):
   def __init__(self, target:Target):
