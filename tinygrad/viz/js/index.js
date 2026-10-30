@@ -843,6 +843,8 @@ function codeBlock(st, language, { loc, wrap }={}) {
   if (!language || language === "txt") code.appendChild(colored(st));
   else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
+  code.tabIndex = 0;
+  code.onkeydown = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "a") { e.preventDefault(); window.getSelection().selectAllChildren(code); }};
   const ret = document.createElement("pre");
   if (wrap) ret.className = "wrap";
   if (loc != null) ret.appendChild(pathLink(loc[0], loc[1]).style("margin-bottom", "4px").node());
@@ -850,7 +852,7 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 function traceBlock(trace) {
-  const root = d3.create("pre").append("code").classed("hljs", true);
+  const root = d3.select(codeBlock("", "txt")).select("code");
   for (let i=trace.length-1; i>=0; i--) {
     const [fp, lineno, fn, code] = trace[i];
     root.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
