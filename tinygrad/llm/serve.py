@@ -697,6 +697,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # requests waiting this long are taken in turn, before the others the cache has more of
   STARVE = getenv("STARVE", 120.0)
   STARVE_LONG = getenv("STARVE_LONG", 30.0)  # (a request that doesn't fit a slot: the batch drains for it after this long)
+  PAUSE_LONG = getenv("PAUSE_LONG", 1)  # (aliased slots: the batch waits for it instead, after PAUSE_WAIT, see pause_long)
+  PAUSE_WAIT = getenv("PAUSE_WAIT", 0.0)
   def next_alone(self, pending:list[Request]) -> int:
     """
     the next request alone: the one whose conversation the model or a slot has the most of (agents taking turns: one's next request often comes
@@ -819,13 +821,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       req.spec_start(firsts[g], req.pos, k)
       if self.emit(req, firsts[g]): active[slot] = req
 
-  def preempt(self, active:dict, pending:list[Request]):
+  def preempt(self, active:dict, pending:list[Request], only:set[int]|None=None):
     """
     (PREEMPT_LONG) the batch drains for a request that doesn't fit a slot: the requests decoding stop now, not after their replies (thousands
-    of tokens: the server mostly idle meanwhile). each goes on after it as one that fills its slot does, its conversation kept (in host memory)
+    of tokens: the server mostly idle meanwhile). each goes on after it as one that fills its slot does, its conversation kept (in host memory).
+    only: the ones in these slots
     """
     stopped = []
     for i, req in sorted(active.items(), reverse=True):
+      if only is not None and i not in only: continue
       del active[i]
       self.slot_done(i, req, active)
       stopped.append(req)
@@ -844,13 +848,32 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     try: return next(g)
     finally: _close(g)
 
-  def run_alone(self, req:Request) -> bool:
-    """req alone on the model: speculative decoding until its end, or until another request comes (it goes on in slot 0: returns True)"""
+  def pause_long(self, req:Request, active:dict, pending:list[Request]):
+    """
+    (PAUSE_LONG) a request that doesn't fit a slot alone while the batch waits (aliased: the model's cache past batch_ctx is the first slots'):
+    the requests in the slots it overwrites stop (see preempt), the others go on from their slots after it, nothing of theirs prefilled again
+    """
+    model = self.model
+    self.preempt(active, pending, only=set(model.main_overlaps(model.max_context)))
+    pending.remove(req)
+    trace(f"pause_long req {req.rid} active {sorted(active)}")
+    try: self.run_alone(req, set(active))
+    except Exception as e:
+      traceback.print_exc()
+      self.finish(req, e)
+    # (its conversation past batch_ctx is the slots', the next step writes them: kept in host memory first)
+    self.stash_main(set(active))
+
+  def run_alone(self, req:Request, busy:set[int]|None=None) -> bool:
+    """
+    req alone on the model: speculative decoding until its end, or until another request comes (it goes on in slot 0: returns True). busy: the
+    slots of a batch that waits for it (it goes on to its end)
+    """
     model = self.model
     ids = req.ids + req.generated
     trace(f"alone req {req.rid} ids {len(ids)}")
-    self.miss_log(ids, self.stash_hit(ids, set()))
-    self.stash_load(ids, set())
+    self.miss_log(ids, self.stash_hit(ids, busy or set()))
+    self.stash_load(ids, busy or set())
     self.main_moved = False
     req.cache_start = model.get_start_pos(ids)
     spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
@@ -858,7 +881,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     try:
       for tok in g:
         if not self.emit(req, tok): return False
-        if not self.waiting.empty() and self.batchable(req):
+        if busy is None and not self.waiting.empty() and self.batchable(req):
           # another request: this one goes on batched (the model's states after its last token's position are the slot's)
           _close(g)
           req.pos = len(model._cached_tokens)
@@ -893,6 +916,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         self.inflight = len(active) + len(pending)
         # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains, see preempt), then it
         # goes on alone. else it waits for no request to be decoded: while agents take turns that's never)
+        # (PAUSE_LONG: the batch waits for it, see pause_long)
+        if active and self.PAUSE_LONG and callable(getattr(model, "main_overlaps", None)) and \
+           (long_req:=next((r for r in pending if not self.batchable(r) and time.perf_counter() - r.st > self.PAUSE_WAIT), None)) is not None:
+          self.pause_long(long_req, active, pending)
+          continue
         drain = any(not self.batchable(r) and time.perf_counter() - r.st > self.STARVE_LONG for r in pending)
         if drain and active and getenv("PREEMPT_LONG", 1): self.preempt(active, pending)
         if not active and pending:

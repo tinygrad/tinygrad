@@ -817,6 +817,23 @@ class TestStash(unittest.TestCase):
     self.assertEqual(pending, [reqs[1], reqs[2], reqs[0], long])
     self.assertEqual([c.args[0] for c in done.call_args_list], [2, 1, 0])
 
+  def test_pause_long(self):
+    # (aliased slots) the batch waits for a long request: only the ones in the slots its cache overwrites stop, it runs alone (the others' slots
+    # busy: nothing of theirs written), its conversation kept (in host memory) before the next step writes those slots
+    from tinygrad.llm.serve import Request
+    self.server.spec = 2
+    self.model.main_overlaps, self.model.max_context = Mock(return_value=[0, 1]), 4096
+    reqs = [Request(list(range(90)), "", None, 0.0) for _ in range(3)]
+    long, active = Request(list(range(9000)), "", None, 0.0), {0: reqs[0], 1: reqs[1], 5: reqs[2]}
+    pending = [long]
+    with patch.object(self.server, "slot_done"), patch.object(self.server, "run_alone") as alone, \
+         patch.object(self.server, "stash_main") as stash:
+      self.server.pause_long(long, active, pending)
+    self.assertEqual(active, {5: reqs[2]})
+    self.assertEqual(pending, [reqs[0], reqs[1]])
+    alone.assert_called_once_with(long, {5})
+    stash.assert_called_once_with({5})
+
   def test_batched_done_to_host(self):
     # (SLOT_HOST with HOST_STASH) a request done in a slot: its whole conversation into the model's states and from them to host memory (the
     # slot is taken by another request before its next turn), even in a slot a step writes. the model's conversation was a prompt moved to a

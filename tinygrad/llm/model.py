@@ -1924,7 +1924,9 @@ class Transformer:
       pairs = [(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)]
       if not save: pairs = [(b, h) for h, b in pairs]
       calls = [UOp.from_buffer(d, dtypes.uint8).store_call(UOp.from_buffer(s, dtypes.uint8)) for d, s in pairs]
-      prg = link_linear(compile_linear(UOp(Ops.LINEAR, src=tuple(calls)), cache=True))
+      # (its buffers as inputs: compiled once for every program of these sizes (another conversation's chunks), linked to these)
+      inputs:list[UOp] = []
+      prg = link_linear(compile_linear(UOp(Ops.LINEAR, src=tuple(calls)), input_uops=inputs, cache=True), input_uops=inputs)
       while len(self._host_programs) >= getenv("HOST_PROGRAMS", 512): self._host_programs.pop(next(iter(self._host_programs)))
     self._host_programs[key] = prg  # (the most recently used last)
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
