@@ -30,7 +30,7 @@ def packed_load(root:UOp):
 
 def is_packed(x:UOp):
   dt = x.src[1].dtype if x.op is Ops.STORE else x.buf_uop.dtype
-  return dt.itemsize < 4 and dt != dtypes.half and x.buf_uop.addrspace != AddrSpace.REG
+  return dt.itemsize < 4 and dt != dtypes.half and x.buf_uop.addrspace != AddrSpace.REG and x.buf_uop.op is not Ops.BINARY
 def _packed_size(u:UOp): return ceildiv(u.max_numel(), 4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
@@ -92,6 +92,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v: f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
+    (UPat(Ops.BINARY, name="x"), lambda ctx,x: f"const {ctx[x]} = array<u32,{len(x.arg)}>({','.join(f'{b}u' for b in x.arg)});"),
   ]) + base_rewrite
 
   def render_cast(self, u:UOp, val: str) -> str:
