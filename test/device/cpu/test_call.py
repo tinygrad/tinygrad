@@ -3,6 +3,7 @@ from tinygrad import Tensor, Device
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, KernelInfo
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.device import TinyELF
 
 # an external call is a CALL on a CUSTOM_FUNCTION body naming the symbol, the program links against the loaded libraries
@@ -14,7 +15,7 @@ def call_ret_kernel(C:UOp) -> UOp:
   val = UOp.custom_function("sqrt", dtype=dtypes.float64).call(UOp.const(16.0, dtypes.float64))
   return C[0].store(val.cast(dtypes.int) * 2).sink(arg=KernelInfo(name="call_ret"))
 
-@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "TODO: CALL is rendered in C style only")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, CPULLVMRenderer)), "requires C or LLVM calls")
 class TestExternalCall(unittest.TestCase):
   def test_direct_args(self):
     # Mix scalar types and enough integer arguments to spill onto the stack.
@@ -25,6 +26,13 @@ class TestExternalCall(unittest.TestCase):
     }"""
     types = (dtypes.int8, dtypes.uint16, dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64,
              dtypes.int32, dtypes.int32, dtypes.float32, dtypes.float64)
+    if isinstance(dev.renderer, CPULLVMRenderer):
+      params = [UOp.param(i+1, dt, addrspace=AddrSpace.ALU) for i,dt in enumerate(types)]
+      value = params[0].cast(dtypes.float64)
+      for p in params[1:]: value = value + p.cast(dtypes.float64)
+      out_param = UOp.param(0, dtypes.float64, 1)
+      sink = out_param.index(UOp.const(0, dtypes.int)).store(value).sink(arg=KernelInfo(name="test_args"))
+      src = dev.renderer.render(list(sink.toposort()))
     sig = ((None, AddrSpace.GLOBAL, dtypes.float64, (1,)),) + tuple((None, AddrSpace.ALU, dt, ()) for dt in types)
     prg = dev.runtime(TinyELF(dev.compiler.compile(src), "test_args", dev.renderer.target, sig))
     out = ctypes.c_double()

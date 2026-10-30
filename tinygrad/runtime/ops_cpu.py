@@ -21,7 +21,7 @@ class CPUProgram(Program['CPUDevice']):
   def __init__(self, dev:CPUDevice, obj:TinyELF, links:dict[str,CPUProgram]):
     self.dev, self.name, self.signature, self.profile_key, self.links = dev, obj.name, obj.signature, obj.profile_key, links
     self.lvp = obj.target.renderer == "LVP"
-    self.direct = obj.target.renderer in ("", "CLANG")
+    self.direct = obj.target.renderer in ("", "CLANG", "LLVM")
     self.packer = struct.Struct(''.join(unwrap(dt.fmt) for _, dt in TinyELF.iter_sig(self.signature)))
     if dev.remote is not None:
       link_ids = json.dumps({"links": {n:p.fxn for n,p in links.items()}, "renderer": obj.target.renderer,
