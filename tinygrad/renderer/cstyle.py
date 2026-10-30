@@ -610,6 +610,21 @@ class HIPRenderer(CStyleLanguage):
 class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target): super().__init__(target, use_hipcc=True)
 
+def _all_ones(k:UOp) -> bool:
+  c = k
+  while c.op is Ops.CAST: c = c.src[0]
+  return c.op is Ops.CONST and (c.arg & (mask:=(1 << k.dtype.bitsize) - 1)) == mask
+
+# ~max(~a, b) == min(a, ~b), max is lowered to (p<q)?q:p by then
+def _render_int_min(ctx, x:UOp, p:UOp, q:UOp, k:UOp) -> str|None:
+  if not _all_ones(k): return None
+  t = ctx.render_type(x)
+  for n, o in ((p, q), (q, p)):
+    if n.op is not Ops.XOR: continue
+    for a, ones in (n.src, n.src[::-1]):
+      if _all_ones(ones): return f"min(({t})({ctx[a]}),({t})({ctx[o]}^{ctx[k]}))"
+  return None
+
 class QCOMCLRenderer(OpenCLRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
@@ -628,6 +643,9 @@ class QCOMCLRenderer(OpenCLRenderer):
      lambda ctx,x,y: f"convert_{ctx.render_dtype(y.dtype)}_rte({ctx[x]})"),
     (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("x", dtypes.floats),), name="y"),
      lambda ctx,x,y: f"convert_{ctx.render_dtype(y.dtype)}_rtz({ctx[x]})"),
+    # QCOM miscompiles the int minimum ~max(~a,~b): it narrows the outer ~ and drops the truncation of a narrowing cast after it, use min()
+    (UPat(Ops.XOR, dtypes.ints, [UPat(Ops.WHERE, src=(UPat(Ops.CMPLT, src=(UPat.var("p"), UPat.var("q"))), UPat.var("q"), UPat.var("p"))),
+                                 UPat.var("k")], name="x"), _render_int_min),
   ]) + OpenCLRenderer.string_rewrite
 
   # QCOM's load vectorizer emits invalid IR for vectorized bool loads ("Range types must match load type"), type bool buffers as uchar
