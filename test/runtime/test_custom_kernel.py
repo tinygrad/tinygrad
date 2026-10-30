@@ -839,6 +839,21 @@ class TestCallInKernel(unittest.TestCase):
     self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call.body))
     self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
 
+  def test_args_scaling(self):
+    N = getenv("N", 1024)
+
+    @uopfunc
+    def add(v:UOp, w:UOp, out:UOp, a:UOp, b:UOp, c:UOp): return out[0].store(out[0] + v + w + a[0] + b[0] + c[0]).sink()
+
+    def kernel(out:UOp, x:UOp):
+      for j in range(N):
+        out = out.after(add(UOp.const(j, dtypes.int), UOp.const(j+1, dtypes.int), out, *(x[i:i+1] for i in range(3))))
+      return out.sink(arg=KernelInfo(name="test_args_scaling", opts_to_apply=()))
+
+    x = Tensor([1, 2, 3], dtype=dtypes.int).realize()
+    out = Tensor([0], dtype=dtypes.int).realize().custom_kernel(x, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [N*N + 6*N])
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
