@@ -97,7 +97,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
+  if x.op is Ops.INDEX and len(ctx.range_map[x][0]) == len(ctx.range_map[x][1]): return None
+  if (bx:=create_bufferize_and_index_based_on_ranges(ctx, x)).src[0] is x: return None
   valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
   return valid.where(bx.src[0], UOp.const(x.dtype.const(0)))
 
@@ -129,7 +130,7 @@ pm_apply_rangeify = PatternMatcher([
   # REDUCE(op, axis) -> REDUCE(op) with ranges
   (UPat(Ops.REDUCE, name="x"), convert_reduce_to_reduce_with_ranges),
   # PAD -> WHERE
-  (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
+  (UPat((Ops.PAD, Ops.INDEX), name="x"), convert_pad_to_where_to_keep_behavior_local),
   # STACK -> WHERE select on the leading range
   (UPat(Ops.STACK, name="x"), convert_stack_to_where),
   # finally, apply_rangeify
@@ -282,6 +283,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
     # STACK: the leading range selects the src, srcs get the trailing ranges
     if x.op is Ops.STACK: rngs = out_rngs[1:]
+    # when the index srcs and output ranges of INDEX address every axis of its src, the index srcs select the leading axes
+    if x.op is Ops.INDEX and len(x.src)-1+len(out_rngs) == x.src[0].ndim: rngs = x.src[1:]+out_rngs
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):

@@ -108,7 +108,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_multiple_of_cancellation(self):
     for multiple in (1, 2, 3, 4, 8):
-      var = UOp.variable("n", multiple, 8*multiple, multiple_of=multiple)
+      var = UOp.variable("n", multiple, 8*multiple)
       for n in (var, var.bind(2*multiple)):
         for factor in (-multiple, -1, 2, multiple, multiple+1):
           with self.subTest(multiple=multiple, bound=n.is_bound_var, factor=factor):
@@ -116,14 +116,6 @@ class TestSymbolic(unittest.TestCase):
             self.assertEqual((n*factor%n).ssimplify(), 0)
             self.assertEqual(((-n*factor)//(-n)).ssimplify(), factor)
             self.assertIs(UOp.gcd(n*factor, n).simplify(), n)
-
-  def test_gcd_multiple_of_without_shared_factors(self):
-    n = UOp.variable("n", 6, 60, multiple_of=6)
-    m = UOp.variable("m", 4, 40, multiple_of=4)
-    self.assertEqual(UOp.gcd(n, m).ssimplify(), 2)
-    self.assertEqual((n%3).ssimplify(), 0)
-    self.assertEqual((m%2).ssimplify(), 0)
-    self.assertIs((n<12).simplify(), n<12)
 
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
@@ -488,17 +480,9 @@ class TestSymbolic(unittest.TestCase):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
 
-  def test_masked_idiv_fold(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
-    self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
-
   def test_masked_shr_fold_committed_mask(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
     self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) >> 2, 0, 63, "(x>>2)")
-
-  def test_masked_idiv_fold_committed_mask(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
-    self.helper_test_variable((x & UOp.const(-4, dtypes.uint32)) // 4, 0, 63, "(x//4)")
 
   def test_signed_const_wraps(self):
     c = UOp.const(2**31, dtypes.int32)
@@ -800,7 +784,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
   def test_gcd_with_remainder(self):
-    # gcd_with_remainder: factor GCD out of non-constant terms and denominator
+    # nest_by_factor on the GCD of non-constant terms and denominator
     a = Variable("a", 0, 2)
     self.helper_test_variable((a*4)//6, 0, 1, "(a*2//3)")
     self.helper_test_variable((a*4+1)//6, 0, 1, "(a*2//3)")
@@ -810,6 +794,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*4+1)%6, 1, 5, "(a*2%3*2+1)")
     self.helper_test_variable((a*4+2)%6, 0, 4, "((a*2+1)%3*2)")
     self.helper_test_variable((a*4+3)%6, 1, 5, "((a*2+1)%3*2+1)")
+
+  def test_gcd_with_remainder_negative(self):
+    a, b = Variable("a", -3, 5), Variable("b", 0, 7)
+    self.helper_test_variable((a*18+1)//4, -14, 22, "(a*9//2)")
+    self.helper_test_variable((a*12+b*18+5)//12, -3, 15, "((a*2+b*3)//2)")
 
   def test_div_by_factor_tie_break(self):
     a = Variable("a", 0, 1)
@@ -945,16 +934,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((idx<4).where(idx//4, uconst(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
 
   def test_floordiv_lt(self):
-    # x//d<c <=> x<c*d for d>0, and <=> c*d<x for d<0
+    # x//d<c <=> x<c*d for d>0
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
     self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<8)")
     self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<10)")
-    self.helper_test_variable((idx//-4<-3), 0, 1, "(12<idx)")
-    self.helper_test_variable((idx//-4<-5), 0, 1, "(20<idx)")
     self.helper_test_variable((idx//-4<-6), 0, 0, "False")
-    self.helper_test_variable(((idx-10)//-4<0), 0, 1, "(8<(idx+-2))")
-    self.helper_test_variable(((idx-20)//-4<2), 0, 1, "(12<idx)")
 
   def test_nested_div_mod_negative_inner_divisor(self):
     # (x % (k*c)) // c -> (x // c) % k requires k>0; (x % (k*c)) % c -> x % c is unconditional for c>0
@@ -1022,6 +1007,8 @@ class TestSymbolic(unittest.TestCase):
     x = Variable("x", -10, 10)
     self.helper_test_variable((x < 0).where(0, x), 0, 10, "x.maximum(0)")
     self.helper_test_variable((0 < x).where(x, 0), 0, 10, "x.maximum(0)")
+    self.helper_test_variable(((x+3) < 0).where(0, x+3), 0, 13, "(x+3).maximum(0)")
+    self.helper_test_variable((5 < x).where(5, x), -10, 5, "(5<x).where(5, x)")
 
   def test_where_combine(self):
     cond = Variable("x", 0, 3) < 2

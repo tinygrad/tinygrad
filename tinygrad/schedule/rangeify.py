@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
@@ -311,9 +311,6 @@ to_define_global = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
   (UPat(Ops.AFTER, name="after"), handle_after),
-
-  # remove device from local BUFFERIZE
-  (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
 
   (UPat(Ops.RANGE, name="r"), lambda ctx, r: ctx.ranges.setdefault(r.arg)),
 ])

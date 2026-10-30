@@ -8,7 +8,6 @@ from tinygrad.dtype import dtypes
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
-  if not len(rngs): return None
   return r.replace(src=r.src[:off]+tuple(dedup(x for s in rngs for x in ((s,) if s.op is Ops.RANGE else s.ranges))))
 
 pm_flatten_range = PatternMatcher([
@@ -22,8 +21,8 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
-    # check same type
-    if r0.axis_type == r1.axis_type:
+    # check same type and neither bound depends on the other range
+    if r0.axis_type == r1.axis_type and r0 not in r1.ranges and r1 not in r0.ranges:
       # check if the ranges to merge are in the same reduces
       if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
         s0, s1 = r0.src[0], r1.src[0]
@@ -79,7 +78,6 @@ pm_split_ranges = PatternMatcher([
 def no_range(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
-  if red.arg[0] not in GroupOp.Reduce: return None
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None

@@ -26,7 +26,6 @@ class ParamArg:
   slot: int
   dtype: DType
   vmin_vmax: tuple[PyConst, PyConst]|None = None
-  multiple_of: int|None = None
   name: str|None = None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   device: str|tuple[str, ...]|None = None
@@ -41,7 +40,7 @@ class ParamArg:
   # the memory the linker gives an ALLOC
   spec: BufferSpec|None = None
   def __repr__(self):
-    fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
+    fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
@@ -167,7 +166,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
       return src[0].dtype
-    case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
+    case Ops.BUFFER | Ops.ALLOC | Ops.PARAM | Ops.REFPARAM:
       assert isinstance(arg, ParamArg), f"{op} must have ParamArg"
       return arg.dtype
     case Ops.BINARY:
@@ -348,7 +347,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.GETADDR: return ()
       case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
-      case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
+      case Ops.BUFFER | Ops.ALLOC | Ops.PARAM | Ops.REFPARAM:
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
@@ -678,12 +677,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     """(axis, RANGE) pairs this value is sharded over (the source of truth for shard bounds/counts)."""
     return tuple(zip(self.arg, self.src[1:])) if self.op is Ops.UNSHARD else ()
 
-  @property
-  def bounds(self):
-    if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
-    dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
-    return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in range(dcount)], initial=0)))
-
   @functools.cached_property
   def axis(self) -> int|None:
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
@@ -727,14 +720,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     copied = self.copy_to_device(devices)
     return copied if axis is None else copied._shard(axis, UOp.range(len(devices), 0, AxisType.DEVICE)).unshard(axis)
 
-  def copy_to_device(self, device:str|tuple[str, ...], arg=None):
+  def copy_to_device(self, device:str|tuple[str, ...]):
     if is_disk_device(device):
       raise RuntimeError("COPY to DISK is not allowed; use STORE to an explicit disk buffer")
-    assert arg is None or isinstance(self.device, tuple)
-    inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
-    if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
+    if self.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {self.dtype}")
     # multi-device COPYs carry the DEVICE range as src[1] (like UNSHARD's sharding ranges)
-    return UOp(Ops.COPY, src=(inp, *UOp.device_range_src(device)), arg=device)
+    return UOp(Ops.COPY, src=(self, *UOp.device_range_src(device)), arg=device)
   def store_call(self, src:UOp) -> UOp:
     """Executable bulk transfer into this buffer."""
     return self.param_like(0).store(src.param_like(1)).call(self, src)
@@ -756,12 +747,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # base with UNSHARD
   @property
-  def unsharded_base(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
-    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
-    # TODO: why can't this be in normal base?
-    if self.op is Ops.UNSHARD: return self.src[0].base
-    return self
+  def unsharded_base(self) -> UOp: return self.src[0].base if self.op is Ops.UNSHARD else self.base
 
   # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
   @recursive_property
@@ -884,8 +870,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     # anything that has dtype void has no memory backing, it lives in the ALU
     if self.dtype is dtypes.void: return AddrSpace.ALU
-    if self.op is Ops.PARAM: return self.arg.addrspace
-    if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
+    if self.op in {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
     if self.op is Ops.BINARY: return AddrSpace.GLOBAL
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
@@ -985,10 +970,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint) -> UOp:
     # a Variable is a scalar ALU PARAM with a name and a value range; binding it sets the val payload on the arg
-    return UOp(Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val),
-                                                          multiple_of=multiple_of, addrspace=AddrSpace.ALU))
+    return UOp(Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), addrspace=AddrSpace.ALU))
   @property
   def is_variable(self) -> bool:
     # a Variable is a scalar ALU PARAM that carries a value range
@@ -1006,7 +990,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     uval = UOp.const(val) if isinstance(val, int) else val
     assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
-    assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
     return self.replace(arg=replace(self.arg, val=uval.val))
   def unbound(self) -> Variable:
     assert self.is_variable, f"op is {self.op}, need Variable"
@@ -1032,29 +1015,22 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     """largest known int that divides self"""
     # TODO: for negatives it's not the largest
     if self.op is Ops.CONST: return self.val
-    if self.op is Ops.STACK: return math.gcd(*[x.const_factor() for x in self.src])
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].val if self.src[0].op is Ops.CONST else self.src[1].val if self.src[1].op is Ops.CONST else 1
-    if self.op in GroupOp.Defines and self.arg.multiple_of is not None: return self.arg.multiple_of
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
     if self.op is Ops.CONST: return self.const_like(self.val//v) if self.val%v == 0 else None
-    if self.op is Ops.STACK:
-      srcs = tuple(s.divides(v) for s in self.src)
-      return None if any(s is None for s in srcs) else UOp(Ops.STACK, src=cast(tuple[UOp, ...], srcs))
     if self.op is Ops.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
     if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
-    if self.op in GroupOp.Defines and self.arg.multiple_of is not None:
-      return self // v if self.arg.multiple_of%v == 0 else None
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
     return (self.src[0], self.src[1].val) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
   def gcd(*uops: UOp) -> UOp:
-    # Strip explicit coefficients, not multiple_of, so symbolic factors stay recognizable by divide_exact.
+    # Strip explicit coefficients so symbolic factors stay recognizable by divide_exact.
     terms, factors = zip(*[u.pop_const(Ops.MUL) for u in uops])
     count = functools.reduce(operator.and_, [collections.Counter(term.split_uop(Ops.MUL)) for term in terms])
     if not count: factors = tuple(u.const_factor() for u in uops)
@@ -1079,7 +1055,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return wrapped(self.dtype, s0_vmin+s1_vmin, s0_vmax+s1_vmax)
       if self.op is Ops.SUB: return wrapped(self.dtype, s0_vmin-s1_vmax, s0_vmax-s1_vmin)
-      if self.op is Ops.AND and dtypes.is_int(self.dtype) and s1_vmin == s1_vmax >= 0:
+      if self.op is Ops.AND and dtypes.is_int(self.dtype) and s1_vmin == s1_vmax and (s0_vmin >= 0 or s1_vmax >= 0):
         return 0, s1_vmax if s0_vmin < 0 else min(s0_vmax, int(s1_vmax) & ((1 << int(s0_vmax).bit_length()) - 1))
       if self.op is Ops.MUL: return wrapped(self.dtype, min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals))
       # SHL/SHR on consts only
@@ -1114,7 +1090,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if self.op is Ops.CMPEQ: return (s0_vmin == s0_vmax == s1_vmin == s1_vmax, not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
       if self.op is Ops.OR and self.dtype == dtypes.bool: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
       if self.op is Ops.AND and self.dtype == dtypes.bool: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
-    if self.op is Ops.WHERE: return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
+    if self.op is Ops.WHERE:
+      # int (a<b).where(a,b) is min(a,b)
+      if dtypes.is_int(self.dtype) and self.src[0].op is Ops.CMPLT and self.src[0].src == self.src[1:]:
+        return min(self.src[1].vmin, self.src[2].vmin), min(self.src[1].vmax, self.src[2].vmax)
+      return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
@@ -1205,7 +1185,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     shape = (shape,) if isinstance(shape, (int, UOp)) else shape or ()
     ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),),
-              arg=ParamArg(slot, dtype, vmin_vmax, None, name, addrspace, device, volatile))
+              arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
@@ -1286,8 +1266,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def kernel_params(self) -> tuple[UOp, ...]:
-    # the kernel's params in its arg order, which is slot order. the LINEAR keeps two IMAGE params of one slot in order, x86 isel replaces every PARAM
-    params = [u for u in self.src[1].src if u.op is Ops.PARAM]
+    # the kernel's params in slot order. the LINEAR keeps two IMAGE params of one slot in order, isel and packing replace PARAMs
+    params = [u for u in self.src[1].src if u in self.arg.params]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
 
@@ -1318,6 +1298,7 @@ class KernelInfo:
   estimates: Estimates|None = None
   beam: int = 0
   optimized: bool = False       # the AST has been through the optimizer, skip re-optimization
+  kernel: bool = True           # launched by the runtime, not called from another kernel
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -1621,12 +1602,12 @@ def get_process_replay_loc() -> str:
   return f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
 
 if CAPTURE_PROCESS_REPLAY:
-  replay_capture: list[bytes] = []
+  replay_capture: list[tuple[str, bytes]] = []
   import atexit, uuid
   @atexit.register
   def save_to_diskcache():
     uid = uuid.uuid4() # one id per process
-    for i,v in enumerate(replay_capture): diskcache_put("process_replay", f"{uid}_{i}", v, prepickled=True)
+    for i,(k,v) in enumerate(replay_capture): diskcache_put(k, f"{uid}_{i}", v, prepickled=True)
 
 def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
@@ -1634,7 +1615,7 @@ def add_trace_group(kt:TracingKey) -> None:
 
 active_group:list[int] = []
 active_rewrites:list[TrackedGraphRewrite] = []
-def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False, new_ctx:bool=True):
+def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:str="", new_ctx:bool=True):
   if not new_ctx: assert not callable(name) and not replay, "name fxn and replay are only supported for new_ctx groups"
   def _decorator(func):
     def __wrapper(*args, **kwargs):
@@ -1670,7 +1651,7 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
       if CAPTURE_PROCESS_REPLAY and replay:
         # capture global context vars and all the args passed in
         with Context(PROCESS_REPLAY_LOC=get_process_replay_loc()):
-          replay_capture.append(pickle.dumps((fn, args, kwargs, ContextVar._cache, ret)))
+          replay_capture.append((replay, pickle.dumps((fn, args, kwargs, ContextVar._cache, ret))))
       return ret
     return __wrapper
   return _decorator

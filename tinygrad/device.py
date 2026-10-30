@@ -11,6 +11,7 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
+  from tinygrad.uop.ops import PatternMatcher
 
 # **************** Device ****************
 
@@ -376,10 +377,10 @@ class Compiled:
   var_vals: dict[str, int] = {}
 
   # hcq2
-  pm_encode:Any = None
-  pm_lower:Any = None
-  pm_link:Any = None
-  link_bufs:dict[str, Any] = {}
+  pm_encode:PatternMatcher
+  pm_lower:PatternMatcher
+  pm_link:PatternMatcher
+  link_bufs:dict[str, Buffer|Callable[..., Buffer]] = {}
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer

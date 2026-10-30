@@ -89,10 +89,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # the image dims are stored in the param's arg, the size stays the flat buffer len
   buf = buf.replace(arg=replace(buf.arg, image=(h, w)))
   shapes[buf.arg.slot] = (h, w)
-  if valid.op is not Ops.CONST or valid.val is not True:
-    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
-  else:
-    return buf.index(cidx.src[1], cidx.src[0])
+  return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
 
 def store_image(x:UOp, d:UOp) -> UOp:
   # image load/store is always float, a half image converts on store
@@ -110,9 +107,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
-    # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
@@ -121,48 +117,46 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       if idx.is_invalid: continue
-      root_src: UOp|str
+      root_src: UOp|None
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
       elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].val
-      elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.val
+      elif idx.op is Ops.CONST: root_src, arg = None, idx.val
       else: root_src, arg = idx, 0
       # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
       memory[(u.op, buf, root_src, valid, u.arg)].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,base,valid,ld_arg),offsets in memory.items():
+  for (op,buf,_,_,ld_arg),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
     if ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif is_image_shape(buf._shape):
-      lengths = [4]
     elif buf.dtype in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and ctx.supports_float4:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
     # do the grouping
-    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
-    for full_grp in grouped_offsets:
+    for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0]):
+      full_grp = [offsets[x] for _,x in group]
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
-        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
+        # the group starts at its first access's index, valid included
+        offset = full_grp[0][0].src[0].src[1]
+        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.get_idx().divides(l) is not None)][0]
         grp, full_grp = full_grp[:length], full_grp[length:]
-        # NOTE: we apply the valid again after we determine the length
-        offset = offset.valid(valid)
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length))) if length > 1 else buf.index(offset)
+        assert op is not Ops.STORE or all(len(g) == 1 for g in grp), "attempting multiple stores"
+        if length == 1: continue
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length)))
         if op == Ops.STORE:
-          assert all(len(offsets[g]) == 1 for g in grp), "attempting multiple stores"
-          datas = [offsets[g][0].src[1] for g in grp]
-          store = idx.store(UOp.stack(*datas) if length > 1 else datas[0])
-          for g in grp: replacements[offsets[g][0]] = store
+          datas = [g[0].src[1] for g in grp]
+          store = idx.store(UOp.stack(*datas))
+          for g in grp: replacements[g[0]] = store
         else:
           ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
-            for oo in offsets[g]: replacements[oo] = ld.index(i) if length > 1 else ld
+            for oo in g: replacements[oo] = ld.index(i)
 
   # apply
   return sink.substitute(replacements, name="memory coalescing")

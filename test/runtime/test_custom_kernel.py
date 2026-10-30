@@ -4,7 +4,7 @@ from tinygrad.engine.realize import run_linear, get_runtime
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
-from tinygrad.helpers import getenv, DEV
+from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
@@ -289,6 +289,16 @@ class TestCustomKernel(unittest.TestCase):
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
+  def test_unused_reduce_dependency(self):
+    for value in (UOp.const(2), UOp.const((1, 2, 3, 4)).reshape((2, 2))):
+      with self.subTest(shape=value.shape):
+        def kernel(C:UOp) -> UOp:
+          i = UOp.range(3, 0, AxisType.LOOP)
+          cell = C.after(i)[0]
+          v = value.after(cell.store(cell + 1))
+          return C.after(v.reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+        self.assertEqual(Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [3])
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
     # j%2 splits j into two ranges, both are still LOCAL
@@ -367,6 +377,13 @@ class TestCustomKernel(unittest.TestCase):
       return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
     a = Tensor([1., 2, 3, 4])
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
+
+  def test_range_bound_after_outer_range(self):
+    def kernel(C:UOp) -> UOp:
+      i = UOp.range(3, 0, AxisType.LOOP)
+      j = UOp.range(UOp.const(2, dtypes.weakint).after(i), 1, AxisType.LOOP)
+      return C[0].set(C.after(i, j)[0] + 1, end=(j, i)).sink(arg=KernelInfo())
+    self.assertEqual(Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[0].tolist(), [6])
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
@@ -585,18 +602,24 @@ class TestCustomKernel(unittest.TestCase):
       self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
     self.assertEqual(a.shape, (2, 2))
 
-  @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) or Device.DEFAULT == "PYTHON") and
+  @unittest.skipUnless((isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)) or Device.DEFAULT == "PYTHON") and
                        Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
-  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK"), "AMD emulator doesn't support direct pc read and write")
   def test_binary(self):
     payload = bytes(range(256))
+    def view(x): return x.reshape((16, 16)).permute((1, 0)).reshape((256,))
     def kernel(out:UOp):
       i = UOp.range(len(payload), 0)
-      data = UOp(Ops.BINARY, arg=payload)
+      data = view(UOp(Ops.BINARY, arg=payload))
       return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
-    self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(), list(payload))
+    self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(),
+                     view(Tensor(payload, dtype=dtypes.uint8)).tolist())
 
-@unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer))),
+  def test_one_lane_stack_runtime_index(self):
+    def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
+
+@unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
+                     or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
                      "calls in kernel not implemented in this renderer")
 class TestCallInKernel(unittest.TestCase):
   def test_simple(self):
@@ -783,7 +806,8 @@ class TestCallInKernel(unittest.TestCase):
     self.assertEqual(y.tolist(), z.tolist())
     self.assertEqual(x.tolist(), z.tolist())
 
-  def test_compile_cache(self):
+  @unittest.skipIf(Device[Device.DEFAULT].renderer.inline_prefix is not None, "backend inlines calls instead of linking")
+  def test_linker(self):
     @uopfunc
     def plus2(out:UOp, A:UOp): return out[0].store(A[0]+2).sink()
 

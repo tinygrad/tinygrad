@@ -1161,8 +1161,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       to_add.append((Tensor.ones(2, 8) * i).shard(devices))
 
     added:list[Tensor] = []
-    for bound, a in zip(x.uop.bounds, to_add):
-      added.append(x[bound[0]:bound[1]] + a)
+    for i, a in enumerate(to_add):
+      added.append(x[2*i:2*i+2] + a)
 
     output = added[0].cat(*added[1:])
     expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
@@ -1275,8 +1275,8 @@ class TestBatchNorm(unittest.TestCase):
         bns.append(bn)
 
       bn_ts = []
-      for bound, bn in zip(x.uop.bounds, bns):
-        bni = bn(x[bound[0]:bound[1]])
+      for i, bn in enumerate(bns):
+        bni = bn(x[2*i:2*i+2])
         bn_ts.append(bni)
 
       bn_ts[0].cat(*bn_ts[1:]).numpy()

@@ -10,9 +10,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.DIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   # x//y is constant
-  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.MOD else xdiv.const_like(xdiv.vmin)
-  # PARAM // c is irreducible
-  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.val == 0: return d.const_like(0) if d.op is Ops.MOD else None
+  if d.op is Ops.MOD and (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -34,6 +32,9 @@ def fold_divmod_general(d: UOp) -> UOp|None:
         new_xs.append(u)
       if changed: return (UOp.usum(*new_xs) + const) % y
 
+    # exact division keeps the structure of x: (q*c+k)//c -> q+k//c
+    if d.op is Ops.DIV and (q:=x_peeled.divides(c)) is not None: return q + const//c
+
     # Shared decomposition for folding rules
     decomp = [(u.divides(f:=u.const_factor()),f) for u in uops_no_const]
     terms, factors = zip(*decomp)
@@ -47,17 +48,11 @@ def fold_divmod_general(d: UOp) -> UOp|None:
         if d.op is Ops.MOD: return rem - rem.vmin//c*c
         return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
 
-    # gcd_with_remainder: factor out common gcd from numerator
-    if (g:=math.gcd(*factors, c)) > 1:
-      new_x = unwrap(x_peeled.divides(g)).simplify() + (const//g)%(c//g)
-      if new_x.vmin >= 0:
-        if d.op is Ops.MOD: return new_x % (c//g) * g + const%g
-        return new_x // (c//g) + const//c
-
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
+    # f is a term factor dividing c or the gcd of all factors and c
     # DIV identity holds for any sign of x; MOD reconstruction needs x.vmin>=0
     results = []
-    for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op is not Ops.CONST and 1 < abs(f) < c and (c%f)==0}:
+    for div in {abs(f) for f in (*factors, math.gcd(*factors, c)) if 1 < abs(f) < c and c%f==0}:
       if (newxs := fold_divmod_general(x//div)) is not None:
         if d.op is Ops.DIV:
           results.append((len(newxs.backward_slice), newxs // (c // div)))

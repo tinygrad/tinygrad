@@ -37,10 +37,9 @@ def _render_arg(x:UOp) -> str:
       if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
       if dtypes.is_float(dt): return f"{dt.name}:{float(v).hex()}"   # float.hex() roundtrips exactly, inf/nan included
       return f"{dt.name}:{v}"
-    case Ops.PARAM | Ops.BUFFER | Ops.ALLOC:
+    case Ops.PARAM | Ops.REFPARAM | Ops.BUFFER | Ops.ALLOC:
       a, opts = x.arg, ""
       if a.vmin_vmax is not None: opts += f" bounds=[{a.vmin_vmax[0]},{a.vmin_vmax[1]}]"
-      if a.multiple_of is not None: opts += f" multiple_of={a.multiple_of}"
       if a.addrspace not in (None, AddrSpace.GLOBAL): opts += f" addrspace={a.addrspace.name}"
       if a.device is not None:
         opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))

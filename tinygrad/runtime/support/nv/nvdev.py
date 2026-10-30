@@ -82,7 +82,8 @@ class NVDev:
     self.is_booting = False
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
-    for ip in [self.flcn, self.gsp]: ip.init_hw()
+    if self.flcn.init_hw(): return NVDev.__init__(self, pci_dev)
+    self.gsp.init_hw()
 
   def fini(self):
     for ip in [self.gsp, self.flcn]: ip.fini_hw()

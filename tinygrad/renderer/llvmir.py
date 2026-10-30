@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target
 
-def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
+def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op in {Ops.PARAM, Ops.REFPARAM} and buf.arg.volatile
 
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
@@ -71,7 +71,7 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.TRUNCDIV: "udiv", Ops.TRUNC
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.TRUNCDIV: "sdiv", Ops.TRUNCMOD: "srem", Ops.SHR: "ashr"}
-flags = " nsz contract afn"
+flags = " contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -112,6 +112,7 @@ base_rewrite = PatternMatcher([
    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
+  (UPat(Ops.REFPARAM, name="x"), lambda ctx,x: f"  {ctx[x]} = inttoptr i64 {ctx[x.src[1]]} to {ldt(x.dtype, ptr=True)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
@@ -168,20 +169,15 @@ class LLVMRenderer(Renderer):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, args_struct=False) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
     sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
-    if args_struct:
-      args_t = "{ " + ", ".join(tys) + " }"
-      kernel = [f"  %args_t = load {args_t}, ptr %args"] + [f"  {n} = extractvalue {args_t} %args_t, {i}" for i,(n,_) in enumerate(args)] + kernel
-      sargs = "ptr %args"
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
-  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test", args_struct=False) -> tuple[tuple[str, ...], str]:
+  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test") -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
     args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
-    call_args: list[str] = []
     vc = -1
 
     local_args: list[str] = []
@@ -209,15 +205,8 @@ class LLVMRenderer(Renderer):
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
       elif u.op is Ops.BINARY: r[u] = f"@bin_{u.key.hex()}"
       elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
-        vc += 1
-        types = [ldt(p.dtype, ptr=p.addrspace != AddrSpace.ALU) for p in u.body.arg.params]
-        arg_type = "{ " + ", ".join(types) + " }"
-        r[u] = f"%v{vc}"
-        call_args.append(f"  {r[u]} = alloca {arg_type}")
-        for i, (p, ty) in enumerate(zip(u.body.arg.params, types)):
-          kernel.append(f"  {r[u]}_{i} = getelementptr inbounds {arg_type}, ptr {r[u]}, i32 0, i32 {i}")
-          kernel.append(f"  store {ty} {r[u.src[p.arg.slot+1]]}, ptr {r[u]}_{i}")
-        kernel.append(f"  call void @{u.body.src[0].arg.function_name}(ptr {r[u]})")
+        call_args = ', '.join(f'{lparam(p)} {r[u.src[p.arg.slot+1]]}' for p in u.body.arg.params)
+        kernel.append(f"  call void @{u.body.src[0].arg.function_name}({call_args})")
       elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
       elif (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype)) or (u.op is Ops.BITCAST and u.addrspace not in (None, AddrSpace.ALU)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -230,18 +219,19 @@ class LLVMRenderer(Renderer):
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, call_args + kernel, prefix, args_struct)
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   global_max = (1, 0, 0)
   abi = None
+  packed_args = True
   string_rewrite = base_rewrite
-  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops, args_struct=True))[0] + (k[1], self._render_footer(uops)))
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
-    decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}(ptr)"
+    decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}({', '.join(map(lparam, x.body.arg.params))})"
               for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}

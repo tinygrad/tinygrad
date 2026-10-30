@@ -2,13 +2,14 @@ from __future__ import annotations
 from typing import cast, Any, Sequence
 import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
-from tinygrad.uop.ops import pm_renumber_slots, CountCtx
+from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop
 from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates
+from tinygrad.runtime.support.c import Struct
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
 
 # **** calls
@@ -55,7 +56,7 @@ def make_program(prg:UOp, size:int, device:str) -> UOp:
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
   return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
-def make_submit(*cmds, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
+def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
   kind = to_name(dev.split(":")[0], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
   q = UOp.param(0, dtypes.u8, 1, dev, name=queue) # the queue instance: its device and name
   return UOp.sink(*cmds, arg=KernelInfo(kind)).call(q).after(*deps)
@@ -73,7 +74,7 @@ def hcq_fence(slots:UOp, tl:UOp, last:int) -> UOp: # wait for the previous run o
 
   loop = UOp.range(UOp(Ops.NOOP).after(start:=get_time_ms(target:=slots.index(last).load())), next(UOp.unique_num), dtype=dtypes.void)
   done = tl.after(target, loop).index(0).load()
-  return done.backedge(loop, (done < target) & (get_time_ms(done) - start < 30000)).sink()
+  return done.backedge(loop, (done < target) & (get_time_ms(done) - start < int(Compiled.wait_timeout_ms))).sink()
 
 def make_fence(slots:dict[str, UOp], num_queues:dict[str, int]) -> UOp:
   fences = [hcq_fence(patch(b, [], bytes(b.nbytes())), timeline(dev), 2 * num_queues[dev], name=to_name("fence", dev)) for dev, b in slots.items()]
@@ -84,7 +85,7 @@ def announce(slots:dict[str, UOp], num_queues:dict[str, int], dep:UOp) -> list[U
   bumped = [timeline(dev).after(dep).index(1).store(timeline_value(dev) + 1) for dev in slots]
   return bumped + [buf.after(dep).index(2 * num_queues[dev]).store(timeline_value(dev) + 1) for dev, buf in slots.items()]
 
-def ins(name, *src) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
+def ins(name:str, *src:UOp|int) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
 
 # **** patchers
 
@@ -97,7 +98,7 @@ def _is_link_patch(w:UOp) -> bool:
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, getattr(o, "vmin", o) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
+  keys = [(w.dtype, (u:=sint_to_uop(o)).vmin % w.dtype.itemsize, _is_link_patch(w), tuple(u.ranges)) for o, w in rows]
   groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
 
   # a link patch writes the bare buffer after the blob, a runtime patch writes it after its deps
@@ -124,7 +125,7 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
   ret = dtypes.void if fn.restype is None else getattr(dtypes, fn.restype.__name__[2:], dtypes.u64) # void, c_int -> int, pointers -> u64
   return UOp.custom_function(fn.__name__, dtype=ret).call(*[UOp.const(a, dtypes.i32) if isinstance(a, int) else a for a in args])
 
-def cstruct(struct_t, **fields:UOp|int) -> UOp:
+def cstruct(struct_t:type[Struct], **fields:UOp|int) -> UOp:
   flds = {n: (o, {d.itemsize: d for d in dtypes.uints}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)}
   rows = [(flds[n][0], UOp.const(v, flds[n][1])) for n, v in fields.items()]
   buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.u8, device=HCQ_RUNTIME_DEV.device, name=struct_t.__name__)
@@ -183,7 +184,8 @@ pm_insert_copy_staging = PatternMatcher([
 # **** batch: calls become queue programs
 
 class DepsTracker:
-  def __init__(self):
+  def __init__(self, queue_of:Sequence[Any]):
+    self.queue_of = queue_of
     self.ranges:dict[tuple[UOp, int|None], list[tuple[int, int, bool, int]]] = defaultdict(list) # per (base, lane): (start, end, is_write, tag)
 
   def access_resources(self, accesses:Sequence[tuple[UOp, bool]], tag:int) -> list[int]: # (buffer, is_write) accesses -> earlier tags to wait on
@@ -194,10 +196,11 @@ class DepsTracker:
     waits = [t for key, start, end, is_write in spans for lo, hi, was_write, t in self.ranges[key]
              if lo < end and start < hi and (is_write or was_write)]
 
-    # a write owns its span: the earlier accesses keep only the parts outside it
+    # a write owns its span: the earlier accesses keep only the parts outside it.
     for key, start, end, is_write in spans:
       if is_write:
         self.ranges[key] = [(lo, hi, w, t) for a, b, w, t in self.ranges[key] for lo, hi in ((a, min(b, start)), (max(a, end), b)) if lo < hi]
+      else: self.ranges[key] = [r for r in self.ranges[key] if r[:3] != (start, end, False) or self.queue_of[r[3]] != self.queue_of[tag]]
       self.ranges[key].append((start, end, is_write, tag))
     return dedup(waits)
 
@@ -243,7 +246,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   queue_of = [(dev, queue) for _, dev, queue in ctx.batch] # the (device, queue) of each call by tag
 
   # calc deps for each tag
-  tracker = DepsTracker()
+  tracker = DepsTracker(queue_of)
   accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
 
@@ -310,7 +313,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
   info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
-                 estimates=Estimates(*[sum(x*t.count(x) for x in dict.fromkeys(t)) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
+                 estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
   return sink.call(*slots.values(), aux=info)
 
 @rewrite_group(new_ctx=False)
@@ -368,17 +371,17 @@ class HWQueue:
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
 
-  def q(self, *words) -> int:
+  def q(self, *words:UOp|int) -> int:
     for w in words:
-      c = w
-      while isinstance(c, UOp) and c.op is Ops.CAST: c = c.src[0]
-      if isinstance(c, UOp) and c.op is Ops.BINARY: self.blob += c.arg
-      elif isinstance(c, UOp) and c.op is not Ops.CONST:
-        self.patches.append((len(self.blob), w))
-        self.blob += bytes(w.dtype.itemsize)
+      if isinstance(w, int): self.blob += struct.pack("I", truncate[dtypes.u32](w))
       else:
-        v, dt = (c.val, w.dtype) if isinstance(w, UOp) else (c, dtypes.u32)
-        self.blob += struct.pack(unwrap(dt.fmt), truncate[dt](v))
+        c = w
+        while c.op is Ops.CAST: c = c.src[0]
+        if c.op is Ops.BINARY: self.blob += c.arg
+        elif c.op is not Ops.CONST:
+          self.patches.append((len(self.blob), w))
+          self.blob += bytes(w.dtype.itemsize)
+        else: self.blob += struct.pack(unwrap(w.dtype.fmt), truncate[w.dtype](c.val))
     return len(self.blob)
 
   def loop(self, body:UOp, r:UOp):
@@ -537,7 +540,7 @@ pm_resolve_link = PatternMatcher([
 hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False) -> UOp:
+def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
   if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
 
   if cache and input_uops is not None:

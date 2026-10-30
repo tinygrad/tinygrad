@@ -11,6 +11,7 @@ from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
 from tinygrad.runtime.autogen.amd.common import OpType
+from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -555,9 +556,11 @@ def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") el
 
 def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
   addr_table:dict[int, Inst] = {}
+  code_end = s_code_end().to_bytes()
   offset, view = 0, memoryview(buf)
   while offset < len(buf):
     remaining = view[offset:]
+    if remaining[:4] == code_end: break
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
@@ -636,7 +639,10 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     return ret
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, i, data, src=2, alt="View Program")) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.arg, "lang":"cpp"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ast = unwrap(get_sink_at(("do_render",), viz_data, i, data, src=0, alt="View Program"))
+    extern_srcs = [u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, enter_calls=True) if u.op is Ops.SOURCE]
+    return {"src":"\n".join([sink.arg, *reversed(extern_srcs)]), "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data

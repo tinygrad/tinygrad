@@ -899,7 +899,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
-    self.assertEqual(len(cfg["blocks"]), 3)
+    self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_repeat(self):
     k = Kernel()
@@ -947,7 +947,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     ret = self.get_cfg("diamond", k)
     cfg = ret["data"]
-    self.assertEqual(len(cfg["blocks"]), 6)
+    self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
@@ -1105,7 +1105,7 @@ class TestCfg(unittest.TestCase):
     k.label("loop")
     k.emit(s_branch(), target="cmp")
     ret = self.get_cfg("endpgm", k)
-    self.assertEqual(len(ret["data"]["blocks"]), 6)
+    self.assertEqual(len(ret["data"]["blocks"]), 5)
     # the endpgm block has no path out
     endpc = next(pc for pc,s in ret["data"]["pc_tokens"].items() if s[0]["st"].startswith("s_endpgm"))
     self.assertEqual(len(ret["data"]["paths"][endpc]), 0)
@@ -1248,11 +1248,14 @@ class TestCLI(unittest.TestCase):
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
+      source = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View Source")[1]["value"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
     self.assertCountEqual(programs, [f"do_to_program for {name}" for name in ("inner", "outer", "nested_calls")])
     self.assertEqual(len(codegen_count), 1)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
+    self.assertEqual(len([s for s in source.splitlines() if "inner(" in s]), 4) # define + declare + 2 calls
+    self.assertEqual(len([s for s in source.splitlines() if "nested_calls(" in s]), 1)
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):

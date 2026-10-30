@@ -45,7 +45,8 @@ class Estimates:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          mults *= cast(sint, u.src[0].without_after.ssimplify())
+          bound = u.src[0].without_after.simplify()
+          mults *= cast(sint, bound.vmax if bound.ranges else bound.ssimplify())
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
@@ -63,6 +64,7 @@ class Estimates:
 class Renderer:
   target: Target
   suffix: str = ""
+  inline_prefix: str|None = None
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
@@ -74,6 +76,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
+  packed_args: bool = False
   code_for_op: dict[Ops, Callable] = {}
 
   compiler: Compiler = Compiler()
