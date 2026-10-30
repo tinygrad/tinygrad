@@ -93,7 +93,7 @@ class DTypes:
   def is_float(x: DType) -> bool: return x in (dtypes.floats + (dtypes.weakfloat,))
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x in (dtypes.ints + (dtypes.weakint,))
+  def is_int(x: DType) -> bool: return x in dtypes.wints
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x in dtypes.uints
@@ -160,6 +160,7 @@ class DTypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  wints = ints + (weakint,)
   weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 
