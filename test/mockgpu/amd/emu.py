@@ -1750,8 +1750,6 @@ if hasattr(ir4.SOP1Op, 'S_BARRIER_SIGNAL'): _BARRIER_SOP1_OPS.add(ir4.SOP1Op.S_B
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
               244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
 
-instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None]]]] = {}
-
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
               scratch_size:int, rsrc2:int, arch:str="rdna3"):
@@ -1793,6 +1791,8 @@ def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs, name=name)
+
+instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None]]]] = {}
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
