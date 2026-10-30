@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Any, Sequence
 import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
@@ -184,7 +184,8 @@ pm_insert_copy_staging = PatternMatcher([
 # **** batch: calls become queue programs
 
 class DepsTracker:
-  def __init__(self):
+  def __init__(self, queue_of:Sequence[Any]):
+    self.queue_of = queue_of
     self.ranges:dict[tuple[UOp, int|None], list[tuple[int, int, bool, int]]] = defaultdict(list) # per (base, lane): (start, end, is_write, tag)
 
   def access_resources(self, accesses:Sequence[tuple[UOp, bool]], tag:int) -> list[int]: # (buffer, is_write) accesses -> earlier tags to wait on
@@ -195,10 +196,11 @@ class DepsTracker:
     waits = [t for key, start, end, is_write in spans for lo, hi, was_write, t in self.ranges[key]
              if lo < end and start < hi and (is_write or was_write)]
 
-    # a write owns its span: the earlier accesses keep only the parts outside it
+    # a write owns its span: the earlier accesses keep only the parts outside it.
     for key, start, end, is_write in spans:
       if is_write:
         self.ranges[key] = [(lo, hi, w, t) for a, b, w, t in self.ranges[key] for lo, hi in ((a, min(b, start)), (max(a, end), b)) if lo < hi]
+      else: self.ranges[key] = [r for r in self.ranges[key] if r[:3] != (start, end, False) or self.queue_of[r[3]] != self.queue_of[tag]]
       self.ranges[key].append((start, end, is_write, tag))
     return dedup(waits)
 
@@ -244,7 +246,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   queue_of = [(dev, queue) for _, dev, queue in ctx.batch] # the (device, queue) of each call by tag
 
   # calc deps for each tag
-  tracker = DepsTracker()
+  tracker = DepsTracker(queue_of)
   accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
 
@@ -311,7 +313,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
   info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
-                 estimates=Estimates(*[sum(x*t.count(x) for x in dict.fromkeys(t)) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
+                 estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
   return sink.call(*slots.values(), aux=info)
 
 @rewrite_group(new_ctx=False)
