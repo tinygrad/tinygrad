@@ -166,7 +166,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
       return src[0].dtype
-    case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
+    case Ops.BUFFER | Ops.ALLOC | Ops.PARAM | Ops.REFPARAM:
       assert isinstance(arg, ParamArg), f"{op} must have ParamArg"
       return arg.dtype
     case Ops.BINARY:
@@ -347,7 +347,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.GETADDR: return ()
       case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
-      case Ops.BUFFER | Ops.ALLOC | Ops.PARAM:
+      case Ops.BUFFER | Ops.ALLOC | Ops.PARAM | Ops.REFPARAM:
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
@@ -870,8 +870,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     # anything that has dtype void has no memory backing, it lives in the ALU
     if self.dtype is dtypes.void: return AddrSpace.ALU
-    if self.op is Ops.PARAM: return self.arg.addrspace
-    if self.op in {Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
+    if self.op in {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC}: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
     if self.op is Ops.BINARY: return AddrSpace.GLOBAL
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
@@ -1267,8 +1266,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def kernel_params(self) -> tuple[UOp, ...]:
-    # the kernel's params in its arg order, which is slot order. the LINEAR keeps two IMAGE params of one slot in order, x86 isel replaces every PARAM
-    params = [u for u in self.src[1].src if u.op is Ops.PARAM]
+    # the kernel's params in slot order. the LINEAR keeps two IMAGE params of one slot in order, isel and packing replace PARAMs
+    params = [u for u in self.src[1].src if u in self.arg.params]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
 
@@ -1299,6 +1298,7 @@ class KernelInfo:
   estimates: Estimates|None = None
   beam: int = 0
   optimized: bool = False       # the AST has been through the optimizer, skip re-optimization
+  kernel: bool = True           # launched by the runtime, not called from another kernel
   @property
   def function_name(self): return to_function_name(self.name)
 

@@ -7,7 +7,8 @@ from tinygrad.dtype import DTYPES_DICT, DType
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.codegen import to_program
+from tinygrad.codegen import full_rewrite_to_sink
+from tinygrad.codegen.late.linearizer import linearize
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
@@ -56,9 +57,7 @@ class TestIdxUpcast(unittest.TestCase):
     for si in linear.src:
       ast = si.src[0]
       if ast.op is Ops.SINK:
-        renderer = Device[si.src[1].buffer.device].renderer
-        prg = to_program(ast, renderer)
-        return tuple(prg.src[1].src)
+        return tuple(linearize(full_rewrite_to_sink(ast, Device[si.src[1].buffer.device].renderer)))
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)

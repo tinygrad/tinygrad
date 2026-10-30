@@ -11,6 +11,7 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
+  packed_args = False
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
@@ -36,7 +37,7 @@ class DSPRenderer(ClangRenderer):
     msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{j+3}].dma.fd,0)+off{i};' for j,i in enumerate(gbufs)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     fbufs = [(f'buf_{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'sz_or_val_{i}') for i,b in enumerate(bufs)]
-    msrc += [f"{function_name}(&(struct {function_name}_args){{{', '.join(fbufs)}}});"]
+    msrc += [f"{function_name}({', '.join(fbufs)});"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
     msrc += ["return 0; }"]
@@ -266,7 +267,7 @@ class MockDSPRenderer(DSPRenderer):
         msrc.append(f"{self._render_dtype(b[1][0].dtype)} val{i}; read(0, &val{i}, {b[1][0].dtype.itemsize});")
     msrc.append("unsigned int st = inscount();")
     params = [(f'(void*)buf{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'val{i}') for i,b in enumerate(bufs)]
-    msrc.append(f"{function_name}(&(struct {function_name}_args){{{', '.join(params)}}});")
+    msrc.append(f"{function_name}({', '.join(params)});")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if b[1][0].addrspace == AddrSpace.GLOBAL: msrc.append(f"write(1, buf{i}, {b[1][0].max_numel()*b[1][0].dtype.itemsize});")
