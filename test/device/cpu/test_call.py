@@ -1,8 +1,9 @@
-import unittest
+import unittest, ctypes
 from tinygrad import Tensor, Device
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, KernelInfo
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.device import TinyELF
 
 # an external call is a CALL on a CUSTOM_FUNCTION body naming the symbol, the program links against the loaded libraries
 def call_out_kernel(C:UOp) -> UOp: # frexp writes the exponent through its pointer arg
@@ -15,6 +16,22 @@ def call_ret_kernel(C:UOp) -> UOp:
 
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "TODO: CALL is rendered in C style only")
 class TestExternalCall(unittest.TestCase):
+  def test_direct_args(self):
+    # Mix scalar types and enough integer arguments to spill onto the stack.
+    dev = Device["CPU"]
+    src = """void test_args(double* out, signed char a, unsigned short b, int c, unsigned int d,
+                            long e, unsigned long f, int g, int h, float i, double j) {
+      out[0] = a + b + c + d + e + f + g + h + i + j;
+    }"""
+    types = (dtypes.int8, dtypes.uint16, dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64,
+             dtypes.int32, dtypes.int32, dtypes.float32, dtypes.float64)
+    sig = ((None, AddrSpace.GLOBAL, dtypes.float64, (1,)),) + tuple((None, AddrSpace.ALU, dt, ()) for dt in types)
+    prg = dev.runtime(TinyELF(dev.compiler.compile(src), "test_args", dev.renderer.target, sig))
+    out = ctypes.c_double()
+    args = (-3, 65535, -100, 100, -1000, 1000, -7, 8, 0.5, 0.25)
+    self.assertIsNotNone(prg(ctypes.addressof(out), *args, wait=True))
+    self.assertEqual(out.value, sum(args))
+
   def test_call_out_param(self):
     c = Tensor.custom_kernel(Tensor.empty(2, dtype=dtypes.int, device="CPU"), fxn=call_out_kernel)[0]
     self.assertEqual(c.tolist(), [4, 5])

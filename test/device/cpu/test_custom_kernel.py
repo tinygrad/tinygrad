@@ -7,7 +7,7 @@ class TestCustomKernel(unittest.TestCase):
   @Context(DEV="CPU")
   def test_simple_from_source(self):
     a = Tensor.arange(4).clone().realize()
-    src = "struct args_t { int* a; }; void test_src(const struct args_t* args) { args->a[0] = 1; }"
+    src = "void test_src(int* a) { a[0] = 1; }"
     def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))
@@ -17,7 +17,7 @@ class TestCustomKernel(unittest.TestCase):
   @Context(DEV="CPU")
   def test_simple_from_source_alt(self):
     a = Tensor.arange(4).clone().realize()
-    src = "struct args_t { int* out; int* in; }; void copy(const struct args_t* args) { for (int i = 0; i < 4; i++) args->out[i] = args->in[i]; }"
+    src = "void copy(int* out, int* in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
     def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
       sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))

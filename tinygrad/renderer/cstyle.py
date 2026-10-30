@@ -71,8 +71,8 @@ base_rewrite = PatternMatcher([
 
   # call to PROGRAM links BINARY at runtime
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{body.src[0].arg.function_name}(&(struct {body.src[0].arg.function_name}_args){{"
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)}}});"),
+   f"{body.src[0].arg.function_name}("
+   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)});"),
 
   # call to LINEAR renders the call in SOURCE
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
@@ -168,7 +168,8 @@ class CStyleLanguage(Renderer):
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
-                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
+                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape,
+                                          override_ptr=u.addrspace != AddrSpace.ALU)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     if self.args_struct_prefix is not None:
       prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} arg{u.arg.slot}; " for _,(u,_) in bufs) + "};"]
@@ -285,8 +286,7 @@ class CStyleLanguage(Renderer):
     fns = {b:b.src[0].arg.function_name for b in bodies if b.op is Ops.PROGRAM}
     inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
     prefix = [f"extern void {b.arg.name}();" if b.op is Ops.CUSTOM_FUNCTION else
-              f"struct {fns[b]}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
-              f"}}; extern void {fns[b]}(const struct {fns[b]}_args*);" if b.op is Ops.PROGRAM else
+              f"extern void {fns[b]}({', '.join(self.param_type(p) for p in b.arg.params)});" if b.op is Ops.PROGRAM else
               f"static inline {self.inline_prefix} void {b.arg}({', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
               '\n'.join(inlines[b][1]) + "\n}" for b in bodies]
     return self.render_kernel(*self._render(uops), uops+[u for b in inlines for u in b.src], prefix or None)
@@ -297,7 +297,6 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   global_max = (1, 0, 0)
-  args_struct_prefix = "const"
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
 

@@ -4,6 +4,7 @@ from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.device import Device, TinyELF
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import DEBUG, Target, to_mv
 
 def resp(resp0=0, resp1=0, status=0): return struct.pack(REMOTE_RESP, status, resp0, resp1)
@@ -80,13 +81,17 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     conn.sendall(resp())
   elif cmd == RemoteCmd.LOAD_PROG:
     lib = conn.recv(arg0, socket.MSG_WAITALL)
-    links = {n:programs[i] for n,i in json.loads(conn.recv(arg1, socket.MSG_WAITALL)).items()}
-    programs.append(Device["CPU"].runtime(TinyELF(lib, "hcq_submit", Target("CPU"), ()), links=links))
+    meta = json.loads(conn.recv(arg1, socket.MSG_WAITALL))
+    links = {n:programs[i] for n,i in meta["links"].items()}
+    signature = tuple((None, AddrSpace.ALU, next(dt for dt in dtypes.all if dt.fmt == f), ()) for f in meta["formats"])
+    programs.append(Device["CPU"].runtime(TinyELF(lib, "hcq_submit", Target("CPU", meta["renderer"]), signature), links=links))
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
     kernargs = ctypes.create_string_buffer(conn.recv(arg1, socket.MSG_WAITALL))
     st = time.perf_counter()
-    programs[arg0].fxn(kernargs)
+    prg = programs[arg0]
+    if prg.direct: prg.fxn(*prg.packer.unpack_from(kernargs))
+    else: prg.fxn(kernargs)
     et = time.perf_counter() - st
     if (mock:=sys.modules.get("test.mockgpu.mockgpu")) is not None: # native programs bypass the mock's memoryview hooks
       for d in mock.drivers: d._emulate_execute()

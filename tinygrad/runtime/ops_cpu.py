@@ -21,9 +21,11 @@ class CPUProgram(Program['CPUDevice']):
   def __init__(self, dev:CPUDevice, obj:TinyELF, links:dict[str,CPUProgram]):
     self.dev, self.name, self.signature, self.profile_key, self.links = dev, obj.name, obj.signature, obj.profile_key, links
     self.lvp = obj.target.renderer == "LVP"
+    self.direct = obj.target.renderer in ("", "CLANG")
     self.packer = struct.Struct(''.join(unwrap(dt.fmt) for _, dt in TinyELF.iter_sig(self.signature)))
     if dev.remote is not None:
-      link_ids = json.dumps({n:p.fxn for n,p in links.items()}).encode()
+      link_ids = json.dumps({"links": {n:p.fxn for n,p in links.items()}, "renderer": obj.target.renderer,
+                             "formats": self.packer.format}).encode()
       self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(link_ids), payload=obj.lib + link_ids)[0]
     else:
       self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True))
@@ -42,10 +44,16 @@ class CPUProgram(Program['CPUDevice']):
         # msync should be a universal POSIX way to do this
         libc.msync(ctypes.c_void_p(self.buf.buf), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.buf.buf)
+      ctypes_map:dict[str, Any] = dict(zip("?bBhHiIqQfd", (ctypes.c_bool, ctypes.c_int8, ctypes.c_uint8, ctypes.c_int16, ctypes.c_uint16,
+                                            ctypes.c_int32, ctypes.c_uint32, ctypes.c_int64, ctypes.c_uint64, ctypes.c_float, ctypes.c_double)))
+      argtypes = [ctypes_map[f] for f in self.packer.format] if self.direct else [ctypes.c_void_p]
+      self.fxn = ctypes.CFUNCTYPE(None, *argtypes)(self.buf.buf)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:
+    if self.dev.remote is None and self.direct:
+      with cpu_profile(self.name, self.dev.device, profile_key=self.profile_key) as prof: self.fxn(*args)
+      return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
     hdr = 12 if self.lvp else 0
     kernargs = ctypes.create_string_buffer(hdr + len(args) * 8)
     if self.lvp: struct.pack_into('<3I', kernargs, 0, *data64_le(ctypes.addressof(kernargs) + hdr), len(args) * 2)
