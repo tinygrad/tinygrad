@@ -72,8 +72,8 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
-  shapes, ren = ctx
-  if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
+  shapes, ren, read_write = ctx
+  if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"} or buf in read_write: return None
   valid, x = x.get_valid(), x.get_idx()
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
@@ -89,10 +89,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # the image dims are stored in the param's arg, the size stays the flat buffer len
   buf = buf.replace(arg=replace(buf.arg, image=(h, w)))
   shapes[buf.arg.slot] = (h, w)
-  if valid.op is not Ops.CONST or valid.val is not True:
-    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
-  else:
-    return buf.index(cidx.src[1], cidx.src[0])
+  return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
 
 def store_image(x:UOp, d:UOp) -> UOp:
   # image load/store is always float, a half image converts on store
@@ -131,7 +128,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
 
   # build replacements
   replacements = {}
-  for (op,buf,base,valid,ld_arg),offsets in memory.items():
+  for (op,buf,_,_,ld_arg),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
@@ -148,21 +145,21 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
-        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
+        # the group starts at its first access's index, valid included
+        offset = offsets[full_grp[0]][0].src[0].src[1]
+        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.get_idx().divides(l) is not None)][0]
         grp, full_grp = full_grp[:length], full_grp[length:]
-        # NOTE: we apply the valid again after we determine the length
-        offset = offset.valid(valid)
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length))) if length > 1 else buf.index(offset)
+        assert op is not Ops.STORE or all(len(offsets[g]) == 1 for g in grp), "attempting multiple stores"
+        if length == 1: continue
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length)))
         if op == Ops.STORE:
-          assert all(len(offsets[g]) == 1 for g in grp), "attempting multiple stores"
           datas = [offsets[g][0].src[1] for g in grp]
-          store = idx.store(UOp.stack(*datas) if length > 1 else datas[0])
+          store = idx.store(UOp.stack(*datas))
           for g in grp: replacements[offsets[g][0]] = store
         else:
           ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
-            for oo in offsets[g]: replacements[oo] = ld.index(i) if length > 1 else ld
+            for oo in offsets[g]: replacements[oo] = ld.index(i)
 
   # apply
   return sink.substitute(replacements, name="memory coalescing")

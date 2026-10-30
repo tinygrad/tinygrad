@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
+from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
@@ -299,29 +299,6 @@ class Tensor(RandMixin):
     assert fmt != "e" or sys.version_info >= (3, 12)
     return buf.as_memoryview().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
 
-  # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
-  def tolist(self) -> PyConst|list[Any]:
-    """
-    Returns the value of this tensor as a nested list.
-    Returns single value for const tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4])
-    print(t.tolist())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor(5)
-    print(t.tolist())
-    ```
-    """
-    # TODO: remove half once minimum python supports it
-    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
-    if 0 in self.shape:
-      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
-      return _tolist(self.shape)
-    return self.data().tolist()
-
   def numpy(self) -> 'numpy.ndarray':
     """
     Returns the value of this tensor as a `numpy.ndarray`.
@@ -460,14 +437,10 @@ class Tensor(RandMixin):
     if device not in Tensor._device_seeds:
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
       Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint64)
     counter = Tensor._device_rng_counters[device]
-    new_low = counter[0:1] + (num & 0xffffffff)
-    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
-    counter.assign(new_low.cat(new_high))
-    low = counter[0:1] - (num & 0xffffffff)
-    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
-    return Tensor._device_seeds[device], low.cat(high)
+    counter.assign(counter + num)
+    return Tensor._device_seeds[device], (counter - num).bitcast(dtypes.uint32)
 
   # ***** toposort and backward pass *****
 
@@ -513,7 +486,7 @@ class Tensor(RandMixin):
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
-    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop._base_buffer_is_realized()
+    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop.base.without_after.is_realized
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))

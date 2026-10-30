@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, GroupOp
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import run_linear
 from tinygrad.renderer.ptx import PTXRenderer
@@ -24,7 +24,7 @@ def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:
 
 def _test_single_value(vals, op, dts):
   uops = []
-  output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
+  output_dtype = dtypes.bool if op in GroupOp.Comparison else dts[-1]
   buf_store = uop(uops, Ops.PARAM, output_dtype, (), 0)
   buf_loads = [uop(uops, Ops.PARAM, dtype, (), i+1) for i,dtype in enumerate(dts)]
   loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)) for i, dtype in enumerate(dts))
@@ -37,7 +37,7 @@ def _test_single_value(vals, op, dts):
 
 def _test_single_value_const(vals, op, dts):
   uops = []
-  output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
+  output_dtype = dtypes.bool if op in GroupOp.Comparison else dts[-1]
   buf_store = uop(uops, Ops.PARAM, output_dtype, (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
@@ -125,7 +125,7 @@ class TestFloatUOps(TestUOps):
   def test_log2(self): self._test_uop_fxn(Ops.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
   @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
   def test_sin(self): self._test_uop_fxn(Ops.SIN, lambda a: math.sin(a))
-  def test_recip(self): self._test_uop_fxn(Ops.RECIPROCAL, lambda a: 1/a if a != 0 else float('inf'))
+  def test_recip(self): self._test_uop_fxn(Ops.RECIP, lambda a: 1/a if a != 0 else float('inf'))
   def test_sqrt(self): self._test_uop_fxn(Ops.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
   def test_sqrt_edgecases(self):
     for a, expected in [(-math.inf, math.nan), (-1., math.nan), (0., 0.), (4., 2.), (math.inf, math.inf), (math.nan, math.nan)]:
@@ -137,7 +137,7 @@ class TestFloatUOps(TestUOps):
   def test_max(self): self._test_bop_fxn(Ops.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: a<b)
   def test_cmpne(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: a!=b)
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
+  def test_cmpeq(self): self._test_bop_fxn(Ops.CMPEQ, lambda a,b: a==b)
   def test_cmpne_nan(self):  # NaN != x for any x (IEEE 754)
     for a, b in [(math.nan, 1.0), (1.0, math.nan), (math.nan, math.nan)]:
       self.assertTrue(_test_single_value(
@@ -156,11 +156,11 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, CStyleLanguage)), "only ptx and cstyle use bitshifts")
   def test_shl_int32(self): self._test_bop_fxn(Ops.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   def test_div_int32(self):
-    self._test_bop_fxn(Ops.CDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
+    self._test_bop_fxn(Ops.TRUNCDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
   def test_and_int32(self): self._test_bop_fxn(Ops.AND, lambda a,b: int(a)&int(b), (dtypes.int32, dtypes.int32))
   def test_or_int32(self): self._test_bop_fxn(Ops.OR, lambda a,b: int(a)|int(b), (dtypes.int32, dtypes.int32))
   def test_mod_int32(self):
-    self._test_bop_fxn(Ops.CMOD,
+    self._test_bop_fxn(Ops.TRUNCMOD,
                        lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], (dtypes.int32, dtypes.int32), no_b_zero=True)
   def test_cmplt_int32(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: int(a)<int(b), (dtypes.int32, dtypes.int32))
   def test_cmpne_int32(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: int(a)!=int(b), (dtypes.int32, dtypes.int32))
@@ -192,6 +192,7 @@ class TestBoolUOps(TestUOps):
   def test_and_bool(self): self._test_bop_bool_fxn(Ops.AND, lambda a,b: a & b)
   def test_or_bool(self): self._test_bop_bool_fxn(Ops.OR, lambda a,b: a | b)
   def test_cmpne_bool(self): self._test_bop_bool_fxn(Ops.CMPNE, lambda a,b: a != b)
+  def test_cmpeq_bool(self): self._test_bop_bool_fxn(Ops.CMPEQ, lambda a,b: a == b)
   def test_cmplt_bool(self): self._test_bop_bool_fxn(Ops.CMPLT, lambda a,b: a < b)
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 

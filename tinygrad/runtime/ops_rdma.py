@@ -147,7 +147,7 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
               ins("write", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
 
     # and invalidate the gpu caches on recv
-    copies.append(ops + ([ins("barrier")] if is_recv else []))
+    copies.append(ops + ([ins("memory_barrier")] if is_recv else []))
   return copies
 
 # *****************

@@ -3,7 +3,7 @@ from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
-from tinygrad.codegen.simplify import pm_reduce_unparented, pm_reduce_collapse
+from tinygrad.codegen.simplify import pm_reduce_collapse
 from test.helpers import full_rewrite, to_uops_list
 
 simple_pm = PatternMatcher([
@@ -297,19 +297,6 @@ class TestUOpGraph(unittest.TestCase):
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD: self.assertIs(u.src[1], expected)
 
-  def test_where_on_gated_load_with_cast(self):
-    ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.int, 100)
-    gate_idx = ridx0.valid((ridx0<50))
-    ld = d0.index(gate_idx).cast(dtypes.float)
-    w = (ridx0<50).where(ld, 5.0)
-    out = UOp.param(1, dtypes.float, 100)
-    uops = to_uops_list([out.index(ridx0).store(w)])
-    expected = full_rewrite(UOp.const(5, dtypes.int).sink()).src[0]
-    for u in uops:
-      assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: self.assertIs(u.src[1], expected)
-
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.float, 100)
@@ -464,15 +451,6 @@ class TestReduceCollapse(unittest.TestCase):
       x, y, c = [Variable(n, 1, 100, dt) for n in "xyc"]
       for lt in ((x+y) < c, (x*y) < c):
         self.assertEqual(graph_rewrite(lt, pm_reduce_collapse) is lt, dt is dtypes.uint32)
-
-  def test_bool_reduce_unparented_keeps_dtype(self):
-    for op in (Ops.ADD, Ops.MUL):
-      self.assertIs(graph_rewrite(UOp.const(True).reduce(UOp.range(4, 0), arg=op), pm_reduce_unparented).dtype, dtypes.bool)
-
-  def test_max_reduce_unparented_empty_range(self):
-    n = Variable("n", 0, 4)
-    ret = graph_rewrite(UOp.const(1.0).reduce(UOp.range(n, 0), arg=Ops.MAX), pm_reduce_unparented)
-    self.assertEqual(ret.substitute({n: n.const_like(0)}).simplify().arg, float("-inf"))
 
   def test_reduce_shapeless_const_unroll(self):
     """a REDUCE over a shapeless CONST (e.g. x*0 folded late in codegen) must collapse before the expander"""

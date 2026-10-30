@@ -38,7 +38,7 @@ class Estimates:
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
-        while len(buf.src) and buf.op not in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: buf = buf.src[0]
+        while len(buf.src) and buf.op not in GroupOp.Defines: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
           accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults
@@ -67,6 +67,7 @@ def _cached_renderer(cls:type[Renderer], target:Target) -> Renderer: return cls(
 class Renderer:
   target: Target
   suffix: str = ""
+  inline_prefix: str|None = None
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
@@ -78,6 +79,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
+  packed_args: bool = False
   code_for_op: dict[Ops, Callable] = {}
 
   compiler: Compiler = Compiler()

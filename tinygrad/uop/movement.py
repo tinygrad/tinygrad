@@ -13,8 +13,6 @@ mop_cleanup = PatternMatcher([
   # merge PERMUTEs
   (UPat(Ops.PERMUTE, src=(UPat(Ops.PERMUTE, name="x2"), UPat()), name="x"),
    lambda x,x2: x2.src[0].permute(tuple(x2.marg[i] for i in x.marg))),
-  # remove noop PERMUTEs
-  (UPat(Ops.PERMUTE, name="x"), lambda x: x.src[0] if list(x.marg) == list(range(len(x.marg))) else None),
   # STACK on INDEX CONST
   (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat.var("src"), UPat(Ops.CONST))), name="stk"),
    lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].val for x in stk.src] else None),

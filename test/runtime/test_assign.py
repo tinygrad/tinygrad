@@ -418,7 +418,20 @@ class TestAssign(unittest.TestCase):
     a.realize()
     self.assertListEqual(a.tolist(), [[2.,2.,2.,2.],[2.,2.,2.,2.],[3.,3.,3.,3.], [3.,3.,3.,3.]])
 
-  # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
+  def test_flipped_assignment_from_self(self):
+    a = Tensor([0, 1, 2]).realize()
+    a[::-1] = a
+    self.assertEqual(a.tolist(), [2, 1, 0])
+
+  def test_add_row_from_self(self):
+    a = Tensor([[0, 1], [2, 3], [4, 5]]).realize()
+    a += a[0]
+    self.assertEqual(a.tolist(), [[0, 2], [2, 4], [4, 6]])
+
+  def test_roll_assignment_from_self(self):
+    a = Tensor([[0, 1], [2, 3]]).realize()
+    a.assign(a.roll(1, 0))
+    self.assertEqual(a.tolist(), [[2, 3], [0, 1]])
 
   def test_overlapping_shrink_assignment_forward(self):
     # Forward shift: read index > write index in overlap
@@ -757,17 +770,27 @@ class TestAssignOrdering(unittest.TestCase):
       b_np *= 0.9
     np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
 
-  @unittest.expectedFailure
   def test_war_reader_already_depends_on_write(self):
-    # TODO: broken now, x_expr reads x after the assign. z should be 15
+    # TODO: x_expr reads x before the assign but fuses with a read after it. should be [2, 4, 15] once that read is staged
     x = Tensor([1.0]).contiguous().realize()
     y = Tensor([2.0]).contiguous().realize()
     x_expr = x + 10          # 11, x is read here, before the assign
     x.assign(x * 2)
     y.assign(y + x)
     z = y + x_expr
+    with self.assertRaises(RuntimeError): Tensor.realize(x, y, z)
+
+  @unittest.expectedFailure
+  def test_war_reader_of_disjoint_slice(self):
+    # TODO: the stale read of x[2:4] fuses into z's kernel with the new y, like the sibling. staging that read gives [18, 20]
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).contiguous().realize()
+    y = Tensor([0.0, 0.0]).contiguous().realize()
+    stale = x[2:4] + 10
+    x[0:2].assign(Tensor([5.0, 6.0]))
+    y.assign(y + x[0:2])
+    z = y + stale
     Tensor.realize(x, y, z)
-    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 15.0])
+    np.testing.assert_equal(z.numpy(), [18.0, 20.0])
 
   def test_war_multi_read_then_assign(self):
     devices = ("CPU:0", "CPU:1")

@@ -1,6 +1,6 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple, round_up
-from tinygrad.device import Compiled
+from tinygrad.device import Compiled, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, CustomFunction
 from tinygrad.runtime.support.system import FileIOInterface, System
@@ -29,8 +29,8 @@ setattr(libc.dll, "mockgpu_ioctl", mockgpu_ioctl)
 
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
 def hook_doorbells(s:UOp) -> UOp|None:
-  hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr("CPU")) for c in s.toposort() if c.op is Ops.CALL
-                for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.arg.name) and to_tuple(b.device)[0].split(":")[0] in mocked)
+  hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr(Device[d].host)) for c in s.toposort() if c.op is Ops.CALL
+                for b in c.src[1:] if b.op is Ops.ALLOC and "doorbell" in str(b.arg.name) and (d:=to_tuple(b.device)[0]).split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 def hook_ioctl(f:UOp) -> UOp|None:
   return f.replace(arg=CustomFunction("mockgpu_ioctl", f.arg.dtype)) if f.arg.name == "ioctl" and "QCOM" in mocked else None
