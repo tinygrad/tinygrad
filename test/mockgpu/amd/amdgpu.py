@@ -193,12 +193,6 @@ class PM4Executor(AMDQueue):
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
-    # Read all user data registers (hardware loads these directly into s[0:N])
-    user_sgpr_count = (rsrc2 >> 1) & 0x1F  # USER_SGPR_COUNT is bits 1:5
-    user_data = []
-    for i in range(user_sgpr_count):
-      try: user_data.append(self.gpu.regs[regCOMPUTE_USER_DATA_0 + i])
-      except KeyError: user_data.append(0)
 
     prg_sz = 0
     for st,sz in sorted(self.gpu.mapped_ranges):
@@ -216,7 +210,7 @@ class PM4Executor(AMDQueue):
     assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
     from test.mockgpu.amd.emu import run_asm
     err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr,
-                  rsrc2, scratch_size, self.gpu.arch, user_data, self.kernel_name)
+                  rsrc2, scratch_size, self.gpu.arch, self.kernel_name)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_indirect_buffer(self, n):
