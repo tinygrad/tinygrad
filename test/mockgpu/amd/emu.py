@@ -1752,10 +1752,10 @@ F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None]]]] = {}
 
-# this is meant to replace the old emulator
 @uopfunc
 def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
               scratch_size:int, rsrc2:int, arch:str="rdna3"):
+  # set CONST registers
   ci = UOp.range(81, 2, AxisType.LOOP, dtype=dtypes.int)
   init_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
   fi = UOp.range(len(F32_INLINE), 3, AxisType.LOOP, dtype=dtypes.int)
