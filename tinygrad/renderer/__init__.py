@@ -46,7 +46,8 @@ class Estimates:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          mults *= cast(sint, u.src[0].without_after.ssimplify())
+          bound = u.src[0].without_after.simplify()
+          mults *= cast(sint, bound.vmax if bound.ranges else bound.ssimplify())
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
