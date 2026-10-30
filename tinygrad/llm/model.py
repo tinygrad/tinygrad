@@ -199,7 +199,7 @@ class FFNBlock:
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit, up_bias=self.config.swiglu_up_bias)
       x_down = self.ffn_down_exps(sel, act.contiguous())  # ([ndev,] B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # ([ndev,] B, T, D)
-      if out.ndim == 4: out = out.sum(0)
+      if out.ndim == x.ndim + 1: out = out.sum(0)
       if hasattr(self, 'ffn_gate_shexp'):
         shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous())
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
