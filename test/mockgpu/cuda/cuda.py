@@ -84,8 +84,9 @@ def cuModuleLoadData(module, image):
 def cuModuleGetFunction(hfunc, hmod, name): return out(hfunc, handle(hmod))
 
 def cuLaunchKernel(f, gx, gy, gz, lx, ly, lz, smem, stream, params, extra):
-  args, size = extra[1], ctypes.c_size_t.from_address(extra[3]).value # CU_LAUNCH_PARAM_BUFFER_POINTER, CU_LAUNCH_PARAM_BUFFER_SIZE
-  return enqueue(stream, lambda: run_kernel(handle(f), args, size, gx, gy, gz, lx, ly, lz, smem))
+  size = ctypes.c_size_t.from_address(extra[3]).value # CU_LAUNCH_PARAM_BUFFER_SIZE
+  args = ctypes.create_string_buffer(ctypes.string_at(extra[1], size), size) # CU_LAUNCH_PARAM_BUFFER_POINTER
+  return enqueue(stream, lambda: run_kernel(handle(f), ctypes.addressof(args), size, gx, gy, gz, lx, ly, lz, smem))
 def cuLaunchHostFunc(stream, fn, data): return enqueue(stream, lambda: fn(data) or True)
 def cuMemcpyAsync(dst, src, size, stream): return enqueue(stream, lambda: ctypes.memmove(dst, src, size) or True)
 def cuStreamWriteValue64_v2(stream, address, value, flags): return enqueue(stream, lambda: out(address, value) == 0)
