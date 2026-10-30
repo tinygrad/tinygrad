@@ -49,32 +49,37 @@ def normalize_messages(messages:list[dict]) -> None:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  END_THINK, END_CONTENT = ("</think>", "<|close|>think<|sep|><|open|>response<|sep|>"), ("<tool_call>", "<|close|>response<|sep|>")
-  def __init__(self, reasoning:bool=False):
+  # (start think, end think, end content, tool call)
+  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)"),
+             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
+              r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)"))
+  def __init__(self, special_tokens:dict[str, int], reasoning:bool=False):
+    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if any(f[2].startswith(t) for t in special_tokens)),
+                                                                   self.FORMATS[0])
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
-  def split(self, tags:tuple[str, ...], final:bool) -> tuple[str, str|None]:
+  def split(self, tag:str, final:bool) -> tuple[str, bool]:
     # split buf on the first full tag, holding back a partial tag at the end unless final
-    if found := [(self.buf.index(t), t) for t in tags if t in self.buf]:
-      before, self.buf = self.buf.split(tag := min(found)[1], 1)
-      return before, tag
-    hold = max((i for t in tags for i in range(1, min(len(self.buf), len(t))+1) if t.startswith(self.buf[-i:])), default=0) if not final else 0
+    if tag in self.buf:
+      before, self.buf = self.buf.split(tag, 1)
+      return before, True
+    hold = max((i for i in range(1, min(len(self.buf), len(tag))+1) if tag.startswith(self.buf[-i:])), default=0) if not final else 0
     emit, self.buf = self.buf[:len(self.buf)-hold], self.buf[len(self.buf)-hold:]
-    return emit, None
+    return emit, False
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
-      if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
-      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
+      if not final and len(self.buf) < len(self.think) and self.think.startswith(self.buf): return
+      self.mode, self.buf = ("reasoning", self.buf[len(self.think):]) if self.buf.startswith(self.think) else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, done = self.split(self.END_THINK, final)
+      emit, done = self.split(self.end_think, final)
       if emit: yield "reasoning_content", emit
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, found = self.split(self.END_CONTENT, final)
+    emit, found = self.split(self.end_content, final)
     if emit: yield "content", emit
-    if found: self.mode, self.buf = "tool", found + self.buf
+    if found: self.mode, self.buf = "tool", self.end_content + self.buf
 
 class Handler(VizHandler):
   server: LLMServer
@@ -95,7 +100,7 @@ class Handler(VizHandler):
     finish_reason = "stop"
     st = pt = time.perf_counter()
     dec = tok.stream_decoder()
-    router = StreamRouter(reasoning)
+    router = StreamRouter(tok._special_tokens, reasoning)
     def log_stats(interrupted:bool=False):
       et = time.perf_counter()
       total = f"total:{et-st:6.2f}s"
@@ -115,9 +120,9 @@ class Handler(VizHandler):
           break
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
-      for m in re.finditer(r"(?:(<tool_call>)|<\|open\|>call )\s*(.*?)\s*(?:(?(1)</tool_call>|<\|close\|>call<\|sep\|>)|$)", router.buf, re.DOTALL):
-        if (parsed := parse_tool_call(m.group(2))) is None:
-          stderr_log(f"failed to parse tool call: {m.group(2)[:200]}")
+      for m in re.finditer(router.call, router.buf, re.DOTALL):
+        if (parsed := parse_tool_call(m.group(1))) is None:
+          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
           yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
         else:
           name, args = parsed

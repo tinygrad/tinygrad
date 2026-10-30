@@ -44,6 +44,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
+    cls.mock_tok._special_tokens = {}
     cls.mock_tok.preset = "llama3"
     cls.mock_tok.bos_id = 1
     cls.mock_tok.eos_id = 999
@@ -272,7 +273,8 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.server.shutdown()
     cls.server.server_close()
 
-  def set_output(self, text:str):
+  def set_output(self, text:str, special_tokens=("<tool_call>",)):
+    self.mock_tok._special_tokens = dict.fromkeys(special_tokens, 0)
     pieces = dict(enumerate(text, 1))
     self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
@@ -351,7 +353,7 @@ class TestLLMToolCalls(unittest.TestCase):
     self.set_output('thinking<|close|>think<|sep|><|open|>response<|sep|>before<|close|>response<|sep|>'
       '<|open|>tools<|sep|><|open|>call tool="read" index="1"<|sep|>'
       '<|open|>argument key="path" type="string"<|sep|>README.md<|close|>argument<|sep|>'
-      '<|close|>call<|sep|><|close|>tools<|sep|><|close|>message<|sep|>')
+      '<|close|>call<|sep|><|close|>tools<|sep|><|close|>message<|sep|>', ("<|close|>",))
     with patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>think<|sep|>'):
       chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Read README.md"}],
                                                        tools=self.tools(), stream=True))
@@ -361,9 +363,17 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'path':'README.md'})])
     self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
 
+  def test_kimi_text_with_hermes_tags(self):
+    self.set_output('a </think> b<|close|>think<|sep|><|open|>response<|sep|>c <tool_call>{"name":"read","arguments":{}}</tool_call> d'
+      '<|close|>response<|sep|><|close|>message<|sep|>', ("<|close|>",))
+    with patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>think<|sep|>'):
+      msg = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"hi"}], tools=self.tools()).choices[0].message
+    self.assertEqual((getattr(msg, 'reasoning_content', None), msg.content, msg.tool_calls),
+                     ('a </think> b', 'c <tool_call>{"name":"read","arguments":{}}</tool_call> d', None))
+
   def test_kimi_tool_call_with_hermes_end_tag(self):
     self.set_output('<|close|>response<|sep|><|open|>tools<|sep|><|open|>call tool="write" index="1"<|sep|>'
-      '<|open|>argument key="text" type="string"<|sep|></tool_call><|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>')
+      '<|open|>argument key="text" type="string"<|sep|></tool_call><|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>', ("<|close|>",))
     with patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>response<|sep|>'):
       chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Write it"}],
                                                        tools=self.tools(), stream=True))
@@ -390,7 +400,7 @@ class TestTransformerGenerate(unittest.TestCase):
     self.assertEqual(calls, [[0], [0]])
 
   def test_template_starts_reasoning(self):
-    router = StreamRouter(reasoning=True)
+    router = StreamRouter({}, reasoning=True)
     self.assertEqual(list(router.route("reasoning</think>answer")),
                      [("reasoning_content", "reasoning"), ("content", "answer")])
 
