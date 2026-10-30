@@ -17,8 +17,8 @@ def hf_load(path:pathlib.Path, devices:tuple[str, ...], names:dict[str, str|list
   weights:dict[str, tuple[Tensor, dict]] = {}
 
   def pop_tensor(source:str|list[str], axis:int|None) -> Tensor:
+    sources = source if isinstance(source, list) else [source]
     stack = isinstance(source, list)
-    sources = source if stack else [source]
     parts = []
     for s in sources:
       if s not in weights:
@@ -33,25 +33,25 @@ def hf_load(path:pathlib.Path, devices:tuple[str, ...], names:dict[str, str|list
     assert all(m['shape'] == shape and m['dtype'] == m0['dtype'] and
                0 <= m['data_offsets'][0] <= m['data_offsets'][1] <= d.numel() and
                m['data_offsets'][1] - m['data_offsets'][0] == nbytes for d, m in parts), f"mismatched parts for {sources[0]}"
-    parts = [(d, m['data_offsets'][0]) for d, m in parts]
+    slices = [(d, m['data_offsets'][0]) for d, m in parts]
     byte_shape = (*shape[:-1], shape[-1] * dtype.itemsize)
     if stack: shape, byte_shape = (len(parts), *shape), (len(parts), *byte_shape)
     assert axis is None or shape[axis] % len(devices) == 0, f"cannot split {sources[0]} on axis {axis}"
 
     if stack:
-      if nbytes % 4 == 0 and all(d.numel() % 4 == 0 and o % 4 == 0 for d, o in parts):
+      if nbytes % 4 == 0 and all(d.numel() % 4 == 0 and o % 4 == 0 for d, o in slices):
         words = Tensor.arange(nbytes // 4, dtype=dtypes.int64).to(devices[0])
         chunks = []
-        for data in {id(d): d for d, _ in parts}.values():
-          offsets = Tensor([-1 if d is not data else o // 4 for d, o in parts], device=devices[0], dtype=dtypes.int64)
+        for data in {id(d): d for d, _ in slices}.values():
+          offsets = Tensor([-1 if d is not data else o // 4 for d, o in slices], device=devices[0], dtype=dtypes.int64)
           gathered = data.bitcast(dtypes.uint32)[offsets.clamp(min_=0)[:, None] + words[None, :]]
           chunks.append((offsets >= 0)[:, None].where(gathered, 0))
         w = Tensor.usum(*chunks).bitcast(dtypes.uint8)
       else:
-        w = Tensor.stack(*[d[o:o+nbytes] for d, o in parts])
+        w = Tensor.stack(*[d[o:o+nbytes] for d, o in slices])
       w = w.reshape(byte_shape).clone().realize().shard(devices, axis).contiguous()
     else:
-      data, o = parts[0]
+      data, o = slices[0]
       w = data[o:o+nbytes].reshape(byte_shape).shard(devices, axis).clone()
     return w.realize().bitcast(dtype)
 
