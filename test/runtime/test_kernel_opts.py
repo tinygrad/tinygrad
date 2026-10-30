@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import DEV
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
