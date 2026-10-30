@@ -24,7 +24,7 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
   # CALL is a kernel invocation; value-producing calls write to ALLOC arguments
-  PARAM = auto(); CALL = auto()
+  PARAM = auto(); REFPARAM = auto(); CALL = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
@@ -111,7 +111,7 @@ class GroupOp:
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
-  Defines = {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}
+  Defines = {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC, Ops.BINARY}
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}

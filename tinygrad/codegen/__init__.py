@@ -27,6 +27,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, argsort, partition, to_function_name
+from tinygrad.device import TinyELF
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -139,10 +140,10 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
-  # RESHAPE a void is removed (hack for AFTER)
-  (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
+  # a scalar index into a one-lane STACK is its lane, 0 is the only in-bounds index
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=(UPat.var("x"),)), UPat.var("i"))), lambda x,i: x if i.shape == () else None),
 ])
 
 def fix_group_for_reduce(x:UOp):
@@ -406,7 +407,7 @@ class LowerCallsCtx:
 def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
   if b.op is Ops.PROGRAM and b.src[-1].op is Ops.BINARY: return None
   bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
-  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True)
+  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True, kernel=False)
   if ctx.renderer.inline_prefix:
     b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
     b = UOp(Ops.LINEAR, src=tuple(line_rewrite(list(b.src[1].src) if b.op is Ops.PROGRAM \
@@ -417,6 +418,13 @@ def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
 pm_lower_calls = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="b"),), allow_any_len=True, name="call"), lower_call),
 ])
+
+def pack_args(sink:UOp, params:tuple[UOp, ...]) -> UOp:
+  sig = TinyELF.iter_sig(tuple((None, p.addrspace, p.dtype, ()) for p in params))
+  args = UOp.param(0, dtypes.uint8, len(params) * 8, name="args")
+  loads = [args.bitcast(dt).index(UOp.cconst(off // dt.itemsize, dtypes.int)).load() for off, dt in sig]
+  reads = {p: v if p.addrspace is AddrSpace.ALU else UOp(Ops.REFPARAM, src=(p.src[0], v), arg=p.arg) for p, v in zip(params, loads)}
+  return sink.substitute(reads, name="pack args")
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
@@ -484,11 +492,11 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=not ast.arg.optimized)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
+    if (isinstance(renderer, ISARenderer) or renderer.packed_args) and full_sink.arg.estimates is None:
+      full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
+    if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):
-      # Instruction selection replaces LOAD/STORE/ALU with INS, so estimate while their meaning is still available.
-      if full_sink.arg.estimates is None:
-        full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)

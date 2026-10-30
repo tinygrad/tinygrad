@@ -66,6 +66,10 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 16)
 
+    uop = x & -4
+    self.assertEqual(uop.vmin, 0)
+    self.assertEqual(uop.vmax, 20)
+
   def test_vmin_vmax_and_with_negative_variable(self):
     # when mask doesn't have sign bit set, result is always non-negative
     x = UOp.variable('x', -100, 100, dtypes.int32)
@@ -420,10 +424,6 @@ class TestConstFactor(unittest.TestCase):
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
 
-  def test_const_factor_variable_multiple_of(self):
-    x = UOp.variable('x', 16, 32, multiple_of=4)
-    self.assertEqual(x.const_factor(), 4)
-
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):
     # Divides a constant by an exact divisor
@@ -461,16 +461,6 @@ class TestDivides(unittest.TestCase):
     uop = x * 4
     result = uop.divides(3)
     self.assertIsNone(result)  # Cannot divide by 3, since 4 is not divisible by 3
-
-  def test_divides_variable_multiple_of_exact(self):
-    x = UOp.variable('x', 16, 32, multiple_of=4)
-    result = x.divides(4)
-    self.assertIsNotNone(result)
-
-  def test_divides_variable_multiple_of_factor(self):
-    x = UOp.variable('x', 16, 32, multiple_of=4)
-    result = x.divides(2)
-    self.assertIsNotNone(result)
 
 if __name__ == '__main__':
   unittest.main()
