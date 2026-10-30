@@ -123,8 +123,9 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       elif idx.op is Ops.CONST: root_src, arg = None, idx.val
       else: root_src, arg = idx, 0
       # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
-      # stores in a group have the same store ancestors in their data, preventing cycles when merged
-      deps = frozenset(s for s in u.src[1].backward_slice if s.op is Ops.STORE) if u.op is Ops.STORE else frozenset()
+      # stores in a group share their store ancestors in the same or a wider address space, so merging never forms a cycle
+      deps = frozenset(s for s in u.src[1].backward_slice if s.op is Ops.STORE and s.src[0].addrspace <= buf.addrspace) \
+        if u.op is Ops.STORE else frozenset()
       memory[(u.op, buf, root_src, valid, u.arg, deps)].setdefault(arg, []).append(u)
 
   # build replacements
