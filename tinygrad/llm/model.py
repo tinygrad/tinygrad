@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Callable
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
-from tinygrad.llm.gguf import gguf_parse, gguf_shard
+from tinygrad.llm.gguf import gguf_parse, gguf_shard, _GGML_QUANT
 from tinygrad.llm.hf import hf_load
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, get_child
@@ -221,8 +221,9 @@ class FFNBlock:
       gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       act = gated_activation(gate, up, alpha=self.config.swiglu_alpha, limit=self.config.swiglu_limit,
                              up_bias=self.config.swiglu_up_bias, situ=self.config.situ)
-      x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      x_down = self.ffn_down_exps(sel, act.contiguous())  # ([ndev,] B, T, k, D)
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # ([ndev,] B, T, D)
+      if out.ndim == x.ndim + 1: out = out.sum(0)
       if self.config.expert_latent_dim: out = self.ffn_routed_up(self.ffn_routed_norm(out))
       if hasattr(self, 'ffn_gate_shexp'):
         shexp = self.ffn_down_shexp(gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x),
@@ -592,13 +593,13 @@ class Transformer:
       rules = {**{w: 0 for w in ('token_embd.weight', 'output.weight', 'attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'ffn_gate.weight',
         'ffn_up.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
         **{w: 1 for w in ('attn_output.weight', 'ffn_down.weight', 'ffn_gate_exps.weight', 'ffn_up_exps.weight')}, 'ffn_down_exps.weight':2}
-      # TODO: can't split H on IQ2_XS, use EP or slicing when ready
-      if arch == 'kimi-k3': rules.update({'ffn_down_exps.weight': 1, 'ffn_routed_up.weight': 1, 'attn_gate.weight': 0})
+      if arch == 'kimi-k3': rules['attn_gate.weight'] = 0
       if arch in ('kimi-linear', 'glm5-next', 'kimi-k3'): rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight',
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    state_dict = gguf_shard(entries, devices, shard_map)
+    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
+    state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()})
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}

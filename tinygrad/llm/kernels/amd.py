@@ -146,7 +146,7 @@ class ExpertWeights:
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
     if bias: self.bias = Tensor.zeros(num_experts, out_features)
   def set_quantized(self):
-    if self.weight.uop.axis == 0 or (found:=find_packed(self.weight, self.in_features)) is None: return
+    if (found:=find_packed(self.weight, self.in_features)) is None: return
     self.ggml_type, self.packed = found
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
@@ -154,9 +154,10 @@ class ExpertWeights:
     if self.ggml_type is None and supported:
       self.set_quantized()
       if self.ggml_type is None: self.use_custom_quant = supported = False  # not a supported quant format
+    assert self.weight.uop.axis != 0 or (self.ggml_type is not None and supported and not hasattr(self, 'bias')), "split experts need the moe kernel"
     if self.weight_scale_inv is not None:
       ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
-    elif self.ggml_type is not None and supported and isinstance(x.shape[1], int) and x.shape[1] == 1: ret = moe_linear(self, sel, x)
+    elif self.ggml_type is not None and supported: ret = moe_linear(self, sel, x)
     else: ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
@@ -367,28 +368,33 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
-                       out_features:int, in_features:int, ggml_type:int, x_share:int, cdna:bool=False) -> UOp:
+                       out_features:int, in_features:int, ggml_type:int, x_share:int, cdna:bool=False, ndev:int=1) -> UOp:
   # out rows are (token, slot): the slot's expert reads its weight rows, x_share slots share an activation row
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
-  def gate(row:UOp, base:UOp) -> UOp: return base + sel[row].cast(dtypes.weakint).maximum(0).minimum(raw.shape[0]//expert_words-1) * expert_words
+  local_experts = raw.shape[0]//expert_words
+  def expert(row:UOp) -> UOp: return sel[row].cast(dtypes.weakint) - UOp.range(ndev, 4, AxisType.DEVICE)*local_experts
+  def gate(row:UOp, base:UOp) -> UOp:
+    base = base + expert(row).maximum(0).minimum(local_experts-1) * expert_words
+    return base.valid((expert(row) >= 0) & (expert(row) < local_experts)) if ndev > 1 else base
   def xtoken(row:UOp) -> UOp: return row // x_share
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, xtoken, "moe_")
 
 def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
+  if not isinstance(T:=sel.shape[1], int): return moe_linear(layer, sel.pad_to(sel.max_shape, value=-1), x.pad_to(x.max_shape))[..., :T, :, :]
   B, T, slots = cast(tuple[int, int, int], sel.shape[-3:]) # sel: (B, T, k), weight: (E, O, I)
-  if layer.weight.uop.axis != 2 and x.uop.axis is not None: x = Tensor(x.uop.copy_to_device(x.uop.device))  # weight not split on in: gather x
+  if layer.weight.uop.axis == 1 and x.uop.axis is not None: x = Tensor(x.uop.copy_to_device(x.uop.device))  # weight not split on in: gather x
   in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2]) # gate/up: (B, T, 1, D), down: (B, T, k, H)
   assert x_slots in (1, slots), f"x has {x_slots} rows per token, expected 1 or {slots}"
   local_out, global_out, ggml_type = int(layer.weight.uop.max_shard_shape[1]), int(layer.weight.shape[1]), unwrap(layer.ggml_type)
-  splits = layer.in_features // in_features
+  splits, ndev = layer.in_features // in_features, int(layer.weight.shape[0]) // int(layer.weight.uop.shard_shape[0])
   assert (layer.weight.uop.axis == 2) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.weight.uop.axis}"
   xq, xd, xs = q8_quantize(x.contiguous(), B*T*x_slots, in_features)
-  out = Tensor.empty(B*T*slots, global_out, splits*((in_features+1023)//1024), dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
+  out = Tensor.empty(ndev*B*T*slots, global_out, splits*((in_features+1023)//1024), dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
   fxn = functools.partial(_moe_decode_kernel, out_features=local_out, in_features=in_features, ggml_type=ggml_type, x_share=slots//x_slots,
-                          cdna=_is_cdna(x.device))
+                          cdna=_is_cdna(x.device), ndev=ndev)
   extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   result = Tensor.custom_kernel(out, layer.packed, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
-  return result.reshape(B, T, slots, global_out)
+  return result.reshape(ndev, B, T, slots, global_out) if ndev > 1 else result.reshape(B, T, slots, global_out)
 
 # kgroups: groups of 16 lanes that split k in a 16x16x16 fragment, RDNA3 copies a and b in both halves
 def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
