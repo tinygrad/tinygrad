@@ -3353,11 +3353,13 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tenso
   # (fp8: the rows as they are, the attention reads them so. a bitcast would be a copy of all of it)
   return out if fp8 and raw else out.bitcast(dtypes.half)
 
-def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None) -> Tensor:
+def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
+                   dims:int|None=None) -> Tensor:
   """
   the attention of the (1, H, T, D) queries (heads split over the devices) on the sequence sharded latent cache (n*rows, D), every token on the
   keys of its list (T, n_max+1, on every device): (1, H, T, D) heads split. every device attends all the heads over its keys (the queries
-  gathered), their outputs are weighed by their max and sum (gathered) and summed on the devices of the heads (reduce_scatter)
+  gathered), their outputs are weighed by their max and sum (gathered) and summed on the devices of the heads (reduce_scatter).
+  dims: the output's first dims only (the latent ones of the values: the rest isn't sent)
   """
   devs = cast(tuple[str, ...], cache.device)
   n, (_, H, T, D) = len(devs), q.shape
@@ -3392,12 +3394,16 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   M = st[..., 0:1].max(0)
   L = (st[..., 1:2] * (st[..., 0:1] - M).exp()).sum(0)
   contrib = od * (ld * (mx.squeeze(3) - M).exp() / L.maximum(1e-30))
+  if dims is not None: contrib, D = contrib[..., :dims], dims
   contrib = contrib.permute(0, 2, 1, 3, 4).reshape(n, 1, T, G*16, D)[:, :, :, :H]
   # (a few tokens: the heads of every device sent to it, summed there: one peer to peer kernel)
   if small and getenv("SEQ_P2P_RS", 1):
     hl = H // n
     parts = contrib.reshape(n, T, n, hl, D).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*D)
     if (rs:=p2p_reduce_scatter(parts)) is not None: return rs.reshape(n, 1, T, hl, D).permute(1, 0, 3, 2, 4).reshape(1, H, T, D)
+  if getenv("SEQ_RS_Q8", 0) and isinstance(T, int) and (T*D) % 256 == 0:
+    # (the heads' rows as rows of (1, H, T*D): the int8 sums of reduce_scatter's ring, RS_Q8)
+    return reduce_scatter(contrib.permute(0, 1, 3, 2, 4).reshape(n, 1, H, T*D), 1).reshape(1, H, T, D)
   return reduce_scatter(contrib, 2).permute(0, 2, 1, 3)
 
 def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, valid_kv_len:int|UOp, max_kv_len:int, scale:float,

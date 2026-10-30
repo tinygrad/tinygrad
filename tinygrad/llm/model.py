@@ -1015,7 +1015,7 @@ class MLATransformerBlock(FFNBlock):
         # computes them), the attention of the device's heads on the whole of it
         whole = seq_gather(cache, k_store[0, 0], start_pos, T, round_up(self.config.max_context, 64))
         attn = flash_attention_mla_sparse(q, whole.reshape(1, 1, 1, -1, whole.shape[-1]), lists, scale, start_pos+T)
-      else: attn = mla_sparse_seq(q, cache, lists, scale, start_pos+T)
+      else: attn = mla_sparse_seq(q, cache, lists, scale, start_pos+T, dims=self.config.kv_lora_rank)
       v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
       if bmm: attn = mla_bmm(attn, self.attn_v_b["weight"])
       else: attn = attn.half().contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if half else attn @ v_b
@@ -1089,7 +1089,7 @@ class MLATransformerBlock(FFNBlock):
       # of every row over its keys of the row's slot)
       stride = int(self.slot_s[0].shape[0]) // len(cast(tuple, x.device))
       cache = seq_store_grouped(self.pool_s, self._seq_rows(k_store[0, 0]), positions, slots, stride)
-      attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(positions, slots, stride))[..., :self.config.kv_lora_rank]
+      attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(positions, slots, stride), dims=self.config.kv_lora_rank)
     else:
       ctx, D = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1])
       cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx, slots)
@@ -1912,13 +1912,14 @@ class Transformer:
     self._host_run((save, tuple(id(c) for c in chunks), self._host_len(length), ckpt), save, chunks, lambda: self._host_parts(length, ckpt))
     if not save: self._host_rows(length, False)  # (the staging rows to the row of its end)
 
-  def _host_run(self, key:tuple, save:bool, chunks:list[Buffer], parts_of:Callable[[], list[tuple[Buffer, int, int]]]):
+  def _host_run(self, key:tuple, save:bool, chunks:list[Buffer], parts_of:Callable[[], list[tuple[Buffer, int, int]]],
+                layout_of:Callable[[list[tuple[Buffer, int, int]]], list[tuple[int, int]]]|None=None):
     # the copies between the model's states (parts_of) and these chunks: a program made once (building and compiling ~2000 copies takes
     # ~0.5 s), the devices copy at once (CPU memory is the devices' to copy to, none staged)
     if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
     if (prg:=self._host_programs.pop(key, None)) is None:
       parts = parts_of()
-      layout = self._host_layout(parts)
+      layout = (layout_of or self._host_layout)(parts)
       assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
       pairs = [(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)]
       if not save: pairs = [(b, h) for h, b in pairs]
@@ -1935,15 +1936,18 @@ class Transformer:
   # prefill, back into the model's before its conversation's host_save. a client that doesn't send the model's reasoning back has the
   # conversation of its next turn differ right after this prompt: it goes on from there, not from the start
   def _ckpt_parts(self) -> list[tuple[Buffer, int, int]]: return [p for t in getattr(self, "_ckpt", []) for p in self._state_parts(t)]
+  @staticmethod
+  def _one_layout(parts:list[tuple[Buffer, int, int]]) -> list[tuple[int, int]]:
+    """every part's (0, offset): one after the other in one buffer (aligned to 256 bytes), whatever its size"""
+    offs = list(itertools.accumulate((round_up(n, 256) for _, _, n in parts), initial=0))
+    return [(0, o) for o in offs[:-1]]
   def ckpt_alloc(self) -> Buffer|None:
-    """host memory for a copy of the model's checkpoint (ckpt_copy): its size, not a chunk's. None without one"""
+    """host memory for a copy of the model's checkpoint (ckpt_copy): its size, in one buffer (not chunks). None without one"""
     if not (parts:=self._ckpt_parts()): return None
-    layout = self._host_layout(parts)
-    assert layout[-1][0] == 0, "a checkpoint past a chunk of host memory"
-    return self.host_alloc(layout[-1][1] + parts[-1][2])
+    return self.host_alloc(self._one_layout(parts)[-1][1] + parts[-1][2])
   def ckpt_copy(self, save:bool, buf:Buffer):
     """the model's checkpoint into buf (save), or back from it (the caller sets _ckpt_tokens)"""
-    self._host_run(("ckpt", save, id(buf)), save, [buf], self._ckpt_parts)
+    self._host_run(("ckpt", save, id(buf)), save, [buf], self._ckpt_parts, self._one_layout)
 
   def _host_len(self, length:int) -> int:
     """the positions of a conversation host_save copies: rounded up to HOST_BUCKET, (aliased) not past batch_ctx if it fits (the slots')"""
