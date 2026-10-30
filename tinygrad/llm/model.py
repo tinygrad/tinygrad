@@ -422,6 +422,20 @@ def _temp_pair(t:float|tuple[float, float]) -> array.array:
   """a row's temperature and top_p (a temperature alone: top_p 1) for a step's host buffer"""
   return array.array('f', t if isinstance(t, tuple) else (t, 1.0))
 
+def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
+  """
+  uniform noise in (0, 1) like `like` (B, V): a hash of seed (a step's, uint32 (1,)), the key of every row (B,) and the column. the same for the
+  same key: (SPEC_SHARED) a draft of speculative decoding and the verification of its position use the same noise, the draft is the token
+  sampled there whenever the draft distribution is close to the model's (not only when the most likely is). the sampled token is the model's
+  sample all the same: its noise is fresh at every position of every step
+  """
+  col = Tensor.arange(V:=int(like.shape[-1])).reshape(1, V).cast(dtypes.uint32).to(like.device)
+  h = seed.reshape(1, 1).to(like.device) * 0x9E3779B1 + keys.reshape(-1, 1).cast(dtypes.uint32).to(like.device) * 0x85EBCA77 + col * 0xC2B2AE3D
+  # (murmur3's finalizer: every bit of the sum mixed into every bit)
+  for sh, mul in ((16, 0x85EBCA6B), (13, 0xC2B2AE35)): h = (h ^ (h >> sh)) * mul
+  h = h ^ (h >> 16)
+  return ((h >> 8).cast(dtypes.float32) + 0.5) * (1.0 / (1 << 24))
+
 def _argmax_rows(x:Tensor, cols:int=256) -> Tensor:
   """
   x (B, V) -> (B, 1) argmax over a long last axis (the vocab) in two parallel steps: the max of every row of `cols`, then the first row with the
@@ -1473,17 +1487,19 @@ class Transformer:
       tok = (dst:=buf[:, (nxt:=start_pos + tokens.shape[1]):nxt+1]).assign((dst < 0).where(tok.cast(buf.dtype), dst))
     return tok
 
-  def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None) -> Tensor:
+  def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None, noise:tuple[Tensor, Tensor]|None=None) -> Tensor:
     """
     the token (B, 1) after every normed hidden state h (B, D), sampled (greedy without a temperature). on device unless the output is split.
-    temperature: (rows, 1) the temperature of every row (or one), or (rows, 2) and its top_p (only the tokens of the top_p nucleus are sampled)
+    temperature: (rows, 1) the temperature of every row (or one), or (rows, 2) and its top_p (only the tokens of the top_p nucleus are sampled).
+    noise: (seed, keys (B,)): the uniform noise of a row a hash of the seed, its key and the token (see _hash_uniform), not drawn
     """
     logits = self.output(h)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     if temperature is not None:
       tp = temperature.to(logits.device).reshape(-1, temperature.shape[-1])
       z = logits.float() / tp[:, :1].maximum(1e-12)
-      logits = z - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()
+      u = _hash_uniform(noise[0], noise[1], logits) if noise is not None else Tensor.rand_like(logits)
+      logits = z - (u.maximum(1e-12).log().neg()).log()
       if tp.shape[1] == 2: logits = nucleus(z, self.config.vocab_size, tp[:, 1:]).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
@@ -2032,9 +2048,16 @@ class Transformer:
       _batch_rows[0] = [(mp, k+1) for mp, _, _ in groups]
       m = self.mtp.predict(self.token_embd(y.to(devs)).float(), last.unsqueeze(0), 0)
       m = Tensor.cat(*[m.shrink((None, (g*(k+1)+j, g*(k+1)+j+1), None)) for g, (_, j, _) in enumerate(groups)], dim=1)
+      # (SPEC_SHARED: the drafts sampled with the noise of the position they're verified at, see _hash_uniform. else the most likely)
+      shared = bool(getenv("SPEC_SHARED", 1))
+      seed = (Tensor.rand_like(self._batch_temp[:1]) * (1 << 24)).cast(dtypes.uint32) if shared else None
+      temps = self._batch_temp[:2*n].reshape(n, 1, 2).expand(n, k+1, 2).reshape(n*(k+1), 2)
       drafts:list[Tensor] = []
       for i in range(k):
-        drafts.append(self._sample(m[0], None, y.device).reshape(1, n))
+        # (draft i of group g: verified at row i of the group)
+        # (at their temperature, not their top_p: no nucleus of theirs, about as many accepted)
+        drafts.append(self._sample(m[0], self._batch_temp[:2*n].reshape(n, 2)[:, :1] if shared else None, y.device,
+                                   (seed, Tensor.arange(n) * (k+1) + i) if seed is not None else None).reshape(1, n))
         if i < k-1:
           _batch_rows[0] = [(mp + j + 1 + i, 1) for mp, j, _ in groups]
           m = self.mtp.predict(self.token_embd(drafts[-1].to(devs)).float(), m, 0)
@@ -2049,8 +2072,7 @@ class Transformer:
       hn = self.output_norm(x)[0].float()
       hn = Tensor.cat(*[self.slot_spec_h[g].shrink(((par*(k+1), (par+1)*(k+1)), None)).assign(hn[g*(k+1):(g+1)*(k+1)])
                         for g, (_, _, par) in enumerate(groups)])
-      temps = self._batch_temp[:2*n].reshape(n, 1, 2).expand(n, k+1, 2).reshape(n*(k+1), 2)
-      tok = self._sample(hn, temps, y.device)
+      tok = self._sample(hn, temps, y.device, (seed, Tensor.arange(n*(k+1))) if seed is not None else None)
     finally: _batch_rows[0], Q8_ROWS_I8[0] = None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(n, k+1).cat(*[d.reshape(n, 1) for d in drafts], dim=1).reshape(1, n*(2*k+1)).cast(dtypes.int32)
