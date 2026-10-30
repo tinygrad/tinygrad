@@ -468,6 +468,13 @@ class TestCustomKernel(unittest.TestCase):
       out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int).contiguous().realize(), fxn=functools.partial(kernel, loop=loop))[0]
       self.assertEqual(out.tolist(), [7, 9])
 
+  def test_store_value_behind_coalesced_store(self):
+    def c(v): return UOp.const(v, dtypes.int)
+    for stores, want in ((lambda A: (A[1].store(c(1).after(A[0].store(7)) + A[2].load()),), [7, 6, 5, 0]),
+                         (lambda A: (A[1].store(c(1).after(A[2].store(2))), A[3].store(c(3).after(A[0].store(10)))), [10, 1, 2, 3])):
+      out = Tensor([0, 0, 5, 0], dtype=dtypes.int).contiguous().custom_kernel(fxn=lambda A: UOp.sink(*stores(A), arg=KernelInfo(opts_to_apply=())))[0]
+      self.assertEqual(out.tolist(), want)
+
   def test_deleted_store_keeps_deps(self):
     for f in (lambda a, s: s[1].store(s[1].load()), lambda a, s: s[UOp.invalid()].store(5),
               lambda a, s: s[1].store(UOp.invalid()), lambda a, s: a[UOp.invalid()].store(s[1].load())):

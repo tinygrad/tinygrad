@@ -107,7 +107,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object, frozenset[UOp]], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
@@ -123,11 +123,13 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       elif idx.op is Ops.CONST: root_src, arg = None, idx.val
       else: root_src, arg = idx, 0
       # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
-      memory[(u.op, buf, root_src, valid, u.arg)].setdefault(arg, []).append(u)
+      # stores in a group have the same store ancestors in their data, preventing cycles when merged
+      deps = frozenset(s for s in u.src[1].backward_slice if s.op is Ops.STORE) if u.op is Ops.STORE else frozenset()
+      memory[(u.op, buf, root_src, valid, u.arg, deps)].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,_,_,ld_arg),offsets in memory.items():
+  for (op,buf,_,_,ld_arg,_),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
