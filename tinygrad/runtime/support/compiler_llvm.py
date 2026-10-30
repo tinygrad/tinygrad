@@ -1,6 +1,6 @@
 import ctypes
 from tinygrad.device import Compiler, CompileError
-from tinygrad.helpers import getenv, cpu_objdump, amdgpu_disassemble, unwrap, DEBUG
+from tinygrad.helpers import getenv, cpu_objdump, amdgpu_disassemble, unwrap, DEBUG, OSX
 from tinygrad.runtime.autogen import llvm
 
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
@@ -15,6 +15,8 @@ class LLVMCompiler(Compiler):
       getattr(llvm, "LLVMInitialize" + {'arm64': 'AArch64', 'x86_64': 'X86', 'riscv64': 'riscv64'}.get(arch, "AMDGPU") + component)()
 
     triple = {'arm64': b'aarch64-none-unknown-elf', 'x86_64': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[arch]
+    # Match Darwin's packed stack arguments while keeping ELF objects for jit_loader.
+    if OSX and arch == "arm64": triple = b'aarch64-apple-macosx-elf'
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
     if DEBUG >= 3: print(f"LLVM init for {processor!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor.encode(), feats.encode(),
@@ -41,7 +43,7 @@ class LLVMCompiler(Compiler):
         self.diag_msgs.append(msg)
     self.handle_diag = handle_diag
     llvm.LLVMContextSetDiagnosticHandler(self.context, handle_diag, None)
-    super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_opt' if opt else ''}")
+    super().__init__((cache_key or f"compile_llvm_{processor}_{feats}{'_opt' if opt else ''}") + ('_darwin' if OSX and arch == "arm64" else ''))
 
   def __del__(self):
     if hasattr(self, 'pbo'): llvm.LLVMDisposePassBuilderOptions(self.pbo)

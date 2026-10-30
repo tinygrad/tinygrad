@@ -1,6 +1,6 @@
 import subprocess
 from tinygrad.device import Compiler
-from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump
+from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump, OSX
 
 class ClangCompiler(Compiler):
   def __init__(self, arch:list[str], cachekey="compile_clang_obj"):
@@ -13,13 +13,14 @@ class ClangCompiler(Compiler):
       case "arm64": self.args = ["-ffixed-x18", "-mcpu=" + "+".join([cpu] + ["no"+f[1:] if f.startswith("-") else f for f in feats])]
       case "riscv64": self.args = ["-march=" + "_".join(["rv64g" if cpu == "native" else cpu] + feats)]
       case _: raise RuntimeError(f"unsupported arch: {self.arch!r}")
-    super().__init__(f"{cachekey}_{'_'.join(arch)}")
+    super().__init__(f"{cachekey}_{'_'.join(arch)}" + ('_darwin' if OSX and self.arch == "arm64" else ''))
 
   def compile(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
+    triple = f'{self.arch}-{"apple-macosx" if OSX and self.arch == "arm64" else "none-unknown"}-elf'
     return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib',
-                                    '-fno-ident', f'--target={self.arch}-none-unknown-elf', *self.args, '-', '-o', '-'], input=src.encode('utf-8'))
+                                    '-fno-ident', f'--target={triple}', *self.args, '-', '-o', '-'], input=src.encode('utf-8'))
 
   def disassemble(self, lib: bytes): cpu_objdump(lib)
 

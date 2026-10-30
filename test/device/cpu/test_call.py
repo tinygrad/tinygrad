@@ -18,14 +18,14 @@ def call_ret_kernel(C:UOp) -> UOp:
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, (CStyleLanguage, CPULLVMRenderer)), "requires C or LLVM calls")
 class TestExternalCall(unittest.TestCase):
   def test_direct_args(self):
-    # Mix scalar types and enough integer arguments to spill onto the stack.
+    # Spill multiple integers: Darwin ARM64 packs stack arguments, while generic AAPCS64 uses 8-byte slots.
     dev = Device["CPU"]
     src = """void test_args(double* out, signed char a, unsigned short b, int c, unsigned int d,
-                            long e, unsigned long f, int g, int h, float i, double j) {
-      out[0] = a + b + c + d + e + f + g + h + i + j;
+                            long e, unsigned long f, int g, int h, int k, int l, float i, double j) {
+      out[0] = a + b + c + d + e + f + g + h + k + l + i + j;
     }"""
     types = (dtypes.int8, dtypes.uint16, dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64,
-             dtypes.int32, dtypes.int32, dtypes.float32, dtypes.float64)
+             dtypes.int32, dtypes.int32, dtypes.int32, dtypes.int32, dtypes.float32, dtypes.float64)
     if isinstance(dev.renderer, CPULLVMRenderer):
       params = [UOp.param(i+1, dt, addrspace=AddrSpace.ALU) for i,dt in enumerate(types)]
       value = params[0].cast(dtypes.float64)
@@ -36,7 +36,7 @@ class TestExternalCall(unittest.TestCase):
     sig = ((None, AddrSpace.GLOBAL, dtypes.float64, (1,)),) + tuple((None, AddrSpace.ALU, dt, ()) for dt in types)
     prg = dev.runtime(TinyELF(dev.compiler.compile(src), "test_args", dev.renderer.target, sig))
     out = ctypes.c_double()
-    args = (-3, 65535, -100, 100, -1000, 1000, -7, 8, 0.5, 0.25)
+    args = (-3, 65535, -100, 100, -1000, 1000, -7, 8, -17, 23, 0.5, 0.25)
     self.assertIsNotNone(prg(ctypes.addressof(out), *args, wait=True))
     self.assertEqual(out.value, sum(args))
 
