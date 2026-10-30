@@ -852,7 +852,7 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 function traceBlock(trace) {
-  const root = d3.create("pre").append("code").classed("hljs", true);
+  const root = d3.select(codeBlock("", "txt")).select("code");
   for (let i=trace.length-1; i>=0; i--) {
     const [fp, lineno, fn, code] = trace[i];
     root.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
