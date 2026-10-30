@@ -29,7 +29,7 @@ def srun() -> bool:
   return progress
 
 cwait = Compiled._wait_signal
-def _wait_signal(self:Compiled, sig:MMIOInterface|memoryview[int], value:int, timeout:int|None=None):
+def _wait_signal(self:Compiled, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
   while sig[0] < value and srun(): pass
   return cwait(self, sig, value, timeout)
 if MOCKGPU_ASYNC:
@@ -67,7 +67,7 @@ def cuDeviceGet(device, ordinal): return out(device, ordinal, ctypes.c_int32)
 def cuDeviceComputeCapability(major, minor, dev): return out(major, 3, ctypes.c_int32) or out(minor, 5, ctypes.c_int32)
 def cuCtxCreate_v2(pctx, flags, dev): return out(pctx, dev + 1)
 def cuCtxSetCurrent(ctx): return cuda.CUDA_SUCCESS
-def cuCtxSynchronize(): #TODO Compiled._wait_signal -> CPU hang
+def cuCtxSynchronize():
   while MOCKGPU_ASYNC and srun(): pass
   return cuda.CUDA_SUCCESS
 def cuStreamCreate(pstream, flags):
