@@ -610,8 +610,8 @@ class TestCustomKernel(unittest.TestCase):
     def view(x): return x.reshape((16, 16)).permute((1, 0)).reshape((256,))
     def kernel(out:UOp):
       i = UOp.range(len(payload), 0)
-      data = UOp(Ops.BINARY, arg=payload)
-      return out[i].store(view(data)[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
+      data = view(UOp(Ops.BINARY, arg=payload))
+      return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(),
                      view(Tensor(payload, dtype=dtypes.uint8)).tolist())
 
