@@ -606,7 +606,7 @@ class TestCustomKernel(unittest.TestCase):
                        Device.DEFAULT != "WEBGPU", "binary not supported on this backend")
   @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK"), "AMD emulator doesn't support direct pc read and write")
   def test_binary(self):
-    payload = bytes((i * 73 + 41) & 255 for i in range(256))
+    payload = bytes(range(256))
     def kernel(out:UOp):
       i = UOp.range(len(payload), 0)
       data = UOp(Ops.BINARY, arg=payload).reshape((16, 16)).permute((1, 0)).reshape((256,))
