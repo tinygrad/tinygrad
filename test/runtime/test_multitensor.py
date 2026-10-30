@@ -191,6 +191,13 @@ class TestMultiTensor(unittest.TestCase):
     grad = Tensor.stack(X, Y).sum().gradient(X)[0]
     np.testing.assert_allclose(grad.numpy(), 1)
 
+  def test_stack_sharded_with_replicated(self):
+    X = Tensor([[1, 2], [3, 4]]).shard(devices_2, 0)
+    Y = Tensor([[5, 6], [7, 8]]).shard(devices_2)
+    self.assertEqual(X.stack(Y).tolist(), [[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    self.assertEqual(Y.stack(X).tolist(), [[[5, 6], [7, 8]], [[1, 2], [3, 4]]])
+    self.assertEqual(X.cat(Y, dim=1).tolist(), [[1, 2, 5, 6], [3, 4, 7, 8]])
+
   def test_allreduce_naive(self):
     with Context(RING=0):
       a,b = _test_allreduce(Tensor.rand(256, 256))

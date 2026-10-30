@@ -184,7 +184,7 @@ def stack_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
   sharding = multis[0].sharding
   if all(m.sharding == sharding for m in multis):
-    srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
+    srcs = [m.src[0] if m.op is Ops.UNSHARD else shard_subview(m, multis[0]) for m in root.src]
     new_sharding = tuple((ax+1, rng) for ax, rng in sharding)
     return UOp(Ops.STACK, src=tuple(srcs)).unshard(tuple(a for a,_ in new_sharding), tuple(r for _,r in new_sharding))
   # resharding: single-axis fallback
