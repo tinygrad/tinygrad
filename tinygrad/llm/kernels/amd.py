@@ -1173,9 +1173,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
   splits = layer.in_features // in_features
-  # (the rows of batched decoding that aren't whole tiles of the kernels (80 sequences: 240) padded to tiles of 64, a few more than a decode
-  # kernel's (8 sequences: 24 rows) to the 16 rows of the int8 tensor cores, the extra rows sliced off)
-  pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 and tokens % 16 == 0 else \
+  # (the rows of batched decoding that aren't whole tiles of the kernels (80 sequences: 240, 24 sequences: 72) padded to tiles of 64 (else
+  # none of the tensor core kernels: the decode kernel, a few times slower), a few more than a decode kernel's (8 sequences: 24 rows) to the 16
+  # rows of the int8 tensor cores, the extra rows sliced off)
+  pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
   if Q8_ROWS_I8[0] and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)

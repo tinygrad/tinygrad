@@ -707,6 +707,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if len(pending) == 1 or not self.keeps() or time.perf_counter() - pending[0].st > self.STARVE: return 0
     return max(range(len(pending)), key=lambda i: (self.stash_hit(pending[i].ids + pending[i].generated, set()), -i))
 
+  LONG_FIRST = getenv("LONG_FIRST", 1)
+  def admit_order(self, reqs:list[Request]) -> list[Request]:
+    """
+    (LONG_FIRST) the requests waiting for a slot, the longest conversation first (agents' longest tasks: their turns one after the other are the
+    end of a run of many, a turn's wait for a slot is on that path every turn), the ones that waited past STARVE before them in turn
+    """
+    if not self.LONG_FIRST or len(reqs) < 2: return reqs
+    now = time.perf_counter()
+    return sorted(reqs, key=lambda r: (now - r.st <= self.STARVE, -(len(r.ids) + len(r.generated)) if now - r.st <= self.STARVE else r.st))
+
   def main_writes(self, length:int):
     """
     the model's cache written up to `length` positions: the conversations kept in the slots it overwrites are gone (SLOT_ALIAS: the slots are
@@ -964,7 +974,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             req.cache_start, req.pos = 0, len(req.ids)
             req.spec_start(first, req.pos, k)
             if self.emit(req, first): active[slot] = req
-        for req in [r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp]:
+        for req in self.admit_order([r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp]):
           if len(active) >= slots or drain: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()

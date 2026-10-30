@@ -817,6 +817,15 @@ class TestStash(unittest.TestCase):
     self.assertEqual(pending, [reqs[1], reqs[2], reqs[0], long])
     self.assertEqual([c.args[0] for c in done.call_args_list], [2, 1, 0])
 
+  def test_admit_order(self):
+    # the longest conversation first, the ones that waited past STARVE before them, oldest first
+    from tinygrad.llm.serve import Request
+    reqs = [Request(list(range(n)), "", None, 0.0) for n in (100, 5000, 300, 50)]
+    self.assertEqual(self.server.admit_order(reqs), [reqs[1], reqs[2], reqs[0], reqs[3]])
+    reqs[3].st -= 1000
+    reqs[0].st -= 2000
+    self.assertEqual(self.server.admit_order(reqs), [reqs[0], reqs[3], reqs[1], reqs[2]])
+
   def test_pause_long(self):
     # (aliased slots) the batch waits for a long request: only the ones in the slots its cache overwrites stop, it runs alone (the others' slots
     # busy: nothing of theirs written), its conversation kept (in host memory) before the next step writes those slots
