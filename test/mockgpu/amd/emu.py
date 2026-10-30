@@ -1773,10 +1773,9 @@ def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int
       if rsrc2 & enabled:
         initial.append((sgpr_id, gid))
         sgpr_id += 1
-  initial += [(EXEC_LO.offset, ((UOp.const(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32)),
-              (SCRATCH_STRIDE_IDX, scratch_size), (SGPR_COUNT-16+4, (wave&15)|((wave&3)<<4))]
-  if wave_size == 64: initial.append((EXEC_LO.offset+1,
-                                     ((UOp.const(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
+  initial += [(EXEC_LO.offset, ((UOp.const(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32))]
+  if wave_size == 64: initial.append((EXEC_LO.offset+1, ((_c(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
+  if scratch_size > 0: initial.append((SCRATCH_STRIDE_IDX, scratch_size))
   lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
   tid = wave*wave_size+lane
   init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
