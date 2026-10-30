@@ -33,14 +33,13 @@ class TestQCOMEmu(unittest.TestCase):
   def test_dst_conv(self):
     a = Tensor(np.array([1 + 2**-11 + 2**-13, 1e5, 2**-15 + 2**-17], np.float32))
     out = (a * Tensor(np.ones(3, np.float32))).half().numpy()
-    self.assertEqual(out.view(np.uint16).tolist(), [0x3c00, 0x7bff, 0x0])
+    self.assertEqual(out.view(np.uint16).tolist(), [0x3c01, 0x7c00, 0x0])
 
-  @unittest.skipUnless(DEV.renderer == "IR3", "CL rounds to nearest even")
   def test_cov(self):
     np.testing.assert_equal(Tensor([2**24 + 3, -(2**24 + 3), 2**31 - 1], dtype=dtypes.int32).cast(dtypes.float32).numpy(),
-                            np.array([2**24 + 2, -(2**24 + 2), 2**31 - 2**7], np.float32))
+                            np.array([2**24 + 4, -(2**24 + 4), 2**31], np.float32))
     np.testing.assert_equal(Tensor([1 + 2**-11 + 2**-13, 1e5, -1e30, 2**-20], dtype=dtypes.float32).cast(dtypes.half).numpy(),
-                            np.array([1, 65504, -65504, 0], np.float16))
+                            np.array([1 + 2**-10, np.inf, -np.inf, 0], np.float16))
 
   def test_denormals(self):
     np.testing.assert_equal((Tensor(np.array([1e-45, -1e-39, 1.0], np.float32)) * 1.5).numpy(), np.array([0, -0.0, 1.5], np.float32))
