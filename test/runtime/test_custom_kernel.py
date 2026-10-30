@@ -495,6 +495,14 @@ class TestCustomKernel(unittest.TestCase):
     assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
     assert_kernel_count(2)
 
+  def test_contiguous_output_no_copy(self):
+    a = Tensor.ones(4).realize()
+    b = Tensor.custom_kernel(Tensor.zeros(4).contiguous(), a, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    b.realize()
+    assert_kernel_count(2)
+    self.assertEqual(b.tolist(), [2.0, 2.0, 2.0, 2.0])
+
   def test_multi_invalids_custom_kernel_no_copy(self):
     devs = ("CPU:0", "CPU:1")
     a = Tensor.ones(4, 4).shard(devs, axis=0).realize()

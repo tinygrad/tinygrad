@@ -171,11 +171,11 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    # The outputs and the ALLOCs beneath their wrappers get bound storage, so all aliases share storage and call dependencies.
+    # The outputs and the ALLOCs or STAGEs beneath their wrappers get bound storage, so all aliases share storage and call dependencies.
     bases = {x.base for x in sink.src}
     for x in list(bases):
       while x.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: x = x.src[0].base
-      if (b:=x.storage_base).op is Ops.ALLOC: bases.add(b)
+      if (b:=x.storage_base).op in {Ops.ALLOC, Ops.STAGE}: bases.add(b)
 
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     tensor_map:dict[UOp, UOp] = {}
