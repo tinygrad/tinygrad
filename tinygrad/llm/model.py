@@ -1925,29 +1925,29 @@ class Transformer:
   def _host_copy(self, save:bool, chunks:list[Buffer], length:int, ckpt:bool=True):
     if save: self._host_rows(length, True)  # (the row of its end to the staging rows, before the copies)
     # (the bucket of its positions, its checkpoint or not)
-    self._host_run((save, tuple(id(c) for c in chunks), self._host_len(length), ckpt), save, chunks, lambda: self._host_parts(length, ckpt))
+    self._host_run((save, len(chunks), self._host_len(length), ckpt), save, chunks, lambda: self._host_parts(length, ckpt))
     if not save: self._host_rows(length, False)  # (the staging rows to the row of its end)
 
   def _host_run(self, key:tuple, save:bool, chunks:list[Buffer], parts_of:Callable[[], list[tuple[Buffer, int, int]]],
                 layout_of:Callable[[list[tuple[Buffer, int, int]]], list[tuple[int, int]]]|None=None):
-    # the copies between the model's states (parts_of) and these chunks: a program made once (building and compiling ~2000 copies takes
-    # ~0.5 s), the devices copy at once (CPU memory is the devices' to copy to, none staged)
+    # the copies between the model's states (parts_of) and chunks (of host memory: inputs of the program, the same program for every chunks
+    # of these sizes): a program made once (building and compiling ~2000 copies takes ~0.5 s), the devices copy at once (CPU memory is the
+    # devices' to copy to, none staged)
     if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
+    key = (*key, tuple(c.nbytes for c in chunks))
     if (prg:=self._host_programs.pop(key, None)) is None:
       parts = parts_of()
       layout = (layout_of or self._host_layout)(parts)
       assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
-      pairs = [(chunks[c].view(n, off).ensure_allocated(), b.view(n, o).ensure_allocated()) for (b, o, n), (c, off) in zip(parts, layout)]
-      if not save: pairs = [(b, h) for h, b in pairs]
-      calls = [UOp.from_buffer(d, dtypes.uint8).store_call(UOp.from_buffer(s, dtypes.uint8)) for d, s in pairs]
-      # (its buffers as inputs: compiled once for every program of these sizes (another conversation's chunks), linked to these)
-      inputs:list[UOp] = []
-      prg = link_linear(compile_linear(UOp(Ops.LINEAR, src=tuple(calls)), input_uops=inputs, cache=True), input_uops=inputs)
+      ins = [UOp.param(i, dtypes.uint8, c.nbytes, c.device) for i, c in enumerate(chunks)]
+      pairs = [(ins[c][off:off+n], UOp.from_buffer(b.view(n, o).ensure_allocated(), dtypes.uint8)) for (b, o, n), (c, off) in zip(parts, layout)]
+      calls = [h.store_call(b) if save else b.store_call(h) for h, b in pairs]
+      prg = link_linear(compile_linear(UOp(Ops.LINEAR, src=tuple(calls))))
       while len(self._host_programs) >= getenv("HOST_PROGRAMS", 512): self._host_programs.pop(next(iter(self._host_programs)))
     self._host_programs[key] = prg  # (the most recently used last)
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     for d in devs: Device[d].synchronize()  # (run ahead steps of the model)
-    run_linear(prg, jit=True, update_stats=False)
+    run_linear(prg, input_uops=[UOp.from_buffer(c, dtypes.uint8) for c in chunks], jit=True, update_stats=False)
     for d in devs + ("CPU",): Device[d].synchronize()
 
   # ** a request's checkpoint while it's decoded in a slot (the model's own is the next prompt's by then): copied to host memory after its
@@ -1965,7 +1965,7 @@ class Transformer:
     return self.host_alloc(self._one_layout(parts)[-1][1] + parts[-1][2])
   def ckpt_copy(self, save:bool, buf:Buffer):
     """the model's checkpoint into buf (save), or back from it (the caller sets _ckpt_tokens)"""
-    self._host_run(("ckpt", save, id(buf)), save, [buf], self._ckpt_parts, self._one_layout)
+    self._host_run(("ckpt", save), save, [buf], self._ckpt_parts, self._one_layout)
 
   def _host_len(self, length:int) -> int:
     """the positions of a conversation host_save copies: rounded up to HOST_BUCKET, (aliased) not past batch_ctx if it fits (the slots')"""
