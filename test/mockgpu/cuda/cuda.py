@@ -1,4 +1,6 @@
 # the cuda driver api in python: the runtime reaches it through function pointers, kernels run on gpuocelot
+import tinygrad.runtime.support.system  # noqa: F401  # pylint: disable=unused-import
+from test.mockgpu.mockgpu import pfuncs
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.device import Compiled
 import ctypes, re
@@ -30,7 +32,9 @@ cwait = Compiled._wait_signal
 def _wait_signal(self:Compiled, sig:MMIOInterface|memoryview[int], value:int, timeout:int|None=None):
   while sig[0] < value and srun(): pass
   return cwait(self, sig, value, timeout)
-if MOCKGPU_ASYNC: Compiled._wait_signal = _wait_signal # type: ignore[method-assign]
+if MOCKGPU_ASYNC:
+  Compiled._wait_signal = _wait_signal # type: ignore[method-assign]
+  pfuncs.append(srun)
 
 def enqueue(stream, work:Callable[[], Any]) -> int:
   streams[handle(stream)].append(work)
