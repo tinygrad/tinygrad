@@ -607,12 +607,13 @@ class TestCustomKernel(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK"), "AMD emulator doesn't support direct pc read and write")
   def test_binary(self):
     payload = bytes(range(256))
+    def view(x): return x.reshape((16, 16)).permute((1, 0)).reshape((256,))
     def kernel(out:UOp):
       i = UOp.range(len(payload), 0)
-      data = UOp(Ops.BINARY, arg=payload).reshape((16, 16)).permute((1, 0)).reshape((256,))
-      return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
+      data = UOp(Ops.BINARY, arg=payload)
+      return out[i].store(view(data)[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(),
-                     [payload[(i % 16) * 16 + i // 16] for i in range(256)])
+                     view(Tensor(payload, dtype=dtypes.uint8)).tolist())
 
   def test_one_lane_stack_runtime_index(self):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
