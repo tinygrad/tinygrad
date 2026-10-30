@@ -1,7 +1,7 @@
-import unittest, threading, time, json
+import unittest, threading, time, json, socket
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
-from tinygrad.llm.serve import StreamRouter, parse_tool_call
+from tinygrad.llm.serve import Request, StreamRouter, disconnected, parse_tool_call
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
@@ -34,6 +34,28 @@ class TestParseToolCall(unittest.TestCase):
     for call in ("not a call", "read<arg_key>path</arg_key>", "read<arg_key>path</arg_key><arg_value>unfinished",
                  "read<arg_key>path</arg_key><arg_value>a</arg_value>trailing junk"):
       self.assertIsNone(parse_tool_call(call))
+
+class TestDisconnected(unittest.TestCase):
+  def setUp(self):
+    self.client, self.server = socket.socketpair()
+    self.addCleanup(self.client.close)
+    self.addCleanup(self.server.close)
+
+  def test_idle(self):
+    self.assertFalse(disconnected(self.server))
+
+  def test_client_closed(self):
+    self.client.close()
+    self.assertTrue(disconnected(self.server))
+
+  def test_server_closed(self):
+    self.server.close()
+    self.assertTrue(disconnected(self.server))
+
+  def test_peeks(self):
+    self.client.send(b"a")
+    self.assertFalse(disconnected(self.server))
+    self.assertEqual(self.server.recv(1, socket.MSG_DONTWAIT), b"a")
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -159,13 +181,24 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(contents), 0)
 
   def test_interrupted_stream_logs_tokens(self):
-    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
-         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
-      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
+    gate, client_disconnected, interrupted = threading.Event(), threading.Event(), threading.Event()
+    def slow_generate(ids, **kwargs):
+      yield 300
+      gate.wait(2)
+      yield 301
+    def log(s):
+      if "total:" in s: interrupted.set()
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), \
+         patch("tinygrad.llm.serve.stderr_log", side_effect=log) as log_mock, \
+         patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+      req = Request([200, 201, 202], client_disconnected.is_set)
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), req, "test")
       next(stream)
       next(stream)
-      stream.close()
-    interrupt = log.call_args.args[0]
+      client_disconnected.set()
+      gate.set()
+      self.assertTrue(interrupted.wait(2))
+    interrupt = log_mock.call_args.args[0]
     self.assertFalse(interrupt.startswith("\n"))
     self.assertTrue(interrupt.endswith("\n"))
     self.assertIn("gen:", interrupt)
@@ -236,6 +269,85 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(len(data["data"]), 1)
     self.assertEqual(data["data"][0]["id"], "test-model")
     self.assertEqual(data["data"][0]["object"], "model")
+
+  def test_concurrent_requests(self):
+    # the server accepts and tokenizes a second request while the first is generating, but the inference loop runs them one at a time
+    gate, generating, encoded, calls = threading.Event(), threading.Event(), threading.Event(), []
+    def gated_generate(ids, **kwargs):
+      calls.append(ids)
+      generating.set()
+      if len(calls) == 1: gate.wait(5)
+      yield from (300, 999)
+    def encode(text):
+      if generating.is_set(): encoded.set()
+      return [200, 201, 202]
+    results: dict[str, str] = {}
+    def chat(prompt):
+      resp = self.client.chat.completions.create(model="test", messages=[{"role":"user", "content":prompt}])
+      results[prompt] = resp.choices[0].message.content
+    first, second = (threading.Thread(target=chat, args=(p,)) for p in ("first", "second"))
+    with patch.object(self.mock_model, "generate", side_effect=gated_generate), patch.object(self.mock_tok, "encode", side_effect=encode):
+      first.start()
+      try:
+        self.assertTrue(generating.wait(2))
+        second.start()
+        self.assertTrue(encoded.wait(2))
+        self.assertEqual(len(calls), 1)
+      finally: gate.set()  # release the shared inference thread even if an assertion above fails, so later tests don't queue behind it
+      first.join(5)
+      second.join(5)
+    self.assertEqual(results, {"first":"Hello", "second":"Hello"})
+
+  def test_client_disconnect_stops_generation(self):
+    # once the client's socket closes, generate() must stop at its disconnect check instead of running the model to the end
+    client, server = socket.socketpair()
+    self.addCleanup(server.close)
+    client_closed, tokens_generated = threading.Event(), []
+    def generate(ids, **kwargs):
+      for token in range(300, 310):
+        tokens_generated.append(token)
+        yield token
+        client_closed.wait(5)
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      req = Request([200, 201, 202], lambda: disconnected(server))
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), req, "test")
+      next(stream)
+      next(stream)
+      client.close()
+      client_closed.set()
+      self.assertIsNone(req.out.get(timeout=2))
+    self.assertEqual(tokens_generated, [300, 301])
+
+  def test_disconnected_while_queued(self):
+    # a request whose client went away while it was still queued must not reach the model
+    req = Request([200, 201, 202], lambda: True)
+    with patch.object(self.mock_model, "generate") as generate:
+      self.server.waiting.put(req)
+      self.assertIsNone(req.out.get(timeout=2))
+    generate.assert_not_called()
+
+  def test_model_generation_failure(self):
+    from openai import APIError, InternalServerError
+    def failing_generate(ids, **kwargs):
+      yield 300
+      raise RuntimeError("fake generate error")
+    client = self.client.with_options(max_retries=0)  # the default client retries 500s, which would just rerun the failure
+    with patch.object(self.mock_model, "generate", side_effect=failing_generate):
+      # non-streaming: a 500 instead of a 200 with finish_reason "stop"
+      with self.assertRaises(InternalServerError):
+        client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}])
+      # streaming: the client raises on the error chunk instead of returning the partial text
+      with self.assertRaises(APIError):
+        for _ in client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}], stream=True): pass
+
+  def test_generate_runs_on_serving_thread(self):
+    threads = []
+    def generate(ids, **kwargs):
+      threads.append(threading.current_thread())
+      yield from (300, 999)
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      self.client.chat.completions.create(model="test-model", messages=[{"role":"user","content":"Hello"}])
+    self.assertEqual(threads, [self.server_thread])
 
 class TestLLMToolCalls(unittest.TestCase):
   """Tool calling through the OpenAI-compatible HTTP API."""
