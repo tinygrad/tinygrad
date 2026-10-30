@@ -78,6 +78,8 @@ class DType(metaclass=DTypeMetaClass):
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
+    if self in dtypes.ints and isinstance(val, float) and not math.isfinite(val):
+      val = 0 if math.isnan(val) else self.max if val > 0 else self.min
     if self in dtypes.ints: return truncate[self](int(val))
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
