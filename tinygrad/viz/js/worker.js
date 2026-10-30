@@ -24,7 +24,7 @@ onmessage = (e) => {
 const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
   const lineHeight = 18;
   g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight, textSpace:"1ch" });
-  ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
+  ctx.font = `300 ${lineHeight}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
   const tokenColors = {0:"#7aa2f7", 1:"#9aa5ce"};
   for (const [lead, members] of Object.entries(blocks)) {
@@ -54,7 +54,7 @@ const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
 const layoutUOp = (g, { graph, change }, opts) => {
   const lineHeight = 14;
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
-  ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
+  ctx.font = `300 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, labelX:0, className:"overlay"});
   let callCount = 0;
   for (const [k, {label, src, ref, color, exclude, addrspace}] of Object.entries(graph)) {
