@@ -382,7 +382,6 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids
 def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   if not isinstance(T:=sel.shape[1], int): return moe_linear(layer, sel.pad_to(sel.max_shape, value=-1), x.pad_to(x.max_shape))[..., :T, :, :]
   B, T, slots = cast(tuple[int, int, int], sel.shape[-3:]) # sel: (B, T, k), weight: (E, O, I)
-  if layer.weight.uop.axis == 1 and x.uop.axis is not None: x = Tensor(x.uop.copy_to_device(x.uop.device))  # weight not split on in: gather x
   in_features, x_slots = int(x.uop.shard_shape[-1]), int(x.shape[-2]) # gate/up: (B, T, 1, D), down: (B, T, k, H)
   assert x_slots in (1, slots), f"x has {x_slots} rows per token, expected 1 or {slots}"
   local_out, global_out, ggml_type = int(layer.weight.uop.max_shard_shape[1]), int(layer.weight.shape[1]), unwrap(layer.ggml_type)

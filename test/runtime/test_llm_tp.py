@@ -106,13 +106,13 @@ class TestTensorParallel(unittest.TestCase):
     data = random_data(shape, typ).reshape(-1)
     w = ggml_data_to_tensor(Tensor(data, device='CPU'), E*O*I, typ).reshape(shape).float().numpy()
     sel, T = np.array([[[3, 1], [0, 2]]], dtype=np.int32), Variable('T', 1, 2).bind(1)
-    for axis, x_axis in ((0, None), (1, None), (1, 3), (2, 3)):
-      with self.subTest(axis=axis, x_axis=x_axis):
+    for axis in (0, 1, 2):
+      with self.subTest(axis=axis):
         layer = ExpertWeights(E, I, O)
         layer.weight = gguf_shard({'w': (Tensor(data, device='CPU'), shape, typ)}, DEVICES, {'w': axis})['w'].half()
-        x = np.random.default_rng(1).normal(size=(1, 2, 1 if x_axis is None else 2, I)).astype(np.float16)
+        x = np.random.default_rng(1).normal(size=(1, 2, 1 if axis == 1 else 2, I)).astype(np.float16)
         ref = np.stack([w[e] @ x[0, 0, j % x.shape[2]].astype(np.float32) for j, e in enumerate(sel[0, 0])])
-        got = layer(Tensor(sel).shard(DEVICES)[:, :T], Tensor(x).shard(DEVICES, x_axis)[:, :T])
+        got = layer(Tensor(sel).shard(DEVICES)[:, :T], Tensor(x).shard(DEVICES, 3 if axis == 2 else None)[:, :T])
         got = got.pad_to(got.max_shape).float().to(Device.DEFAULT).numpy()
         if axis == 0: got = got.sum(0)
         self.assertEqual(layer.ggml_type, typ)
