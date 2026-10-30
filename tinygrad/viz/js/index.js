@@ -843,6 +843,8 @@ function codeBlock(st, language, { loc, wrap }={}) {
   if (!language || language === "txt") code.appendChild(colored(st));
   else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
+  code.tabIndex = 0;
+  code.onkeydown = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "a") { e.preventDefault(); window.getSelection().selectAllChildren(code); }};
   const ret = document.createElement("pre");
   if (wrap) ret.className = "wrap";
   if (loc != null) ret.appendChild(pathLink(loc[0], loc[1]).style("margin-bottom", "4px").node());
