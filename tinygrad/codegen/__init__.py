@@ -489,14 +489,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   if ast.op is Ops.PROGRAM:
     prg = ast
     if (sink:=ast.src[0]).arg.estimates is None:
-      sink = (sink:=ast.src[0]).replace(arg=replace(sink.arg, estimates=Estimates.from_uops(sink, ignore_indexing=True)))
+      sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(sink, ignore_indexing=True)))
       prg = ast.replace(src=(sink, *ast.src[1:]))
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=not ast.arg.optimized)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
-    if (isinstance(renderer, ISARenderer) or renderer.packed_args) and full_sink.arg.estimates is None:
-      full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
     if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):
