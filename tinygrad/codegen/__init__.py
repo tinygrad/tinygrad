@@ -2,7 +2,7 @@ from dataclasses import replace, dataclass, field
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, dedup
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType, ParamArg
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -254,7 +254,7 @@ pm_implicit_barriers = PatternMatcher([
 def remove_range(sink:UOp):
   uops = list(sink.toposort())
   loop_ids = itertools.count(max((aid for u in uops if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
-  acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if u.op in GroupOp.Defines), default=0))
+  acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if isinstance(u.arg, ParamArg)), default=0))
   enclosing = {u.src[1]:tuple(u.ranges) for u in uops if u.op is Ops.END and u.ranges}
   ends: dict[UOp, list[UOp]] = {}
   for u in uops:
