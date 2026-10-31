@@ -158,9 +158,8 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, addr_w, val_w, ctxid)
 
   def memory_barrier(self):
-    pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
-    self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
-                      reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
+    (req, done), mask = self.dev.hdp_flush, self.dev.hdp_flush[0].fields_mask('cp2')
+    self.wait_reg_mem(reg=req.addr[0], reg_done=done.addr[0], value=mask, mask=mask, op=WAIT_REG_MEM_FUNCTION_EQ)
     self.acquire_mem()
 
   def spi_config(self, tracing:bool):
@@ -182,6 +181,7 @@ class AMDComputeQueue(HWQueue):
     return slot
 
   def prof_stop(self, slot:UOp):
+    self.exec_barrier()
     if self.dev.pmc_enabled: self.pmc_read(slot)
     if self.dev.sqtt_enabled: self.sqtt_stop(slot)
 
@@ -385,6 +385,7 @@ class AMDComputeQueue(HWQueue):
 
     dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
       **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
+    if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
     self.acquire_mem(gli=0, gl2=0)
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
@@ -400,8 +401,10 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *prg.arg.local_size, 0, 0)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
-    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     if self.dev.prof_enabled: self.prof_stop(slot)
+
+  def exec_barrier(self):
+    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
@@ -440,6 +443,8 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     self.close_run(len(self.blob)) # close pm4, so we can sync xccs. without that wait-signal can race
     super().signal(signal, value)
 
+  def exec_barrier(self): pass
+
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
@@ -472,6 +477,11 @@ class AMDSDMAQueue(HWQueue):
     for off in range(0, sz, self.max_copy_size):
       self.q(self.sdma.SDMA_OP_COPY|self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR), min(sz-off, self.max_copy_size)-1,
             0, *(a + UOp.const(off, dtypes.uint64) if off else a for a in (src.getaddr(self.devs), dst.getaddr(self.devs))))
+
+  def memory_barrier(self):
+    (req, done), op = self.dev.hdp_flush, self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_HDP_FLUSH(1)
+    self.q(op | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_EQ), done.addr[0] << 2, req.addr[0] << 2,
+           m:=req.fields_mask('sdma0'), m, self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(10) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
   def wait(self, signal:UOp, value:UOp, eq:bool=False):
     func = WAIT_REG_MEM_FUNCTION_EQ if eq else WAIT_REG_MEM_FUNCTION_GEQ
@@ -817,7 +827,7 @@ class AMDDevice(Compiled):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
     self.is_vf = self.is_am() and self.iface.dev_impl.is_vf
-    self.can_recover, self.rtalloc_size = self.is_am() and not self.is_vf, (4 if self.is_usb else 64)<<20
+    self.can_recover = self.is_am() and not self.is_vf
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
@@ -839,6 +849,8 @@ class AMDDevice(Compiled):
 
     self.nbio = AMDIP('nbio' if self.target[0] < 12 else 'nbif', self.iface.ip_versions[am.NBIF_HWIP],
                       bases={i: tuple(getattr(self.ip_off, f'NBIO_BASE__INST{i}_SEG{s}', 0) for s in range(9)) for i in range(6)})
+    pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
+    self.hdp_flush = getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ'), getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE')
 
     self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
     self.max_copy_size = 0x40000000 if (4, 4, 2) <= (v:=self.iface.ip_versions[am.SDMA0_HWIP]) < (5, 0, 0) or v >= (5, 2, 0) else 0x400000
@@ -852,8 +864,8 @@ class AMDDevice(Compiled):
     # the ring and its pointers of every queue it can make, made on first use
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
-    rings = {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
-    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())} | rings
+    Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
+    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
@@ -993,11 +1005,6 @@ class AMDDevice(Compiled):
       print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {se})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
     blob = bytes(self.sqtt_buf.host.view(fmt='B')[off:off + wptr])
     return (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + blob) if self.target[0] == 9 else blob
-
-  def _at_profile_finalize(self): # the calibration kernels aren't profiles
-    self.synchronize()
-    super()._at_profile_finalize()
-    if self.prof_enabled: self.prof_read = self.prof_log.host.view(fmt='Q')[0]
 
   def collect_prof(self):
     if self.prof_enabled:

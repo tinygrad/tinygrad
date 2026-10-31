@@ -93,7 +93,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_dependencies_through_selected_slices(self):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
     for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(view, True)], 0)
       self.assertEqual(tracker.access_resources([(b.mselect(1), False)], 1), [])
       self.assertEqual(tracker.access_resources([(b.mselect(0).shrink(((16, 24),)), False)], 2), [])
@@ -102,7 +102,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for write in (False, True):
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(b.shrink(((0, 4),)), write)], 0)
       self.assertEqual(tracker.access_resources([(b.shrink(((4, 8),)), True)], 1), [])
       self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
@@ -110,7 +110,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_partial_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for write in (False, True):
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(b, write)], 0)
       self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 1), [0])
       self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
@@ -119,16 +119,21 @@ class TestHCQ2Deps(unittest.TestCase):
 
   def test_write_waits_for_all_readers(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    tracker = hcq2.DepsTracker()
+    tracker = hcq2.DepsTracker(range(5))
     self.assertEqual(tracker.access_resources([(b, False)], 0), [])
     self.assertEqual(tracker.access_resources([(b, False)], 1), [])
     self.assertEqual(tracker.access_resources([(b, True)], 2), [0, 1])
     self.assertEqual(tracker.access_resources([(b, False)], 3), [2])
 
+  def test_write_waits_for_latest_reader_per_queue(self):
+    b, tracker = UOp.param(0, dtypes.uint8, 16, device="NULL"), hcq2.DepsTracker("AABAA")
+    for tag, view in enumerate([b, b, b, b.shrink(((0, 8),))]): self.assertEqual(tracker.access_resources([(view, False)], tag), [])
+    self.assertEqual(tracker.access_resources([(b, True)], 4), [1, 2, 3])
+
   def test_aliases_do_not_wait_on_themselves(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for whole, part in ((True, False), (False, True), (True, True)):
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(b, True)], 0)
       self.assertEqual(tracker.access_resources([(b, whole), (b.shrink(((4, 12),)), part)], 1), [0])
       self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 2), [1])
@@ -154,8 +159,15 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def scheduled(self, *ts:Tensor) -> list[UOp]: return [self.check(b) for b in scheduled(*ts)]
   def batch(self, *ts:Tensor) -> UOp: return unwrap(self.scheduled(*ts)[0])
+  def kernels(self, batch:UOp) -> list[str]:
+    return [ins_name(c) or "kernel" for c in queues(batch)[("NULL", "COMPUTE:0")] if ins_name(c) in ("exec_barrier", None)]
 
   def test_kernels_run_in_order(self): self.assertEqual(orders(self.batch(chain(self.x, 3))), {(0, 1, 2)})
+
+  def test_exec_barrier(self):
+    self.assertEqual(self.kernels(self.batch(chain(self.x, 3))), ["kernel", "exec_barrier", "kernel", "exec_barrier", "kernel"])
+    a = (self.x + 1).contiguous()
+    self.assertEqual(self.kernels(self.batch((a + 1).contiguous(), (a + 2).contiguous())), ["kernel", "exec_barrier", "kernel", "kernel"])
 
   def test_a_copy_waits_for_the_kernel_when_the_scalar_is_first(self):
     n, B = Tensor(Variable("n", 0, 10, dtypes.int).bind(5)), Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
@@ -214,7 +226,7 @@ class TestHCQ2Link(unittest.TestCase):
     hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=[(o, var.index(0).load()) for o in offs], devs=("CPU",), queue="COPY:0", deps=())
     lowered = lower_hcq(var.after(hcq2.encode_cmdbuf(hq, device="CPU")).index(0).store(var.index(0).load() + 1))
     self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
-    linked = hcq2.hcq_link(lower_and_compile(lowered), use_rt=False)
+    linked = hcq2.hcq_link(lower_and_compile(lowered))
     args = zip(lowered.src[0].without_after.src[1:], linked.src[0].without_after.src[1:])
     cmdbuf = next(b.buffer for p, b in args if p.without_after.arg.name == "cmdbuf_copy_0")
     for step in range(3):

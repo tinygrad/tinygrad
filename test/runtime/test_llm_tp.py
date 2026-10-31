@@ -5,7 +5,7 @@ from tinygrad import Device, Tensor, Variable, nn
 from tinygrad.helpers import DEV
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
 from tinygrad.llm.gguf import gguf_load, gguf_parse, gguf_shard, ggml_data_to_tensor
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, ExpertWeights, amd_custom_kernels_supported
 from test.helpers import not_support_multi_device
 
 DEVICES = (Device.DEFAULT, f"{Device.DEFAULT}:1")
@@ -97,6 +97,26 @@ class TestTensorParallel(unittest.TestCase):
         ref = x.astype(np.float32) @ w.T
         got = layer(Tensor(x).shard(DEVICES, 2 if axis == 1 else None)).float().to(Device.DEFAULT).numpy()
         np.testing.assert_allclose(got, ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
+
+  def test_quantized_experts(self):
+    # the moe decode kernel on the packed shards: gate/up split the output features, down splits the input features
+    if not amd_custom_kernels_supported(DEVICES[0]): self.skipTest("needs the AMD custom kernels")
+    E, O, I = shape = (4, 8, 512)
+    typ = Q.Q4_K
+    data = random_data(shape, typ).reshape(-1)
+    w = ggml_data_to_tensor(Tensor(data, device='CPU'), E*O*I, typ).reshape(shape).float().numpy()
+    sel, T = np.array([[[3, 1], [0, 2]]], dtype=np.int32), Variable('T', 1, 2).bind(1)
+    for axis in (0, 1, 2):
+      with self.subTest(axis=axis):
+        layer = ExpertWeights(E, I, O)
+        layer.weight = gguf_shard({'w': (Tensor(data, device='CPU'), shape, typ)}, DEVICES, {'w': axis})['w'].half()
+        x = np.random.default_rng(1).normal(size=(1, 2, 1 if axis == 1 else 2, I)).astype(np.float16)
+        ref = np.stack([w[e] @ x[0, 0, j % x.shape[2]].astype(np.float32) for j, e in enumerate(sel[0, 0])])
+        got = layer(Tensor(sel).shard(DEVICES)[:, :T], Tensor(x).shard(DEVICES, 3 if axis == 2 else None)[:, :T])
+        got = got.pad_to(got.max_shape).float().to(Device.DEFAULT).numpy()
+        if axis == 0: got = got.sum(0)
+        self.assertEqual(layer.ggml_type, typ)
+        np.testing.assert_allclose(got[0, 0], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
 
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "too heavy for mock GPUs")
   def test_model(self):

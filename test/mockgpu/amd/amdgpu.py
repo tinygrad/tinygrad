@@ -1,7 +1,6 @@
 import ctypes, time
 from dataclasses import replace
 from test.mockgpu.gpu import VirtGPU
-from test.mockgpu.helpers import PythonRemu
 from tinygrad.helpers import getbits, to_mv, getenv, DEV
 from tinygrad.runtime.support import c
 
@@ -40,8 +39,6 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
-
-remu = PythonRemu()
 
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
@@ -196,12 +193,6 @@ class PM4Executor(AMDQueue):
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
-    # Read all user data registers (hardware loads these directly into s[0:N])
-    user_sgpr_count = (rsrc2 >> 1) & 0x1F  # USER_SGPR_COUNT is bits 1:5
-    user_data = []
-    for i in range(user_sgpr_count):
-      try: user_data.append(self.gpu.regs[regCOMPUTE_USER_DATA_0 + i])
-      except KeyError: user_data.append(0)
 
     prg_sz = 0
     for st,sz in sorted(self.gpu.mapped_ranges):
@@ -217,14 +208,9 @@ class PM4Executor(AMDQueue):
     scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
 
     assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
-    # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to the emulator
-    remu.valid_mem_ranges = self.gpu.mapped_ranges
-    remu.rsrc2 = rsrc2
-    remu.scratch_size = scratch_size
-    remu.arch = self.gpu.arch
-    remu.user_data = user_data
-    remu.name = self.kernel_name
-    err = remu.run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr)
+    from test.mockgpu.amd.emu import run_asm
+    err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr,
+                  rsrc2, scratch_size, self.gpu.arch, self.kernel_name)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_indirect_buffer(self, n):
@@ -243,9 +229,6 @@ class PM4Executor(AMDQueue):
     event_dw = self._next_dword()
     match (event_dw & 0xFF): # event type
       case SQTT_EVENTS.THREAD_TRACE_FINISH:
-        # Get the most recent trace from the emulator (if available)
-        from test.mockgpu.amd.emu import sqtt_traces
-        blob = sqtt_traces.pop(0) if sqtt_traces else b''
         old_idx = self.gpu.regs.grbm_index
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
@@ -254,13 +237,7 @@ class PM4Executor(AMDQueue):
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
           else:
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
-          # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
-          se_blob = blob if se == 0 else b''
-
-          # Write blob to trace buffer
-          if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
-          # RDNA3 has absolute address for wptr, RDNA4 has relative
-          wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
+          wptr_val = ((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) // 32) & 0x1FFFFFFF
           self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
         self.gpu.regs.grbm_index = old_idx
       case _: pass # NOTE: for now most events aren't emulated

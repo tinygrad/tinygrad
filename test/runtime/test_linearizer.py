@@ -11,7 +11,7 @@ from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.isa import ISARenderer
+from tinygrad.renderer.x86 import ISARenderer
 from test.helpers import replace_opts, check_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
@@ -113,7 +113,7 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # LOAD -> RANGE -> LOAD -> STORE
-    assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
+    assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD and x.src[0].buf_uop.arg.name != "args"]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()

@@ -11,14 +11,14 @@ from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
+  while len(s.src) and s.op not in GroupOp.Defines|{Ops.AFTER, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | ALLOC | PARAM. MSELECT/MSTACK join per-device states
+# a buffer state is a define or an AFTER. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
+  assert s.op in GroupOp.Defines|{Ops.AFTER}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
@@ -59,7 +59,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for a, write_kernels in writes.get(s, []):
         if a is u: continue
         for t in write_kernels:
-          if t is not k and t not in k.backward_slice:
+          if t is not k:
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
 

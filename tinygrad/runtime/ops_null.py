@@ -39,7 +39,7 @@ class NullQueue(HWQueue):
   def submit(self, cmdbuf): return null_submit(cmdbuf, UOp.alloc((1,), dtypes.uint8, device=self.devs[0], name="doorbell"))
 
 class NullProgram(Program['NullDevice']):
-  def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
+  def __init__(self, dev, obj, links=None): self.streams = [(i,prod(s)) for i,(n,_,_,s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
   def __call__(self, *args, **kwargs):
     st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(args[i], n, fmt='Q')[:]]
     # timestamps are emulated: every exec and copy takes 1us
@@ -47,10 +47,11 @@ class NullProgram(Program['NullDevice']):
       if op == TIMESTAMP: MMIOInterface(addr, 8, fmt='Q')[0] = int((st + done) * 1000)
     descs = [list(null_events)[event] for op, event in zip(words[0::4], words[3::4]) if op in (EXEC, COPY)] if PROFILE else []
     sigs = [st + sum(x[0] == d[0] for x in descs[:i]) + k for i, d in enumerate(descs) for k in (0, 1)]
-    if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
+    if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], sigs))
 
 class NullAllocator(HostAllocator):
-  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage: return BufferStorage(next(va))
+  def _alloc(self, size:int, options, va=itertools.count(1 << 40, 1 << 32)) -> BufferStorage:
+    return super()._alloc(size, options) if options.host or options.cpu_access else BufferStorage(next(va))
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): NULL_ALLOW_COPYOUT or panic(RuntimeError, "no copyout on NULL")
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf._buf if buf.device.startswith("NULL") else buf.host.addr)
@@ -74,4 +75,3 @@ class NullDevice(Compiled):
 
   # its memory is fake: every placeholder on it gets host memory
   def host_buffer(self, n:int) -> Buffer: return Buffer(self.device, n, opaque=memoryview(bytearray(n)), options=BufferSpec(external_ptr=1))
-  def link_buffer(self, b:UOp) -> Buffer: return self.host_buffer(b.max_numel() * b.dtype.itemsize)

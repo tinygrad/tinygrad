@@ -138,6 +138,15 @@ class TestFp8sConversions(unittest.TestCase):
     # e4m3 and the fnuz fp8s have no inf, so their extremes (the MAX/MIN reduce identities) are finite values that round trip
     for dt in dtypes.fp8s: self.assertEqual(Tensor([dt.min, dt.max], dtype=dt).float().tolist(), [dt.min, dt.max])
 
+  @Context(EMULATED_DTYPES="fp8e4m3,fp8e5m2,fp8e4m3fnuz,fp8e5m2fnuz")
+  def test_cast_rounds(self):
+    for dt in dtypes.fp8s: self.assertEqual(Tensor([1.0625]).cast(dt).float().tolist(), [1.0])
+
+  @Context(EMULATED_DTYPES="fp8e4m3,fp8e5m2,fp8e4m3fnuz,fp8e5m2fnuz")
+  def test_cast_nonfinite(self):
+    x = [math.inf, -math.inf, math.nan]
+    for dt in dtypes.fp8s: self.assertEqual(Tensor(x).cast(dt).bitcast(dtypes.uint8).tolist(), [float_to_fp8(v, dt) for v in x])
+
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
   def test_float_to_fp8e4m3(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
@@ -220,6 +229,10 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     original_to_float32 = original_tensor.cast(dtypes.float32)
     np.testing.assert_allclose(back_to_float32.numpy(), original_to_float32.numpy(), rtol=1e-2, atol=1e-3)
 
+  @Context(EMULATED_DTYPES="bf16")
+  def test_cast_denormal_flushes(self):
+    self.assertEqual(Tensor([0x7f8000], dtype=dtypes.uint32).bitcast(dtypes.float32).cast(dtypes.bfloat16).bitcast(dtypes.uint16).tolist(), [0])
+
   def test_f16_to_bf16_edge_cases(self):
     edge_cases = Tensor([0.0, -0.0, float('inf'), float('-inf'), float('nan')], dtype=dtypes.float16)
     converted = edge_cases.cast(dtypes.bfloat16).cast(dtypes.float32)
@@ -250,6 +263,12 @@ class TestEmulatedHalf(TestHalfDType):
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
+
+  def test_cast_overflow(self): self.assertEqual(Tensor([65519., 65520.]).cast(dtypes.half).float().tolist(), [65504., math.inf])
+  def test_cast_underflow(self):
+    self.assertEqual(Tensor([2**-14 - 2**-25, 2**-14 - 2**-25 - 2**-38]).cast(dtypes.half).float().tolist(), [2**-14, 0.])
+  def test_cast_nan_payload(self):
+    self.assertEqual(Tensor([0x7f800001], dtype=dtypes.uint32).bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).tolist(), [0x7e00])
 
 
 class TestFloatDType(TestDType):
@@ -319,6 +338,9 @@ class TestUint8DType(TestDType):
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
+  @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
+  def test_uint8_to_int8_overflow_compare(self):
+    self.assertEqual((Tensor([128, 5], dtype=dtypes.uint8).cast(dtypes.int8) < 0).tolist(), [True, False])
 
 class TestBitCast(unittest.TestCase):
   def test_subword_slice(self):
@@ -388,6 +410,11 @@ class TestUint64DType(TestDType):
   @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
   def test_uint64_cast_double(self):
     assert Tensor([2**32 + 1], dtype=dtypes.uint64).cast(dtypes.double).numpy() == 2**32 + 1
+  def test_uint64_cast_float_rounds_once(self):
+    self.assertEqual(Tensor([2**25+3], dtype=dtypes.uint64).cast(dtypes.float32).tolist(), [2**25+4])
+  @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
+  def test_uint64_cast_double_rounds_once(self):
+    self.assertEqual(Tensor([2**63+2**10+1], dtype=dtypes.uint64).cast(dtypes.double).tolist(), [2**63+2**11])
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedUInt64DType(TestUint64DType):
