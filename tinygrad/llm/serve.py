@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, re, time, typing, uuid
+import json, pathlib, queue, re, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -68,6 +68,13 @@ class StreamRouter:
     if emit: yield "content", emit
     if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
 
+class Request:
+  def __init__(self, ids:list[int], model_name:str, include_usage:bool, max_tokens:int|None, temperature:float, reasoning:bool):
+    self.ids, self.model_name, self.include_usage, self.max_tokens, self.temperature = ids, model_name, include_usage, max_tokens, temperature
+    self.reasoning = reasoning
+    self.cancelled = False
+    self.out: queue.Queue[dict|None] = queue.Queue()
+
 class Handler(VizHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
@@ -77,55 +84,13 @@ class Handler(VizHandler):
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
                 reasoning:bool=False):
-    model, tok = self.server.model, self.server.tok
-    prompt_tokens = len(ids)
-    cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
-    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
-    out: list[int] = []
-    finish_reason = "stop"
-    st = pt = time.perf_counter()
-    dec = tok.stream_decoder()
-    router = StreamRouter(reasoning)
-    def log_stats(interrupted:bool=False):
-      et = time.perf_counter()
-      total = f"total:{et-st:6.2f}s"
-      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
-    completed = False
+    # hand off to the scheduler thread (the only thread that touches the model), drain our private stream
+    req = Request(ids, model_name, include_usage, max_tokens, temperature, reasoning)
+    self.server.waiting.put(req)
     try:
-      yield chunk({"role":"assistant", "content":""})
-      for next_id in model.generate(ids, temperature=temperature):
-        if len(out) == 0:
-          stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-        if tok.is_end(next_id): break
-        out.append(next_id)
-        for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
-        if max_tokens is not None and len(out) >= max_tokens:
-          finish_reason = "length"
-          break
-      for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
-      tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
-        if (parsed := parse_tool_call(m.group(1))) is None:
-          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
-          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
-        else:
-          name, args = parsed
-          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
-      if tool_calls:
-        yield chunk({"tool_calls":tool_calls})
-        if finish_reason == "stop": finish_reason = "tool_calls"
-      completed = True
-      yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-      if include_usage:
-        yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                        "total_tokens": prompt_tokens + len(out)}, **tmpl}
-      log_stats()
+      while (c := req.out.get()) is not None: yield c
     except GeneratorExit:
-      if not completed: log_stats(interrupted=True)
+      req.cancelled = True   # client went away, ask the scheduler to stop generating
       raise
 
   def do_POST(self):
@@ -173,4 +138,70 @@ class Handler(VizHandler):
 class LLMServer(TCPServerWithReuse):
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
+    self.waiting: queue.Queue[Request] = queue.Queue()
+    threading.Thread(target=self.scheduler, daemon=True, name="LLMScheduler").start()
     super().__init__(server_address, Handler)
+
+  def scheduler(self):
+    # single thread owns the model; handler threads enqueue requests and drain req.out
+    while True:
+      req = self.waiting.get()                                   # admit FCFS
+      try:
+        for c in self._generate(req): req.out.put(c)             # TODO: batch decodes across requests (batched_step)
+      except Exception: traceback.print_exc()
+      req.out.put(None)                                          # retire: None ends the client's stream
+
+  def _generate(self, req:Request):
+    ids, model_name, include_usage, max_tokens, temperature, reasoning = \
+      req.ids, req.model_name, req.include_usage, req.max_tokens, req.temperature, req.reasoning
+    model, tok = self.model, self.tok
+    prompt_tokens = len(ids)
+    cache_start_pos = model.get_start_pos(ids)
+    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
+    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
+    out: list[int] = []
+    finish_reason = "stop"
+    st = pt = time.perf_counter()
+    dec = tok.stream_decoder()
+    router = StreamRouter(reasoning)
+    def log_stats(interrupted:bool=False):
+      et = time.perf_counter()
+      total = f"total:{et-st:6.2f}s"
+      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
+    completed = False
+    try:
+      yield chunk({"role":"assistant", "content":""})
+      for next_id in model.generate(ids, temperature=temperature):
+        if req.cancelled: raise GeneratorExit
+        if len(out) == 0:
+          stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
+        if tok.is_end(next_id): break
+        out.append(next_id)
+        for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
+        if max_tokens is not None and len(out) >= max_tokens:
+          finish_reason = "length"
+          break
+      for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
+      tool_calls: list[dict] = []
+      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+        if (parsed := parse_tool_call(m.group(1))) is None:
+          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
+        else:
+          name, args = parsed
+          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+      if tool_calls:
+        yield chunk({"tool_calls":tool_calls})
+        if finish_reason == "stop": finish_reason = "tool_calls"
+      completed = True
+      yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
+      if include_usage:
+        yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
+                                        "total_tokens": prompt_tokens + len(out)}, **tmpl}
+      log_stats()
+    except GeneratorExit:
+      if not completed: log_stats(interrupted=True)
+      return   # end the stream; the scheduler thread must survive
