@@ -191,6 +191,7 @@ class CallifyCtx:
   allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
+  written: set[UOp] = field(default_factory=set)
 
 def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -206,7 +207,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
   buf, offset = cv
   view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  if ctx is not None: ctx.views.add(view)
+  if ctx is not None and (c.op is Ops.STORE or buf not in ctx.written): ctx.views.add(view)
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
@@ -259,7 +260,8 @@ def transform_to_call(big_sink:UOp) -> UOp:
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.
-  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
+  ctx = CallifyCtx(written={u.buf_uop for u in big_sink.toposort() if is_store_after(u)})
+  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=ctx, name="early transform tensor graph")
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
