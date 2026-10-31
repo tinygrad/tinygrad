@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, os, subprocess
+import unittest, os, subprocess, sys
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
 from tinygrad.device import Device, Compiler, enumerate_devices_str
@@ -187,6 +187,15 @@ class TestCompiler(unittest.TestCase):
     with Context(CCACHE=0):
       self.assertEqual(MockCompiler("disabled_key").compile_cached("123"), str.encode("123"))
       self.assertIsNone(diskcache_get("disabled_key", "123"))
+
+  def test_compile_server_large(self):
+    # the base Compiler echoes src back, so this round-trips a payload larger than a pipe buffer
+    proc = Compiler().server(sys.executable, "echo")
+    try:
+      for n in (10, 200_000, 10):
+        src = "x" * n
+        self.assertEqual(Compiler().compile_server(src, proc), src.encode())
+    finally: proc.kill()
 
   def test_device_compile(self):
     getenv.cache_clear()
