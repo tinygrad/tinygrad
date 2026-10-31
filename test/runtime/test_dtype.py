@@ -338,6 +338,9 @@ class TestUint8DType(TestDType):
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
+  @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
+  def test_uint8_to_int8_overflow_compare(self):
+    self.assertEqual((Tensor([128, 5], dtype=dtypes.uint8).cast(dtypes.int8) < 0).tolist(), [True, False])
 
 class TestBitCast(unittest.TestCase):
   def test_subword_slice(self):
