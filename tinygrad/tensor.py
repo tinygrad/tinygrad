@@ -196,6 +196,9 @@ class Tensor(RandMixin):
           u = buf.after(buf.store(src))
       if u is not x: tensor_map[x] = u
 
+    # other outputs of a call that runs become their storage too, so realizing them later doesn't run it again
+    tensor_map = {s.after(c):b for c in sink.toposort() if c.op is Ops.CALL for s in c.src[1:]
+                  if (b:=tensor_map.get(s, s)).storage_base.op is Ops.BUFFER} | tensor_map
     sink = tensor_map.get(sink, sink)
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
