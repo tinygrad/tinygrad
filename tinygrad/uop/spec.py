@@ -219,9 +219,9 @@ spec_program = PatternMatcher([
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
-  # if has a <gate, index_for_dedup>
-  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
-  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+  # if has a <gate, dedup>
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat())), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),UPat())), lambda: True),
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.int32),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -241,6 +241,11 @@ spec_full = PatternMatcher([
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(dtype=dtypes.void), UPat()), allow_any_len=True, name="x"),
    lambda x: x.arg is None and all(dtypes.is_int(u.dtype) for u in x.src[1:])),
+
+  # ISA branches carry a flag-producing instruction and a backend jump opcode until linearization.
+  (UPat(Ops.IF, src=(UPat(Ops.INS, dtypes.void).or_after(),), name="x"), lambda x: x.arg is not None),
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(Ops.INS, dtypes.void).or_after()), name="x"),
+   lambda x: x.arg is not None),
 
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),

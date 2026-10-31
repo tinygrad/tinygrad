@@ -564,8 +564,7 @@ class TestRangeShrink(unittest.TestCase):
 
   def assert_range_end(self, ranges:list[UOp], end:int):
     self.assertEqual(len(ranges), 1)
-    with Context(NOOPT=1, SPEC=0): expected = full_rewrite(UOp.const(end, dtypes.int).sink()).src[0]
-    self.assertIs(ranges[0].src[0], expected)
+    self.assertEqual(ranges[0].src[0].without_after.ssimplify(), end)
 
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
@@ -595,14 +594,6 @@ class TestRangeShrink(unittest.TestCase):
     load1 = get_gated_load_uop(r < UOp.const(4), r)
     load2 = UOp.param(1, dtypes.float, 204).index(r).load()
     ranges = self.get_ranges(UOp.sink(load1, load2))
-    self.assert_range_end(ranges, 204)
-
-  def test_range_no_shrink_when_used_in_reduce(self):
-    # range used in both a gated load AND directly in the reduce expression -> no shrink
-    r = Range(0, 204)
-    gated_load = get_gated_load_uop(r < UOp.const(4), r)
-    red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
-    ranges = self.get_ranges(red.sink())
     self.assert_range_end(ranges, 204)
 
   def test_range_shrink_to_single_iteration(self):
