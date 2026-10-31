@@ -5,9 +5,10 @@ from tinygrad.helpers import EMULATED_DTYPES, DEV, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.uop import Ops
 import numpy as np
 import pytest
@@ -274,6 +275,118 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
 
+  def test_unsigned_add_lt(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      x = Tensor.arange(10, dtype=dt) + Tensor([dt.max-4], dtype=dt)
+      self.assertEqual((x < 3).tolist(), [i in (5, 6, 7) for i in range(10)])
+
+  def test_unsigned_narrow_wrap(self):
+    for dt in (dtypes.uint8, dtypes.uint16):
+      x = Tensor([dt.max, 3], dtype=dt)
+      self.assertEqual(((x+1)>>4).tolist(), [0, 0])
+      self.assertEqual(((x-4)>>4).tolist(), [dt.max>>4, dt.max>>4])
+      self.assertEqual(((x*2)>>4).tolist(), [dt.max>>4, 0])
+      self.assertEqual(((-x)>>4).tolist(), [0, dt.max>>4])
+      self.assertEqual(((x<<4)>>4).tolist(), [dt.max>>4, 3])
+      self.assertEqual(((x*x)>>4).tolist(), [0, 0])
+      self.assertEqual(((x+1)<1).tolist(), [True, False])
+
+  def test_pow_one_keeps_dtype(self):
+    self.assertEqual(((1**Tensor([2], dtype=dtypes.uint8))+255).cast(dtypes.uint32).tolist(), [0])
+    self.assertEqual((1**Tensor([2], dtype=dtypes.int8)).bitcast(dtypes.uint8).tolist(), [1])
+
+  def test_div_add_div_no_overflow(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      x = Tensor([dt.max-1], dtype=dt)
+      self.assertEqual(((x//2+1)//2).tolist(), [(dt.max+1)//4])
+    x = Tensor([2**31-2], dtype=dtypes.int32)
+    self.assertEqual(((x//2+2**29)//2).tolist(), [805306367])
+
+  def test_div_div_no_overflow(self):
+    self.assertEqual(((Tensor([2**31-1, -5], dtype=dtypes.int32)//65536)//65536).tolist(), [0, -1])
+
+  def test_add_add_no_overflow(self):
+    self.assertEqual((((Tensor([-2**31, 1-2**31], dtype=dtypes.int32)+2**30)+2**30)//2).tolist(), [0, 0])
+
+  def test_neg_zero(self):
+    self.assertEqual((1/-Tensor([0., -0.])).tolist(), [-math.inf, math.inf])
+
+  def test_neg_add_half_zero(self):
+    self.assertEqual((1/-(Tensor([0.])+Tensor([-0.])).half()).tolist(), [-math.inf])
+
+  def test_neg_add_no_overflow(self):
+    self.assertEqual((-(Tensor([1, 2], dtype=dtypes.int32)+(-2**31))==2**31-1).tolist(), [True, False])
+
+  def test_neg_add_signed_zero(self):
+    self.assertEqual((1/-(Tensor([0.])+Tensor([-0.]))).tolist(), [-math.inf])
+
+  def test_add_mul_no_overflow(self):
+    self.assertEqual((((Tensor([-715827887, 0], dtype=dtypes.int32)+5)*3)==-2**31+2).tolist(), [True, False])
+
+  def test_add_lt_no_overflow(self):
+    self.assertEqual(((Tensor([0, -715827882], dtype=dtypes.int32)*3+15) < -2**31+8).tolist(), [False, False])
+
+  def test_mul_mul_no_overflow(self):
+    self.assertEqual(((Tensor([-1, 0], dtype=dtypes.int32)*65536)*32768//2).tolist(), [-2**30, 0])
+
+  def test_combine_terms_no_overflow(self):
+    t, u = Tensor([-1, 0], dtype=dtypes.int32), Tensor([0, 0], dtype=dtypes.int32)
+    self.assertEqual(((t*2**30+t*2**30)//2).tolist(), [-2**30, 0])
+    self.assertEqual(((t+t*(2**31-1))//2).tolist(), [-2**30, 0])
+    self.assertEqual((((u+t*(2**31-1))+t)//2).tolist(), [-2**30, 0])
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, CUDARenderer), "nvrtc 11.5 reassociates (x+c)+y<d and folds it to True")
+  def test_reassociate_no_overflow(self):
+    t, c = Tensor.arange(3, dtype=dtypes.int32), Tensor([False, True])
+    a, b, x, y = (Tensor(v, dtype=dtypes.int32) for v in ([1, 0], [1, 1], [2, 0], [2**30, 1]))
+    self.assertEqual((((t*2**29-2**30)+t*2**29) < 2**29).tolist(), [True, True, False])
+    self.assertEqual((((t-2**30)+t*(2**30-1)) < 2**29).tolist(), [True, True, False])
+    self.assertEqual((((a*2**30-2**30)+b*2**30) < 2**29).tolist(), [False, True])
+    self.assertEqual((((x*-1)*y) < -1).tolist(), [True, False])
+    self.assertEqual((((c.where(0, b*2**30)-2**30)+c.where(0, b*2**30)) < 2**29).tolist(), [False, True])
+
+  def test_float_reassociate(self):
+    x, y, c = Tensor([1e8]), Tensor([3.]), Tensor([True])
+    self.assertEqual(((x-1e8)+Tensor([1.])).tolist(), [1.])
+    self.assertEqual(((Tensor([1e30])*1e10)*Tensor([1e-30])).tolist(), [math.inf])
+    self.assertEqual(((x+y)+y).tolist(), [1e8])
+    self.assertEqual(((Tensor([1.])+(z:=Tensor([1e38]))*4)+z*-3).tolist(), [math.inf])
+    self.assertEqual(((Tensor([1.])+z*-3.5)+z).tolist(), [-math.inf])
+    self.assertEqual(((Tensor([1.])+c.where(1e8, x))+c.where(-1e8, x)).tolist(), [0.])
+
+  def test_fused_div_matches_unfused(self):
+    x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
+    for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):
+      np.testing.assert_equal(g(f()).numpy(), g(f().realize()).numpy())
+
+  @unittest.skipIf(Device.DEFAULT == "CL", "rusticl fdiv scaling reassociates (x*c)*0.25 past inf")
+  def test_fused_recip_const_matches_unfused(self):
+    x = Tensor([3e38, 1e30, 1.7])
+    np.testing.assert_equal((1/(x*3)).numpy(), (1/(x*3).realize()).numpy())
+
+  def test_unsigned_mul_max(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      x = Tensor([dt.max//2, dt.max//2+1], dtype=dt)
+      self.assertEqual((x*2).max().item(), dt.max-1)
+
+  def test_unsigned_wrap_bounds(self):
+    for dt in (dtypes.uint32, dtypes.uint64):
+      h = 1 << (dt.bitsize-1)
+      u, x = Tensor([h], dtype=dt).maximum(h), Tensor([1], dtype=dt)
+      self.assertEqual([(t < 1).item() for t in (u+h, u*2, u<<1, -x, x^-1)], [True, True, True, False, False])
+
+  def test_unsigned_const_canonical(self):
+    for dt in (dtypes.uint8, dtypes.uint32, dtypes.uint64):
+      c, z = Tensor(-1, dtype=dt), Tensor([1], dtype=dt)*0-1
+      self.assertEqual((c>>1).item(), dt.max>>1)
+      self.assertEqual((z>>1).item(), dt.max>>1)
+      self.assertEqual((z//2).item(), dt.max//2)
+      self.assertEqual((z<3).item(), False)
+      self.assertEqual(z.maximum(5).item(), dt.max)
+    self.assertEqual(Tensor(-1, dtype=dtypes.uint32).cast(dtypes.int64).item(), 2**32-1)
+    self.assertEqual((Tensor(255, dtype=dtypes.uint8)+1).cast(dtypes.uint16).item(), 0)
+    self.assertEqual((Tensor([5], dtype=dtypes.uint32)//Tensor(-1, dtype=dtypes.uint32)).item(), 0)
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
@@ -316,6 +429,11 @@ class TestDTypeALU(unittest.TestCase):
 
   def test_shl(self): self._test_shl()
   def test_shr(self): self._test_shr()
+  def test_shr_long_of_small_value(self):
+    self.assertEqual((Tensor([-1, 5], dtype=dtypes.int8).cast(dtypes.int64) >> 32).tolist(), [-1, 0])
+  def test_mod_long_of_int_min(self):
+    a, b = Tensor([-2**31, 5], dtype=dtypes.int32).cast(dtypes.int64), Tensor([-1, -2], dtype=dtypes.int8).minimum(-1).cast(dtypes.int64)
+    self.assertEqual((a % b).tolist(), [0, -1])
 
   @Context(EMULATED_DTYPES="long")
   def test_emulated_shl(self): self._test_shl()

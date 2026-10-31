@@ -1,4 +1,4 @@
-import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools
+import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools, errno
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
@@ -25,15 +25,15 @@ class DiskDevice(Compiled):
       return
     filename = self.device[len("disk:"):]
 
-    if sys.platform != "win32" and filename.startswith("shm:"):
+    if filename.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+filename[4:].lstrip("/"), os.O_RDWR, 0o600)
       self.mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
-      try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0))
-      except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
+      try: self.fd, rdonly = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0)), False
+      except OSError as e: self.fd = os.open(filename, os.O_RDONLY if (rdonly:=e.errno in (errno.EROFS, errno.EACCES)) else os.O_RDWR|os.O_CREAT)
       if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < size: os.ftruncate(self.fd, size)
-      self.mem = mmap.mmap(self.fd, size)
+      self.mem = mmap.mmap(self.fd, size, access=mmap.ACCESS_COPY if rdonly else mmap.ACCESS_DEFAULT)
       self.info.host.view()[:16] = struct.pack("2Q", self.fd, mv_address(memoryview(self.mem)))
     self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
@@ -121,8 +121,8 @@ def is_disk_read(c:UOp) -> bool:
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lin = s.without_after.body
   if not (copies:=[c for c in lin.src if is_disk_read(c)]): return None
-  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
-  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
+  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device, name="uring_rings")
+  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device, name="uring_sqes")
 
   # [mmap address, bytes] per copy in a table: an arg each would hit ctypes' 1024 limit
   words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.device), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
@@ -131,12 +131,12 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
 
   # [chunks read, chunks copied] at the start of the gpu's stage
   dev = s.without_after.src[1].device
-  counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev).rtag("disk_stage")[:16].bitcast(dtypes.uint64)
+  counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev, name="disk_stage")[:16].bitcast(dtypes.uint64)
 
   # cpu part
   done, off, gpu_ops = s, 0, collections.defaultdict[UOp, list[UOp]](list)
   for disk, grp in itertools.groupby(range(len(copies)), lambda k: to_tuple(copies[k].src[2].device)[0]):
-    file, ks = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info"), list(grp)
+    file, ks = UOp.alloc((2,), dtypes.uint64, 0, device=disk, name="disk_info"), list(grp)
     done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts.after(done), rings, sqes)
 
   # gpu part
@@ -166,6 +166,5 @@ def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None:
 @functools.cache
 def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, options=BufferSpec(cpu_access=True), initial_value=bytes(STAGE_SZ))
 
-Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="disk_info", name="b"), lambda b: cast(DiskDevice, Device[b.device]).info),
-  (UPat(Ops.ALLOC, tag="disk_stage", name="b"), lambda b: _stage(b.device)),
-  (UPat(Ops.ALLOC, tag="uring_rings"), lambda: unwrap(uring())[2]), (UPat(Ops.ALLOC, tag="uring_sqes"), lambda: unwrap(uring())[3])])
+Compiled.link_bufs |= {"disk_info": lambda b: cast(DiskDevice, Device[b.device]).info, "disk_stage": lambda b: _stage(b.device),
+                       "uring_rings": lambda b: unwrap(uring())[2], "uring_sqes": lambda b: unwrap(uring())[3]}

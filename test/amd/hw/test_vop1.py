@@ -15,6 +15,7 @@ class TestMov(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 42),
       v_mov_b32_e32(v[0], s[0]),
+      v_nop_e32()
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][0], 42)

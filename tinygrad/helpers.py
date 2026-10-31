@@ -14,11 +14,8 @@ U = TypeVar("U")
 def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX, WIN = sys.platform == "darwin", sys.platform == "win32"
+OSX = sys.platform == "darwin"
 BASEDIR = pathlib.Path(__file__).parent
-
-# fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
-if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
@@ -240,7 +237,7 @@ class _DEV(ContextVar):
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT = ContextVar("JIT", 1)
-WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
+WINO, CAPTURING, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
 USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("TC_MIN_GLOBALS", 0)
 TRANSCENDENTAL = ContextVar("TRANSCENDENTAL", 1)
@@ -293,13 +290,6 @@ SCACHE = ContextVar("SCACHE", 1)
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 # don't allow broadcast
 DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
-
-@dataclass(frozen=True)
-class Metadata:
-  name: str
-  backward: bool = False
-  def __hash__(self): return hash(self.name)
-  def __str__(self): return self.name + (" bw" if self.backward else "")
 
 # **************** global state Counters ****************
 

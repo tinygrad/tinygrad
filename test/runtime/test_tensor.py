@@ -418,6 +418,11 @@ class TestTinygrad(unittest.TestCase):
       assert type(reshaped_item) is type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
 
+  def test_item_narrow_float(self):
+    for dt in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s):
+      self.assertEqual(Tensor([1.5], dtype=dt).item(), 1.5)
+      self.assertEqual(Tensor(1.5).cast(dt).item(), 1.5)
+
   def test_no_attributeerror_after_apply_uop_exception(self):
     try:
       Tensor.arange(4).reshape(3,2)

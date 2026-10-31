@@ -1,6 +1,7 @@
 import gc, unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, UOp
 from tinygrad.uop.ops import Ops
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from test.helpers import not_support_multi_device, needs_second_gpu
@@ -131,8 +132,6 @@ class TestMultiRamUsage(unittest.TestCase):
       return x, w1, w2
 
     def run_layers(n_layers):
-      GlobalCounters.reset()
-
       @TinyJit
       def f(x, w1, w2):
         for _ in range(n_layers):
@@ -144,8 +143,10 @@ class TestMultiRamUsage(unittest.TestCase):
         r = f(*a)
         del a, r
 
-      gc.collect()
-      return GlobalCounters.mem_used
+      # get the data itself. cmdbuf memory might grow a bit
+      linked = next(iter(f.captured._linears.values()))[0]
+      bufs = [u.buffer for u in linked.toposort(enter_calls=True) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL]
+      return sum(b.nbytes for b in {b for mb in bufs for b in getattr(mb, "bufs", [mb])} if not b.options.cpu_access)
 
     mem_2 = run_layers(2)
     mem_4 = run_layers(4)

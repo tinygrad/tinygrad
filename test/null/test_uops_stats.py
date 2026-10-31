@@ -4,16 +4,16 @@ from tinygrad.helpers import GlobalCounters, Target
 from tinygrad.engine.realize import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo, AddrSpace
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from test.helpers import replace_opts
 
-def flops_mem(uops, ignore_indexing=False):
-  est = Estimates.from_uops(uops, ignore_indexing)
+def flops_mem(uop, ignore_indexing=False):
+  est = Estimates.from_uops(uop, ignore_indexing)
   return est.ops, est.lds
 
 # **************** new FlopCounter ****************
@@ -100,12 +100,69 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     expected_ops = 4 * N ** 3 * 2
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
+class TestUOpsStatsInlineCall(unittest.TestCase):
+  def test_inline_call(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0 = buf.param_like(0)
+    body = p0[0].store(UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU) + p0[0].load())
+    out = body.sink().call(buf, UOp.const(5, dtypes.int32), name="test_call").sink(arg=KernelInfo(optimized=True))
+    self.assertEqual(flops_mem(out), (1, 8))
+
+  def test_inline_range_bound(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0 = buf.param_like(0)
+    n = UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+    i = UOp.range(n + 1, 0, dtype=dtypes.int32)
+    body = p0[i].store(i).end(i).sink()
+    for value in (0, 3):
+      with self.subTest(value=value):
+        out = body.call(buf, UOp.const(value, dtypes.int32), name="bound_expr").sink()
+        est = Estimates.from_uops(out)
+        self.assertEqual((est.ops, est.lds, est.mem), (1, 4*(value+1), 4*(value+1)))
+
+  def test_multiple_inline_call_sites(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0, p1 = buf.param_like(0), UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+    val, i = (p0[p1].load() * p1) + 10, UOp.range(4, 0, dtype=dtypes.i32)
+    body, buf1 = p0[p1].store(val).sink(), UOp.param(1, dtypes.int32, 4)
+    call0 = body.call(buf.after(i), i, name="test_call")
+    call1 = body.call(buf1.after(i), i, name="test_call")
+    out = UOp.sink(call0, call1).end(i).sink(arg=KernelInfo(optimized=True))
+    est = Estimates.from_uops(out, ignore_indexing=True)
+    self.assertEqual((est.ops,est.lds,est.mem), (16,64,64))
+
+  def test_sequential_inline_calls(self):
+    buf = UOp.param(0, dtypes.int32, 1)
+    p0 = buf.param_like(0)
+    body = p0[0].store(p0[0].load() + 1).sink()
+    first = body.call(buf, name="increment")
+    second = body.call(buf.after(first), name="increment")
+    est = Estimates.from_uops(second.sink())
+    self.assertEqual((est.ops, est.lds, est.mem), (2, 16, 8))
+
+  def test_nested_inline_call(self):
+    buf = UOp.param(0, dtypes.int32, 4)
+    p0 = buf.param_like(0)
+    p1 = UOp.param(1, dtypes.int32, addrspace=AddrSpace.ALU, vmin_vmax=(0,3))
+    inner = p0[p1].store(p0[p1].load() * p1 + UOp.const(10, dtypes.int32)).sink()
+    outer = inner.call(p0, p1, name="inner_call").sink()
+    i = UOp.range(4, 0, dtype=dtypes.i32)
+    out = outer.call(buf, i, name="outer_cal").end(i).sink(arg=KernelInfo(optimized=True))
+    self.assertEqual(flops_mem(out), (8, 32))
+
 class TestUOpsStats(unittest.TestCase):
   def test_isa_store_estimate(self):
     buf = UOp.param(0, dtypes.int32, 4)
     prg = to_program(buf.index(1).store(5).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
     self.assertEqual(prg.src[0].arg.estimates.mem, 4)
     self.assertEqual(prg.src[0].arg.estimates.lds, 4)
+
+  def test_triangular_loop_estimate(self):
+    buf = UOp.param(0, dtypes.int32, 6)
+    i = UOp.range(3, 0)
+    j = UOp.range(i+1, 1)
+    prg = to_program(buf.index(i*(i+1)//2+j).store(j).end(j, i).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
+    self.assertEqual(prg.src[0].arg.estimates.lds, 3*3*4)
 
   def test_simple_add(self):
     a = Tensor.empty(100,100)
@@ -163,7 +220,6 @@ class TestUOpsStats(unittest.TestCase):
     u3 = UOp.const(3, dtypes.int)
     u4 = UOp(Ops.MUL, src=(u1,u2))
     u5 = UOp(Ops.ADD, src=(u4,u3))
-    uops = tuple(u5.toposort())
 
     globl = UOp.param(0, dtypes.int, 3)
     o1 = UOp.const(1, dtypes.int)
@@ -172,9 +228,8 @@ class TestUOpsStats(unittest.TestCase):
     u2 = globl.index(o2)
     u3 = UOp.const(3, dtypes.int)
     u4 = UOp(Ops.MULACC, src=(u1,u2,u3))
-    uops_fma = tuple(u4.toposort())
 
-    self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
+    self.assertEqual(flops_mem(u5), flops_mem(u4))
 
 N = 64
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "wrong in PTX") # maybe?

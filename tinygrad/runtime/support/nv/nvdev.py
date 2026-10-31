@@ -2,10 +2,9 @@ from __future__ import annotations
 import time, functools, tinygrad.runtime.autogen.nv_regs
 from tinygrad.helpers import getenv, DEBUG, getbits, round_up
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace, MMIOInterface
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import PCIDevice
-from tinygrad.runtime.support.memory import MMIOInterface
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -83,7 +82,8 @@ class NVDev:
     self.is_booting = False
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
-    for ip in [self.flcn, self.gsp]: ip.init_hw()
+    if self.flcn.init_hw(): return NVDev.__init__(self, pci_dev)
+    self.gsp.init_hw()
 
   def fini(self):
     for ip in [self.gsp, self.flcn]: ip.fini_hw()
