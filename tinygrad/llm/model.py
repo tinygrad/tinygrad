@@ -2196,11 +2196,16 @@ class Transformer:
     assert m <= self.batch_slots(), f"{n} sequences, {self.batch_slots()} slots"
     # (the groups past n are the free slots' at position 0: what they write is overwritten when a sequence takes the slot)
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
-    for g, (y, _, _, _, temp) in enumerate(seqs):
-      self._bspec_host_in[g*(k+1):(g+1)*(k+1)] = array.array('i', y)
-      self._batch_host_temp[2*g:2*g+2] = _temp_pair(temp)
+    # (the step's tokens and temperatures written at once, the host's time is the devices' idle time between steps)
+    self._bspec_host_in[:m*(k+1)] = array.array('i', [t for y, _, _, _, _ in seqs for t in y])
+    self._batch_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
     self._bspec_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
-    self._bspec_jit(m)(*self._bspec_vars([(mp, j, par) for _, mp, j, par, _ in seqs]))
+    jit = self._bspec_jit(m)
+    if (cap:=getattr(jit, "captured", None)) is not None and getenv("BSPEC_FAST_CALL", 1):
+      # (captured: its variables' values as they are, no bound variables made a step)
+      cap([], {name: v for g, (_, mp, j, par, _) in enumerate(seqs)
+               for name, v in ((f"bspec_mtp{g}", mp), (f"bspec_j{g}", j), (f"bspec_par{g}", par))})
+    else: jit(*self._bspec_vars([(mp, j, par) for _, mp, j, par, _ in seqs]))
     st = time.perf_counter()
     while min(self._bspec_host_out[:m*(2*k+1)]) < 0:
       # (a step that doesn't come: the devices' errors, or none)

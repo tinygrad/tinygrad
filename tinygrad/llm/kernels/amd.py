@@ -1892,7 +1892,10 @@ def partial_sum(x:Tensor) -> Tensor:
   # (a few rows (decoding): three halves a word, many: packed)
   rows = prod(x.shape[1:-1])
   pk = _ar_pack() if isinstance(rows, int) and rows >= getenv("P2P_AR_PACK_ROWS", 5) else None
-  n, words = prod(x.shape[1:]), ((pk[0],) if pk else (3, 2))
+  n = prod(x.shape[1:])
+  # (packed: P2P_AR_PACK's values a word, else 4x12 (a count of values of the rows that 6 doesn't divide: the drafts' 56), else three halves)
+  if pk is not None and isinstance(n, int) and n % pk[0] and n % 4 == 0 and pk != (4, 12): pk = (4, 12)
+  words = (pk[0],) if pk else (3, 2)
   if isinstance(x.device, tuple) and isinstance(n, int) and rows >= getenv("P2P_AR_HALF_ROWS", 1) and getenv("P2P_AR_HALF", 1) and \
      (pw:=next(((p, w) for cap in (P2P_AR_PART, P2P_AR_MAXG*1024) for p in (1, 2, 4, 8, 16) for w in words if rows % p == 0 and
                 n % (w*p) == 0 and n // (w*p) <= (P2P_AR_MAXG*P2P_AR_MAXW if p == 1 else cap) and p2p_ar_shape(n // (w*p)) is not None), None)) \
