@@ -78,6 +78,8 @@ class DType(metaclass=DTypeMetaClass):
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
+    if self in dtypes.ints and isinstance(val, float) and not math.isfinite(val):
+      val = 0 if math.isnan(val) else self.max if val > 0 else self.min
     if self in dtypes.ints: return truncate[self](int(val))
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
@@ -91,7 +93,7 @@ class DTypes:
   def is_float(x: DType) -> bool: return x in (dtypes.floats + (dtypes.weakfloat,))
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x in (dtypes.ints + (dtypes.weakint,))
+  def is_int(x: DType) -> bool: return x in dtypes.wints
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x in dtypes.uints
@@ -158,6 +160,7 @@ class DTypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  wints = ints + (weakint,)
   weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 

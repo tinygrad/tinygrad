@@ -107,6 +107,20 @@ class TestSafeCast(unittest.TestCase):
     self.assertEqual(a.cast(dtypes.int64).cast(dtypes.uint8).simplify(), a)
     self.assertEqual(a.cast(dtypes.uint32).cast(dtypes.uint8).simplify(), a)
 
+  def test_const_float_to_int(self):
+    for dtype in dtypes.ints:
+      for value, expected in ((math.nan, 0), (math.inf, dtype.max), (-math.inf, dtype.min), (1.9, 1)):
+        with self.subTest(dtype=dtype, value=value):
+          self.assertEqual(UOp.const(value).cast(dtype).ssimplify(), expected)
+
+  def test_const_float_to_int_wraps(self):
+    for value, dtype, expected in ((128.0, dtypes.int8, -128), (256.0, dtypes.uint8, 0), (-1.0, dtypes.uint8, 255)):
+      with self.subTest(dtype=dtype, value=value):
+        self.assertEqual(UOp.const(value).cast(dtype).ssimplify(), expected)
+
+  def test_const_nan_to_int_tensor(self):
+    self.assertEqual(Tensor(math.nan).cast(dtypes.int32).item(), 0)
+
   def test_remove_intermediate_cast(self):
     a = UOp.variable("a", 0., 100., dtype=dtypes.half)
     self.assertEqual(a.cast(dtypes.double).cast(dtypes.float).simplify(), a.cast(dtypes.float))

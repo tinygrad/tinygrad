@@ -41,6 +41,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(({ctx._render_dtype(x.dtype, addrspace=x.addrspace)})({ctx[x.src[0]]}))"
    if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
+  (UPat(Ops.REFPARAM, name="x"), lambda ctx,x: f"(({ctx.param_type(x)})({ctx[x.src[1]]}))"),
 
   # GPU stuff
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
@@ -71,8 +72,7 @@ base_rewrite = PatternMatcher([
 
   # call to PROGRAM links BINARY at runtime
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{body.src[0].arg.function_name}(&(struct {body.src[0].arg.function_name}_args){{"
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)}}});"),
+   f"{body.src[0].arg.function_name}({', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)});"),
 
   # call to LINEAR renders the call in SOURCE
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
@@ -139,7 +139,6 @@ class CStyleLanguage(Renderer):
   var_suffix: str = ""
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l"], Callable] = {}
-  args_struct_prefix: str|None = None
   extra_args: list[str] = []
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
@@ -168,12 +167,8 @@ class CStyleLanguage(Renderer):
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
-                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
+                       self._render_dtype(u.dtype, addrspace=u.addrspace, mutable=mutable, override_ptr=u.addrspace != AddrSpace.ALU, shape=u._shape)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
-    if self.args_struct_prefix is not None:
-      prefix = (prefix or []) + [f"struct {function_name}_args {{ " + "".join(f"{self.param_type(u)} arg{u.arg.slot}; " for _,(u,_) in bufs) + "};"]
-      kernel = [f"  {self.param_type(u)} {n} = args->arg{u.arg.slot};" for n,(u,_) in bufs] + kernel
-      buftypes = [("args", f"{self.args_struct_prefix} struct {function_name}_args*")]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -263,7 +258,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END, Ops.BACKEDGE}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and ((u.op is Ops.CAST and u.src[0].op is Ops.CONST) or \
-        u.op in {Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
+        u.op in {Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI, Ops.REFPARAM} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op in {Ops.CAST, Ops.BITCAST} and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
@@ -282,11 +277,9 @@ class CStyleLanguage(Renderer):
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
     bodies = dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL)
-    fns = {b:b.src[0].arg.function_name for b in bodies if b.op is Ops.PROGRAM}
     inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
     prefix = [f"extern void {b.arg.name}();" if b.op is Ops.CUSTOM_FUNCTION else
-              f"struct {fns[b]}_args {{ " + ''.join(f"{self.param_type(p)} arg{p.arg.slot}; " for p in b.arg.params) +
-              f"}}; extern void {fns[b]}(const struct {fns[b]}_args*);" if b.op is Ops.PROGRAM else
+              f"extern void {b.src[0].arg.function_name}({', '.join(self.param_type(p) for p in b.arg.params)});" if b.op is Ops.PROGRAM else
               f"static inline {self.inline_prefix} void {b.arg}({', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
               '\n'.join(inlines[b][1]) + "\n}" for b in bodies]
     return self.render_kernel(*self._render(uops), uops+[u for b in inlines for u in b.src], prefix or None)
@@ -297,7 +290,7 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   global_max = (1, 0, 0)
-  args_struct_prefix = "const"
+  packed_args = True
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
 
@@ -383,7 +376,7 @@ class MetalRenderer(CStyleLanguage):
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
-  args_struct_prefix = "constant"
+  packed_args = True
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {**CStyleLanguage.type_map, dtypes.u32: "uint", dtypes.bf16: "bfloat"}

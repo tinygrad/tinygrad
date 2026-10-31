@@ -345,6 +345,15 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual((((x*-1)*y) < -1).tolist(), [True, False])
     self.assertEqual((((c.where(0, b*2**30)-2**30)+c.where(0, b*2**30)) < 2**29).tolist(), [False, True])
 
+  def test_float_reassociate(self):
+    x, y, c = Tensor([1e8]), Tensor([3.]), Tensor([True])
+    self.assertEqual(((x-1e8)+Tensor([1.])).tolist(), [1.])
+    self.assertEqual(((Tensor([1e30])*1e10)*Tensor([1e-30])).tolist(), [math.inf])
+    self.assertEqual(((x+y)+y).tolist(), [1e8])
+    self.assertEqual(((Tensor([1.])+(z:=Tensor([1e38]))*4)+z*-3).tolist(), [math.inf])
+    self.assertEqual(((Tensor([1.])+z*-3.5)+z).tolist(), [-math.inf])
+    self.assertEqual(((Tensor([1.])+c.where(1e8, x))+c.where(-1e8, x)).tolist(), [0.])
+
   def test_fused_div_matches_unfused(self):
     x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
     for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):

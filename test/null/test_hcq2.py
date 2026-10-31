@@ -93,7 +93,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_dependencies_through_selected_slices(self):
     b = UOp.param(0, dtypes.float32, 64, device=("NULL", "NULL:1"))
     for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(view, True)], 0)
       self.assertEqual(tracker.access_resources([(b.mselect(1), False)], 1), [])
       self.assertEqual(tracker.access_resources([(b.mselect(0).shrink(((16, 24),)), False)], 2), [])
@@ -102,7 +102,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for write in (False, True):
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(b.shrink(((0, 4),)), write)], 0)
       self.assertEqual(tracker.access_resources([(b.shrink(((4, 8),)), True)], 1), [])
       self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
@@ -110,7 +110,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_partial_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for write in (False, True):
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(b, write)], 0)
       self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 1), [0])
       self.assertEqual(tracker.access_resources([(b.shrink(((0, 4),)), True)], 2), [0])
@@ -119,16 +119,21 @@ class TestHCQ2Deps(unittest.TestCase):
 
   def test_write_waits_for_all_readers(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
-    tracker = hcq2.DepsTracker()
+    tracker = hcq2.DepsTracker(range(5))
     self.assertEqual(tracker.access_resources([(b, False)], 0), [])
     self.assertEqual(tracker.access_resources([(b, False)], 1), [])
     self.assertEqual(tracker.access_resources([(b, True)], 2), [0, 1])
     self.assertEqual(tracker.access_resources([(b, False)], 3), [2])
 
+  def test_write_waits_for_latest_reader_per_queue(self):
+    b, tracker = UOp.param(0, dtypes.uint8, 16, device="NULL"), hcq2.DepsTracker("AABAA")
+    for tag, view in enumerate([b, b, b, b.shrink(((0, 8),))]): self.assertEqual(tracker.access_resources([(view, False)], tag), [])
+    self.assertEqual(tracker.access_resources([(b, True)], 4), [1, 2, 3])
+
   def test_aliases_do_not_wait_on_themselves(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")
     for whole, part in ((True, False), (False, True), (True, True)):
-      tracker = hcq2.DepsTracker()
+      tracker = hcq2.DepsTracker(range(5))
       tracker.access_resources([(b, True)], 0)
       self.assertEqual(tracker.access_resources([(b, whole), (b.shrink(((4, 12),)), part)], 1), [0])
       self.assertEqual(tracker.access_resources([(b.shrink(((4, 12),)), True)], 2), [1])
