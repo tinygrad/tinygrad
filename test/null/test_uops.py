@@ -73,6 +73,27 @@ class TestDTypeFromUOp(unittest.TestCase):
     type_verify(out.sink(), spec_program)
 
 class TestMemoryCoalescing(unittest.TestCase):
+  def test_store_deps_ignore_narrower_scopes(self):
+    for space in (AddrSpace.REG, AddrSpace.LOCAL):
+      buf = UOp.param(0, dtypes.int, 2)
+      tmp = UOp.placeholder((1,), dtypes.int, 1, addrspace=space)
+      value = UOp.const(2, dtypes.int).after(tmp.index(0).store(1))
+      sink = memory_coalescing(UOp.sink(buf.index(0).store(0), buf.index(1).store(value)), Renderer(Target()))
+      self.assertEqual(sum(u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.GLOBAL for u in sink.toposort()), 1)
+
+  def test_store_deps_cross_scopes_through_reg(self):
+    for space in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
+      a, b = UOp.param(0, dtypes.int, 2), UOp.placeholder((2,), dtypes.int, 1, addrspace=space)
+      reg = UOp.placeholder((2,), dtypes.int, 2, addrspace=AddrSpace.REG)
+      a0, b0 = a.index(0).store(0), b.index(0).store(0)
+      ra = reg.index(0).store(UOp.const(1, dtypes.int).after(b0))
+      rb = reg.index(1).store(UOp.const(1, dtypes.int).after(a0))
+      sink = UOp.sink(a.index(1).store(reg.after(ra).index(0).load()), b.index(1).store(reg.after(rb).index(1).load()))
+      sink = memory_coalescing(sink, Renderer(Target()))
+      # merging both groups would cycle, so a LOCAL group keeps its GLOBAL ancestors through REG stores
+      self.assertEqual(sum(u.op is Ops.STORE and u.src[0].addrspace is not AddrSpace.REG for u in sink.toposort()),
+                       4 if space is AddrSpace.GLOBAL else 3)
+
   def test_volatile_view_not_coalesced(self):
     buf = UOp.param(0, dtypes.uint32, 4, volatile=True).bitcast(dtypes.int32)
     sink = memory_coalescing(UOp.sink(*(buf.index(i).load() for i in range(4))), Renderer(Target()))
