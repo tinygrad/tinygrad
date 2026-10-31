@@ -246,6 +246,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok = Mock()
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="")
+    cls.mock_tok._special_tokens = {}
     cls.mock_tok.preset = "qwen2"
     cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
     cls.mock_tok.is_end = Mock(return_value=False)
@@ -273,8 +274,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.server.shutdown()
     cls.server.server_close()
 
-  def set_output(self, text:str, special_tokens=("<tool_call>",)):
-    self.mock_tok._special_tokens = dict.fromkeys(special_tokens, 0)
+  def set_output(self, text:str):
     pieces = dict(enumerate(text, 1))
     self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
@@ -352,9 +352,9 @@ class TestLLMToolCalls(unittest.TestCase):
   def test_kimi_tool_call(self):
     self.set_output('a </think> b<|close|>think<|sep|><|open|>response<|sep|>c <tool_call>{}</tool_call> d<|close|>response<|sep|>'
       '<|open|>tools<|sep|><|open|>call tool="read" index="1"<|sep|><|open|>argument key="x&quot;y" type="string"<|sep|>\n</tool_call>\n'
-      '<|close|>argument<|sep|><|open|>argument key="n" type="number"<|sep|>3<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>',
-      ("<|close|>",))
-    with patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>think<|sep|>'):
+      '<|close|>argument<|sep|><|open|>argument key="n" type="number"<|sep|>3<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>')
+    with (patch.object(self.mock_tok, "_special_tokens", {"<|close|>": 0}),
+          patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>think<|sep|>')):
       chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"hi"}], tools=self.tools(),
                                                        stream=True))
     self.assertEqual(''.join(getattr(c.choices[0].delta, 'reasoning_content', '') for c in chunks if c.choices), 'a </think> b')
