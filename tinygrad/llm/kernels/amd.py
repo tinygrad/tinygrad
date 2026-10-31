@@ -1800,6 +1800,25 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   # the lowest index of the max
   return vals.eq(vals.max(0, keepdim=True)).where(idxs, n).min(0).reshape(B, 1)
 
+@functools.cache
+def _nucleus_round_kernel(out:UOp, z:UOp, e:UOp, t:UOp) -> UOp:
+  # out (1, B, G): the sums of e over the values of z at or above each of the G thresholds of its row (a device's part of the vocab): a
+  # workgroup a row, a thread every 256th value (all the thresholds), the threads' sums added in LDS in thread order
+  B, _, C, c = cast(tuple[int, int, int, int], z.shape)
+  G = int(t.shape[-1])
+  row, tid = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
+  ts = [t[row, g].load() for g in range(G)]
+  acc = UOp.alloc((G,), dtypes.float32, addrspace=AddrSpace.REG)
+  acc = acc.after(UOp.group(*[acc[g].store(UOp.const(0.0, dtypes.float32)) for g in range(G)]))
+  i = UOp.range(C * c // 256, 2, AxisType.LOOP)
+  pos = i * 256 + tid
+  zv, ev = z[row, 0, pos // c, pos % c].load(), e[row, 0, pos // c, pos % c].load()
+  upd = UOp.group(*[acc[g].store(acc.after(i)[g].load() + (zv >= ts[g]).where(ev, 0.0)) for g in range(G)]).end(i)
+  lds = UOp.alloc((256, G), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(UOp.group(*[lds[tid, g].store(acc.after(upd)[g].load()) for g in range(G)]).barrier())
+  total = functools.reduce(lambda a, b: a + b, [lds[k, tid.minimum(G-1)].load() for k in range(256)])
+  return out[0, row, tid.valid(tid < G)].store(total).end(row, tid).sink(arg=KernelInfo(name="nucleus_round", opts_to_apply=()))
+
 def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None) -> Tensor:
   """
   the tokens (B, V) of the top_p nucleus of softmax(z[:, :n]) (top-p sampling): the ones at least as likely as a threshold t, the largest with
@@ -1834,7 +1853,12 @@ def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None
   lo, w = m - 50.0, 50.0
   for _ in range(rounds):
     t = lo + w * steps  # (B, G) up from lo: the mass at or above them goes down
-    above = parts(vsum(e.unsqueeze(2) * (zc.unsqueeze(2) >= t.reshape(B, 1, G, 1, 1)))).sum(0)  # (B, G)
+    if split and getenv("NUCLEUS_KERNEL", 1) and G <= 256:
+      # (a device's sums in one kernel: the generic one of the (B, G, V) comparisons is ~0.2 TFLOPS)
+      out = Tensor.empty(N, B, G, dtype=dtypes.float32, device=devs, axis=0)
+      local = Tensor.custom_kernel(out, zc.contiguous(), e, t.contiguous(), fxn=_nucleus_round_kernel)[0].permute(1, 0, 2)  # (B, N, G)
+      above = parts(local).sum(0)
+    else: above = parts(vsum(e.unsqueeze(2) * (zc.unsqueeze(2) >= t.reshape(B, 1, G, 1, 1)))).sum(0)  # (B, G)
     k = (above >= mass).sum(-1, keepdim=True).maximum(1)  # (the first is lo: at least the mass)
     lo, w = lo + w * (k - 1).float() / G, w / G
   return ((zl >= lo.reshape(B, 1, 1)) | (top_p.reshape(-1, 1, 1) >= 1)).reshape(B, V)
@@ -2696,6 +2720,90 @@ def _mla_bmm_wave_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
     sums.append(warp_reduce(acc, full_wave=True))
   stores = [out[h, t, o.valid(lane.eq(0))].store(sums[t]) for t in range(T)]
   return UOp.group(*stores).end(blk, wave, lane).sink(arg=KernelInfo(name="mla_bmm", opts_to_apply=()))
+
+@functools.cache
+def _bmm_wmma_kernel(out:UOp, x:UOp, w:UOp, token_tile:int) -> UOp:
+  # out (H, M, N) = x (H, M, K) @ w (H, N, K)^T, half products summed in float on the RDNA4 tensor cores: q8_gemm's tiles (a workgroup a head,
+  # token_tile rows and 128 outputs, 4 waves) with the half weights staged in LDS as they are, 32 inputs a stage
+  H, M, N = cast(tuple[int, int, int], out.shape)
+  K = int(x.shape[-1])
+  OW, TW, OT = 2, 2, 4
+  TT = token_tile // (16 * TW)
+  head, token_block = UOp.range(H, 0, AxisType.GLOBAL), UOp.range(M // token_tile, 1, AxisType.GLOBAL)
+  output_block = UOp.range((N + 127) // 128, 2, AxisType.GLOBAL)
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(OW * TW, 4, axis_type=AxisType.LOCAL)
+  col, half = lane % 16, lane // 16
+  wt, wo, tid = wave // OW, wave % OW, wave * 32 + lane
+  gr = UOp.range(K // 32, 5, AxisType.LOOP)
+  lds_x = UOp.alloc((token_tile, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  lds_w = UOp.alloc((128, 40), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  st = []
+  for k in range((token_tile * 4 + 127) // 128):
+    e = tid + k * 128
+    r, c = (e // 4).minimum(token_tile - 1), e % 4
+    st += [lds_x[r.valid(e < token_tile * 4), c * 8 + i].store(x[head, token_block * token_tile + r, gr * 32 + c * 8 + i].load()) for i in range(8)]
+  wrow = (output_block * 128 + tid).minimum(N - 1)
+  st += [lds_w[tid, i].store(w[head, wrow, gr * 32 + i].load()) for i in range(32)]
+  staged = UOp.group(*st).barrier()
+  lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
+  ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8))
+  accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
+  accs = [[acc.after(acc.store(acc.const_like(0))) for acc in r] for r in accs]
+  cur:list[list[UOp]] = [[accs[o][t].after(gr) for t in range(TT)] for o in range(OT)]
+  for kh in range(2):
+    afr = [UOp.stack(*(lds_x[wt * TT * 16 + t * 16 + col, kh * 16 + i].load() for i in ks)) for t in range(TT)]
+    bfr = [UOp.stack(*(lds_w[wo * OT * 16 + o * 16 + col, kh * 16 + i].load() for i in ks)) for o in range(OT)]
+    cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
+  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier().end(gr)
+  def ocol(o:int) -> UOp:
+    c = output_block * 128 + wo * OT * 16 + o * 16 + col
+    return c.valid(c < N) if N % 128 else c
+  stores = [out[head, token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i, ocol(o)].store(accs[o][t].after(update)[i].load())
+            for o in range(OT) for t in range(TT) for i in range(8)]
+  return UOp.group(*stores).end(head, token_block, output_block, lane, wave).sink(arg=KernelInfo(name="bmm_wmma", opts_to_apply=()))
+
+def bmm_wmma(x:Tensor, w:Tensor) -> Tensor|None:
+  """
+  (1, H, T, I) @ (H, O, I)^T in half products summed in float, (1, H, T, O): the MLA absorptions of the rows of batched decoding on the
+  tensor cores (the generic matmul is ~10x slower), the rows padded to whole tiles. None: not those shapes
+  """
+  B, H, T, I = x.shape
+  O = int(w.shape[1])
+  if not (isinstance(T, int) and isinstance(H, int) and _wmma_rdna4(x.device) and w.dtype == dtypes.half and int(I) % 32 == 0 and T >= 32 and
+          getenv("BMM_WMMA", 1)): return None
+  tt = 96 if round_up(T, 32) % 96 == 0 or T > 64 else 64 if T > 32 else 32
+  Mp = round_up(T, tt)
+  xp = x.reshape(H, T, int(I)).cast(dtypes.half).pad((None, (0, Mp - T), None)).contiguous()
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  out = Tensor.empty(H, Mp, O, dtype=dtypes.float32, device=x.device, axis=None if axis is None else 0)
+  res = Tensor.custom_kernel(out, xp, w, fxn=functools.partial(_bmm_wmma_kernel, token_tile=tt))[0]
+  return res[:, :T].reshape(B, H, T, O)
+
+@functools.cache
+def _weighted_sum_kernel(out:UOp, x:UOp, p:UOp) -> UOp:
+  # out (R, D) = the sum over S of x (R, S, D) times p (R, S), in float in the order of S: a thread 8 neighboring outputs of a row
+  R, S, D = cast(tuple[int, int, int], x.shape)
+  g, t = UOp.range(R * D // 8 // 256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
+  e = g * 256 + t
+  r, d0 = e // (D // 8), (e % (D // 8)) * 8
+  ps = [p[r, s].load().float() for s in range(S)]
+  vals = [functools.reduce(lambda a, b: a + b, [x[r, s, d0 + i].load().float() * ps[s] for s in range(S)]) for i in range(8)]
+  return UOp.group(*[out[r, d0 + i].store(v) for i, v in enumerate(vals)]).end(g, t).sink(arg=KernelInfo(name="weighted_sum", opts_to_apply=()))
+
+def weighted_sum(x:Tensor, p:Tensor) -> Tensor|None:
+  """
+  (x * p.unsqueeze(-1)).sum(-2) of x (..., S, D) (the experts' rows of a token) and p (..., S) in float: a kernel of the rows of decoding (the
+  generic reduction is ~2.5x slower). a leading device axis (partials) stays. None: not those shapes
+  """
+  *lead, S, D = x.shape
+  dev_axis = isinstance(x.device, tuple) and x.uop.axis == 0
+  R = int(prod(lead[1:] if dev_axis else lead))
+  if not all(isinstance(v, int) for v in (*lead, S, D)) or int(D) % 8 or (R * int(D) // 8) % 256 or not amd_custom_kernels_supported(x.device) or \
+     not getenv("WEIGHTED_SUM", 1): return None
+  n = len(cast(tuple, x.device)) if dev_axis else 1
+  out = Tensor.empty(n*R, int(D), dtype=dtypes.float32, device=x.device, axis=0 if dev_axis else None)
+  res = Tensor.custom_kernel(out, x.reshape(n*R, int(S), int(D)), p.reshape(n*R, int(S)), fxn=_weighted_sum_kernel)[0]
+  return res.reshape(*lead, int(D))
 
 def mla_bmm(x:Tensor, w:Tensor) -> Tensor:
   """(B=1, H, T, I) @ (H, O, I)^T in half products summed in float, (1, H, T, O): x.half().matmul(w.transpose(-1, -2), dtype=float)'s values"""

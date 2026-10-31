@@ -13,7 +13,8 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, \
   skinny_parts, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
-  mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
+  mla_bmm, bmm_wmma, weighted_sum, \
+  nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
@@ -650,7 +651,8 @@ class FFNBlock:
       # (the activation computed by the kernel that quantizes it: custom kernel inputs are inlined)
       x_down = self.ffn_down_exps(sel, act if INLINE_ACT else act.contiguous(),
                                   dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices else dtypes.float32)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
+      ws = weighted_sum(x_down, probs) if _batch_rows[0] is not None else None
+      out = ws if ws is not None else (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
     keep = partial and _partial_out[0]  # the partial sums are returned (sequence parallel)
     if shexp is not None:
@@ -1095,7 +1097,8 @@ class MLATransformerBlock(FFNBlock):
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     # (many rows: the tensor cores)
     tc = Tq > getenv("MLA_BMM_ROWS", 32) and self.attn_k_b["weight"].dtype == dtypes.half
-    if tc: q = q_nope.half().contiguous().matmul(self.attn_k_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
+    if (qb:=bmm_wmma(q_nope, self.attn_k_b["weight"])) is not None: q = qb
+    elif tc: q = q_nope.half().contiguous().matmul(self.attn_k_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
     else: q = mla_bmm(q_nope, self.attn_k_b["weight"])
     q = q.cat(q_rope.cast(q.dtype), dim=-1)
     kv_a = self.attn_kv_a_mqa(x)
@@ -1127,7 +1130,8 @@ class MLATransformerBlock(FFNBlock):
       ctx, D = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1])
       cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx, slots)
       attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx, slots))[..., :self.config.kv_lora_rank]
-    if tc: attn = attn.half().contiguous().matmul(self.attn_v_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
+    if (vb:=bmm_wmma(attn, self.attn_v_b["weight"])) is not None: attn = vb
+    elif tc: attn = attn.half().contiguous().matmul(self.attn_v_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
     else: attn = mla_bmm(attn, self.attn_v_b["weight"])
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, -1))
 
