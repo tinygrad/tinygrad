@@ -119,7 +119,7 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
 pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
   # lift x+y out of reduce on eq
   ((UPat.var("x", dtypes.wints)+UPat.var("y")).or_casted("a").eq(UPat.var("c", dtypes.wints)),
-   lambda x,y,a,c: x.eq(c.cast(y.dtype)-y) if no_range(y) and no_range(c) and
+   lambda x,y,a,c: x.eq(c.cast(y.dtype)-y) if no_range(y) and no_range(c) and not no_range(x) and
    (a.op is not Ops.CAST or not a.src[0].overflows(a.dtype)) and not c.overflows(y.dtype) else None),
   # reduce on gated load becomes can substitute the range and remove the reduce
   (UPat.var("idx", dtypes.wints).eq(UPat(Ops.RANGE, name="r").or_casted("rc")).where(UPat.var("expr"), 0)

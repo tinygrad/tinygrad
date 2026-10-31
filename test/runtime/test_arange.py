@@ -39,6 +39,10 @@ class TestArange(unittest.TestCase):
 DSET, DDIM = 2048, 32
 
 class TestIndexing(unittest.TestCase):
+  def test_index_compared_with_offset(self):
+    a, b = Tensor([1, 2, 3, 4]), Tensor([0, 2, 2, 4])
+    self.assertEqual((a == b + 1).float()[Tensor([0, 2, 1])].tolist(), [1.0, 1.0, 0.0])
+
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
