@@ -785,7 +785,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     if approximate == "tanh":
-      return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
+      return self * (math.sqrt(8 / math.pi) * (self + 0.044715 * self ** 3)).sigmoid()
     elif approximate == "none":
       return self * 0.5 * (1.0 + (self / math.sqrt(2)).erf())
     else:

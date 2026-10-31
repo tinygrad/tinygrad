@@ -121,6 +121,18 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(((x*x) == 2.).where(data, 0.).tolist(), [0.]*4)
     self.assertEqual(((x*x) == 2.).reshape(2, 2).where(data.reshape(2, 2), 0.).sum(axis=1).tolist(), [0.]*2)
 
+  def test_index_collapse_float_idx(self):
+    x = Tensor.arange(4).cast(dtypes.float32)
+    self.assertEqual((x == 1.5).where(x+1, 0.).sum().item(), 0.)
+    self.assertEqual(((Tensor.arange(4)+1).cast(dtypes.float32) == 2.5).where(x+1, 0.).sum().item(), 0.)
+    self.assertEqual(((Tensor.arange(8).cast(dtypes.float32)+1e8) < 100000008.).where(1, 0).sum().item(), 5)
+
+  def test_index_collapse_cast_wraps(self):
+    r, y = Tensor.arange(8, dtype=dtypes.int32), Tensor([254], dtype=dtypes.int32).realize()
+    self.assertEqual(((r+y).cast(dtypes.uint8) == Tensor([1], dtype=dtypes.uint8).realize()).where(r+1, 0).sum().item(), 4)
+    self.assertEqual(((r+y).cast(dtypes.int64) == Tensor([2**32+254], dtype=dtypes.int64).realize()).where(r+1, 0).sum().item(), 0)
+    self.assertEqual((Tensor.arange(260).cast(dtypes.uint8) == 1).where(Tensor.arange(260)+1, 0).sum().item(), 260)
+
   def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
