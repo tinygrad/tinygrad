@@ -10,8 +10,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, slot_gather, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, all_gather_q8, sharded_argmax, skinny_matmul, \
-  skinny_parts, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
+  all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
   mla_bmm, bmm_wmma, weighted_sum, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
@@ -573,15 +572,6 @@ class FFNBlock:
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
       exps = self.ffn_gate_exps
       exps.set_quantized()
-      # (decoding: the device's slices of the selections in the router's kernel, its logits the parts of skinny_parts summed there)
-      local = gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and isinstance(xr.shape[1], int) and rows is None and \
-        amd_custom_kernels_supported(x.device) and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1) and \
-        xr.shape[1] <= _decode_rows() and exps.slices and exps.ggml_type is not None and getenv("MOE_ROUTER_LOCAL", 1)
-      if local and bias is not None and (wt:=getattr(router, "weight_t", None)) is not None and not token_sharded(xr) and \
-         (part:=skinny_parts(xr, wt)) is not None:
-        k, scale, KS = self.config.num_experts_per_tok, self.config.routed_scaling_factor, int(part.shape[0])
-        return self._experts(x, h, *moe_router_local(part.reshape(KS, *xr.shape[:-1], -1), bias, k, scale, exps.slice_table, parts=KS),
-                             local=True)
       if rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
       elif router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
          xr.shape[1] > 32:

@@ -1973,12 +1973,15 @@ def _skinny_kernel(out:UOp, x:UOp, wt:UOp, RB:int, KC:int, U:int) -> UOp:
 
 @functools.cache
 def _sum_parts_kernel(out:UOp, part:UOp) -> UOp:
-  # out (n,) the sum of part (S, n) over S: a thread an output (the generic reduction of a leading axis is a few times slower)
+  # out (n,) the sum of part (S, n) over S in its order: a thread 4 neighboring outputs (the loads 16 bytes), the generic reduction of a leading
+  # axis is several times slower
   S, n = cast(tuple[int, int], part.shape)
-  g, t = UOp.range((n + 255) // 256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
-  i = (g * 256 + t).valid(g * 256 + t < n)
-  total = functools.reduce(lambda a, b: a + b, [part[s, (g * 256 + t).minimum(n - 1)].load() for s in range(S)])
-  return out[i].store(total).end(g, t).sink(arg=KernelInfo(name="sum_parts", opts_to_apply=()))
+  g, t = UOp.range((n // 4 + 255) // 256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
+  i4 = g * 256 + t
+  i = (i4 * 4).minimum(n - 4)
+  vals = [functools.reduce(lambda a, b: a + b, [part[s, i + j].load() for s in range(S)]) for j in range(4)]
+  return UOp.group(*[out[(i4 * 4 + j).valid(i4 * 4 < n)].store(v) for j, v in enumerate(vals)]).end(g, t).sink(
+    arg=KernelInfo(name="sum_parts", opts_to_apply=()))
 
 def skinny_matmul(x:Tensor, wt:Tensor) -> Tensor|None:
   """x (B, T, K) @ wt (K, E) in float, few outputs of few rows (see skinny_parts), the parts summed. None: not those shapes"""
@@ -2014,18 +2017,16 @@ def moe_router(logits:Tensor, bias:Tensor, k:int, scale:float) -> tuple[Tensor, 
   return sel, probs
 
 @functools.cache
-def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UOp, k:int, scale:float, parts:int=1) -> UOp:
+def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UOp, k:int, scale:float) -> UOp:
   # as _moe_router_kernel (the same scores, picks and probabilities), a wave per token: a lane holds the experts lane+32*m, k rounds take the
   # largest left (a butterfly over the lanes, ties to the lower index). then the selections as the device's slices (table (E, w): its local
   # slice ids of every expert, -1 none) and their probabilities, (tokens, k*w)
-  # (parts: the logits are that many partial sums (skinny_parts), summed here in their order)
   n = cast(int, logits.shape[-1])
-  tokens, M, w = cast(int, logits.numel()) // n // parts, n // 32, cast(int, table.shape[-1])
-  logits, lsel, probs, table = logits.reshape(parts, tokens, n), lsel.reshape(tokens, k*w), probs.reshape(tokens, k*w), table.reshape(n, w)
+  tokens, M, w = cast(int, logits.numel()) // n, n // 32, cast(int, table.shape[-1])
+  logits, lsel, probs, table = logits.reshape(tokens, n), lsel.reshape(tokens, k*w), probs.reshape(tokens, k*w), table.reshape(n, w)
   token, lane = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   es = [lane + 32*m for m in range(M)]
-  def logit(e:UOp) -> UOp: return functools.reduce(lambda a, b: a + b, [logits[p, token, e].load().float() for p in range(parts)])
-  scores = [(1 + (logit(e) * (-1/math.log(2))).exp2()).reciprocal() for e in es]
+  scores = [(1 + (logits[token, e].load().float() * (-1/math.log(2))).exp2()).reciprocal() for e in es]
   keys = [sc + bias[e].load().float() for sc, e in zip(scores, es)]
   taken = [UOp.const(False, dtypes.bool)] * M
   def better(ka:UOp, ia:UOp, kb:UOp, ib:UOp) -> UOp: return (ka > kb) | (ka.eq(kb) & (ia < ib))
@@ -2055,16 +2056,16 @@ def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UO
                  probs[token, out].store(sc / total * scale))
   return st.end(token, lane).sink(arg=KernelInfo(name="moe_router", opts_to_apply=()))
 
-def moe_router_local(logits:Tensor, bias:Tensor, k:int, scale:float, table:Tensor, parts:int=1) -> tuple[Tensor, Tensor]:
+def moe_router_local(logits:Tensor, bias:Tensor, k:int, scale:float, table:Tensor) -> tuple[Tensor, Tensor]:
   """
   moe_router and select_slices in a kernel (a few tokens): every device's local slices of the top k experts (devices, B, T, k*w) (-1: none)
   and their probabilities (devices, B, T, k*w)
   """
   devs = cast(tuple[str, ...], table.device)
-  shape = (len(devs), *logits.shape[1 if parts > 1 else 0:-1], k*int(table.shape[-1]))
+  shape = (len(devs), *logits.shape[:-1], k*int(table.shape[-1]))
   lsel = Tensor.empty(*shape, dtype=dtypes.int32, device=devs, axis=0)
   probs = Tensor.empty(*shape, dtype=dtypes.float32, device=devs, axis=0)
-  fxn = functools.partial(_moe_router_local_kernel, k=k, scale=scale, parts=parts)
+  fxn = functools.partial(_moe_router_local_kernel, k=k, scale=scale)
   return tuple(Tensor.custom_kernel(lsel, probs, logits.contiguous(), bias, table, fxn=fxn)[:2])  # type: ignore[return-value]
 
 @functools.cache
