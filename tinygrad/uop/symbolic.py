@@ -323,11 +323,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_lossless_cast(x.dtype, a.dtype) else None),
   (UPat.var('x', dtypes.wints).cast(dtypes.wints, name="a").cast(name="b"), lambda x,a,b: x.ccast(b.dtype) if not x.overflows(a.dtype) else None),
-  # try to do math in int instead of long, keep weak const weak
-  (UPat(GroupOp.Binary, src=(UPat.var("x", (dtypes.long, dtypes.weakint)), UPat.var("y", (dtypes.long, dtypes.weakint))), name="u"), lambda u,x,y:
-    (UOp.const(x.val) if x.op is Ops.CONST else x.cast(dtypes.int)).alu(u.op,
-     UOp.const(y.val) if y.op is Ops.CONST else y.cast(dtypes.int)).cast(u.dtype)
-    if dtypes.long in (x.dtype, y.dtype) and not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
+  # try to do math in int instead of long, keep weak const weak. a fitting result doesn't make SHR (count) or MOD (INT_MIN % -1) defined in int
+  (UPat(GroupOp.Binary-{Ops.SHR, Ops.TRUNCMOD, Ops.MOD}, src=(UPat(dtype=(dtypes.long, dtypes.weakint)),)*2, name="u"), lambda u:
+    UOp(u.op, src=tuple(UOp.const(s.val) if s.op is Ops.CONST else s.cast(dtypes.int) for s in u.src)).cast(u.dtype)
+    if dtypes.long in (s.dtype for s in u.src) and not any(v.overflows(dtypes.int) for v in (u,*u.src)) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
   # an AFTER waits only on the effect ops listed here, any other dep is replaced by its srcs
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
