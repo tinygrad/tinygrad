@@ -1399,6 +1399,7 @@ def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   return None
 
 def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return UOp(Ops.CUSTOM, src=src, arg=(fmt, dtype))
+
 _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
 
 @functools.cache
@@ -1857,9 +1858,10 @@ def _p2p_half_sum(x:Tensor, W:int, pack:tuple[int, int]|None=None) -> Tensor:
 def _ar_pack() -> tuple[int, int]|None:
   """
   P2P_AR_PACK (WxB, 0: none): the allreduce of many rows sends W values of B bits a word with a shared power of two, not three halves. 4x12:
-  the error of half (a value's relative to the largest of its four), a third fewer words
+  the error of half (a value's relative to the largest of its four), a third fewer words. 6x8 (default): int8's error, half the words of
+  three halves (next-token accuracy of batched decoding: the same within noise)
   """
-  return (int((p:=v.split("x"))[0]), int(p[1])) if (v:=os.environ.get("P2P_AR_PACK", "4x12")) != "0" else None
+  return (int((p:=v.split("x"))[0]), int(p[1])) if (v:=os.environ.get("P2P_AR_PACK", "6x8")) != "0" else None
 
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
@@ -1955,21 +1957,27 @@ def _sum_parts_kernel(out:UOp, part:UOp) -> UOp:
   return out[i].store(total).end(g, t).sink(arg=KernelInfo(name="sum_parts", opts_to_apply=()))
 
 def skinny_matmul(x:Tensor, wt:Tensor) -> Tensor|None:
+  """x (B, T, K) @ wt (K, E) in float, few outputs of few rows (see skinny_parts), the parts summed. None: not those shapes"""
+  if (part:=skinny_parts(x, wt)) is None: return None
+  KS, R, E = cast(tuple[int, int, int], part.shape)
+  logits = Tensor.empty(R*E, dtype=dtypes.float32, device=x.device)
+  return Tensor.custom_kernel(logits, part.reshape(KS, R*E), fxn=_sum_parts_kernel)[0].reshape(*x.shape[:-1], E)
+
+def skinny_parts(x:Tensor, wt:Tensor) -> Tensor|None:
   """
-  x (B, T, K) @ wt (K, E) (float or half) in float, few outputs (a router's, an indexer's head weights) of the few rows of decoding: the
-  inputs split over workgroups, a thread an output, the partial sums summed after (the generic kernels are 3-4x slower). None: not those
+  the partial sums (KS, B*T, E) of x (B, T, K) @ wt (K, E) (float or half) in float over KS parts of the inputs, few outputs (a router's, an
+  indexer's head weights) of the few rows of decoding: the inputs split over workgroups, a thread an output (the generic kernels are 3-4x
+  slower). None: not those shapes
   """
   K, E = cast(tuple[int, int], wt.shape)
   R = int(prod(x.shape[:-1]))
-  if not amd_custom_kernels_supported(x.device) or E > 1024 or R > 512 or not getenv("ROUTER_KERNEL", 1): return None
+  if not amd_custom_kernels_supported(x.device) or E > 1024 or R > 512 or not getenv("SKINNY", 1): return None
   RB = next((r for r in (getenv("ROUTER_RB", 8), 8, 6, 4, 3, 2, 1) if R % r == 0), 1)
   KS = next((ks for ks in (getenv("ROUTER_KS", 16), 16, 8, 4, 2, 1) if K % ks == 0), 1)
   U = next((u for u in (getenv("ROUTER_U", 8), 8, 4, 2, 1) if (K // KS) % u == 0), 1)
   out = Tensor.empty(KS, R, E, dtype=dtypes.float32, device=x.device)
   fxn = functools.partial(_skinny_kernel, RB=RB, KC=K // KS, U=U)
-  part = Tensor.custom_kernel(out, x.float().reshape(R, K).contiguous(), wt, fxn=fxn)[0]
-  logits = Tensor.empty(R*E, dtype=dtypes.float32, device=x.device)
-  return Tensor.custom_kernel(logits, part.reshape(KS, R*E), fxn=_sum_parts_kernel)[0].reshape(*x.shape[:-1], E)
+  return Tensor.custom_kernel(out, x.float().reshape(R, K).contiguous(), wt, fxn=fxn)[0]
 
 def moe_router(logits:Tensor, bias:Tensor, k:int, scale:float) -> tuple[Tensor, Tensor]:
   """sigmoid gating with a selection bias, normalized: the top k experts (B, T, k) int32 and their probabilities times scale"""
@@ -1982,16 +1990,18 @@ def moe_router(logits:Tensor, bias:Tensor, k:int, scale:float) -> tuple[Tensor, 
   return sel, probs
 
 @functools.cache
-def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UOp, k:int, scale:float) -> UOp:
+def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UOp, k:int, scale:float, parts:int=1) -> UOp:
   # as _moe_router_kernel (the same scores, picks and probabilities), a wave per token: a lane holds the experts lane+32*m, k rounds take the
   # largest left (a butterfly over the lanes, ties to the lower index). then the selections as the device's slices (table (E, w): its local
   # slice ids of every expert, -1 none) and their probabilities, (tokens, k*w)
+  # (parts: the logits are that many partial sums (skinny_parts), summed here in their order)
   n = cast(int, logits.shape[-1])
-  tokens, M, w = cast(int, logits.numel()) // n, n // 32, cast(int, table.shape[-1])
-  logits, lsel, probs, table = logits.reshape(tokens, n), lsel.reshape(tokens, k*w), probs.reshape(tokens, k*w), table.reshape(n, w)
+  tokens, M, w = cast(int, logits.numel()) // n // parts, n // 32, cast(int, table.shape[-1])
+  logits, lsel, probs, table = logits.reshape(parts, tokens, n), lsel.reshape(tokens, k*w), probs.reshape(tokens, k*w), table.reshape(n, w)
   token, lane = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   es = [lane + 32*m for m in range(M)]
-  scores = [(1 + (logits[token, e].load().float() * (-1/math.log(2))).exp2()).reciprocal() for e in es]
+  def logit(e:UOp) -> UOp: return functools.reduce(lambda a, b: a + b, [logits[p, token, e].load().float() for p in range(parts)])
+  scores = [(1 + (logit(e) * (-1/math.log(2))).exp2()).reciprocal() for e in es]
   keys = [sc + bias[e].load().float() for sc, e in zip(scores, es)]
   taken = [UOp.const(False, dtypes.bool)] * M
   def better(ka:UOp, ia:UOp, kb:UOp, ib:UOp) -> UOp: return (ka > kb) | (ka.eq(kb) & (ia < ib))
@@ -2021,16 +2031,16 @@ def _moe_router_local_kernel(lsel:UOp, probs:UOp, logits:UOp, bias:UOp, table:UO
                  probs[token, out].store(sc / total * scale))
   return st.end(token, lane).sink(arg=KernelInfo(name="moe_router", opts_to_apply=()))
 
-def moe_router_local(logits:Tensor, bias:Tensor, k:int, scale:float, table:Tensor) -> tuple[Tensor, Tensor]:
+def moe_router_local(logits:Tensor, bias:Tensor, k:int, scale:float, table:Tensor, parts:int=1) -> tuple[Tensor, Tensor]:
   """
   moe_router and select_slices in a kernel (a few tokens): every device's local slices of the top k experts (devices, B, T, k*w) (-1: none)
   and their probabilities (devices, B, T, k*w)
   """
   devs = cast(tuple[str, ...], table.device)
-  shape = (len(devs), *logits.shape[:-1], k*int(table.shape[-1]))
+  shape = (len(devs), *logits.shape[1 if parts > 1 else 0:-1], k*int(table.shape[-1]))
   lsel = Tensor.empty(*shape, dtype=dtypes.int32, device=devs, axis=0)
   probs = Tensor.empty(*shape, dtype=dtypes.float32, device=devs, axis=0)
-  fxn = functools.partial(_moe_router_local_kernel, k=k, scale=scale)
+  fxn = functools.partial(_moe_router_local_kernel, k=k, scale=scale, parts=parts)
   return tuple(Tensor.custom_kernel(lsel, probs, logits.contiguous(), bias, table, fxn=fxn)[:2])  # type: ignore[return-value]
 
 @functools.cache
@@ -3429,7 +3439,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     # x (n, ...) split on its leading axis: whole on every device
     if small and p2p and getenv("SEQ_P2P_GATHER", 1) and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
     return all_gather(x, 0, dtype)
-  if q.uop.axis == 1 and getenv("SEQ_Q_Q8", 0) and not small and int(D) % 32 == 0:
+  if q.uop.axis == 1 and getenv("SEQ_Q_Q8", 1) and not small and int(D) % 32 == 0:
     # (SEQ_Q_Q8: the queries sent as int8 groups of 32 with their scale, about half the bytes)
     qa = all_gather_q8(q.contiguous().reshape(1, H*T, D), 1).reshape(1, H, T, D)
   elif q.uop.axis == 1: qa = gather(q.contiguous().reshape(n, H//n, T, D), dtypes.half, bool(getenv("SEQ_P2P_Q", 1))).reshape(1, H, T, D).half()
@@ -3463,7 +3473,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     hl = H // n
     parts = contrib.reshape(n, T, n, hl, D).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*D)
     if (rs:=p2p_reduce_scatter(parts)) is not None: return rs.reshape(n, 1, T, hl, D).permute(1, 0, 3, 2, 4).reshape(1, H, T, D)
-  if getenv("SEQ_RS_Q8", 0) and isinstance(T, int) and (T*D) % 256 == 0:
+  if getenv("SEQ_RS_Q8", 1) and isinstance(T, int) and (T*D) % 256 == 0:
     # (the heads' rows as rows of (1, H, T*D): the int8 sums of reduce_scatter's ring, RS_Q8)
     return reduce_scatter(contrib.permute(0, 1, 3, 2, 4).reshape(n, 1, H, T*D), 1).reshape(1, H, T, D)
   return reduce_scatter(contrib, 2).permute(0, 2, 1, 3)
