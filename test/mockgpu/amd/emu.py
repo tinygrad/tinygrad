@@ -1563,7 +1563,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
               '_active': _lane_active(exec_mask, lane), **data}
     active = _lane_active(exec_mask, lane)
     # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
-    use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else _c(False)
+    use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(False)
     saddr_raw = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else _c(0, dtypes.uint64)
     saddr_base = use_saddr.where(saddr_raw, _c(0, dtypes.uint64))
     # Sign-extend offset to 64-bit for the final address calculation
