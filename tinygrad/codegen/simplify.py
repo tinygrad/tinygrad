@@ -94,7 +94,7 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
-  (UPat(Ops.ADD, dtypes.sints+dtypes.floats+dtypes.weaks, [UPat.var("x"), UPat.var("y")]) < UPat.var("c"),
+  (UPat(Ops.ADD, dtypes.sints+(dtypes.weakint,), [UPat.var("x"), UPat.var("y")]) < UPat.var("c"),
    lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
   (UPat(Ops.MUL, dtypes.sints+(dtypes.weakint,), [UPat.var("x"), UPat.var("y")]) < UPat.var("c"),
@@ -118,10 +118,14 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
 
 pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
   # lift x+y out of reduce on eq
-  ((UPat.var("x")+UPat.var("y")).or_casted().eq(UPat.var("c")), lambda x,y,c: x.eq(c.cast(y.dtype)-y) if no_range(y) and no_range(c) else None),
+  ((UPat.var("x", dtypes.wints)+UPat.var("y")).or_casted("a").eq(UPat.var("c", dtypes.wints)),
+   lambda x,y,a,c: x.eq(c.cast(y.dtype)-y) if no_range(y) and no_range(c) and
+   (a.op is not Ops.CAST or not a.src[0].overflows(a.dtype)) and not c.overflows(y.dtype) else None),
   # reduce on gated load becomes can substitute the range and remove the reduce
-  (UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted()).where(UPat.var("expr"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
-   lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
+  (UPat.var("idx", dtypes.wints).eq(UPat(Ops.RANGE, name="r").or_casted("rc")).where(UPat.var("expr"), 0)
+   .reduce(UPat.var("r"), arg=Ops.ADD),
+   lambda r,rc,idx,expr: None if r.overflows(rc.dtype) else
+   (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
 ])
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
