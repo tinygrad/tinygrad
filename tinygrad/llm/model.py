@@ -10,7 +10,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, slot_gather, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, all_gather_q8, sharded_argmax, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
+  all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, \
   mla_bmm, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
@@ -278,6 +278,11 @@ def _identity(x:Tensor) -> Tensor: return x
 MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 96)
 # batched decoding: rows of experts decoded (in bundles) up to this many, grouped (the prefill kernels) past it
 MOE_BATCH_ROWS = getenv("MOE_BATCH_ROWS", 512)
+def _skinny(lin:Linear, x:Tensor) -> Tensor|None:
+  """lin(x) by skinny_matmul (few outputs, few rows) if its weight is stored for it (see Transformer._finish_load), else None"""
+  if (wt:=getattr(lin, "weight_t", None)) is None or not isinstance(x.shape[-2], int) or token_sharded(x): return None
+  return skinny_matmul(x, wt)
+
 def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None else MOE_DECODE_ROWS
 
 # batched decoding (Transformer.forward_batch): the rows are groups of a sequence each, group g (its rows the tokens at positions pos.. of the
@@ -562,7 +567,8 @@ class FFNBlock:
       router = self.ffn_gate_inp
       # sequence parallel: every device routes its rows, the selections are gathered
       xr = rows if (rows:=_sp_rows[0]) is not None else x
-      if router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
+      if rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
+      elif router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
          xr.shape[1] > 32:
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
         logits = xr.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
@@ -1089,7 +1095,8 @@ class MLATransformerBlock(FFNBlock):
       ic = idx.idx
       kg = idx.k_norm(idx.attn_k(x)).stack(idx.compressor_gate(x), dim=2)[0]
       iq = idx.attn_q_b(q_lora).reshape(Tq, ic.n_heads, ic.head_dim)
-      iw = (idx.proj(x) * (ic.n_heads * ic.head_dim)**-0.5)[0]
+      iw = (p if (p:=_skinny(idx.proj, x)) is not None else idx.proj(x)) * (ic.n_heads * ic.head_dim)**-0.5
+      iw = iw[0]
     # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor
     assert idx is not None and len({T for _, T in groups}) == 1, "batched decoding: the sparse attention of the indexer, groups of the same rows"
     scale, positions = 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
@@ -2454,6 +2461,15 @@ class Transformer:
   def _finish_load(self):
     """the work left of loading (deferred): the weights read, the values computed from them"""
     while self._pending_load: self._pending_load.pop(0)()
+    # (SKINNY) the float weights of few outputs that decoding multiplies by (the routers, the indexers' head weights) stored transposed (the
+    # outputs the fast axis), the Linear's a view of it: skinny_matmul reads every input's weights of all the outputs at once
+    blocks = self.blk + ([self.mtp] if hasattr(self, "mtp") else [])
+    lins = [l for b in blocks for l in (getattr(b, "ffn_gate_inp", None), getattr(getattr(b, "indexer", None), "proj", None))
+            if isinstance(l, Linear) and l.ggml_type is None and l.weight.dtype in (dtypes.float32, dtypes.half) and l.weight.ndim == 2 and
+            getattr(l, "bias", None) is None and not hasattr(l, "weight_t") and amd_custom_kernels_supported(l.weight.device) and getenv("SKINNY", 1)]
+    if lins:
+      Tensor.realize(*(wts:=[l.weight.T.contiguous() for l in dedup(lins)]))
+      for l, wt in zip(dedup(lins), wts): l.weight_t, l.weight = wt, wt.T
 
   def sequence_parallel(self, rows:int) -> bool:
     """the hyper-connection streams of a prefill chunk of `rows` are split over the devices: tiles of 16 rows on every device"""
