@@ -2014,10 +2014,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           break
         relift_lib = get_elf_section(ret.src[3].arg, ".text").content
     prg = dispatch_cache[key]
+  vmem_buf = UOp.from_buffer(Buffer('CPU', 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.uint32)
+  args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
+  for p in prg.kernel_params:
+    if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
   with _MXCSRContext():
-    vmem_buf = UOp.from_buffer(Buffer('CPU', 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.uint32)
-    args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
-    for p in prg.kernel_params:
-      if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
     run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), update_stats=False)
   return 0
