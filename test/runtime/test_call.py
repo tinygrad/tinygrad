@@ -8,6 +8,19 @@ from tinygrad.schedule import transform_to_call
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
 
 class TestCall(unittest.TestCase):
+  def test_multioutput_realize_one(self):
+    for precompile in (False, True):
+      for reverse in (False, True):
+        with self.subTest(precompile=precompile, reverse=reverse):
+          @function(precompile=precompile)
+          def pair(x): return x + 1, x * 2
+          a, b = pair(Tensor([1., 2., 3.]).realize())
+          first, second = (b, a) if reverse else (a, b)
+          first.realize()
+          second.realize()
+          self.assertEqual(a.tolist(), [2., 3., 4.])
+          self.assertEqual(b.tolist(), [2., 4., 6.])
+
   def test_call_plus(self):
     a = Tensor.randn(10, 10)
     b = Tensor.randn(10, 10)
