@@ -509,6 +509,16 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(16).reshape(4, 4).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), a, fxn=kernel)[0].tolist(), a[:, :1].pad(((0, 0), (0, 3))).tolist())
 
+  def test_shrink_range_keeps_ungated_index(self):
+    # q is ungated in C[q], so q keeps its 4 iterations after r shrinks to its gate r<2
+    q, r = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+    def kernel(C:UOp, D:UOp) -> UOp:
+      return UOp.group(C[q].store(1), D[(q*4+r).valid((q<2)&(r<2))].store(1)).end(q, r).sink(arg=KernelInfo(opts_to_apply=()))
+    c, d = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(16, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
+    Tensor.realize(c, d)
+    self.assertEqual(c.tolist(), [1, 1, 1, 1])
+    self.assertEqual(d.tolist(), [1, 1, 0, 0, 1, 1, 0, 0] + [0]*8)
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
     a = Tensor.full((4, 4), 3.).contiguous()

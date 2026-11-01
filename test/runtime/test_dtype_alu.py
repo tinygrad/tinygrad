@@ -429,6 +429,11 @@ class TestDTypeALU(unittest.TestCase):
 
   def test_shl(self): self._test_shl()
   def test_shr(self): self._test_shr()
+  def test_shr_long_of_small_value(self):
+    self.assertEqual((Tensor([-1, 5], dtype=dtypes.int8).cast(dtypes.int64) >> 32).tolist(), [-1, 0])
+  def test_mod_long_of_int_min(self):
+    a, b = Tensor([-2**31, 5], dtype=dtypes.int32).cast(dtypes.int64), Tensor([-1, -2], dtype=dtypes.int8).minimum(-1).cast(dtypes.int64)
+    self.assertEqual((a % b).tolist(), [0, -1])
 
   @Context(EMULATED_DTYPES="long")
   def test_emulated_shl(self): self._test_shl()
