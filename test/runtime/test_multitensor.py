@@ -1349,6 +1349,7 @@ class TestTensorOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
 
+  @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "no views")
   @needs_second_gpu
   def test_bitcast_assign(self):
     t = Tensor([0, 0, 0, 0], dtype=dtypes.int32).shard(devices_2, axis=0).contiguous().realize()
