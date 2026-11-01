@@ -1132,8 +1132,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         self.step_writes(active)
         if k:
           # (WIDE: a partner slot's row of nothing at its last positions, past the ones of the sequence spanning it, see wide_limit)
+          # (every row of the step's size: a mixed step's is the largest)
           hi = max(active, default=-1) + 1
-          if self.partner: hi = next(m for m in model.batch_sizes() if m >= hi)
+          if self.partner: hi = next(m for m in model.batch_sizes() if m >= max(hi, max(self.partner.values()) + 1))
+          if self.landing and self.partner: hi = max(model.mix_sizes())
           seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]] = \
             [(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p)) if i in active else
              ([0]*(k+1), model.batch_ctx() - k - 2 if i in self.partner.values() else 0, 0, 1, 0.0) for i in range(hi)]
