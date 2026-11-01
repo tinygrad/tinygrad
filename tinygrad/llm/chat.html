@@ -43,6 +43,10 @@
     model.replaceChildren(...r.data.map(m => new Option(m.id, m.id, false, m.id === params.get('model'))));
   }).catch(showError);
   let generating = false;
+  document.onkeydown = (e) => { if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing &&
+      !e.target.closest('input, textarea, select') && !e.target.isContentEditable) {
+    e.preventDefault(); input.focus();
+  } };
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault(); if (generating || !model.value) return;
     generating = true; send().catch(showError).finally(() => generating = false);
