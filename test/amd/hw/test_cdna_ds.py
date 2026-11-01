@@ -39,5 +39,17 @@ class TestCDNADSReadTr(unittest.TestCase):
   def test_read_b64_tr_b16_acc(self): self.assertEqual(self._run_tr_b16(acc=1), self._expected())
   def test_read_b64_tr_b16_vdst_is_addr(self): self.assertEqual(self._run_tr_b16(vdst=0), self._expected())
 
+class TestCDNADSLoadReturn(unittest.TestCase):
+  def _run(self, wait: bool) -> list[int]:
+    # LDS[4l] = 4(l^1), then two dependent ds_reads with v[0] as both the destination of the first and the address of the second
+    return run_cdna_lanes([cdna.v_lshlrev_b32_e32(cdna.v[0], 2, cdna.v[255]), cdna.v_xor_b32_e32(cdna.v[1], 4, cdna.v[0]),
+                           cdna.ds_write_b32(addr=cdna.v[0], data0=cdna.v[1]), cdna.s_waitcnt(0),
+                           cdna.ds_read_b32(vdst=cdna.v[0], addr=cdna.v[0]), *([cdna.s_waitcnt(0)] if wait else []),
+                           cdna.ds_read_b32(vdst=cdna.v[2], addr=cdna.v[0]), cdna.s_waitcnt(0)])
+
+  # a ds_read writes its destination when the data returns, so a read issued before s_waitcnt still sees the old address
+  def test_next_read_uses_old_address(self): self.assertEqual(self._run(wait=False), [4*(l^1) for l in range(64)])
+  def test_waitcnt_returns_data(self): self.assertEqual(self._run(wait=True), [4*l for l in range(64)])
+
 if __name__ == "__main__":
   unittest.main()

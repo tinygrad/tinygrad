@@ -66,7 +66,7 @@ from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
-from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
+from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst, Reg
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
 from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, _bitreverse, _countbits
@@ -1907,6 +1907,27 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     return regions
   return build(set(order))
 
+def ds_deferred(insts:list[Inst]) -> dict[int, int]:
+  """CDNA LDS returns data after later DS instructions have read their operands (hand written kernels reuse the destination of one
+  ds_read as the address of the next, without s_waitcnt). Returns {load index: commit index} for the DS loads whose destination
+  a later DS instruction touches before the s_waitcnt lgkmcnt that covers the load, or before any other instruction touches it."""
+  commit:dict[int, int] = {}
+  pending:list[int] = []
+  for i, inst in enumerate(insts):
+    if isinstance(inst, irc.SOPP) and inst.op is irc.SOPPOp.S_WAITCNT:
+      while len(pending) > (inst.simm16 >> 8) & 0xF: commit[pending.pop(0)] = i
+    if isinstance(inst, (irc.DS, irc.SMEM)): pending.append(i)
+  commit.update((i, len(insts)) for i in pending)
+  def vgprs(inst:Inst, *names:str) -> set[int]:
+    return {r.offset+k for n, cnt in inst.op_regs.items() if (not names or n in names) and isinstance(r:=getattr(inst, n, None), Reg)
+            and r.offset >= 256 for k in range(cnt)}
+  ret:dict[int, int] = {}
+  for i, c in commit.items():
+    if not (dst:=vgprs(insts[i], 'vdst')): continue
+    users = [j for j in range(i+1, c) if dst & vgprs(insts[j])]
+    if (ds_users:=list(itertools.takewhile(lambda j: isinstance(insts[j], irc.DS), users))): ret[i] = ds_users[-1]+1
+  return ret
+
 @rewrite_group(replay="emu_process_replay")
 def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   insts = amd_decode(code, arch)
@@ -1948,6 +1969,12 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
+  # deferred DS load results: 16 slots of (old, new) register values, 4 registers each
+  ds_ret = UOp.param(9, dtypes.uint32, 128*wave_size, name="ds_ret")
+  buffers[ds_ret] = (UOp.alloc((n_waves*128*wave_size,), dtypes.uint32, 8, AddrSpace.REG), 128*wave_size)
+  def ds_copy(dst:UOp, dst_reg:int, src:UOp, src_reg:int, n:int) -> UOp:
+    i = UOp.range(n*wave_size, 0, AxisType.LOOP, dtype=dtypes.int)
+    return lower_body(dst.index(i+dst_reg*wave_size).store(src.index(i+src_reg*wave_size).load()).end(i).sink(), "ds_return")
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
   route = UOp.param(6, dtypes.int, (1,), name="route")
@@ -1959,13 +1986,25 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
     instructions = []
-    for off in cfg["blocks"][block_pc]:
-      inst = insts[off]
+    block = [insts[off] for off in cfg["blocks"][block_pc]]
+    # deferred DS loads: save the old registers before the load, swap them back in after it, write the result at its commit point
+    pre:dict[int, list[UOp]] = {}
+    post:dict[int, list[UOp]] = {}
+    commits:dict[int, list[UOp]] = {}
+    for slot, (i, c) in enumerate(sorted(ds_deferred(block).items()) if wave_size == 64 else []):
+      gpr, slot = ctx.accvgpr if _iattr(block[i], 'acc') else ctx.vgpr, slot%16*8
+      reg, n = getattr(block[i], 'vdst').offset-256, block[i].op_regs['vdst']
+      pre[i] = [ds_copy(ds_ret, slot, gpr, reg, n)]
+      post[i] = [ds_copy(ds_ret, slot+4, gpr, reg, n), ds_copy(gpr, reg, ds_ret, slot, n)]
+      commits.setdefault(c, []).append(ds_copy(gpr, reg, ds_ret, slot+4, n))
+    for i, inst in enumerate(block):
+      instructions.extend(commits.pop(i, []))
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
       call, branch_cond = instruction_call(inst, arch, renderer)
       if branch_cond is not None: cond = branch_cond
-      if call is not None: instructions.append(call)
+      if call is not None: instructions.extend([*pre.get(i, []), call, *post.get(i, [])])
+    instructions.extend(commits.pop(len(block), []))
     values = {}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
