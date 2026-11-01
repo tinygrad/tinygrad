@@ -421,10 +421,11 @@ class _Ctx:
     idx = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
     return self.accvgpr.index(idx.valid(valid)).load() if valid is not None else self.accvgpr.index(idx).load()
 
-  def waccvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
+  def waccvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write ACCVGPR with dynamic register index (CDNA only)."""
+    buf = self.accvgpr.after(after) if after is not None else self.accvgpr
     offset = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
-    return self.accvgpr.index(offset.valid(_lane_active(exec_mask, lane))).store(val.cast(dtypes.uint32))
+    return buf.index(offset.valid(_lane_active(exec_mask, lane))).store(val.cast(dtypes.uint32))
 
   def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False, do_cast: bool = True) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
@@ -1449,7 +1450,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
-  pcode = get_pcode(inst.op)
+  pcode = get_pcode(inst.op) if inst.op in _get_pcode_dict(inst.op) else ''  # DS_READ_B64_TR_B16 has no pcode
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
   if isinstance(inst, (irc.GLOBAL, irc.FLAT, irc.SCRATCH, irc.DS, ir4.VFLAT, ir4.VSCRATCH)) and 'Calc' in pcode and 'Addr' in pcode:
@@ -1493,6 +1494,17 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     # Snapshot every source before writing: destination and source registers may be identical.
     reads = UOp(Ops.STACK, src=tuple(values))
     return UOp.sink(*(ctx.wvgpr_dyn(vdst_reg, _c(i), val, exec_mask, after=reads) for i, val in enumerate(values)))
+
+  if is_lds and op_name == 'DS_READ_B64_TR_B16':
+    # Each lane reads 4 16-bit elements, then each group of 16 lanes transposes the 4x16 tile it read (no pcode in the manual).
+    # Lane 4*r+c reads row r, columns 4*c..4*c+3. Lane j gets column j: element r comes from lane 4*r+j//4, element j%4 of its 8 bytes.
+    def rd16(lane: int, r: int) -> UOp:
+      addr = ctx.rvgpr_dyn(addr_reg, _c((lane & ~15) + 4*r + (lane & 15)//4)) + offset + _c(2 * (lane % 4))
+      return (mem.index(addr >> addr_shift).load() >> ((addr & _c(2)) << _c(3))) & _c(0xFFFF)
+    values = [rd16(lane, 2*d) | (rd16(lane, 2*d+1) << _c(16)) for lane in range(ctx.wave_size) for d in range(2)]
+    # Snapshot every source before writing: destination and address registers may be identical.
+    reads, write_gpr = UOp(Ops.STACK, src=tuple(values)), ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
+    return UOp.sink(*(write_gpr(vdst_reg + _c(i % 2), _c(i // 2), val, exec_mask, after=reads) for i, val in enumerate(values)))
 
   # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
   if is_lds and 'PERMUTE' in op_name:
