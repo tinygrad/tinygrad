@@ -826,6 +826,55 @@ class TestStash(unittest.TestCase):
     reqs[0].st -= 2000
     self.assertEqual(self.server.admit_order(reqs), [reqs[0], reqs[3], reqs[1], reqs[2]])
 
+  def test_bcp_batch(self):
+    # the oldest, then the fewest new tokens, as many as a step of the rows of their class takes
+    from tinygrad.llm.serve import Request
+    self.model.BPF_P = 384
+    self.model.bpf_class = lambda n: next((p for p in (96, 192, 384) if p >= n), None)
+    self.model.bpf_sizes = lambda P: tuple(g for g in (1, 2, 4, 8) if g * P <= 768)
+    reqs = [Request(list(range(n)), "", None, 0.0) for n in (300, 50, 90, 150, 60, 20)]
+    self.assertEqual(self.server.bcp_batch(reqs, 8, set()), [reqs[0], reqs[5]])
+    self.assertEqual(self.server.bcp_batch(reqs[1:], 8, set()), [reqs[1], reqs[5], reqs[4], reqs[2]])
+    self.assertEqual(self.server.bcp_batch(reqs[1:], 3, set()), [reqs[1], reqs[5], reqs[4]])
+    self.assertEqual(self.server.bcp_batch(reqs[:1], 8, set()), [reqs[0]])
+
+  def test_mix(self):
+    # (MIX) a request's new tokens prefilled in steps (into the landing slot past the slots decoded, in chunks), then moved into a free slot
+    from tinygrad.llm.serve import Request, BatchStats
+    m, srv = self.model, self.server
+    m.MIX_PS, m.mix_landing = (192, 384), Mock(return_value=1)
+    m.batch_sizes, m.mix_sizes = Mock(return_value=(1, 2, 3)), Mock(return_value=(3,))
+    srv.spec, srv.stats, srv.main_moved, srv.landing, srv.MIX_MAX = 2, BatchStats(), False, [], 1000
+    # (mixed steps of the largest size only)
+    self.assertEqual(srv.mixing({}), 0)
+    self.assertEqual(srv.mixing({0: None, 1: None}), 0)
+    self.assertEqual(srv.mixing({2: None}), 1)
+    reqs = [Request(list(range(n)), "", None, 0.0) for n in (900, 1500, 120)]
+    self.assertEqual([srv.mix_ok(r, set()) for r in reqs], [True, False, True])
+    # (a conversation the model has less of than it seemed: not mixed)
+    m.prefix_to_slot = Mock(side_effect=lambda ids, slot: 100 if len(ids) == 900 else 0)
+    pending = list(reqs)
+    srv.mix_take([reqs[0], reqs[1]], {2: Mock()}, pending, 1)
+    self.assertEqual(srv.landing, [(reqs[0], 3, 100, 100)])
+    self.assertEqual(pending, reqs[1:])
+    self.assertTrue(reqs[1].no_mix and not reqs[0].no_mix)
+    # (one landing slot: no other one meanwhile)
+    srv.mix_take([reqs[2]], {2: Mock()}, pending, 1)
+    self.assertEqual(len(srv.landing), 1)
+    # its 800 new tokens in chunks of 384
+    active = {2: Mock()}
+    srv.emit = Mock(return_value=True)
+    for pos in (100, 484, 868):
+      self.assertEqual([(len(t), sl, st) for t, sl, _, st in srv.mix_prompts()], [(min(384, 900 - pos), 3, pos)])
+      srv.mix_done([7], active)
+    m.slot_move.assert_called_once_with(3, 0)
+    self.assertIs(active[0], reqs[0])
+    self.assertEqual(srv.landing, [])
+    self.assertEqual((reqs[0].pos, reqs[0].cache_start, reqs[0].y[0]), (900, 100, 7))
+    # (no free slot: none taken)
+    srv.mix_take([reqs[2]], {0: Mock(), 1: Mock(), 2: Mock()}, pending, 1)
+    self.assertEqual(srv.landing, [])
+
   def test_pause_long(self):
     # (aliased slots) the batch waits for a long request: only the ones in the slots its cache overwrites stop, it runs alone (the others' slots
     # busy: nothing of theirs written), its conversation kept (in host memory) before the next step writes those slots

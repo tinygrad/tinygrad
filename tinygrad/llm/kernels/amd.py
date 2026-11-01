@@ -319,7 +319,10 @@ def q8_quantize_known(x:Tensor, tokens:int, in_features:int, sumsq:bool, outs:tu
   """the quantization of x is outs (the kernel that made x made it too)"""
   _q8_cache[_q8_key(x, tokens, in_features, sumsq, False)] = outs
 
-def q8_quantize_cache_clear(): _q8_cache.clear()
+def q8_quantize_cache_clear():
+  # (the caches of a forward's graph: kept, they'd keep its buffers from the memory planner of the jits captured after)
+  _q8_cache.clear()
+  _bundle_cache.clear()
 
 def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool, split:bool) -> tuple[Tensor, ...]:
   x, groups = Tensor(x_uop), in_features//Q8_GROUP_SIZE
@@ -2281,7 +2284,6 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
     # (the gate and up rows' bundles are the down rows' too: the same selections)
     key = (sel.uop, first.uop, experts, M)
     if (bundles:=_bundle_cache.get(key)) is None:
-      if len(_bundle_cache) > 256: _bundle_cache.clear()
       bundles = _bundle_cache[key] = moe_bundles(sel, first, experts, M, tokens*int(slots))
     bexp, brow = bundles
     out = Tensor.empty(devices*tokens*slots, out_features, dtype=out_dtype, device=x.device, axis=0 if devices > 1 else None)
@@ -4491,10 +4493,11 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
-               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0) -> Tensor:
+               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0, calls_out:list[UOp]|None=None) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
-  are p%S: the ones of start_pos are read, the ones after every token written (T < S)
+  are p%S: the ones of start_pos are read, the ones after every token written (T < S). calls_out: the kernel appended (a later write of
+  the states waits for it)
   """
   _, B, heads, V, K = state.shape
   # row: `rows` tokens, rows row.. of the inputs (batched decoding: the inputs of every sequence's rows)
@@ -4515,6 +4518,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   call = _kda_decode_kernel(*(params[:-1] if positions is not None else params), cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
                             pos_param, S, SC).call(*contig)
   out = Tensor(contig[0].after(call))
+  if calls_out is not None: calls_out.append(call)
   if not R: return out
   # the norm, the gate and the quantization of the outputs (the output projection's input)
   n = int(heads*V)  # (heads of every device)

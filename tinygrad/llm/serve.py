@@ -434,6 +434,7 @@ class Request:
     # batched speculative decoding: the last step's sampled tokens, the position the MTP layer catches up from, the drafts accepted, the parity
     self.y:list[int] = []
     self.mtp, self.j, self.par = 0, 0, 1
+    self.no_mix = False  # (MIX) prefilled before its steps, not in them (its cache was less than it seemed)
     # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
     self.ckpt_buf: typing.Any = None
     self.ckpt_tokens: list[int] = []
@@ -483,12 +484,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.stats = BatchStats()
     # the slots of batched decoding (none: one request at a time)
-    self.slots = n if isinstance(n:=getattr(model, "batch_slots", lambda: 0)(), int) else 0
+    # (the slots past them: the landing slots of mixed steps, see Transformer.batch_mixed_step)
+    self.slots = n if isinstance(n:=getattr(model, "decode_slots", getattr(model, "batch_slots", lambda: 0))(), int) else 0
     # batched decoding is speculative (the drafts of every sequence verified in the step) when the model drafts
     self.spec = k if self.slots and isinstance(k:=getattr(getattr(model, "config", None), "spec_drafts", 0), int) else 0
     # the conversations kept in the free slots (their tokens, the slot's row of the last one's hidden state): a request that continues one is
     # prefilled from its states (agents taking turns)
     self.stash: dict[int, tuple[list[int], int]] = {}
+    # (MIX) the requests prefilled in the steps: (request, landing slot, start, position)
+    self.landing:list[tuple[Request, int, int, int]] = []
     # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
     # (see HostConv). the chunks of the ones out are used again (new memory and its devices' mappings are slow, ~1 s a GB)
     self.host: list[HostConv] = []
@@ -789,13 +793,87 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.ckpt_pool.append(req.ckpt_buf)
     req.ckpt_buf, req.ckpt_tokens = None, []
 
+  def mixing(self, active:dict) -> int:
+    """(MIX) the prompts of the next step (mixed steps: requests' new tokens prefilled in a step of decoding, its sizes the model's)"""
+    model = self.model
+    if not active or not self.spec or not isinstance(land:=getattr(model, "mix_landing", lambda: 0)(), int) or not land: return 0
+    return land if next(m for m in model.batch_sizes() if m > max(active)) in model.mix_sizes() else 0
+  def mix_ok(self, req:Request, busy:set[int]) -> bool:
+    """(MIX) req's prompt in mixed steps: its new tokens (past what's kept of its conversation) MIX_MAX at most, in chunks of a step's"""
+    n = len(req.ids) + len(req.generated)
+    return self.batchable(req) and not req.no_mix and n - self.stash_hit(req.ids + req.generated, busy) <= self.MIX_MAX
+  MIX_MAX = getenv("MIX_MAX", 4096)
+  def mix_take(self, mixes:list[Request], active:dict, pending:list[Request], land:int):
+    """
+    (MIX) the prompts of the next mixed steps (as many as free landing slots, free slots): each one's conversation from the model's or a kept
+    one into its landing slot (self.landing: request, landing slot, start, position)
+    """
+    model, busy = self.model, {x[1] for x in self.landing}
+    for req in self.admit_order(mixes):
+      if len(busy) >= land or len(active) + len(self.landing) >= self.slots: break
+      ids, landing = req.ids + req.generated, next(self.slots + i for i in range(land) if self.slots + i not in busy)
+      _p0 = time.perf_counter()
+      trace(f"mix req {req.rid} ids {len(ids)} landing {landing}")
+      self.miss_log(ids, self.stash_hit(ids, set(active)))
+      self.stash_load(ids, set(active))
+      start = model.prefix_to_slot(ids, landing)
+      self.main_moved = True
+      self.stats.prefill_time += time.perf_counter() - _p0
+      # (a cache that has less of it: prefilled before a step)
+      if len(ids) - start > self.MIX_MAX:
+        req.no_mix = True
+        continue
+      pending.remove(req)
+      self.landing.append((req, landing, start, start))
+      busy.add(landing)
+  def mix_prompts(self) -> list[tuple[list[int], int, float|tuple[float, float], int]]:
+    """(MIX) the prompts of a mixed step: the next chunk of every landing one (as many tokens as the model's largest prompt of a step)"""
+    most = max(self.model.MIX_PS)
+    return [((req.ids + req.generated)[pos:pos+most], landing, (req.temperature, req.top_p), pos) for req, landing, _, pos in self.landing]
+  def mix_done(self, firsts:list[int], active:dict):
+    """(MIX) the chunks of a mixed step done: the prompts done from their landing slots into free ones, decoded from their first tokens"""
+    model, k, most, left = self.model, self.spec, max(self.model.MIX_PS), []
+    for (req, landing, start, pos), first in zip(self.landing, firsts):
+      n = len(req.ids) + len(req.generated)
+      if (pos:=min(n, pos + most)) < n:
+        left.append((req, landing, start, pos))
+        continue
+      # (its prompt's checkpoint from its slot, as ckpt_keep's: the model's own is another prompt's)
+      if self.slot_host() and getenv("SLOT_CKPT", 1) and not req.generated and n >= getenv("HOST_MIN", 4096) and \
+         callable(getattr(model, "ckpt_from_slot", None)):
+        model.ckpt_from_slot(landing, n)
+        model._ckpt_tokens = list(req.ids)
+        self.ckpt_keep(req)
+        model._ckpt_tokens = []
+      slot = next(i for i in range(self.slots) if i not in active)
+      self.slot_taken(slot)
+      model.slot_move(landing, slot)
+      req.cache_start, req.pos = start, n
+      trace(f"mix done req {req.rid} landing {landing} slot {slot} start {start} pos {n}")
+      self.stats.prefills += 1
+      req.spec_start(first, n, k)
+      if self.emit(req, first): active[slot] = req
+    self.landing = left
+
+  def bcp_batch(self, cands:list[Request], most:int, busy:set[int]) -> list[Request]:
+    """
+    (BCP) the requests of a batch_continue: the oldest, then the ones of the fewest new tokens, as many as a step of the rows of the class of
+    the most new tokens of them takes (BPF_PS: a step's prompts padded to its rows)
+    """
+    model = self.model
+    if not cands or most <= 0 or not callable(getattr(model, "bpf_class", None)): return cands[:most]
+    def new(r:Request) -> int: return len(r.ids) + len(r.generated) - self.stash_hit(r.ids + r.generated, busy)
+    batch = [cands[0]] + sorted(cands[1:], key=new)[:most - 1]
+    while len(batch) > 1 and len(batch) > max(model.bpf_sizes(model.bpf_class(max(new(r) for r in batch)) or model.BPF_P)): batch.pop()
+    return batch
+
   def batch_continue(self, batch:list[Request], active:dict, pending:list[Request]):
     """
     (BCP) requests into free slots in steps of the model for all of them: each one's conversation (the model's, a kept one, its checkpoint)
     into its slot, the rest of its prompt prefilled there (batch_prefill from its start, in chunks of P), its first token. its prompt's
     checkpoint (in its slot: the model's isn't its) kept with it (ckpt_keep)
     """
-    model, k, P = self.model, self.spec, self.model.BPF_P
+    model, k = self.model, self.spec
     _p0 = time.perf_counter()
     free = [i for i in range(self.slots) if i not in active][:len(batch)]
     starts, lens = [], []
@@ -811,10 +889,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.main_moved = True
       self.slot_taken(slot)
     pos, firsts = list(starts), [0] * len(batch)
+    # (the steps' rows: the class of the most new tokens, BPF_P if past them (chunks of it))
+    P = c if callable(getattr(model, "bpf_class", None)) and (c:=model.bpf_class(max(l - s for l, s in zip(lens, starts)))) else model.BPF_P
     while (todo:=[g for g in range(len(batch)) if pos[g] < lens[g]]):
       chunks:list[tuple[list[int], int, float|tuple[float, float]]] = \
         [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], (batch[g].temperature, batch[g].top_p)) for g in todo]
-      outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo])
+      outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo], P=P)
       for g, out in zip(todo, outs): pos[g], firsts[g] = min(lens[g], pos[g] + P), out
     self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + time.perf_counter() - _p0
     for g, (req, slot) in enumerate(zip(batch, free)):
@@ -913,17 +993,18 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model, slots, k = self.model, self.slots, self.spec
     active: dict[int, Request] = {}  # the slot of every request decoded batched
     pending: list[Request] = []  # requests waiting for a slot or for the model alone
+    self.landing = []
     while True:
       try:
         # (a wait of a while at a time: a Ctrl-C stops the server, a lock's wait without a timeout doesn't see it)
-        while not active and not pending:
+        while not active and not pending and not self.landing:
           try: pending.append(self.waiting.get(timeout=0.2))
           except queue.Empty: self.host_prepare()
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
         for r in self.ckpt_later or []: self.ckpt_free(r)
         self.ckpt_later = []
-        self.inflight = len(active) + len(pending)
+        self.inflight = len(active) + len(pending) + len(self.landing)
         # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains, see preempt), then it
         # goes on alone. else it waits for no request to be decoded: while agents take turns that's never)
         # (PAUSE_LONG: the batch waits for it, see pause_long)
@@ -953,7 +1034,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             n = len(r.ids) + len(r.generated)
             return self.batchable(r) and n <= room and n - self.stash_hit(r.ids + r.generated, set(active)) <= most
           # (fewer than a step's worth while others decode: they wait BCP_WAIT seconds at most for more, agents' turns come one at a time)
-          while len(batch:=[r for r in pending if cont(r)][:min(G, slots - len(active))]) >= BCP_MIN and \
+          while len(batch:=self.bcp_batch([r for r in pending if cont(r)], min(G, slots - len(active)), set(active))) >= BCP_MIN and \
                 (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > getenv("BCP_WAIT", 1.5)):
             self.batch_continue(batch, active, pending)
           # (the ones that wait for more: not prefilled alone meanwhile. one that waited long enough is, if no others came)
@@ -974,7 +1055,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             req.cache_start, req.pos = 0, len(req.ids)
             req.spec_start(first, req.pos, k)
             if self.emit(req, first): active[slot] = req
-        for req in self.admit_order([r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp]):
+        # (MIX: the requests of mixed steps wait for theirs)
+        mixes = [r for r in pending if self.mix_ok(r, set(active))] if (land:=self.mixing(active)) and not drain else []
+        if mixes: self.mix_take(mixes, active, pending, land)
+        for req in self.admit_order([r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp and
+                                     r not in mixes]):
           if len(active) >= slots or drain: break
           slot = next(i for i in range(slots) if i not in active)
           _p0 = time.perf_counter()
@@ -989,17 +1074,22 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           self.main_moved = True
           req.spec_start(first, req.pos, k)
           if self.emit(req, first): active[slot] = req
-        if not active: continue
+        if not active and not self.landing: continue
         self.stats.step(len(active), len(pending) + self.waiting.qsize())
         _t0 = time.perf_counter()
         # a step of every slot up to the last one used (the free ones in between are rows of nothing)
-        self.inflight = len(active) + len(pending) + self.waiting.qsize()
+        self.inflight = len(active) + len(pending) + self.waiting.qsize() + len(self.landing)
         trace("step " + " ".join(f"{i}:{r.rid}@{r.pos}" for i, r in sorted(active.items())))
         self.step_writes(active)
         if k:
-          spec = model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p))
-                                        if i in active else
-                                        ([0]*(k+1), 0, 0, 1, 0.0) for i in range(max(active)+1)])
+          seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]] = \
+            [(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p)) if i in active else
+             ([0]*(k+1), 0, 0, 1, 0.0) for i in range(max(active, default=-1)+1)]
+          if self.landing:
+            prompts = self.mix_prompts()
+            trace("mix step " + " ".join(f"{r.rid}@{pos}+{len(t)}" for (r, _, _, pos), (t, *_) in zip(self.landing, prompts)))
+            spec, firsts = model.batch_mixed_step(seqs, prompts)
+          else: spec = model.batch_spec_step(seqs)
         else: out = model.batch_step([(active[i].generated[-1], active[i].pos, (active[i].temperature, active[i].top_p)) if i in active else
                                       (0, 0, 0.0)
                                       for i in range(max(active)+1)])
@@ -1026,6 +1116,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             del active[i]
             self.slot_done(i, req, active)
             pending.insert(0, req)
+        if self.landing: self.mix_done(firsts, active)
         # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
         while active and (hi:=max(active)) >= len(active) and next(m for m in model.batch_sizes() if m >= hi+1) > \
                          next(m for m in model.batch_sizes() if m >= len(active)):
@@ -1039,5 +1130,5 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           pending.append(active.pop(next(iter(active))))
       except Exception as e:
         traceback.print_exc()
-        for req in [*active.values(), *pending]: self.finish(req, e)
-        active, pending = {}, []
+        for req in [*active.values(), *pending, *(x[0] for x in self.landing)]: self.finish(req, e)
+        active, pending, self.landing = {}, [], []

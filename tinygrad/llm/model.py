@@ -297,11 +297,31 @@ class BatchPrefill:
   P:int; counts:Tensor; slots:Tensor; count_vars:tuple[UOp, ...]; slot_vars:tuple[UOp, ...]; effects:list = field(default_factory=list) # noqa: E702
   # (the positions the prompts start at: a continuation of the conversation in the slot, from its states at the position. None: all at 0)
   starts:Tensor|None = None
+  # (a mixed step (Transformer.forward_batch_mixed): the rows of batched decoding before the prompts' rows, their groups the first of _batch_rows)
+  off:int = 0
   @property
   def real(self) -> Tensor:
-    """(G*P,) the rows that are tokens (the others pad a prompt to P rows)"""
-    return (Tensor.arange(self.P).reshape(1, self.P).to(self.counts.device) < self.counts.reshape(-1, 1)).reshape(-1)
+    """(off+G*P,) the rows that are tokens (the others pad a prompt to P rows)"""
+    real = (Tensor.arange(self.P).reshape(1, self.P).to(self.counts.device) < self.counts.reshape(-1, 1)).reshape(-1)
+    return Tensor.ones(self.off, dtype=dtypes.bool, device=self.counts.device).cat(real) if self.off else real
 _batch_prefill:list[BatchPrefill|None] = [None]
+
+# (MIX_SHARED: a mixed step's attention splits its rows after the projections, see _attention_batch)
+MIX_SHARED = getenv("MIX_SHARED", 1)
+def _batch_attention(x:Tensor, groups:list[tuple[UOp, int]], fn:Callable[[Tensor, list[tuple[UOp, int]]], Tensor]) -> Tensor:
+  """
+  the attention of batched rows: fn(x, groups). a mixed step's (_batch_prefill's off rows of decoding, then its prompts): fn of the decoding rows
+  (no prefill) and fn of the prompts' rows, one after the other (MIX_SHARED: fn splits them)
+  """
+  if (pf:=_batch_prefill[0]) is None or not pf.off or MIX_SHARED: return fn(x, groups)
+  nd = len(groups) - len(pf.count_vars)
+  try:
+    _batch_prefill[0] = None
+    dec = fn(x[:, :pf.off], groups[:nd])
+    _batch_prefill[0] = replace(pf, off=0)
+    pre = fn(x[:, pf.off:], groups[nd:])
+  finally: _batch_prefill[0] = pf
+  return dec.cat(pre, dim=1)
 
 def slot_states(k:int) -> tuple[int, int]:
   """
@@ -994,7 +1014,7 @@ class MLATransformerBlock(FFNBlock):
     self.indexer = Indexer(config) if config.indexer else None
 
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
-    if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
+    if (groups:=_batch_rows[0]) is not None: return _batch_attention(x, groups, self._attention_batch)
     if T is not None: return self._attention_rows(x, start_pos, T)  # rows mode: x is padded, the first T rows are the tokens
     N, D = (self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim) if self.seq_sharded else self.cache_k.shape[2:]
     flash = amd_custom_kernels_supported(x.device) and N % 64 == 0 and D & (D-1) == 0
@@ -1102,24 +1122,36 @@ class MLATransformerBlock(FFNBlock):
       iq = idx.attn_q_b(q_lora).reshape(Tq, ic.n_heads, ic.head_dim)
       iw = (p if (p:=_skinny(idx.proj, x)) is not None else idx.proj(x)) * (ic.n_heads * ic.head_dim)**-0.5
       iw = iw[0]
-    # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor
-    assert idx is not None and len({T for _, T in groups}) == 1, "batched decoding: the sparse attention of the indexer, groups of the same rows"
-    scale, positions = 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
-    P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
-    # (prefills: the slots of the prompts, their token counts)
-    slots, counts = (pf.slots.to(x.device), pf.counts.to(x.device)) if (pf:=_batch_prefill[0]) is not None else (None, None)
-    pk = pool_keys(idx.pool_pk, idx.pool_ring, kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R, slots, counts))
-    picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P, slots))
-    if self.seq_sharded:
-      # (the slots' caches split on their positions as the model's: a device stores its rows of every sequence's tokens, attends all the heads
-      # of every row over its keys of the row's slot)
-      stride = int(self.slot_s[0].shape[0]) // len(cast(tuple, x.device))
-      cache = seq_store_grouped(self.pool_s, self._seq_rows(k_store[0, 0]), positions, slots, stride)
-      attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(positions, slots, stride), dims=self.config.kv_lora_rank)
-    else:
-      ctx, D = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1])
-      cache = grouped_rows(self.pool_k.reshape(-1, D), k_store[0, 0], positions, ctx, slots)
-      attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx, slots))[..., :self.config.kv_lora_rank]
+    assert idx is not None, "batched decoding: the sparse attention of the indexer"
+    def core(q:Tensor, k_store:Tensor, kg:Tensor, iq:Tensor, iw:Tensor, groups:list[tuple[UOp, int]], pf:BatchPrefill|None,
+             pools:tuple[Tensor, ...]) -> tuple[Tensor, tuple[Tensor, ...]]:
+      # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor. returns
+      # the attention and the pools (pooled keys, ring, cache) after it (another part's writes after its reads)
+      assert len({T for _, T in groups}) == 1, "batched decoding: groups of the same rows"
+      Tq, scale, positions = int(q.shape[2]), 1.0/self.config.head_dim**0.5, _group_positions(groups, x.device)
+      P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
+      # (prefills: the slots of the prompts, their token counts)
+      slots, counts = (pf.slots.to(x.device), pf.counts.to(x.device)) if pf is not None else (None, None)
+      pk = pool_keys(pools[0], pools[1], kg.half(), idx.compressor_ape["weight"], None, Tq, grouped=(positions, P, R, slots, counts))
+      picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(positions, P, slots))
+      if self.seq_sharded:
+        # (the slots' caches split on their positions as the model's: a device stores its rows of every sequence's tokens, attends all the
+        # heads of every row over its keys of the row's slot)
+        stride = int(self.slot_s[0].shape[0]) // len(cast(tuple, x.device))
+        cache = seq_store_grouped(pools[2], self._seq_rows(k_store[0, 0]), positions, slots, stride)
+        attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(positions, slots, stride), dims=self.config.kv_lora_rank)
+      else:
+        ctx, D = int(self.pool_k.shape[2]), int(self.pool_k.shape[-1])
+        cache = grouped_rows(pools[2].reshape(-1, D), k_store[0, 0], positions, ctx, slots)
+        attn = flash_attention_mla_sparse(q, cache, picks, scale, None, grouped=(positions, ctx, slots))[..., :self.config.kv_lora_rank]
+      return attn, (pk, Tensor(pools[1].uop.after(pk.uop)), cache)
+    pools:tuple[Tensor, ...] = (idx.pool_pk, idx.pool_ring, self.pool_s if self.seq_sharded else self.pool_k)
+    if (pf:=_batch_prefill[0]) is not None and pf.off:
+      # (a mixed step: the rows of decoding, then the prompts' (their writes after the decoding's reads))
+      o, nd = pf.off, len(groups) - len(pf.count_vars)
+      dec, pools = core(q[:, :, :o], k_store[:, :, :o], kg[:o], iq[:o], iw[:o], groups[:nd], None, pools)
+      attn = dec.cat(core(q[:, :, o:], k_store[:, :, o:], kg[o:], iq[o:], iw[o:], groups[nd:], replace(pf, off=0), pools)[0], dim=2)
+    else: attn = core(q, k_store, kg, iq, iw, groups, pf, pools)[0]
     if (vb:=bmm_wmma(attn, self.attn_v_b["weight"])) is not None: attn = vb
     elif tc: attn = attn.half().contiguous().matmul(self.attn_v_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
     else: attn = mla_bmm(attn, self.attn_v_b["weight"])
@@ -1209,17 +1241,26 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _prefill_batch(self, x:Tensor, pf:BatchPrefill) -> Tensor:
+  def _prefill_batch(self, x:Tensor, pf:BatchPrefill, pre:tuple[list[Tensor], Tensor, Tensor, Tensor]|None=None,
+                     deps:tuple[UOp, ...]=()) -> Tensor:
     """
     prefills of G prompts (P rows each, their first counts[g] the tokens) from position 0: the scan of a batch of G (rows past a prompt are no-ops),
     the states after the tokens into the slots (the one of position count in a slot's S)
+    pre: the projections of the rows (q, k and v, the gate, alpha, beta) made before (a mixed step's): the outputs before ssm_out. deps: the
+    kernels the states' pools are read and written after (a mixed step's decoding)
     """
+    def pool(t:Tensor, rows:int) -> Tensor:
+      v = t.reshape(t.shape[0], rows, -1)
+      return Tensor(v.uop.after(*deps)) if deps else v
+    pool_rec, pool_conv = pool(self.pool_rec, 1), [pool(p, self.ssm_conv_kernel-1) for p in self.pool_conv]
     P, (Bt, Tq, Dm) = pf.P, x.shape
     G, H, V, K, C = Tq // P, self.num_v_heads, self.head_v_dim, self.head_k_dim, self.ssm_conv_kernel
     xg, real = x.reshape(G, P, Dm).half(), pf.real.reshape(G, P, 1).to(x.device)
-    out_gate = self.ssm_g_b(self.ssm_g_a(xg)).reshape(G, P, H, V)
-    beta = self.ssm_beta(xg).sigmoid().reshape(G, P, H)
-    g, a = (self.ssm_f_b(self.ssm_f_a(xg)).float() + self.ssm_dt["bias"]).reshape(G, P, H, -1), self.ssm_a.reshape(H, -1)
+    def rows(t:Tensor) -> Tensor: return t.reshape(G, P, -1)
+    out_gate = (rows(pre[1]) if pre is not None else self.ssm_g_b(self.ssm_g_a(xg))).reshape(G, P, H, V)
+    beta = (rows(pre[3]) if pre is not None else self.ssm_beta(xg)).sigmoid().reshape(G, P, H)
+    g, a = ((rows(pre[2]) if pre is not None else self.ssm_f_b(self.ssm_f_a(xg))).float() + self.ssm_dt["bias"]).reshape(G, P, H, -1), \
+      self.ssm_a.reshape(H, -1)
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
     beta, log_alpha = real.where(beta, 0), real.unsqueeze(-1).where(log_alpha, 0)
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
@@ -1227,12 +1268,13 @@ class GatedDeltaNetBlock(FFNBlock):
     starts = pf.starts.to(x.device) if pf.starts is not None else None
     # the windows of the prompts: the C-1 inputs before a prompt (its slot's conv state at its start, zeros at position 0) and its rows, the conv
     # state of a slot the last C-1 inputs before its prompt's end
-    if starts is None: windows = [proj(xg).float().pad(((0, 0), (C-1, 0), (0, 0))).contiguous() for proj in (self.attn_q, self.attn_k, self.attn_v)]
+    projs = [rows(p) for p in pre[0]] if pre is not None else [proj(xg) for proj in (self.attn_q, self.attn_k, self.attn_v)]
+    if starts is None: windows = [p.float().pad(((0, 0), (C-1, 0), (0, 0))).contiguous() for p in projs]
     else:
       cont = (starts > 0).reshape(G, 1, 1)
       SC = int(self.slot_conv[0][0].shape[0])
-      before = [cont.where(slot_gather(pool.reshape(pool.shape[0], C-1, -1), slots, starts, SC, dtypes.float), 0) for pool in self.pool_conv]
-      windows = [b.cat(proj(xg).float(), dim=1).contiguous() for b, proj in zip(before, (self.attn_q, self.attn_k, self.attn_v))]
+      before = [cont.where(slot_gather(p, slots, starts, SC, dtypes.float), 0) for p in pool_conv]
+      windows = [b.cat(p.float(), dim=1).contiguous() for b, p in zip(before, projs)]
     if self.head_k_dim == self.head_v_dim and self.num_v_heads == self.num_k_heads and K % 32 == 0 and amd_custom_kernels_supported(x.device):
       # the convolutions and norms of q, k and v in a kernel (as _attention's): the windows one after another, a prompt's output rows the ones
       # of its window (the rows across two windows are dropped)
@@ -1253,27 +1295,38 @@ class GatedDeltaNetBlock(FFNBlock):
       state = Tensor.empty(G, H, V, K, dtype=dtypes.float32, device=x.device, axis=self.recurrent_state.uop.axis and 1).zeros_like().contiguous()
     else:
       # (a continuation: its slot's state of its start position, zeros at position 0)
-      rec = slot_gather(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), slots, starts, S, dtypes.float).reshape(G, H, V, K)
+      rec = slot_gather(pool_rec, slots, starts, S, dtypes.float).reshape(G, H, V, K)
       state = (starts > 0).reshape(G, 1, 1, 1).where(rec, 0).contiguous()
     core = gated_delta_prefill(q, k, v, beta.transpose(1, 2).float(), log_alpha.transpose(1, 2).exp(), state, kq=kq).transpose(1, 2)
     # the states into the slots (the scan updated state in place: after it)
     state = Tensor(state.uop.after(core.uop))
     counts = pf.counts.to(x.device)
-    pf.effects.append(slot_scatter(self.pool_rec.reshape(self.pool_rec.shape[0], 1, -1), state.reshape(G, 1, -1), slots, counts, S,
-                                   starts=starts))
+    pf.effects.append(slot_scatter(pool_rec, state.reshape(G, 1, -1), slots, counts, S, starts=starts))
     # (a conv state: the window's rows count.. of the prompt, the C-1 inputs before its end)
-    pf.effects.extend(slot_scatter(pool.reshape(pool.shape[0], C-1, -1), window, slots, counts, int(self.slot_conv[0][0].shape[0]), shift=1,
-                                   starts=starts) for pool, window in zip(self.pool_conv, windows))
+    pf.effects.extend(slot_scatter(p, window, slots, counts, int(self.slot_conv[0][0].shape[0]), shift=1, starts=starts)
+                      for p, window in zip(pool_conv, windows))
     z = (self.ssm_norm(core) * out_gate.sigmoid()).cast(x.dtype).contiguous()
-    return _out(self.ssm_out, z.reshape(Bt, Tq, -1))
+    return z.reshape(Bt, Tq, -1) if pre is not None else _out(self.ssm_out, z.reshape(Bt, Tq, -1))
 
   def _attention_batch(self, x:Tensor, groups:list[tuple[UOp, int]]) -> Tensor:
     """batched decoding: a group of rows a sequence, its states in its slot (the projections of all of them in one kernel each)"""
-    if (pf:=_batch_prefill[0]) is not None: return self._prefill_batch(x, pf)
-    x = x.half()
+    if (pf:=_batch_prefill[0]) is not None and not pf.off: return self._prefill_batch(x, pf)
+    xin, x = x, x.half()
     projs, gate = [self.attn_q(x), self.attn_k(x), self.attn_v(x)], self.ssm_g_b(self.ssm_g_a(x))
     alpha, beta = self.ssm_f_b(self.ssm_f_a(x)), self.ssm_beta(x)
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
+    if pf is not None:
+      # (a mixed step: the decoding rows' outputs (their kernel reads the first rows of the projections), the prompts' from the rest)
+      o, nd = pf.off, len(groups) - len(pf.count_vars)
+      S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), groups[0][1]
+      assert len({T for _, T in groups[:nd]}) == 1, "a mixed step: decoding groups of the same rows"
+      calls:list[UOp] = []
+      zd = kda_decode(self.pool_rec, self.pool_conv, projs, weights, gate, alpha, beta, self.ssm_dt["bias"], self.ssm_a,
+                      unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
+                      positions=_group_positions(groups[:nd], self.pool_rec.device), groups=nd, S=S, SC=SC, calls_out=calls)
+      def part(t:Tensor) -> Tensor: return t[:, o:]
+      zp = self._prefill_batch(xin[:, o:], replace(pf, off=0), ([part(p) for p in projs], part(gate), part(alpha), part(beta)), tuple(calls))
+      return self.ssm_out(zd.cat(zp.cast(zd.dtype), dim=1))
     # groups of the same size: a kernel for all of them (their states in the pools, their positions in a tensor)
     if len({T for _, T in groups}) == 1 and getenv("KDA_GROUPS", 1):
       S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), groups[0][1]
@@ -1304,7 +1357,7 @@ class GatedDeltaNetBlock(FFNBlock):
     self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[i] for _, slots in pools] for i in range(n)]
 
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
-    if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
+    if (groups:=_batch_rows[0]) is not None: return _batch_attention(x, groups, self._attention_batch)
     # T: x has static padded rows of which the first T are the tokens (rows mode), the padded rows are computed but don't change the state
     rows = T is not None
     B, Tq, _ = x.shape
@@ -1643,10 +1696,19 @@ class Transformer:
   # sequences of the slots 0..n-1 (the rows of a step), the projections, experts and the head read their weights once for all of them
 
   BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,2,4,16,32,64,80")).split(","))
+  # (MIX: the landing slots of mixed steps past the slots decoded, see batch_mixed_step)
+  MIX = getenv("MIX", 0)
   def batch_slots(self) -> int:
+    """the slots: the ones decoded (decode_slots) and the landing ones of mixed steps"""
     # (the memory of the slots: a shorter context of the model's own frees some)
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0): return 0
-    return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
+    return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES)) + self.mix_landing()
+  def mix_landing(self) -> int:
+    """the landing slots of mixed steps (MIX of them, with speculative decoding): a step's prompts prefilled into them, then moved"""
+    return self.MIX if self.config.spec_drafts and self.has_recurrent_block and self.config.kv_lora_rank > 0 else 0
+  def decode_slots(self) -> int:
+    """the slots of the sequences decoded (the first ones)"""
+    return n - self.mix_landing() if (n:=self.batch_slots()) else 0
   def batch_ctx(self) -> int:
     ctx = min(getenv("BATCH_CTX", 2048), self.max_context)
     # (aliased: whole blocks of the split sequence, the slots' regions are the model's cache's positions)
@@ -1673,7 +1735,7 @@ class Transformer:
     BATCH_DECODE=0 (no batched decoding, the slots only keep conversations: its steps aren't captured)
     """
     if not getenv("BATCH_DECODE", 1): return ()
-    return tuple(sorted({s for s in self.BATCH_SIZES if s < n} | {n})) if (n:=self.batch_slots()) else ()
+    return tuple(sorted({s for s in self.BATCH_SIZES if s < n} | {n})) if (n:=self.decode_slots()) else ()
 
   def _init_slots(self, alloc:bool=True):
     """the slots of batched decoding (alloc: their memory too, else when the jits using them are linked: after the peak of loading)"""
@@ -1693,12 +1755,12 @@ class Transformer:
       # in host memory: the tokens and temperatures of a step's rows (the host writes them), the sampled tokens (one device writes them)
       self._batch_host_in, self._batch_in = _host_ints(devs, max(self.BATCH_SIZES))
       # (a row's temperature and top_p)
-      tmv, self._batch_temp = _host_buffer(devs, 8*max(*self.BATCH_SIZES, self.BPF_G), dtypes.float32)
+      tmv, self._batch_temp = _host_buffer(devs, 8*max(max(self.BATCH_SIZES) + self.mix_landing(), self.BPF_G), dtypes.float32)
       self._batch_host_temp = tmv.cast('f')
       self._batch_host_out, self._batch_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BATCH_SIZES))
       # prefills in a step: the tokens of the prompts, the token after each
-      self._bpf_host_in, self._bpf_in = _host_ints(devs, self.BPF_G * self.BPF_P)
-      self._bpf_host_out, self._bpf_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, self.BPF_G)
+      self._bpf_host_in, self._bpf_in = _host_ints(devs, max(self.BPF_G * self.BPF_P, self.mix_landing() * max(self.MIX_PS)))
+      self._bpf_host_out, self._bpf_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BPF_G, self.mix_landing()))
     if alloc: self._alloc_slots()
 
   def _alloc_slots(self):
@@ -2045,12 +2107,17 @@ class Transformer:
         if min(self._batch_host_out[:m]) < 0: raise RuntimeError(f"batched step of {m} rows: no tokens after the devices finished")
     return list(self._batch_host_out[:n])
 
-  def forward_batch_spec(self, *seqs:UOp) -> Tensor:
+  def forward_batch_spec(self, *seqs:UOp, prompts:tuple[int, int]|None=None) -> Tensor:
     """
     a step of batched speculative decoding (forward_spec of every sequence, its slot g the group g): seqs (mtp_pos, j, par) of every group,
     its k+1 tokens in _bspec_in, its temperature in _batch_temp. the MTP layer catches up on the k+1 positions from mtp_pos and drafts k tokens
     after start_pos = mtp_pos+j, the model verifies them. returns (1, n*(2k+1)): the k+1 sampled tokens and the k drafts of every group
+    prompts (G, P): a mixed step, the prefills of G prompts of P rows (as forward_batch_prefill's continuations) with the verification, the last
+    3G of seqs their token counts, slots and starts, their tokens in _bpf_in, their temperatures in _batch_temp after the groups', the token
+    after every one in _bpf_out (the weights read once for both)
     """
+    G, P = prompts or (0, 0)
+    pvs, seqs = (seqs[len(seqs)-3*G:], seqs[:len(seqs)-3*G]) if G else ((), seqs)
     k, n, devs = self.config.spec_drafts, len(seqs) // 3, self.token_embd.weight.device
     groups = [(seqs[3*g], seqs[3*g+1], seqs[3*g+2]) for g in range(n)]
     y = self._bspec_in[:, :n*(k+1)]
@@ -2078,32 +2145,63 @@ class Transformer:
       toks = Tensor.cat(*[y.shrink((None, (g*(k+1)+j, g*(k+1)+j+1))).cat(*[d[:, g:g+1] for d in drafts], dim=1)
                           for g, (_, j, _) in enumerate(groups)], dim=1)
       x = self.token_embd(toks.contiguous().to(devs)).float()
+      _batch_rows[0] = [(mp + j, k+1) for mp, j, _ in groups] + [(st, P) for st in pvs[2*G:]]
+      if G:
+        # (the prompts' rows after the groups')
+        pf = BatchPrefill(P, self._ints(pvs[:G]), self._ints(pvs[G:2*G]), pvs[:G], pvs[G:2*G], starts=self._ints(pvs[2*G:]), off=n*(k+1))
+        x = x.cat(emb:=self.token_embd(self._bpf_in[:, :G*P].to(devs)).float(), dim=1)
+        _batch_prefill[0] = pf
       if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
-      _batch_rows[0] = [(mp + j, k+1) for mp, j, _ in groups]
       for block in self.blk: x = block(x, 0)
       if hc is not None: x = x.mean(2)
-      hn = self.output_norm(x)[0].float()
-      hn = Tensor.cat(*[self.slot_spec_h[g].shrink(((par*(k+1), (par+1)*(k+1)), None)).assign(hn[g*(k+1):(g+1)*(k+1)])
+      hn_all = self.output_norm(x)[0].float()
+      hn = Tensor.cat(*[self.slot_spec_h[g].shrink(((par*(k+1), (par+1)*(k+1)), None)).assign(hn_all[g*(k+1):(g+1)*(k+1)])
                         for g, (_, _, par) in enumerate(groups)])
       tok = self._sample(hn, temps, y.device, (seed, Tensor.arange(n*(k+1))) if seed is not None else None)
-    finally: _batch_rows[0], Q8_ROWS_I8[0] = None, False
+      if G:
+        # the prompts: their MTP layer's caches, the token after every one (their hidden states written after the groups')
+        _batch_rows[0], _batch_prefill[0] = [(st, P) for st in pvs[2*G:]], (pf:=replace(pf, off=0))
+        ptok = self._prompt_ends(hn_all[n*(k+1):], emb, pf, self._batch_temp[2*n:2*(n+G)].reshape(G, 2))
+        pf.effects.append(self._bpf_out[:, :G].assign(Tensor(o.uop.mselect(0)) if isinstance((o:=ptok.reshape(1, G).cast(dtypes.int32)).device, tuple)
+                                                      else o))
+    finally: _batch_rows[0], _batch_prefill[0], Q8_ROWS_I8[0] = None, None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(n, k+1).cat(*[d.reshape(n, 1) for d in drafts], dim=1).reshape(1, n*(2*k+1)).cast(dtypes.int32)
-    return self._bspec_out[:, :n*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
+    ret = self._bspec_out[:, :n*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
+    if G: Tensor.realize(ret, *pf.effects)
+    return ret
 
-  BPF_G, BPF_P = getenv("BPF_G", 8), getenv("BPF_P", 168)  # prefills in a step of them: prompts, their rows (at most)
-  def forward_batch_prefill(self, *vs:UOp) -> Tensor:
+  def _ints(self, xs:tuple[UOp, ...]) -> Tensor:
+    """variables as an int32 tensor of the devices (a stack of variables has no device: onto zeros of the devices)"""
+    devs = self.token_embd.weight.device
+    return (Tensor.zeros(len(xs), dtype=dtypes.int32, device=devs) + Tensor.stack(*[Tensor(x) for x in xs]).cast(dtypes.int32)).contiguous()
+  def _prompt_ends(self, hn:Tensor, emb:Tensor, pf:BatchPrefill, temps:Tensor) -> Tensor:
+    """
+    prompts prefilled into slots (pf's, _batch_rows theirs): the MTP layer on their rows (its caches, a token's input the hidden state hn of the
+    one before, zero before the first), the hidden state of every one's last token its slot's (speculative decoding's row 0). returns (G,) the
+    token after every one (sampled at temps (G, 2))
+    """
+    G, P, k = len(pf.count_vars), pf.P, self.config.spec_drafts
+    before = hn.reshape(G, P, -1)[:, :P-1].pad(((0, 0), (1, 0), (0, 0))).reshape(1, G*P, -1)
+    if k: pf.effects.append(self.mtp(self.mtp.eh_proj(self.mtp.enorm(emb).cat(self.mtp.hnorm(before), dim=-1)), 0)[:, :1, :1].contiguous())
+    last = Tensor.cat(*[hn.shrink(((g*P + c - 1, g*P + c), None)) for g, c in enumerate(pf.count_vars)])
+    if k: pf.effects.extend([self.pool_spec_h.shrink(((sl*2*(k+1), sl*2*(k+1)+1), None)).assign(last[g:g+1]) for g, sl in enumerate(pf.slot_vars)])
+    return self._sample(last, temps, self._bpf_in.device)
+
+  BPF_G = getenv("BPF_G", 8)  # prefills in a step of them: prompts at most
+  # (BPF_PS: the rows of a prompt of a step, a jit each (a step's prompts padded to the smallest that fits them), BPF_P the most)
+  BPF_PS = tuple(sorted({int(x) for x in str(getenv("BPF_PS", getenv("BPF_P", 168))).split(",") if x}))
+  BPF_P = max(BPF_PS)
+  BPF_ROWS = getenv("BPF_ROWS", BPF_G * min(BPF_PS))  # (a step's rows at most: its memory)
+  def forward_batch_prefill(self, *vs:UOp, P:int|None=None) -> Tensor:
     """
     prefills of G prompts into slots (from position 0): vs the token counts and the slots of the G, their P tokens (padded) in _bpf_in, their
     temperatures in _batch_temp. the model and the MTP layer on all of them (the caches and states of the slots), the token after every one's
     last. returns (1, G) the tokens
     """
-    G, P, devs, k = len(vs) // 3, self.BPF_P, self.token_embd.weight.device, self.config.spec_drafts
+    G, P, devs = len(vs) // 3, P or self.BPF_P, self.token_embd.weight.device
     cvars, svars, stvars = vs[:G], vs[G:2*G], vs[2*G:3*G]
-    # (a stack of variables has no device: onto zeros of the devices)
-    def ints(xs:tuple[UOp, ...]) -> Tensor:
-      return (Tensor.zeros(len(xs), dtype=dtypes.int32, device=devs) + Tensor.stack(*[Tensor(x) for x in xs]).cast(dtypes.int32)).contiguous()
-    pf = BatchPrefill(P, ints(cvars), ints(svars), cvars, svars, starts=ints(stvars) if stvars else None)
+    pf = BatchPrefill(P, self._ints(cvars), self._ints(svars), cvars, svars, starts=self._ints(stvars) if stvars else None)
     _batch_rows[0] = [(st, P) for st in stvars] if stvars else [(UOp.const(0, dtypes.weakint), P)] * G
     _batch_prefill[0], Q8_ROWS_I8[0] = pf, False
     try:
@@ -2116,14 +2214,7 @@ class Transformer:
       else:
         for block in self.blk: x = block(x, 0)
         if hc is not None: x = x.mean(2)
-      hn = self.output_norm(x).float()  # (1, G*P, D)
-      # the MTP layer on every prompt (its caches): a token's input is the hidden state of the one before (zero before the first)
-      before = hn.reshape(G, P, -1)[:, :P-1].pad(((0, 0), (1, 0), (0, 0))).reshape(1, G*P, -1)
-      if k: pf.effects.append(self.mtp(self.mtp.eh_proj(self.mtp.enorm(emb).cat(self.mtp.hnorm(before), dim=-1)), 0)[:, :1, :1].contiguous())
-      # the last token of every prompt: the next token, its hidden state the slot's (speculative decoding's row 0)
-      last = Tensor.cat(*[hn[0].shrink(((g*P + c - 1, g*P + c), None)) for g, c in enumerate(cvars)])
-      if k: pf.effects.extend([self.pool_spec_h.shrink(((sl*2*(k+1), sl*2*(k+1)+1), None)).assign(last[g:g+1]) for g, sl in enumerate(svars)])
-      tok = self._sample(last, self._batch_temp[:2*G].reshape(G, 2), self._bpf_in.device)
+      tok = self._prompt_ends(self.output_norm(x).float()[0], emb, pf, self._batch_temp[:2*G].reshape(G, 2))
     finally: _batch_rows[0], _batch_prefill[0] = None, None
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(1, G).cast(dtypes.int32)
@@ -2138,26 +2229,35 @@ class Transformer:
     return self.BPF_G if self.batch_sizes() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
       (not seq_sharded(self.token_embd.weight.device) or getenv("BPF_SEQ", 0)) and \
       self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
-  def bpf_sizes(self) -> tuple[int, ...]:
-    """the prompts of a batch_prefill step (a jit each): BPF_GS (sizes up to BPF_G), a batch of n runs the smallest one of n or more"""
-    return tuple(sorted({g for g in (int(x) for x in str(getenv("BPF_GS", "")).split(",") if x) if 0 < g <= self.BPF_G} | {self.BPF_G}))
-  def _bpf_jit(self, G:int|None=None):
-    if not hasattr(self, "_bpf_jits"): self._bpf_jits:dict[int, Any] = {}
-    if (G:=G or self.BPF_G) not in self._bpf_jits:
-      self._bpf_jits[G] = TinyJit(self.forward_batch_prefill, capture_first=True, scratch=self._scratch)
-    return self._bpf_jits[G]
+  def bpf_sizes(self, P:int|None=None) -> tuple[int, ...]:
+    """
+    the prompts of a batch_prefill step of prompts of P rows (a jit each): BPF_GS (sizes up to BPF_G, at most BPF_ROWS rows), a batch of n runs
+    the smallest one of n or more
+    """
+    P = P or min(self.BPF_PS)
+    gs = {g for g in (int(x) for x in str(getenv("BPF_GS", "")).split(",") if x) if 0 < g <= self.BPF_G} | {self.BPF_G}
+    return tuple(sorted({g for g in gs if g * P <= self.BPF_ROWS and self.sequence_parallel(g * P)} or {1}))
+  def bpf_class(self, n:int) -> int|None:
+    """the rows of the batch_prefill steps of prompts of n tokens at most (the smallest of BPF_PS), None: more than BPF_P"""
+    return next((p for p in self.BPF_PS if p >= n), None)
+  def _bpf_jit(self, G:int|None=None, P:int|None=None):
+    if not hasattr(self, "_bpf_jits"): self._bpf_jits:dict[tuple[int, int], Any] = {}
+    if (key:=(G or self.BPF_G, P or self.BPF_P)) not in self._bpf_jits:
+      self._bpf_jits[key] = TinyJit(functools.partial(self.forward_batch_prefill, P=key[1]), capture_first=True, scratch=self._scratch)
+    return self._bpf_jits[key]
   def _bpf_vars(self, counts:list[int], slots:list[int], starts:list[int]|None=None) -> list[UOp]:
-    return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
+    return [UOp.variable(f"bpf_count{g}", 1, max(self.BPF_P, *self.MIX_PS)).bind(c) for g, c in enumerate(counts)] + \
            [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)] + \
            [UOp.variable(f"bpf_start{g}", 0, self.batch_ctx()-1).bind(st) for g, st in enumerate(starts or [0]*len(counts))]
-  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]], starts:list[int]|None=None) -> list[int]:
+  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]], starts:list[int]|None=None, P:int|None=None) -> list[int]:
     """
     prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one.
-    starts: the positions they start at (a conversation continued from its states in the slot at the position), None: 0
+    starts: the positions they start at (a conversation continued from its states in the slot at the position), None: 0. P: the step's rows
+    of a prompt (one of BPF_PS), None: the smallest that fits them
     """
     self._init_slots()
-    P, n = self.BPF_P, len(prompts)
-    G = next(g for g in self.bpf_sizes() if g >= n)
+    P, n = P or cast(int, self.bpf_class(max(len(t) for t, _, _ in prompts))), len(prompts)
+    G = next(g for g in self.bpf_sizes(P) if g >= n)
     assert 0 < n <= G and all(0 < len(t) <= P for t, _, _ in prompts)
     starts = (starts or [0] * n) + [(starts or [0] * n)[-1]] * (G - n)
     assert all(st + P <= self.batch_ctx() for st in starts), "a prompt past its slot"
@@ -2167,7 +2267,7 @@ class Transformer:
       self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
       self._batch_host_temp[2*g:2*g+2] = _temp_pair(temp)
     self._bpf_host_out[:G] = array.array('i', [-1] * G)
-    self._bpf_jit(G)(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts], starts))
+    self._bpf_jit(G, P)(*self._bpf_vars([len(t) for t, _, _ in prompts], [s for _, s, _ in prompts], starts))
     st = time.perf_counter()
     while min(self._bpf_host_out[:G]) < 0:
       if time.perf_counter() - st > 10:
@@ -2214,6 +2314,59 @@ class Transformer:
         if min(self._bspec_host_out[:m*(2*k+1)]) < 0: raise RuntimeError(f"batched step of {m} sequences: no tokens after the devices finished")
     out = list(self._bspec_host_out[:n*(2*k+1)])
     return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)]
+
+  # (mixed steps: the rows of a prompt (a jit each, a step's prompts padded to the smallest that fits them), the steps of decoding they're of)
+  MIX_PS = tuple(sorted({int(x) for x in str(getenv("MIX_PS", "192,384")).split(",") if x}))
+  def mix_sizes(self) -> tuple[int, ...]:
+    """the sizes of the steps of decoding with mixed steps (MIX_SIZES, default the largest): fewer sequences step without prompts"""
+    sizes = self.batch_sizes()
+    return tuple(sorted({int(x) for x in str(getenv("MIX_SIZES", "")).split(",") if x and int(x) in sizes} or set(sizes[-1:])))
+  def mix_class(self, n:int) -> int|None:
+    """the rows of the mixed step of a prompt of n tokens (the smallest of MIX_PS), None: more"""
+    return next((p for p in self.MIX_PS if p >= n), None)
+  def _mix_jit(self, m:int, G:int, P:int):
+    if not hasattr(self, "_mix_jits"): self._mix_jits:dict[tuple[int, int, int], Any] = {}
+    if (key:=(m, G, P)) not in self._mix_jits:
+      self._mix_jits[key] = TinyJit(functools.partial(self.forward_batch_spec, prompts=(G, P)), capture_first=True, scratch=self._scratch)
+    return self._mix_jits[key]
+
+  def batch_mixed_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]],
+                       prompts:list[tuple[list[int], int, float|tuple[float, float], int]], P:int|None=None) \
+                       -> tuple[list[tuple[list[int], list[int]]], list[int]]:
+    """
+    a step of batched speculative decoding (as batch_spec_step's) with the prefills of prompts (tokens, slot, temperature, start): their
+    conversations continued from their states in the slots at start (landing slots, see mix_landing). returns the sequences' step and the
+    token after every prompt. P: the rows of a prompt, None: the smallest of MIX_PS that fits them
+    """
+    self._init_slots()
+    self._slot_writes()
+    k, n, G = self.config.spec_drafts, len(seqs), len(prompts)
+    m = next(s for s in self.mix_sizes() if s >= n)
+    P = P or cast(int, self.mix_class(max(len(t) for t, _, _, _ in prompts)))
+    assert 0 < G <= self.mix_landing() and all(0 < len(t) <= P and st + P <= self.batch_ctx() for t, _, _, st in prompts)
+    seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
+    def pair(temp:float|tuple[float, float]) -> tuple[float, float]: return temp if isinstance(temp, tuple) else (temp, 1.0)
+    self._bspec_host_in[:m*(k+1)] = array.array('i', [t for y, _, _, _, _ in seqs for t in y])
+    self._batch_host_temp[:2*(m+G)] = array.array('f', [v for *_, temp in seqs for v in pair(temp)] + [v for _, _, temp, _ in prompts
+                                                                                                     for v in pair(temp)])
+    for g, (toks, _, _, _) in enumerate(prompts): self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
+    self._bspec_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
+    self._bpf_host_out[:G] = array.array('i', [-1] * G)
+    jit = self._mix_jit(m, G, P)
+    pvals = [len(t) for t, _, _, _ in prompts] + [s for _, s, _, _ in prompts] + [st for _, _, _, st in prompts]
+    if (cap:=getattr(jit, "captured", None)) is not None and getenv("BSPEC_FAST_CALL", 1):
+      names = [f"bpf_{x}{g}" for x in ("count", "slot", "start") for g in range(G)]
+      cap([], {name: v for g, (_, mp, j, par, _) in enumerate(seqs)
+               for name, v in ((f"bspec_mtp{g}", mp), (f"bspec_j{g}", j), (f"bspec_par{g}", par))} | dict(zip(names, pvals)))
+    else: jit(*self._bspec_vars([(mp, j, par) for _, mp, j, par, _ in seqs]), *self._bpf_vars(pvals[:G], pvals[G:2*G], pvals[2*G:]))
+    st = time.perf_counter()
+    while min(self._bspec_host_out[:m*(2*k+1)]) < 0 or min(self._bpf_host_out[:G]) < 0:
+      if time.perf_counter() - st > 10:
+        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+        if min(self._bspec_host_out[:m*(2*k+1)]) < 0 or min(self._bpf_host_out[:G]) < 0:
+          raise RuntimeError(f"mixed step of {m} sequences: no tokens after the devices finished")
+    out = list(self._bspec_host_out[:n*(2*k+1)])
+    return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)], list(self._bpf_host_out[:G])
 
   def _init_states(self):
     """the states and caches of the blocks, realized (the jits capture on their first call: not the one time setup)"""
@@ -2511,6 +2664,12 @@ class Transformer:
     # (a sequence sharded cache (a long context): one after the other, the weights read before the caches are made (their memory is the device's))
     if getenv("WARMUP_PARALLEL", 0 if seq_sharded(self.token_embd.weight.device) else 1): self._capture_parallel(sizes)
     self._finish_load()
+    # (mixed steps first, the most rows first: their scratch memory can be more than a prefill's (the slots' memory made for them))
+    if (land:=self.mix_landing()):
+      self._alloc_slots()
+      k = self.config.spec_drafts
+      for m, G, P in sorted(itertools.product(self.mix_sizes(), range(1, land+1), self.MIX_PS), key=lambda x: -x[0]*(k+1)-x[1]*x[2]):
+        self.batch_mixed_step([([0]*(k+1), 1, 0, 1, 0.0)] * m, [([0], self.decode_slots() + g, 0.0, 0) for g in range(G)], P=P)
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
       self._cached_tokens, self._ckpt_tokens = [], []
@@ -2525,8 +2684,9 @@ class Transformer:
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
       else: self.batch_step([(0, 1, 0.0)] * m)
     if self.batch_prefills():
-      for G in self.bpf_sizes(): self.batch_prefill([([0], 0, 0.0)] * G)
-      self.ckpt_from_slot(0, 1)  # (a prompt prefilled in a slot: its checkpoint, see the server)
+      for P in self.BPF_PS:
+        for G in self.bpf_sizes(P): self.batch_prefill([([0], 0, 0.0)] * G, P=P)
+    if self.batch_prefills() or land: self.ckpt_from_slot(0, 1)  # (a prompt prefilled in a slot: its checkpoint, see the server)
     # (the staging rows of host_save and host_load: their copies captured)
     self._host_rows(1, True), self._host_rows(1, False)
     self._cached_tokens, self._ckpt_tokens = [], []
@@ -2574,12 +2734,19 @@ class Transformer:
                 (self._slot_load_jit, lambda: self._slot_load_jit(*self._slot_store_vars(0, 1, 0)))]
       if slots > 1: calls += [(self._slot_move_jit, lambda: self._slot_move_jit(*self._slot_move_vars(1, 0)))]
       for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit): setattr(j, "link_later", True)
+      # (and the mixed steps)
+      for m, G, P in itertools.product(self.mix_sizes(), range(1, self.mix_landing()+1), self.MIX_PS):
+        mix = self._mix_jit(m, G, P)
+        calls.append((mix, functools.partial(mix, *self._bspec_vars([(0, 0, 1)]*m),
+                                             *self._bpf_vars([1]*G, [self.decode_slots() + g for g in range(G)], [0]*G))))
+        mix.link_later = True
       # (and the prefills of several prompts)
       if self.batch_prefills():
-        for G in self.bpf_sizes():
-          bpf = self._bpf_jit(G)
-          calls.append((bpf, functools.partial(bpf, *self._bpf_vars([1]*G, [0]*G, [0]*G))))
-          bpf.link_later = True
+        for P in self.BPF_PS:
+          for G in self.bpf_sizes(P):
+            bpf = self._bpf_jit(G, P)
+            calls.append((bpf, functools.partial(bpf, *self._bpf_vars([1]*G, [0]*G, [0]*G))))
+            bpf.link_later = True
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile():
       # (the jits of the computations left run after: they're compiled meanwhile)
