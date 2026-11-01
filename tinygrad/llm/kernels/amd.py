@@ -1388,9 +1388,10 @@ def _p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   """(threads, values a thread) of a p2p allreduce of n values: a workgroup's at most P2P_AR_MAXW, at most P2P_AR_MAXG of them"""
   if (T:=getenv("P2P_AR_T")) and n % (T*(EP:=getenv("P2P_AR_EP", 1))) == 0 and n // (T*EP) <= P2P_AR_MAXG and T*EP <= P2P_AR_MAXW: return T, EP
-  # (measured: a whole step's rows in one allreduce of workgroups of 1024 threads, 4 words each: ~0.6x the time of 4 parts of 256x4. more of
-  # them (or more workgroups) are slower: the ones that poll keep the others from running)
-  if n >= getenv("P2P_AR_BIG", 32768) and n % 4096 == 0 and n // 4096 <= P2P_AR_MAXG and P2P_AR_MAXW >= 4096: return 1024, 4
+  # (measured: a whole step's rows in one allreduce of workgroups of 512 threads, 8 words each: ~0.65x the time of 4 parts of 256x4. its
+  # workgroups have to run at once on every device (a polling one waits for its peers' of the same index): 1024 threads each (as fast)
+  # left some waiting for compute units in a server, every device's poll ran to its deadline (50 ms, its sums wrong) in a step of four)
+  if n >= getenv("P2P_AR_BIG", 32768) and n % 4096 == 0 and n // 4096 <= P2P_AR_MAXG and P2P_AR_MAXW >= 4096: return 512, 8
   # (measured: small ones in many narrow workgroups, larger ones in up to 24 of 256 threads)
   for T, EP in (((128, 1),) if n <= 2048 else ()) + ((256, 1), (256, 2), (256, 4)):
     if n % (T*EP) == 0 and n // (T*EP) <= (P2P_AR_MAXG if n <= 2048 else 24): return T, EP
