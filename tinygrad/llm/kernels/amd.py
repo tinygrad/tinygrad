@@ -2801,6 +2801,8 @@ def weighted_sum(x:Tensor, p:Tensor) -> Tensor|None:
   generic reduction is ~2.5x slower). a leading device axis (partials) stays. None: not those shapes
   """
   *lead, S, D = x.shape
+  # (a leading device axis of partials, or none: not rows split over the devices (sequence parallel))
+  if isinstance(x.device, tuple) and x.uop.axis not in (0, None) or tuple(p.shape) != tuple(x.shape[:-1]): return None
   dev_axis = isinstance(x.device, tuple) and x.uop.axis == 0
   R = int(prod(lead[1:] if dev_axis else lead))
   if not all(isinstance(v, int) for v in (*lead, S, D)) or int(D) % 8 or (R * int(D) // 8) % 256 or not amd_custom_kernels_supported(x.device) or \
