@@ -35,10 +35,11 @@ class SimpleTokenizer:
       sfx = "" if preset == "tekken" else f"{contr}?"
       r_w = f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
       if preset != "kimi-k2": r_p = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*"
+    self._pre_split = None
     if preset == "joyai-llm":
       r_ps = ucat_range(("P", "S"))
       r_p, r_w = f" ?[{r_ps}]+[\\r\\n]*", f"[{re.escape(string.punctuation)}][A-Za-z]+|[^\\r\\n{r_p_L}{r_ps}]?[{r_p_L}{ucat_range('M')}]+"
-      # numbers and CJK runs are split off before the words, text that no pattern matches is a word too
+      # numbers and CJK runs are split off before the words
       self._pre_split = re.compile(f"({r_n}|[\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff]+)")
     self._split_to_word = re.compile(f"({r_w}|{r_n}|{r_p}|{r_t})")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
@@ -85,8 +86,8 @@ class SimpleTokenizer:
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
-    if self.preset == "joyai-llm": words = [w for p in self._pre_split.split(chunk) for w in self._split_to_word.split(p) if w]
-    else: words = self._split_to_word.findall(chunk)
+    if self._pre_split is None: words = self._split_to_word.findall(chunk)
+    else: words = [w for p in self._pre_split.split(chunk) for w in self._split_to_word.split(p) if w]
     return [tok for word in words for tok in self._encode_word(word.encode())]
   def encode(self, text:str) -> list[int]:
     tokens: list[int] = []

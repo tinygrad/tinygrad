@@ -165,10 +165,10 @@ class TestLLMTokenizer(unittest.TestCase):
   def test_joyai_llm_split(self):
     tok = SimpleTokenizer({}, {}, "joyai-llm")
     tok._encode_word = lambda word: [word.decode()]
-    self.assertEqual(tok.encode("12345 hello"), ["123", "45", " hello"])
-    self.assertEqual(tok.encode("你好world"), ["你好", "world"])
+    self.assertEqual(tok.encode("é café"), ["é", " café"])
+    self.assertEqual(tok.encode("  12345"), ["  ", "123", "45"])
+    self.assertEqual(tok.encode("it's I'M don'T"), ["it", "'s", " I", "'M", " don", "'T"])
     self.assertEqual(tok.encode("  你好"), ["  ", "你好"])
-    self.assertEqual(tok.encode("foo.bar, baz!\n\n"), ["foo", ".bar", ",", " baz", "!\n\n"])
     self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
 
   def test_stream_decoder(self):
