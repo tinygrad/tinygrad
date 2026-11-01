@@ -168,7 +168,7 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertEqual(tok.encode("é café"), ["é", " café"])
     self.assertEqual(tok.encode("  12345"), ["  ", "123", "45"])
     self.assertEqual(tok.encode("it's I'M don'T"), ["it", "'s", " I", "'M", " don", "'T"])
-    self.assertEqual(tok.encode("  你好"), ["  ", "你好"])
+    self.assertEqual(tok.encode("  你好hello"), ["  ", "你好", "hello"])
     self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
 
   def test_stream_decoder(self):
