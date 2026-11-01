@@ -337,9 +337,14 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
   def disassemble(self, lib:bytes): pass
+  _servers: dict[tuple[str, ...], subprocess.Popen] = {}
   def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
     argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
-    return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+    # one server per process: renderers are rebuilt for every BEAM task, and each server can be a new docker container
+    key = tuple(argv.split() + [str(a) for a in args])
+    if (proc:=Compiler._servers.get(key)) is None or proc.poll() is not None:
+      proc = Compiler._servers[key] = subprocess.Popen(list(key), stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+    return proc
   def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
     unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
     if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib

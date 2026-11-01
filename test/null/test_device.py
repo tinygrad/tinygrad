@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, os, subprocess
+import unittest, os, subprocess, sys
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
 from tinygrad.device import Device, Compiler, enumerate_devices_str
@@ -187,6 +187,17 @@ class TestCompiler(unittest.TestCase):
     with Context(CCACHE=0):
       self.assertEqual(MockCompiler("disabled_key").compile_cached("123"), str.encode("123"))
       self.assertIsNone(diskcache_get("disabled_key", "123"))
+
+  def test_compile_server_reused(self):
+    # renderers (and their compilers) are rebuilt for every BEAM task, each must not spawn a new server process
+    p1, p2 = Compiler().server(sys.executable, "reuse"), Compiler().server(sys.executable, "reuse")
+    self.assertIs(p1, p2)
+    p1.kill()
+    p1.wait()
+    p3 = Compiler().server(sys.executable, "reuse")
+    self.assertIsNot(p3, p1)
+    self.assertIsNone(p3.poll())
+    p3.kill()
 
   def test_device_compile(self):
     getenv.cache_clear()
