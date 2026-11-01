@@ -107,8 +107,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object, int|tuple[int, int]], dict[int, list[UOp]]] = defaultdict(dict)
+  # depth[u] is the lexicographically largest (GLOBAL stores, LOCAL stores) count on any chain u waits on, u included
+  depth: dict[UOp, tuple[int, int]] = {}
   for u in sink.toposort():
+    depth[u] = waits = max([depth[s] for s in u.src_without_body], default=(0, 0))
+    if u.op is Ops.STORE: depth[u] = (waits[0]+(u.src[0].addrspace is AddrSpace.GLOBAL), waits[1]+(u.src[0].addrspace is AddrSpace.LOCAL))
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
@@ -123,11 +127,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       elif idx.op is Ops.CONST: root_src, arg = None, idx.val
       else: root_src, arg = idx, 0
       # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
-      memory[(u.op, buf, root_src, valid, u.arg)].setdefault(arg, []).append(u)
+      # and the same depth (GLOBAL count only for GLOBAL accesses), so no merge closes a dependency cycle
+      memory[(u.op, buf, root_src, valid, u.arg, waits[0] if buf.addrspace is AddrSpace.GLOBAL else waits)].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,_,_,ld_arg),offsets in memory.items():
+  for (op,buf,_,_,ld_arg,_),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
