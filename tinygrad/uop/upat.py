@@ -53,7 +53,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
         pred.append(UOp(Ops.CUSTOM, src=(st.src[1], first), arg=("{0} is {1}", dtypes.void)))
         and_clause.append(UOp(Ops.STORE, src=(st.src[0], first)))
       if len(stores): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src) != 0", dtypes.void)))
-      and_clause.append(UOp(Ops.CUSTOM, src=(UOp(Ops.AND, src=tuple(pred)), it, base), arg=("all([{0} for {1} in {2}.src])", dtypes.void)))
+      and_clause.append(UOp(Ops.CUSTOM, src=(UOp(Ops.AND, src=tuple(pred)), it, base), arg=("all({0} for {1} in {2}.src)", dtypes.void)))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
