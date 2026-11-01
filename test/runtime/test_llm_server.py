@@ -43,7 +43,7 @@ class TestTransformerGenerate(unittest.TestCase):
   def test_recurrent_divergent_prompt_restarts(self):
     model, calls = Transformer(TEST_CONFIG), []
     model.has_recurrent_block, model._cached_tokens = True, [1, 2, 9]
-    def mock_call(self, tokens, start_pos, temperature):
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
       calls.append(start_pos)
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call): next(model.generate([1, 2, 10, 11]))
