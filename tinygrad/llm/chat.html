@@ -30,7 +30,10 @@
   let generating = false;
   input.onkeydown = chat.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault(); if (generating || !model.value) return;
-    const t = e.target; if (t !== input) { input.value = t.textContent; input.focus(); msgs.length = t.dataset.i; while (t.isConnected) chat.lastChild.remove(); }
+    if (e.target !== input) {
+      input.value = e.target.innerText; input.focus(); msgs.length = e.target.dataset.i;
+      while (e.target.isConnected) chat.lastChild.remove();
+    }
     generating = true; send().finally(() => generating = false);
   } };
   chat.addEventListener('focusout', ({target: t}) => { if (t.dataset.i) t.textContent = msgs[t.dataset.i].content });
@@ -39,7 +42,7 @@
   async function send() {
     if (!input.value.trim()) return;
     msgs.push({role: 'user', content: input.value.trim()});
-    chat.innerHTML += '<div class="msg user" contenteditable="plaintext-only" data-i="' + (msgs.length - 1) + '">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
+    chat.innerHTML += '<div class="msg user" contenteditable data-i="' + (msgs.length - 1) + '">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     d.innerHTML = '<span style="color:#888"></span><div class="answer"></div>'; const [thinking, answer] = d.children;
