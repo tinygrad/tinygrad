@@ -88,6 +88,13 @@ class CapturedJit(Generic[ReturnType]):
     self._linears.clear()
     _launch_args.clear()  # (the relinked calls can be the same: their buffers are allocated again)
 
+  def rebase(self, arenas:dict[UOp, UOp]):
+    """the arenas of its intermediates replaced by bigger ones (another jit sharing them needs more): relinked on its next call"""
+    if not any(u in arenas for u in self._jit_bufs): return
+    self._linear = self._linear.substitute(arenas, walk=True)
+    self.__dict__.pop("_jit_bufs", None)
+    self.free_intermediates()
+
 _input_infos:weakref.WeakKeyDictionary[UOp, tuple] = weakref.WeakKeyDictionary()
 def _input_info(u:UOp) -> tuple[UOp, dict[Variable, int], DType, str|tuple[str, ...]]:
   # the view of an input without its buffer, its bound variables, dtype and device: the same for every call with it (not kept alive by it)
@@ -115,6 +122,9 @@ def _prepare_jit_inputs(args, kwargs):
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
   return input_buf_uops, var_vals, names, expected_input_info
 
+# the jits sharing a scratch (by its id)
+_scratch_jits:dict[int, weakref.WeakSet] = {}
+
 class _TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, capture_first=False,
                scratch:dict|None=None):
@@ -125,6 +135,7 @@ class _TinyJit(Generic[ReturnType]):
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 1 if capture_first else 0
     self.prune, self.scratch = prune, scratch
+    if scratch is not None: _scratch_jits.setdefault(id(scratch), weakref.WeakSet()).add(self)
 
   def add_linear(self, linear:UOp): self._linears.append(linear)
 
@@ -177,7 +188,13 @@ class _TinyJit(Generic[ReturnType]):
       def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
+      before = dict(self.scratch) if self.scratch is not None else {}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals, self.scratch)
+      # (an arena it needs bigger: the other jits sharing it take the new one, the old one is freed before it's allocated)
+      grown = {u: self.scratch[k] for k, u in before.items() if self.scratch is not None and self.scratch.get(k) is not u}
+      for j in list(_scratch_jits.get(id(self.scratch), ())) if grown else []:
+        if j is not self and j.captured is not None: j.captured.rebase(grown)
+      del before, grown
       if _forked_capture and _forked_capture[0] is self: _forked_capture[1](ret, linear, names, expected_input_info) # (doesn't return)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec

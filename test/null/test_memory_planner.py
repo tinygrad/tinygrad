@@ -273,5 +273,21 @@ class TestMemoryPlanner(unittest.TestCase):
     self.assertIsNot(a3, a1)
     self.assertGreaterEqual(a3.max_numel(), 2<<16)
 
+  def test_jits_take_a_grown_arena(self):
+    # a jit that needs a bigger arena than the jits sharing it: they take the new one (relinked on their next call), the old one isn't kept
+    from tinygrad import Tensor, TinyJit
+    scratch:dict = {}
+    def f(x:Tensor) -> Tensor: return ((x*2).contiguous() + 1).contiguous().sum(0)
+    small, big = TinyJit(f, scratch=scratch), TinyJit(f, scratch=scratch)
+    xs, xb = Tensor.empty(64, 256, device="NULL").realize(), Tensor.empty(4096, 256, device="NULL").realize()
+    for _ in range(3): small(xs)
+    old = set(scratch.values())
+    for _ in range(3): big(xb)
+    arenas = set(scratch.values())
+    self.assertFalse(old & arenas)
+    assert small.captured is not None and big.captured is not None
+    self.assertTrue(arenas & small.captured._jit_bufs and not old & small.captured._jit_bufs)
+    small(xs)
+
 if __name__ == "__main__":
   unittest.main()
