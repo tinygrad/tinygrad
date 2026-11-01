@@ -28,6 +28,18 @@ def compare_weights_both(url):
   print(f"compared {len(tg_weights)} weights")
 
 class TestTorchLoad(TempDirTestCase):
+  def test_load_strided(self):
+    import torch
+    t = torch.arange(1., 13.).reshape(3, 4)
+    torch.save({"col": t[:, 1], "step": t[::2], "block": t[:, 1:3], "empty": t[:, 1:1]}, self.tmp("strided.pt"))
+    ret = torch_load(self.tmp("strided.pt"))
+    self.assertEqual(ret["col"].tolist(), [2., 6., 10.])
+    self.assertEqual(ret["step"].tolist(), [[1., 2., 3., 4.], [9., 10., 11., 12.]])
+    self.assertEqual(ret["block"].tolist(), [[2., 3.], [6., 7.], [10., 11.]])
+    self.assertEqual(ret["empty"].shape, (3, 0))
+    torch.save({"empty": t.to(torch.bfloat16)[:, 1:1]}, self.tmp("strided_bf16.pt"))
+    self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["empty"].shape, (3, 0))
+
   # pytorch pkl format
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
