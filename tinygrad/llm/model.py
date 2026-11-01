@@ -926,8 +926,8 @@ class Transformer:
     for p in range(start, len(tokens)):
       ctx = [ple.eos if p < i or ple.eos in tokens[p-i:p] else tokens[p-i] for i in range(n)]
       hashes = list(itertools.accumulate((c*m for c,m in zip(ctx, ple.multipliers)), lambda a,b: a^b))[1:]
-      rows[p*h*rb:(p+1)*h*rb] = b"".join(table[i*rb:(i+1)*rb] for i in (hashes[j*(n-1)//h] % v + o for j,(v,o) in
-                                                                          enumerate(zip(ple.vocab_sizes, ple.offsets))))
+      ids = [hashes[j*(n-1)//h] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))]
+      rows[p*h*rb:(p+1)*h*rb] = b"".join(table[i*rb:(i+1)*rb] for i in ids)
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
