@@ -316,12 +316,10 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
   dtype = strong_dtype(dtype)
-  if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8
-  # NOTE: torch doesn't expose this mapping with a stable API
-  try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
-  except TypeError: return None
+  if (np_dtype := _to_np_dtype(dtype)) is None: return None
+  return getattr(torch, np.dtype(np_dtype).name, None)
 @functools.cache
 def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   return {v:k for k in DTYPES_DICT.values() if (v:=_to_torch_dtype(k)) is not None}[torchdtype]
