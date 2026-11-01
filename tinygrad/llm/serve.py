@@ -588,6 +588,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def taken(self, active:dict) -> set[int]:
     """the slots taken: decoded, and (WIDE) the ones after them a sequence's positions are in"""
     return set(active) | set(self.partner.values())
+  def free_slots(self, active:dict) -> int:
+    """the slots free: not taken, not the ones the requests landing (MIX) go into"""
+    return self.slots - len(self.taken(active)) - len(self.landing)
   def free_slot(self, active:dict, wide:bool=False) -> int|None:
     """a free slot (wide: one with the next free too, not the last), None: none"""
     taken = self.taken(active)
@@ -882,7 +885,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         model._ckpt_tokens = list(req.ids)
         self.ckpt_keep(req)
         model._ckpt_tokens = []
-      slot = typing.cast(int, self.free_slot(active))
+      # (a free slot is kept for every one landing, see free_slots)
+      if (slot:=self.free_slot(active)) is None: raise RuntimeError(f"mixed step: no free slot for req {req.rid}")
       self.slot_taken(slot)
       model.slot_move(landing, slot)
       req.cache_start, req.pos = start, n
@@ -1071,7 +1075,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             n = len(r.ids) + len(r.generated)
             return self.batchable(r) and n <= room and n - self.stash_hit(r.ids + r.generated, set(active)) <= most
           # (fewer than a step's worth while others decode: they wait BCP_WAIT seconds at most for more, agents' turns come one at a time)
-          while len(batch:=self.bcp_batch([r for r in pending if cont(r)], min(G, slots - len(active)), set(active))) >= BCP_MIN and \
+          while len(batch:=self.bcp_batch([r for r in pending if cont(r)], min(G, self.free_slots(active)), set(active))) >= BCP_MIN and \
                 (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > getenv("BCP_WAIT", 1.5)):
             self.batch_continue(batch, active, pending)
           # (the ones that wait for more: not prefilled alone meanwhile. one that waited long enough is, if no others came)
@@ -1080,8 +1084,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # new requests into free slots: short prompts prefilled together into theirs, (the others) prefilled, their states copied into the slot
         def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]
         # (with a step's worth waiting, they wait for that many free slots)
-        defer = bool(G:=model.batch_prefills()) and bool(active) and len(shorts()) >= G and slots - len(active) < G
-        while G and not defer and not drain and len(short:=shorts()[:min(G, slots - len(active))]) >= BATCH_PREFILL_MIN:
+        defer = bool(G:=model.batch_prefills()) and bool(active) and len(shorts()) >= G and self.free_slots(active) < G
+        while G and not defer and not drain and len(short:=shorts()[:min(G, self.free_slots(active))]) >= BATCH_PREFILL_MIN:
           _p0 = time.perf_counter()
           free = [i for i in range(slots) if i not in self.taken(active)][:len(short)]
           self.slot_taken(*free)
@@ -1097,10 +1101,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if mixes: self.mix_take(mixes, active, pending, land)
         for req in self.admit_order([r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp and
                                      r not in mixes]):
-          if len(self.taken(active)) >= slots or drain: break
-          to = self.free_slot(active, wide:=self.wide(req))
+          if len(self.taken(active)) + len(self.landing) >= slots or drain: break
+          wide = self.wide(req)
+          to = self.free_slot(active, wide) if self.free_slots(active) >= 1 + wide else None
           # (WIDE: two free slots apart: a sequence moved for them to be next to each other. else it waits for them, before the others)
-          if to is None and wide: to = self.make_pair(active)
+          if to is None and wide and self.free_slots(active) >= 2: to = self.make_pair(active)
           if to is None: break
           slot = to
           _p0 = time.perf_counter()
@@ -1159,7 +1164,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               del active[i]
               continue
           if req.pos + k + 2 >= model.batch_ctx() and i not in self.partner and self.span_max() > 1 and i + 1 < slots and \
-             i + 1 not in self.taken(active):
+             i + 1 not in self.taken(active) and self.free_slots(active) > 0:
             # (WIDE) its slot is full, the next is free: its positions go on there
             self.partner[i] = i + 1
             self.slot_taken(i + 1)
