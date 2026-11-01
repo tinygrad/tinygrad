@@ -1,4 +1,5 @@
 import unittest, re, ast as pyast
+from dataclasses import replace
 from typing import Any
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
@@ -116,7 +117,7 @@ class TestSSARender(unittest.TestCase):
   def test_conv_noopt(self):
     o = Tensor.rand(1,1,6,6, device="CPU").conv2d(Tensor.rand(1,1,3,3, device="CPU"))
     with Context(NOOPT=1): sink = full_rewrite_to_sink(self._kernel(o), Device["CPU"].renderer, optimize=False)
-    assert_roundtrip(self, sink)
+    assert_roundtrip(self, sink.replace(arg=replace(sink.arg, estimates=None)))
 
   def test_gemm_kernel_graph(self):
     o = Tensor.rand(4,4, device="CPU").matmul(Tensor.rand(4,4, device="CPU"))

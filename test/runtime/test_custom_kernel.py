@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear, get_runtime
+from tinygrad.engine.realize import run_linear, compile_linear, estimate_uop, get_runtime
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
@@ -759,7 +759,11 @@ class TestCallInKernel(unittest.TestCase):
       return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=opts))
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    prg = compile_linear(out.schedule_linear())
+    est = estimate_uop(prg.src[-1])
+    run_linear(prg, update_stats=False)
     self.assertEqual(out.tolist(), [3, 6, 9, 12])
+    self.assertEqual((est.ops, est.mem), (4,32))
 
   def test_call_scalar_arg(self):
     @uopfunc
