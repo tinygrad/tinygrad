@@ -350,6 +350,7 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((x-1e8)+Tensor([1.])).tolist(), [1.])
     self.assertEqual(((Tensor([1e30])*1e10)*Tensor([1e-30])).tolist(), [math.inf])
     self.assertEqual(((x+y)+y).tolist(), [1e8])
+    self.assertEqual(((Tensor([1.])+1e8)-1e8).tolist(), [0.])
     self.assertEqual(((Tensor([1.])+(z:=Tensor([1e38]))*4)+z*-3).tolist(), [math.inf])
     self.assertEqual(((Tensor([1.])+z*-3.5)+z).tolist(), [-math.inf])
     self.assertEqual(((Tensor([1.])+c.where(1e8, x))+c.where(-1e8, x)).tolist(), [0.])
