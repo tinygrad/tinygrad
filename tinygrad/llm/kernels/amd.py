@@ -3246,7 +3246,7 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   def key_at(j) -> tuple[UOp, UOp]:
     i = n_tile * 16 + j
     key = index[itok, i.minimum(n_max-1)].load().cast(dtypes.weakint)
-    return off + key.maximum(0).minimum((stride or N)-1), (i < count) & (key < valid_len)
+    return off + key.maximum(0).minimum((stride*SLOT_SPAN or N)-1), (i < count) & (key < valid_len)
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
@@ -3353,6 +3353,9 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
 
 SEQ_BLK = getenv("SEQ_BLK", 64)
 
+# (WIDE) the slots a sequence of batched decoding spans at most: its positions past its slot's are the next slots' (not decoded meanwhile)
+SLOT_SPAN = getenv("WIDE", 1)
+
 def seq_rows(max_context:int, n:int) -> int:
   """the rows of a device's part of a sequence sharded cache of max_context positions over n devices"""
   return (max_context + SEQ_BLK*n - 1) // (SEQ_BLK*n) * SEQ_BLK
@@ -3383,8 +3386,8 @@ def _seq_store_grouped_kernel(cache:UOp, k:UOp, dev:UOp, positions:UOp, *slots:U
   p = positions[g].load().cast(dtypes.weakint) + r % Tg
   slot = slots[0][g].load().cast(dtypes.weakint) if slots else g
   local = (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK
-  # (a position past the slot's rows isn't stored: not into the next slot or past the pool)
-  ok = ((p // SEQ_BLK) % n).eq(dev[0].load().cast(dtypes.weakint)) & (local < stride)
+  # (a position past the slot's rows (the slots it spans, SLOT_SPAN) isn't stored: not into the next slot or past the pool)
+  ok = ((p // SEQ_BLK) % n).eq(dev[0].load().cast(dtypes.weakint)) & (local < stride*SLOT_SPAN)
   row = slot * stride + local
   return cache[row.valid(ok), d].store(k[r, d].load().cast(cache.dtype)).end(r, d).sink(arg=KernelInfo(name="seq_store_g", opts_to_apply=()))
 
@@ -3423,8 +3426,8 @@ def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, 
     i = t*per + j
     key = picks[row, i.minimum(n_max-1)].load().cast(dtypes.weakint)
     ok = (i < count) & (key >= 0) & (key < valid_len) & ((key // SEQ_BLK) % n).eq(me)
-    # (grouped: a key past the slot's rows isn't seen)
-    return key, ok & ((key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK < stride) if grouped else ok
+    # (grouped: a key past the slot's rows (the slots it spans) isn't seen)
+    return key, ok & ((key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK < stride*SLOT_SPAN) if grouped else ok
   j1 = UOp.range(per, 2, AxisType.LOOP)
   mine = _reg_int(entry(j1)[1].cast(dtypes.int32), j1)
   lds = UOp.alloc((TH,), dtypes.int32, addrspace=AddrSpace.LOCAL)
@@ -3925,7 +3928,7 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
   off, ring_off, kg_off, ends = UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), []
   if grouped:
     g = UOp.range(G:=cast(int, grouped[0].shape[0]), 2, AxisType.GLOBAL)
-    rows, P = rows // G, stride
+    rows, P = rows // G, stride*SLOT_SPAN
     # (slotted: the slots of the sequences, counted: their token counts, the rows past them aren't tokens)
     sl = _slot_of(grouped[1:2] if slotted else (), g)
     start_pos, ends = grouped[0][g].load().cast(dtypes.weakint), [g]
@@ -4030,7 +4033,7 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
   if shard: grouped = grouped[:-1]
   T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
   H, D = cast(tuple[int, int], q.shape[-2:])
-  P = stride or cast(int, k.shape[0])
+  P = stride*SLOT_SPAN or cast(int, k.shape[0])
   G = min(256, P // (16*NP))
   q, w, out = q.reshape(T, H, D), w.reshape(T, H), out.reshape(T, P)
   gr, lane = UOp.range(T*G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
@@ -4363,7 +4366,8 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
     return Tensor.empty(n*T, P, dtype=dtypes.float32, device=q.device, axis=0) if n else Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
   if grouped is not None:
     (positions, stride, *slots), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
-    scores = Tensor.custom_kernel(empty(T, stride), q.half().contiguous(), k, w.float().contiguous(), positions, *[x for x in slots if x is not None],
+    scores = Tensor.custom_kernel(empty(T, stride*SLOT_SPAN), q.half().contiguous(), k, w.float().contiguous(), positions,
+                                  *[x for x in slots if x is not None],
                                   *dsrc, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool, shard=n))[0]
     if n: return pool_index_shard(scores, None, None, top, kpool, positions=positions)
     out = Tensor.empty(T, top*kpool + kpool + 1, dtype=dtypes.int32, device=q.device)

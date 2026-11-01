@@ -607,7 +607,7 @@ class TestStash(unittest.TestCase):
     model.get_start_pos = Mock(side_effect=start)
     self.model, self.server = model, LLMServer.__new__(LLMServer)
     self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
-    self.server.host_free, self.server.host_made = [], 0
+    self.server.host_free, self.server.host_made, self.server.partner, self.server.landing = [], 0, {}, []
 
   def test_common_prefix(self):
     import random
@@ -874,6 +874,26 @@ class TestStash(unittest.TestCase):
     # (no free slot: none taken)
     srv.mix_take([reqs[2]], {0: Mock(), 1: Mock(), 2: Mock()}, pending, 1)
     self.assertEqual(srv.landing, [])
+
+  def test_wide(self):
+    # (WIDE) a sequence longer than a slot spans the next one too: two free slots next to each other (a sequence moved for them)
+    from tinygrad.llm.serve import Request
+    m, srv = self.model, self.server
+    m.max_span, srv.spec, srv.slots = Mock(return_value=2), 2, 4
+    long, short = Request(list(range(12000)), "", None, 0.0), Request(list(range(100)), "", None, 0.0)
+    self.assertTrue(srv.batchable(long) and srv.wide(long) and not srv.wide(short))
+    self.assertFalse(srv.batchable(Request(list(range(19500)), "", None, 0.0)))
+    self.assertEqual(srv.free_slot({1: short}, wide=True), 2)
+    self.assertIsNone(srv.free_slot({1: short, 3: short}, wide=True))
+    active = {1: short, 3: short}
+    self.assertEqual(srv.make_pair(active), 0)
+    m.slot_move.assert_called_with(1, 2)
+    self.assertEqual(active, {2: short, 3: short})
+    srv.partner[0] = 1
+    self.assertEqual(srv.taken(active), {1, 2, 3})
+    self.assertEqual((srv.wide_limit(0), srv.wide_limit(2)), (2*10000 - 4, 10000))
+    # (no free slot: no pair)
+    self.assertIsNone(srv.make_pair({0: long, 2: short, 3: short}))
 
   def test_pause_long(self):
     # (aliased slots) the batch waits for a long request: only the ones in the slots its cache overwrites stop, it runs alone (the others' slots
