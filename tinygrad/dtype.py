@@ -318,8 +318,7 @@ def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-de
   dtype = strong_dtype(dtype)
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8
-  if (np_dtype := _to_np_dtype(dtype)) is None: return None
-  return getattr(torch, np.dtype(np_dtype).name, None)
+  return getattr(torch, np.dtype(dtype.fmt).name, None) if dtype.fmt is not None else None
 @functools.cache
 def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   return {v:k for k in DTYPES_DICT.values() if (v:=_to_torch_dtype(k)) is not None}[torchdtype]
