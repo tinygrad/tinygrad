@@ -51,7 +51,6 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
   # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
   if x.arg is None: return None
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
-  ctx.clear()
   return None if ret is x else ret.simplify()
 
 pm_simplify_ranges = PatternMatcher([
