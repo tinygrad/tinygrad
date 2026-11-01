@@ -31,7 +31,7 @@ class TestCStyleFailures(unittest.TestCase):
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "wgsl ends up with '(' * 5")
   def test_repeat_and(self): self._test_src_strip_paren(Ops.AND)
 
-  def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
+  def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB)
 
 class TestWGSLFailures(unittest.TestCase):
   def test_folded_packed_store(self):
