@@ -10,16 +10,26 @@
   .answer { white-space: normal; line-height: 1.65 } .answer > * { margin: 12px 0 }
   pre, blockquote { background: #2f2f2f; padding: 12px 16px; border-radius: 8px } pre { white-space: pre-wrap }
   .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
-  #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
-           background: #2f2f2f; color: inherit; font: inherit;
-           border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
+  #composer { display: flex; align-items: center; gap: 12px; max-width: 808px; width: calc(100% - 40px);
+              box-sizing: border-box; margin: 20px auto; padding: 12px 16px 12px 20px; background: #2f2f2f; border-radius: 24px }
+  #input { flex: 1; min-width: 0; padding: 0; background: transparent; color: inherit; font: inherit;
+           border: none; outline: none; resize: none; field-sizing: content }
+  #model { max-width: 45%; padding: 6px 10px; background: #383838; color: inherit;
+           border: 1px solid #484848; border-radius: 16px; cursor: pointer }
 </style></head><body><div id="chat"></div>
+<div id="composer">
 <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+<select id="model" aria-label="Model"></select></div>
 <script src="/assets/cdn.jsdelivr.net/npm/markdown-it@15.0.1/dist/browser/markdown-it.umd.min.js"></script>
 <script>
+  const params = new URLSearchParams(location.search), server = params.get('server') || '';
+  const headers = {'Content-Type': 'application/json'};
+  if (params.get('api_key')) headers.Authorization = 'Bearer ' + params.get('api_key');
+  fetch(server + '/v1/models', {headers}).then(r => r.json()).then(r =>
+    model.replaceChildren(...r.data.map(m => new Option(m.id, m.id, false, m.id === params.get('model')))));
   let generating = false;
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault(); if (generating) return;
+    e.preventDefault(); if (generating || !model.value) return;
     generating = true; send().finally(() => generating = false);
   } };
   const msgs = [];
@@ -31,8 +41,8 @@
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     d.innerHTML = '<span style="color:#888"></span><div class="answer"></div>'; const [thinking, answer] = d.children;
-    const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
+    const r = await fetch(server + '/v1/chat/completions', {method: 'POST', headers,
+      body: JSON.stringify({model: model.value, messages: msgs, stream: true, temperature: 0.7})});
     let buf = '', txt = '', rsn = '';
     for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
       const {done, value} = await rd.read();
