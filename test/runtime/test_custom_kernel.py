@@ -299,6 +299,59 @@ class TestCustomKernel(unittest.TestCase):
           return C.after(v.reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
         self.assertEqual(Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [3])
 
+  def test_range_merge_keeps_after_domain(self):
+    # C is read once per i or once per o, so it counts to 4, and merging o and i must not make that 16
+    o, i = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+    stores = {"after_i": lambda C,A: (c:=C.after(i)[0]).store(c+1),
+              "after_o": lambda C,A: UOp.group((c:=C.after(o)[0]).store(c+1), A.after(o, i)[0].store(1)),
+              "load_after_o": lambda C,A: C.after(o, i)[0].store(C.after(o)[0].load()+1)}
+    for name, store in stores.items():
+      with self.subTest(name):
+        def kernel(C:UOp, A:UOp, store=store) -> UOp: return store(C, A).end(o, i).sink(arg=KernelInfo(opts_to_apply=()))
+        self.assertEqual(Tensor.zeros(1).contiguous().custom_kernel(Tensor.empty(1), fxn=kernel)[0].item(), 4)
+
+  def test_range_merge_keeps_index_domain(self):
+    # C[c] is indexed by o alone, so each cell counts to 2 while the B store merges o and i
+    o, i = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+    for name, c in {"div": o//2, "cmp": (o<2).cast(dtypes.int)}.items():
+      with self.subTest(name):
+        def kernel(C:UOp, B:UOp, c=c) -> UOp:
+          return UOp.group(C[c].store(C[c]+1), B[o*4+i].store(1)).end(o, i).sink(arg=KernelInfo(opts_to_apply=()))
+        self.assertEqual(Tensor.custom_kernel(Tensor.zeros(2).contiguous(), Tensor.zeros(16).contiguous(), fxn=kernel)[0].tolist(), [2, 2])
+
+  def test_range_merge_keeps_inner_reduce(self):
+    # the inner reduce ends r1 alone, so r0 and r1 don't merge. the inner sum is 4, the outer adds it 4*4*4 times
+    def kernel(C:UOp, A:UOp) -> UOp:
+      r0, r1, r2 = [UOp.range(4, n, AxisType.UPCAST) for n in range(3)]
+      return C[0].store(A[r2].reduce(r1, arg=Ops.ADD).reduce(r0, r1, r2, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(1), Tensor.ones(4).contiguous(), fxn=kernel)[0].item(), 256)
+
+  def test_range_merge_keeps_reduce_order(self):
+    # the reduce body stores, so it loops a, k, b in order, and the digits of S are the A[a*2+b] it visits
+    def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
+      a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
+      v = A[a*2+b].after((cell:=S.after(a, k, b)[0]).store(cell*10+A[a*2+b]))
+      return O[0].store(v.reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    o, s = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
+                                Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[:2]
+    Tensor.realize(o, s)
+    self.assertEqual(s.item(), 12123434)
+
+  def test_range_merge_keeps_loop_order(self):
+    # loops nest by axis id whatever order END lists them, so x is outer and the digits of S are A[0], A[2], A[1], A[3]
+    def kernel(S:UOp, A:UOp) -> UOp:
+      x, y = UOp.range(2, 0, AxisType.LOOP), UOp.range(2, 1, AxisType.LOOP)
+      return (cell:=S.after(x, y)[0]).store(cell*10+A[y*2+x]).end(y, x).sink(arg=KernelInfo(opts_to_apply=()))
+    s = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[0]
+    self.assertEqual(s.item(), 1324)
+
+  def test_range_merge_then_shrink(self):
+    # r0<2 shrinks the merged range of 8 to 4, which is the same UOp as r0, so it isn't shrunk again to 2
+    def kernel(C:UOp) -> UOp:
+      r0, r1 = UOp.range(4, 0, AxisType.LOOP), UOp.range(2, 1, AxisType.LOOP)
+      return (cell:=C[(r0*2+r1).valid(r0<2)]).store(cell+1).end(r0, r1).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(8, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 1, 1, 1, 0, 0, 0, 0])
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
     # j%2 splits j into two ranges, both are still LOCAL
@@ -658,6 +711,18 @@ class TestCallInKernel(unittest.TestCase):
     self.assertEqual(out.tolist(), [N*(N+1)//2])
     out2 = Tensor.custom_kernel(Tensor.empty(1, dtype=x.dtype), x, fxn=main)[0]
     self.assertEqual(out2.tolist(), [N*(N+3)//2])
+
+  def test_reduce_over_call_keeps_loop_order(self):
+    # a call can hide stores, so the reduce loops a, k, b in order, and the digits of S are the A[a*2+b] it visits
+    @uopfunc
+    def update(S:UOp, A:UOp) -> UOp: return S[0].store(S[0]*10+A[0]).sink()
+    def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
+      a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
+      return O[0].store(A[a*2+b].after(update(S.after(k), A[a*2+b])).reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    o, s = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
+                                Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[:2]
+    Tensor.realize(o, s)
+    self.assertEqual(s.item(), 12123434)
 
   def test_nested_call(self):
     @uopfunc
