@@ -162,6 +162,15 @@ class TestLLMTokenizer(unittest.TestCase):
       self.assertEqual(split["kimi-k2"](s), go, f"kimi-k2 {s!r}")
     self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
 
+  def test_joyai_llm_split(self):
+    tok = SimpleTokenizer({}, {}, "joyai-llm")
+    tok._encode_word = lambda word: [word.decode()]
+    self.assertEqual(tok.encode("12345 hello"), ["123", "45", " hello"])
+    self.assertEqual(tok.encode("你好world"), ["你好", "world"])
+    self.assertEqual(tok.encode("  你好"), ["  ", "你好"])
+    self.assertEqual(tok.encode("foo.bar, baz!\n\n"), ["foo", ".bar", ",", " baz", "!\n\n"])
+    self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
+
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]

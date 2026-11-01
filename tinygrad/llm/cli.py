@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
+import sys, argparse, codecs, itertools, typing, re, string, unicodedata, json, time, pathlib
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -12,17 +12,17 @@ class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o"):
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o","joyai-llm"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
-    # each limit is one past the category's max codepoint (Z→U+3000, N→U+1FBF9, L→U+323AF, M→U+E01EF)
+    # each limit is one past the category's max codepoint (Z→U+3000, N→U+1FBF9, L→U+323AF, M→U+E01EF, P→U+1E95F, S→U+1FBCA)
     # compact adjacent codepoints into ranges: listing them all makes re spend seconds on large prompts
     def ucat_range(pre:str|tuple[str, ...]) -> str:
-      limits = {"Z": 0x3001, "N": 0x1fbfa, "L": 0x323b0, "M": 0xe01f0}
+      limits = {"Z": 0x3001, "N": 0x1fbfa, "L": 0x323b0, "M": 0xe01f0, "P": 0x1e960, "S": 0x1fbcb}
       limit = max(limits[p if p in limits else p[0]] for p in (pre if isinstance(pre, tuple) else (pre,)))
       cps = enumerate(cp for cp in range(limit) if unicodedata.category(chr(cp)).startswith(pre))
       runs = [list(g) for _, g in itertools.groupby(cps, lambda e: e[1]-e[0])]
@@ -35,7 +35,12 @@ class SimpleTokenizer:
       sfx = "" if preset == "tekken" else f"{contr}?"
       r_w = f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
       if preset != "kimi-k2": r_p = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*"
-    self._split_to_word = re.compile(f"{r_w}|{r_n}|{r_p}|{r_t}")
+    if preset == "joyai-llm":
+      r_ps = ucat_range(("P", "S"))
+      r_p, r_w = f" ?[{r_ps}]+[\\r\\n]*", f"[{re.escape(string.punctuation)}][A-Za-z]+|[^\\r\\n{r_p_L}{r_ps}]?[{r_p_L}{ucat_range('M')}]+"
+      # numbers and CJK runs are split off before the words, text that no pattern matches is a word too
+      self._pre_split = re.compile(f"({r_n}|[\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff]+)")
+    self._split_to_word = re.compile(f"({r_w}|{r_n}|{r_p}|{r_t})")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
@@ -80,7 +85,9 @@ class SimpleTokenizer:
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
-    return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
+    if self.preset == "joyai-llm": words = [w for p in self._pre_split.split(chunk) for w in self._split_to_word.split(p) if w]
+    else: words = self._split_to_word.findall(chunk)
+    return [tok for word in words for tok in self._encode_word(word.encode())]
   def encode(self, text:str) -> list[int]:
     tokens: list[int] = []
     pos = 0
