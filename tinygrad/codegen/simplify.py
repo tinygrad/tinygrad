@@ -24,15 +24,18 @@ def mergeable_pairs(x:UOp) -> list[tuple[UOp, UOp]]:
   return list(itertools.pairwise(sorted(x.ended_ranges, key=lambda r: r.arg))) if x.op in {Ops.END, Ops.REDUCE} else []
 
 def merge_ranges(u:UOp) -> UOp|None:
-  for r0, r1 in dedup(p for x in u.backward_slice for p in mergeable_pairs(x)):
+  enders = {x:mergeable_pairs(x) for x in u.backward_slice if x.op in range_start}
+  impure = [x for x in u.backward_slice if x.op not in pure_ops]
+  for r0, r1 in dedup(p for pairs in enders.values() for p in pairs):
     if r0.axis_type is not r1.axis_type or r0 in r1.ranges or r1 in r0.ranges: continue
-    # an op that isn't pure must run as often as before
-    if any((r0 in x.ranges) != (r1 in x.ranges) for x in u.backward_slice if x.op not in pure_ops): continue
-    if any((r0, r1) not in mergeable_pairs(x) for x in u.backward_slice
-           if x.op in range_start and {r0, r1} & set(x.src[range_start[x.op]:])): continue
-    n = r0.replace(src=((r0.src[0]*(s1:=r1.src[0])).simplify(),))
-    ret = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:n//s1, r1:n%s1}, name=f"check_merge_{r0.axis_id}_{r1.axis_id}")
-    if n//s1 not in ret.backward_slice and n%s1 not in ret.backward_slice: return ret
+    # every op that ends r0 or r1 must merge them, and an op that isn't pure must run as often as before
+    if any((r0, r1) not in pairs for x, pairs in enders.items() if {r0, r1} & set(x.ended_ranges)): continue
+    if any((r0 in x.ranges) != (r1 in x.ranges) for x in impure): continue
+    s1 = r1.src[0]
+    n = r0.replace(src=((r0.src[0]*s1).simplify(),))
+    sub = {r0:n//s1, r1:n%s1}
+    ret = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx=sub, name=f"check_merge_{r0.axis_id}_{r1.axis_id}")
+    if not any(v in ret.backward_slice for v in sub.values()): return ret
   return None
 
 def mark_gated(ctx, idx):
