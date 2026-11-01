@@ -83,7 +83,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JAE = auto(); JMP = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -121,7 +121,7 @@ class X86GroupOp:
 
   # X86Ops that read flags
   ReadFlags = {X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JB, X86Ops.JL,
-               X86Ops.JE, X86Ops.JNE, X86Ops.JGE}
+               X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE}
 
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
@@ -129,7 +129,7 @@ class X86GroupOp:
                 X86Ops.OR, X86Ops.ORi}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP}
+  Jump = {X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE, X86Ops.JMP}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -203,6 +203,11 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
+  # IF jumps over its body on the inverse condition, preserving ordering deps around the flag compare
+  (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="cond").or_after(), UPat()), arg=None, name="x"), lambda x,cond:
+    x.replace(src=(cmp(cond).after(*(x.src[0].src[1:] if x.src[0].op is Ops.AFTER else ())),),
+      arg=(X86Ops.JAE if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
+        else {Ops.CMPLT:X86Ops.JGE, Ops.CMPEQ:X86Ops.JNE, Ops.CMPNE:X86Ops.JE}[cond.op]))),
   # vector BUFFERs get modeled in STACK space
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL))
     if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
@@ -354,10 +359,10 @@ def copy_op(dt:DType) -> X86Ops:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),))),
-  # BACKEDGE becomes a conditional jump to its RANGE, it uses flags
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y: x.ins({Ops.CMPEQ: X86Ops.JE,
-   Ops.CMPNE: X86Ops.JNE, Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op], src=(x.src[1], x.src[0], cmp(y)))),
+  # lower the backedge condition to flags, retaining its loop scope until after linearization
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y:
+   x.replace(src=x.src[:2]+(cmp(y),), arg={Ops.CMPEQ: X86Ops.JE, Ops.CMPNE: X86Ops.JNE,
+    Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op])),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM, name="x"), abi),
@@ -491,8 +496,9 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
-  elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
+  op = x.arg if x.op in (Ops.IF, Ops.BACKEDGE, Ops.ENDIF) else x.arg[0]
+  if x.op in (Ops.RANGE, Ops.ENDIF) or op in X86GroupOp.WriteFlags: ctx.lock = x
+  elif op in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1].without_after):
     ctx.lock = flag_def
     return (x, [flag_def, x])
   return None
@@ -504,35 +510,22 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer(), nx]
 
-# TODO: control flow should be overhauled so that this isn't necessary
-# a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
+# a LABEL marks its src: a loop entry marks its RANGE, an IF exit marks its IF. a jump's first src is what its LABEL marks
 def label(x:UOp) -> UOp: return UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), src=(x,))
-
-# a loop's LABEL follows its RANGE. a bounded RANGE's index is a register named by the RANGE, 0 before the loop, compared to the bound
-# after the LABEL and incremented before the END, the body reads it as AFTER(index, RANGE)
-def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
-  if x.dtype is dtypes.void: return x, [x, label(x)]
-  bound, deps = (x.src[0].src[0], x.src[0].src[1:]) if x.src[0].op is Ops.AFTER else (x.src[0], ())
-  idx = UOp(Ops.INS, arg=(X86Ops.MOVi, x.dtype, regbuf_reg(x)), src=(imm(x.dtype, 0),) + deps)
-  cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtypes.void), src=(idx, bound))
-  return idx.after(x), [idx, x, start:=label(x), cmp, UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(start, cmp))]
-
-def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
-  return (end:=x.replace(src=(x.src[0], c.src[1]))), [c.ins(X86Ops.ADDi, *regs(c.src[0]), src=(c, imm(c.dtype, 1))), end]
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.AFTER, name="c")), name="x"), lower_end),
+  (UPat((Ops.INS, Ops.RANGE, Ops.IF, Ops.BACKEDGE, Ops.ENDIF), name="x"), flag_rematerialize),
+  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: (x, [x, label(x)])),
 ])
 
 # ***** post register allocation *****
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(X86Ops.RET)])),
-  # an END jumps back to its loop's LABEL and labels the loop's exit
-  (UPat(Ops.END, name="x"), lambda x: (x, [UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), src=(x.src[1],)), label(label(x.src[1]))])),
+  (UPat(Ops.IF, name="x"), lambda x: (x, [x.ins(x.arg, src=(x, x.src[0].without_after))])),
+  (UPat(Ops.ENDIF, name="x"), lambda x: (x, [label(x.src[0])])),
+  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.ins(x.arg, src=(x.src[1], x.src[2].without_after))])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
@@ -697,6 +690,7 @@ encodings = {
   X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4),
   X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4),
   X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
+  X86Ops.JAE: lambda x: bytes([0x0F, 0x83]) + int(0).to_bytes(4),
   X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
