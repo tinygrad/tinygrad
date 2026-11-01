@@ -610,6 +610,14 @@ class HIPRenderer(CStyleLanguage):
 class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target): super().__init__(target, use_hipcc=True)
 
+def _all_ones(k:UOp) -> bool:
+  return (c:=k.src[0] if k.op is Ops.CAST else k).op is Ops.CONST and (c.arg & (mask:=(1 << k.dtype.bitsize) - 1)) == mask
+
+def _render_int_min(ctx, x:UOp, p:UOp, q:UOp, k:UOp) -> str|None:
+  n, o = (p, q) if p.op is Ops.XOR else (q, p)
+  if n.op is not Ops.XOR or not _all_ones(k) or not _all_ones(n.src[1]): return None
+  return f"min({ctx.render_cast(x, ctx[n.src[0]])},{ctx.render_cast(x, f'{ctx[o]}^{ctx[k]}')})"
+
 class QCOMCLRenderer(OpenCLRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
@@ -621,6 +629,17 @@ class QCOMCLRenderer(OpenCLRenderer):
     unsupported = {*dtypes.fp8s, dtypes.bfloat16, dtypes.double, dtypes.long, dtypes.ulong}
     if not (IMAGE and FLOAT16): unsupported.add(dtypes.half)
     return Renderer.supported_dtypes(self) - unsupported
+
+  # QCOM's i64 emulation asserts on vectorized i64<->float casts ("Unsupported FtoI/ItoF instructions!"), use convert_*
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.CAST, dtypes.floats, (UPat.var("x", (dtypes.int64, dtypes.uint64)),), name="y"),
+     lambda ctx,x,y: f"convert_{ctx.render_dtype(y.dtype)}_rte({ctx[x]})"),
+    (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("x", dtypes.floats),), name="y"),
+     lambda ctx,x,y: f"convert_{ctx.render_dtype(y.dtype)}_rtz({ctx[x]})"),
+    # QCOM miscompiles the int min ~max(~a,~b) (max is (p<q)?q:p here), use min()
+    (UPat(Ops.XOR, dtypes.ints, [UPat(Ops.WHERE, src=(UPat(Ops.CMPLT, src=(UPat.var("p"), UPat.var("q"))), UPat.var("q"), UPat.var("p"))),
+                                 UPat.var("k")], name="x"), _render_int_min),
+  ]) + OpenCLRenderer.string_rewrite
 
   # QCOM's load vectorizer emits invalid IR for vectorized bool loads ("Range types must match load type"), type bool buffers as uchar
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):

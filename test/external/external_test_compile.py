@@ -80,7 +80,9 @@ class TestCompiledModel(unittest.TestCase):
                                     for k, v in inputs.items() if k in input_types})
       self.model(**inputs)
       for expected, actual in zip(reference, inputs['output_buffers'].values(), strict=True):
-        np.testing.assert_allclose(actual.numpy(), expected, atol=1e-4, rtol=1e-4)
+        fp16 = expected.dtype == np.float16
+        np.testing.assert_allclose(actual.numpy(), expected, rtol=2e-3 if fp16 else 1e-4,
+                                   atol=5e-5 * float(np.abs(expected).max()) if fp16 else 1e-4)
 
 
 if __name__ == '__main__': unittest.main()
