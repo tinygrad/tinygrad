@@ -354,6 +354,9 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((Tensor([1.])+z*-3.5)+z).tolist(), [-math.inf])
     self.assertEqual(((Tensor([1.])+c.where(1e8, x))+c.where(-1e8, x)).tolist(), [0.])
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "backend compiler reassociates floats")
+  def test_float_reassociate_consts(self): self.assertEqual(((Tensor([1.])+1e8)-1e8).tolist(), [0.])
+
   def test_fused_div_matches_unfused(self):
     x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
     for f, g in ((lambda: x*y, lambda p: p/y), (lambda: x/y, lambda p: p/z), (lambda: z*z, lambda p: 1/p), (lambda: z*z*z, lambda p: 1/p)):
