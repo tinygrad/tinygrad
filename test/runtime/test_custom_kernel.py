@@ -598,6 +598,14 @@ class TestCustomKernel(unittest.TestCase):
     Tensor.realize(c, d)
     self.assertEqual((c.tolist(), d.tolist()), ([3], [1, 1, 0, 0]))
 
+  def test_shrink_range_keeps_symbolic_end(self):
+    # D gates r to r<4, but r only runs to n=2
+    def kernel(D:UOp, N:UOp) -> UOp:
+      r = UOp.range(N, 0, AxisType.LOOP)
+      return D[r.valid(r<4)].store(1).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    d = Tensor.custom_kernel(Tensor.zeros(8, dtype=dtypes.int).contiguous(), Tensor(Variable("n", 1, 8, dtypes.int).bind(2)), fxn=kernel)[0]
+    self.assertEqual(d.tolist(), [1, 1, 0, 0, 0, 0, 0, 0])
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
     a = Tensor.full((4, 4), 3.).contiguous()
