@@ -1226,13 +1226,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               pending.insert(0, req)
         if self.landing: self.mix_done(firsts, active)
         # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
-        while active and (hi:=max(active)) >= len(active) and hi not in self.partner and \
+        while active and (hi:=max(self.taken(active))) >= len(self.taken(active)) and \
               next(m for m in model.batch_sizes() if m >= hi+1) > next(m for m in model.batch_sizes() if m >= len(self.taken(active))):
-          if (lo:=self.free_slot(active)) is None or lo > hi: break
-          self.slot_taken(lo)
-          trace(f"slot_move req {active[hi].rid} {hi} -> {lo}")
-          model.slot_move(hi, lo)
-          active[lo] = active.pop(hi)
+          # (WIDE: a sequence spanning two slots into two free ones)
+          src = hi - 1 if hi in self.partner.values() else hi
+          if (lo:=self.free_slot(active, wide:=src in self.partner)) is None or lo > src: break
+          self.slot_taken(lo, *([lo+1] if wide else []))
+          trace(f"slot_move req {active[src].rid} {src} -> {lo}" + (" wide" if wide else ""))
+          model.slot_move(src, lo, span=2 if wide else 1)
+          active[lo] = active.pop(src)
+          if wide: self.partner[lo] = self.partner.pop(src) - src + lo
         # (PRIO) the longest conversations' steps of their own too, when few are left
         if k: self.prio_steps(active, pending)
         # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster

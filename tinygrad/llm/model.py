@@ -1833,19 +1833,22 @@ class Transformer:
                      idx.ring.assign(rows(idx.pool_ring, slot*R, R))]
     Tensor.realize(*copies)
 
-  def _slot_pools(self) -> list[tuple[Tensor, int]]:
-    """every pool of the slots' states and the rows of a slot in it"""
-    pools:list[tuple[Tensor, int]] = [(self.pool_spec_h, int(self.slot_spec_h[0].shape[0]))] if hasattr(self, "pool_spec_h") else []
+  def _slot_pools(self) -> list[tuple[Tensor, int, bool]]:
+    """every pool of the slots' states, the rows of a slot in it, and if they're a slot's positions' (the caches: a sequence spans more slots)"""
+    pools:list[tuple[Tensor, int, bool]] = [(self.pool_spec_h, int(self.slot_spec_h[0].shape[0]), False)] if hasattr(self, "pool_spec_h") else []
     for b in self._slot_blocks():
       if isinstance(b, GatedDeltaNetBlock):
-        pools += [(b.pool_rec, int(b.slot_rec[0].shape[0]))] + [(p, int(b.slot_conv[0][0].shape[0])) for p in b.pool_conv]
+        pools += [(b.pool_rec, int(b.slot_rec[0].shape[0]), False)] + [(p, int(b.slot_conv[0][0].shape[0]), False) for p in b.pool_conv]
       if isinstance(b, MLATransformerBlock):
-        pools.append((b.slot_rows_view(b.pool_s), b.slot_rows()) if b.seq_sharded else (b.pool_k, 1))
-        if (idx:=b.indexer) is not None: pools += [(idx.pk_rows(idx.pool_pk), idx.pk_slot()), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
+        pools.append((b.slot_rows_view(b.pool_s), b.slot_rows(), True) if b.seq_sharded else (b.pool_k, 1, False))
+        if (idx:=b.indexer) is not None:
+          pools += [(idx.pk_rows(idx.pool_pk), idx.pk_slot(), True), (idx.pool_ring, int(idx.slot_ring[0].shape[0]), False)]
     return pools
-  def _slot_move_copy(self, src:UOp, dst:UOp):
+  def _slot_move_copy(self, src:UOp, dst:UOp, span:int=1):
     def rows(t:Tensor, start:UOp, n:int) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
-    Tensor.realize(*[rows(p, dst*n, n).assign(rows(p, src*n, n).contiguous()) for p, n in self._slot_pools()])
+    # (span: a sequence spanning that many slots, its positions' caches all of them)
+    Tensor.realize(*[rows(p, dst*n, n*(span if pos else 1)).assign(rows(p, src*n, n*(span if pos else 1)).contiguous())
+                     for p, n, pos in self._slot_pools()])
   def _slot_jits(self):
     # (their temporaries in the memory of the model's intermediates: a slot's copy is as big as its caches)
     if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True, scratch=self._scratch)
@@ -1854,7 +1857,7 @@ class Transformer:
     # (the copies of a sequence spanning more slots, see slot_span)
     if not hasattr(self, "_slot_span_jits"):
       self._slot_span_jits = {n: tuple(TinyJit(functools.partial(f, span=n), capture_first=True, scratch=self._scratch)
-                                       for f in (self._slot_copy, self._slot_load_copy)) for n in range(2, self.max_span()+1)}
+                                       for f in (self._slot_copy, self._slot_load_copy, self._slot_move_copy)) for n in range(2, self.max_span()+1)}
   def main_own(self) -> int:
     """(aliased) the positions of the model's cache that aren't a slot's (SLOT_SPAN slots' worth)"""
     return SLOT_SPAN*self.batch_ctx()
@@ -1908,11 +1911,11 @@ class Transformer:
     v = self._slot_store_vars(i, length, 0)
     self._ckpt_slot_jit(v[0], v[2], v[3])
 
-  def slot_move(self, src:int, dst:int):
-    """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows)"""
+  def slot_move(self, src:int, dst:int, span:int=1):
+    """the states of slot src into slot dst (the sequences of a batch in the slots of its first rows). span: a sequence spanning that many"""
     self._slot_jits()
     self._slot_writes()
-    self._slot_move_jit(*self._slot_move_vars(src, dst))
+    (self._slot_move_jit if span == 1 else self._slot_span_jits[span][2])(*self._slot_move_vars(src, dst))
 
   def slot_store(self, i:int, length:int, hrow:int=0):
     """the states of the sequence just prefilled (or decoded) by the model, of `length` tokens, into slot i (hrow: the row of _spec_h)"""
@@ -2703,7 +2706,9 @@ class Transformer:
     if self.batch_slots(): self.slot_store(0, 1)
     if self.batch_slots() > 1: self.slot_move(1, 0)
     # (and the copies of a sequence spanning more slots)
-    for n in range(2, self.max_span()+1): self.slot_store(0, (n-1)*self.batch_ctx() + 1), self.slot_load(0, (n-1)*self.batch_ctx() + 1)
+    for n in range(2, self.max_span()+1):
+      self.slot_store(0, (n-1)*self.batch_ctx() + 1), self.slot_load(0, (n-1)*self.batch_ctx() + 1)
+      if self.batch_slots() > 2*n: self.slot_move(n, 0, span=n)
     for m in self.batch_sizes():
       if m > self.batch_slots(): continue
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
