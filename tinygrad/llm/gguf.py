@@ -248,6 +248,15 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
+def gguf_packed_table(entry:tuple[Tensor, tuple[int, ...], int]) -> tuple[Tensor, int, Callable[[Tensor, int], Tensor]]:
+  """
+  Keeps a 2D quantized tensor packed in host RAM, returning its bytes, the bytes per row and the decoder of n elements of packed rows.
+  """
+  data, (_, width), typ = entry
+  block, size = _GGML_QUANT[typ]
+  assert width % block == 0, f"rows of {width} don't split into blocks of {block}"
+  return data.to("CPU").realize(), width // block * size, lambda rows, n: ggml_data_to_tensor(rows, n, typ)
+
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
   """

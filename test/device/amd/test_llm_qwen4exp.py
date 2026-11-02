@@ -12,7 +12,8 @@ def load_tiny_qwen4exp(shard:int=1, max_context:int=32) -> Transformer:
   config = TransformerConfig(num_blocks=2, dim=64, hidden_dim=32, n_heads=2, n_kv_heads=1, norm_eps=1e-5, vocab_size=64, head_dim=32,
     rope_theta=10000, rope_dim=16, v_head_dim=32, max_context=32, num_experts=4, num_experts_per_tok=2, shared_expert_dim=32,
     shared_expert_gate=True, attn_output_gate=True, ssm=SSMConfig(4, 32, 1, 2, 64), ssm_layers=(True, False),
-    hc=HCConfig(2, 0, 0.0, low_rank=8), indexer=IndexerConfig(2, 32, 8, 4), ple=PLEConfig(1, 32, MULS, VOCABS, (0, 13), EOS, 4))
+    hc=HCConfig(2, 0, 0.0, low_rank=8), indexer=IndexerConfig(2, 32, 8, 4, 1e-5, rope_dim=16, rope_interleave=False, qsa=True),
+    ple=PLEConfig(1, 32, MULS, VOCABS, (0, 13), EOS, 4))
   writer = GGUFWriter(path:=pathlib.Path(tempfile.mkdtemp())/"model.gguf", "qwen4exp")
   for k, v in {"block_count": 2, "context_length": 32, "embedding_length": 64, "attention.head_count": 2, "attention.head_count_kv": 1,
                "attention.key_length": 32, "attention.value_length": 32, "rope.dimension_count": 16, "expert_count": 4, "expert_used_count": 2,
@@ -26,8 +27,9 @@ def load_tiny_qwen4exp(shard:int=1, max_context:int=32) -> Transformer:
   writer.add_array("tokenizer.ggml.tokens", [str(i) for i in range(64)])
   rng = np.random.default_rng(0)
   for name, weight in nn.state.get_state_dict(Transformer(config)).items():
-    value = -rng.random(weight.shape) if name.endswith("ssm_a") else rng.normal(1, .05, weight.shape) if "norm" in name else \
-            rng.normal(0, .5 if "token_embd" in name else .1, weight.shape)
+    value = (-rng.random(weight.shape) if name.endswith("ssm_a") else rng.normal(1, .05, weight.shape) if "norm" in name else
+             rng.normal(0, .5 if "token_embd" in name else .1, weight.shape))
+    name = name.replace("indexer.attn_k", "indexer.k_proj").replace("indexer.attn_q_b", "indexer.q_proj")
     writer.add_tensor(re.sub(r"(hc_attn|hc_ffn|output_hc|\.ple)\.", r"\1_", name), value.astype(np.float16))
   table = rng.integers(0, 0x7a, (sum(VOCABS), 18), dtype=np.uint8)
   table[:, :2] = np.asarray([1e-2], np.float16).view(np.uint8)  # IQ4_NL block scales
@@ -42,13 +44,14 @@ class TestQwen4Exp(unittest.TestCase):
   def test_generate(self):
     # Exercise a partial final indexer pool and a table view, as produced by loading a Tensor-backed GGUF on CPU.
     model = load_tiny_qwen4exp(max_context=31)
-    model.ple_table = model.ple_table.pad((7, 11)).contiguous().realize()[7:-11]
+    ple = model.blk[1].ple
+    ple.table = ple.table.pad((7, 11)).contiguous().realize()[7:-11]
     gen = model.generate(list(PROMPT), chunk_size=8)
     out = [next(gen) for _ in range(6)]
     # the host buffer holds every position's n-gram table rows: t0*m0 ^ t1*m1 for the bigram head, ^ t2*m2 for the trigram head,
     # predecessors before the start or an EOS are EOS
-    toks, table, rows = PROMPT + out, model.ple_table.numpy().reshape(-1, 18), model.ple_rows.numpy()[0]
-    for p in range(len(toks)):
+    toks, table, rows = PROMPT + out, ple.table.numpy().reshape(-1, 18), ple.rows.numpy()[0]
+    for p in range(len(toks)-1):
       ctx = [EOS if p < i or EOS in toks[p-i:p] else toks[p-i] for i in range(3)]
       bi = ctx[0]*MULS[0] ^ ctx[1]*MULS[1]
       np.testing.assert_array_equal(rows[p], table[[bi % 13, 13 + (bi ^ ctx[2]*MULS[2]) % 17]])
