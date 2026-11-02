@@ -585,6 +585,14 @@ class TestUopsObject(unittest.TestCase):
     for _ in range(10_000): a = a+a
     self.assertEqual(a.device, Device.DEFAULT)
 
+  def test_shape(self):
+    buf, end = UOp.param(0, dtypes.uint, 64), UOp(Ops.NOOP)
+    for i in range(1000):
+      r = UOp.range(UOp.const(2).after(end), i)
+      s = buf.shrink(((r*32, (r+1)*32),))
+      end = UOp.group(s, r).end(r)
+    self.assertEqual(r.shape, ())
+
 class TestUOpRender(unittest.TestCase):
   def test_render_ssimplified_marg_outside_toposort(self):
     r = UOp.range(UOp.const(16, dtypes.int), 2, AxisType.WEAK, dtype=dtypes.int)
