@@ -167,6 +167,7 @@ _pcode_fixes = {
   'V_CMP_CLASS_F32': ('64\'F(abs(S0.f32)) > 0.0', '(64\'U(S0.u32 & 0x7FFFFFFF) != 0)'),
   'V_CMP_CLASS_F16': ('64\'F(abs(S0.f16)) > 0.0', '(64\'U(S0.u32 & 0x7FFF) != 0)'),
   'V_CMP_CLASS_F64': ('64\'F(abs(S0.f64)) > 0.0', '(64\'U(S0.u64 & 0x7FFFFFFFFFFFFFFF) != 0)'),
+  'V_MUL_F32': ('D0.f32 = S0.f32 * S1.f32', 'D0.f32 = isNAN(S0.f32) ? cvtToQuietNAN(S0.f32) : isNAN(S1.f32) ? cvtToQuietNAN(S1.f32) : S0.f32*S1.f32'),
 }
 
 def _get_pcode_dict(op) -> dict:
