@@ -135,7 +135,6 @@ class HCQGraph(GraphRunner):
     # When profiling allocate 2 signals for each jit item to measure speed. The jth jit item have signals at 2*j and 2*j+1.
     # TODO: This logic might allocate a few extra signals...
     self.prof_signals: list[HCQSignal] = []
-    self.prof_graph_deps: list[list[int]] = []
     self.prof_graph_entries: list[ProfileGraphEntry] = []
 
     self.last_j: dict[HWQueue, int|None] = collections.defaultdict(lambda: None)
@@ -205,7 +204,6 @@ class HCQGraph(GraphRunner):
         prof_name = enqueue_dev.device if runtime is not None else f"{enqueue_dev.device}:SDMA:{queue_idx}"
         self.prof_graph_entries.append(ProfileGraphEntry(prof_name, prof_ji_desc, sig_st, j * 2 + 1,
                                                          runtime.profile_key if runtime is not None else None))
-        self.prof_graph_deps.append([d - 1 for _, d in rdeps])
 
       self.last_j[enqueue_queue] = j
 
@@ -368,7 +366,7 @@ class HCQGraph(GraphRunner):
 
   def collect_timestamps(self):
     # NOTE: Append to any device is fine...
-    self.devices[0].profile_events += [ProfileGraphEvent(self.prof_graph_entries, self.prof_graph_deps, [s.timestamp for s in self.prof_signals])]
+    self.devices[0].profile_events += [ProfileGraphEvent(self.prof_graph_entries, [s.timestamp for s in self.prof_signals])]
 
   def dev_name(self, dev) -> str: return dev.device.replace(":", "_")
 

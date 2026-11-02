@@ -115,11 +115,9 @@ class TestQuantizeOnnx(unittest.TestCase):
         unsigned_char128 hi128;
       };
     };
-    struct fxn_args { unsigned char* data0; unsigned char* data1; signed char* data2; };
-    __attribute__((noinline)) void fxn(const struct fxn_args* args) {
-      unsigned char* restrict __attribute__((align_value(128))) data0 = args->data0;
-      unsigned char* restrict __attribute__((align_value(128))) data1 = args->data1;
-      signed char* restrict __attribute__((align_value(128))) data2 = args->data2;
+    __attribute__((noinline)) void fxn(unsigned char* restrict __attribute__((align_value(128))) data0,
+                                       unsigned char* restrict __attribute__((align_value(128))) data1,
+                                       signed char* restrict __attribute__((align_value(128))) data2) {
       for (int ridx0 = 0; ridx0 < 512; ridx0++) {
         int alu0 = (ridx0<<9);
         for (int ridx1 = 0; ridx1 < 4; ridx1++) {

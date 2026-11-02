@@ -117,7 +117,7 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(uops) == (1, 1)
 
   def test_float4_aligned_variable(self):
-    x = Variable('x', 0, 4, multiple_of=4).bind(4)
+    x = Variable('k', 0, 1).bind(1)*4
     a = Tensor.empty(4).realize()
     b = Tensor.empty(12).realize().shrink(((x, x+4),))
     c = a + b
@@ -131,7 +131,7 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(uops) == (2, 1)
 
   def test_float4_unaligned_variable(self):
-    x = Variable('x', 0, 4, multiple_of=2).bind(4)
+    x = Variable('k', 0, 2).bind(2)*2
     a = Tensor.empty(4).realize()
     b = Tensor.empty(12).realize().shrink(((x, x+4),))
     c = a + b

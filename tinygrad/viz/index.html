@@ -136,7 +136,7 @@
     stroke-linejoin: miter;
   }
   .label :is(text, p) {
-    font-weight: 350;
+    font-weight: 300;
   }
   g.node rect {
     stroke-width: 1.4;
@@ -211,7 +211,7 @@
     background-color: #0f1018;
     padding: 20px;
     z-index: 2;
-    position: absolute;
+    position: relative;
     height: 100%;
   }
   .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
@@ -239,6 +239,12 @@
   }
   #custom {
     z-index: 1;
+    margin-inline: 0;
+  }
+  #profiler {
+    position: absolute;
+    inset: 0 0 auto;
+    width: auto;
   }
   .ctx-list-parent {
     width: 15%;

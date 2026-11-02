@@ -266,6 +266,13 @@ class TestSymbolicOps(unittest.TestCase):
       expected = t[:i].sum().item()
       np.testing.assert_equal(symbolic, expected)
 
+  def test_expand_reduce(self):
+    for a in (Tensor([1., float("inf")]).reshape(1, 2), Tensor([True, False]).reshape(1, 2)):
+      for i in range(0, 3):
+        vi = Variable("i", 0, 10).bind(i)
+        for fn in (lambda t: t.sum(0, dtype=a.dtype), lambda t: t.prod(0), lambda t: t.max(0)):
+          np.testing.assert_equal(fn(a.expand(vi, 2)).numpy(), fn(a.expand(i, 2)).numpy())
+
   def test_mean(self):
     a = Tensor.rand(10, 3)
     for i in range(1, 5):

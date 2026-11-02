@@ -338,6 +338,9 @@ class TestUint8DType(TestDType):
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
+  @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
+  def test_uint8_to_int8_overflow_compare(self):
+    self.assertEqual((Tensor([128, 5], dtype=dtypes.uint8).cast(dtypes.int8) < 0).tolist(), [True, False])
 
 class TestBitCast(unittest.TestCase):
   def test_subword_slice(self):
@@ -407,6 +410,11 @@ class TestUint64DType(TestDType):
   @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
   def test_uint64_cast_double(self):
     assert Tensor([2**32 + 1], dtype=dtypes.uint64).cast(dtypes.double).numpy() == 2**32 + 1
+  def test_uint64_cast_float_rounds_once(self):
+    self.assertEqual(Tensor([2**25+3], dtype=dtypes.uint64).cast(dtypes.float32).tolist(), [2**25+4])
+  @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
+  def test_uint64_cast_double_rounds_once(self):
+    self.assertEqual(Tensor([2**63+2**10+1], dtype=dtypes.uint64).cast(dtypes.double).tolist(), [2**63+2**11])
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedUInt64DType(TestUint64DType):

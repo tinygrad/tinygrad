@@ -6,13 +6,15 @@ from tinygrad.runtime.autogen import libc
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:bytes # noqa: E702
 
-def link_sym(sym:str, libs:list[ctypes.CDLL]) -> int:
+def link_sym(sym:str, libs:list[ctypes.CDLL], link_syms:dict[str,int]|None=None) -> int:
+  if link_syms is not None and (addr:=link_syms.get(sym)): return addr
   for lib in libs:
     try: return unwrap(ctypes.cast(getattr(lib, sym), ctypes.c_void_p).value)
     except (OSError, AttributeError, TypeError): pass
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 
-def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None,
+               link_syms:dict[str,int]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
   assert blob[:4] == libc.ELFMAG.encode(), "blob is not an ELF, missing magic bytes"
   ecls = {libc.ELFCLASS32: "Elf32", libc.ELFCLASS64: "Elf64"}[blob[libc.EI_CLASS]]
 
@@ -44,13 +46,13 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, unwrap(symtab)[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)], getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
              getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, link_sym(_strtab(sh_strtab, sym.st_name), link_libs or []) if sym.st_shndx == 0 else
+    relocs += [(target_image_off + roff, link_sym(_strtab(sh_strtab, sym.st_name), link_libs or [], link_syms) if sym.st_shndx == 0 else
                 sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs
 
-def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) -> bytes:
-  image_, _, relocs = elf_loader(obj, link_libs=link_libs)
+def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None, link_syms:dict[str,int]|None=None) -> bytes:
+  image_, _, relocs = elf_loader(obj, link_libs=link_libs, link_syms=link_syms)
   image = bytearray(image_)
 
   def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int, addend: int):

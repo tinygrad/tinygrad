@@ -52,12 +52,12 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** decomposition patterns *****
 
 def floordiv_to_idiv(a:UOp, b:UOp) -> UOp:
-  if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.CDIV, b)
-  return a.alu(Ops.CDIV, b) - (a.alu(Ops.CMOD, b).ne(0) & (a<0).ne(b<0))
+  if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.TRUNCDIV, b)
+  return a.alu(Ops.TRUNCDIV, b) - (a.alu(Ops.TRUNCMOD, b).ne(0) & (a<0).ne(b<0))
 
 def floormod_to_mod(a:UOp, b:UOp) -> UOp:
-  if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.CMOD, b)
-  r = a.alu(Ops.CMOD, b)
+  if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.TRUNCMOD, b)
+  r = a.alu(Ops.TRUNCMOD, b)
   # use where instead of mul to avoid being fused into MULACC (which int64 long-decomp doesn't handle)
   return r + (r.ne(0) & (a<0).ne(b<0)).where(b, b.const_like(0))
 
@@ -66,11 +66,11 @@ powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 def get_simplifying_rewrite_patterns(ops:tuple[Ops, ...]) -> PatternMatcher:
   # these are rewrites that make things simpler
   pat: list[tuple[UPat, Callable]] = []
-  # FLOORDIV by 2**y -> x >> y (an arithmetic shift is exactly floor division for any sign); fires before floordiv_to_idiv
+  # DIV by 2**y -> x >> y (an arithmetic shift is exactly floor division for any sign); fires before floordiv_to_idiv
   if Ops.SHR in ops: pat.append((UPat.var("x", dtypes.ints)//UPat.cvar("c"),
     lambda x,c: x >> v if (v:=powers_of_two.get(c.val, 0)) else None))
   pat.append((UPat.var("a")//UPat.var("b"), floordiv_to_idiv))
-  # FLOORMOD by 2**y -> x & (2**y-1) (correct floor mod for any sign in two's complement); fires before floormod_to_mod
+  # MOD by 2**y -> x & (2**y-1) (correct floor mod for any sign in two's complement); fires before floormod_to_mod
   if Ops.AND in ops: pat.append((UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.val-1) if c.val in powers_of_two else None))
   pat.append((UPat.var("a")%UPat.var("b"), floormod_to_mod))
   # no real hardware supports THREEFRY, but NullRenderer does
@@ -84,22 +84,22 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.MAX not in ops and Ops.CMPLT in ops: pat += [(UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]))]
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
     lambda x,y: (x | y).logical_not())]
-  # rewrite MUL/CDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
+  # rewrite MUL/TRUNCDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.val, 0)) else None)]
   if Ops.SHR in ops:
-    # uint CDIV by 2**v -> x >> v (FLOORDIV is lowered to CDIV by the rule above before reaching here)
-    pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.uints), UPat.cvar("c"))),
+    # uint TRUNCDIV by 2**v -> x >> v (DIV is lowered to TRUNCDIV by the rule above before reaching here)
+    pat += [(UPat(Ops.TRUNCDIV, src=(UPat.var("x", dtypes.uints), UPat.cvar("c"))),
       lambda x,c: x >> v if (v:=powers_of_two.get(c.val, 0)) else None)]
-    # signed CDIV (trunc) by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
-    pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
+    # signed TRUNCDIV by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
+    pat += [(UPat(Ops.TRUNCDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
       lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
         if (v:=powers_of_two.get(c.val, 0)) else None)]
     if not disable_fast_idiv:
       # fast_idiv handles non-pow2 divisors on non-negative inputs
-      pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))), lambda ctx, x, d: fast_idiv(ctx, x, d.val))]
-      # rewrite raw CMOD -> x - d*fast_idiv(x,d), only when fast_idiv can actually divide;
-      # avoids disturbing floormod_to_mod's general-path output (which uses a trunc Ops.CMOD as an implementation detail)
-      pat += [(UPat(Ops.CMOD, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
+      pat += [(UPat(Ops.TRUNCDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))), lambda ctx, x, d: fast_idiv(ctx, x, d.val))]
+      # rewrite raw TRUNCMOD -> x - d*fast_idiv(x,d), only when fast_idiv can actually divide;
+      # avoids disturbing floormod_to_mod's general-path output (which uses Ops.TRUNCMOD as an implementation detail)
+      pat += [(UPat(Ops.TRUNCMOD, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
         lambda ctx, x, d: x - d * q if (q:=fast_idiv(ctx, x, d.val)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*UPat.cvar('c'), lambda ctx,x,c: x.alu(Ops.NEG) if c.val == x.dtype.const(-1) else None)]
@@ -112,7 +112,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       ((UPat.cvar("c1")<UPat.var("x", dtypes.ints)) & (UPat.var("x", dtypes.ints)<UPat.cvar("c2")),
         lambda x,c1,c2: x.eq(c1+1) if c1.val+1==c2.val-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
-  if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
+  if Ops.CMPNE in ops: pat += [(UPat.var('x').eq(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPNE, y))]
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
     # also fuse (x << n) + c → MULACC(x, 2^n, c) since MUL→SHL may run first

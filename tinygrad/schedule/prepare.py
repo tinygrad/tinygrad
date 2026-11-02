@@ -101,28 +101,6 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-# stop at materialization boundaries, including COPYs/STAGEs already lowered to AFTER+STORE
-def store_hazard_boundary(s:UOp):
-  if s.op in {Ops.COPY, Ops.STAGE}: return False
-  if s.op is Ops.AFTER: return not any(d.op is Ops.STORE and d.src[0].base is s.src[0].base for d in s.src[1:])
-  return True
-
-def fix_store_hazard(target:UOp, src:UOp):
-  # (a source that doesn't read the target's buffer at all: no walk)
-  if (base:=target.base).op in GroupOp.Defines and base not in src.defines_slice: return None
-  # PERMUTE reorders indices, SHRINK can have overlapping regions when dest is also shrunk (looked up only if a reached SHRINK needs it)
-  view = target
-  while view.op is Ops.RESHAPE: view = view.src[0]
-  reaches_base: dict[UOp, bool] = {}
-  target_shrunk: bool|None = None
-  for s in src.toposort(gate=store_hazard_boundary):
-    reaches_base[s] = any(c is base or reaches_base.get(c) for c in s.src)
-    if not reaches_base[s]: continue
-    if s.op is Ops.PERMUTE: return target.store(src.contiguous())
-    if s.op is Ops.SHRINK and s is not view:
-      if target_shrunk is None: target_shrunk = any(u.op is Ops.SHRINK for u in target.toposort(gate=lambda u: u is not base))
-      if target_shrunk: return target.store(src.contiguous())
-
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
   if not SPLIT_REDUCEOP or not all_int(x.shape) or prod(x.shape[:reduce.arg[1]])<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -250,9 +228,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # remove DETACH/CONTIGUOUS_BACKWARD (TODO: this is copied in allocations)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
-  # SINK only ever references the base
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(y.unsharded_base for y in x.src))),
-
   # ** copy rules **
 
   # a copy to the same device as the source is not allowed: it is a no-op, STAGE materializes on the same device
@@ -289,9 +264,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # materialize the src of a cross device STORE on its own device first: the STORE itself is the copy
   (UPat(Ops.STORE, src=(UPat(name="dest"), UPat(name="src"))), materialize_cross_device_src),
-
-  # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
-  (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
   # remove two STOREs that store the same thing to the same place: TestSchedule.test_dedup_Assign
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),

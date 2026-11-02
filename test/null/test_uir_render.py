@@ -36,11 +36,10 @@ def _parse_const(tok:str) -> UOp:
 
 def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
   kv = _kv(rest)
-  def i(k:str) -> int|None: return int(kv[k]) if k in kv else None
   dev = kv.get("device")
   return ParamArg(int(kv["slot"]), _DTYPES_BY_NAME[kv["dtype"]],
                   tuple(map(int, kv["bounds"].strip("[]").split(","))) if "bounds" in kv else None,
-                  i("multiple_of"), name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
+                  name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
                   pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, kv.get("volatile") == "true")
 
 def parse_ssa(text:str) -> UOp:
@@ -86,7 +85,7 @@ def parse_ssa(text:str) -> UOp:
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.vmin_vmax, b.arg.multiple_of,
+  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.vmin_vmax,
                                                  b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
           for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
   return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root

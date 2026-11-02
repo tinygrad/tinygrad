@@ -19,7 +19,7 @@ class TestWeakConstFolding(unittest.TestCase):
     self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.weakint, 2**41))
 
   def test_float_unaries(self):
-    for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL):
+    for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIP):
       out = UOp.const(4.0).alu(op).simplify()
       self.assertEqual((out.op, out.dtype), (Ops.CONST, dtypes.weakfloat))
 
@@ -32,7 +32,7 @@ class TestWeakConstFolding(unittest.TestCase):
     self.assertTrue(nan.ne(nan).simplify().val)
 
   def test_invalid_poison(self):
-    self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
+    self.assertTrue(UOp.invalid().alu(Ops.TRUNCDIV, UOp.const(0)).simplify().is_invalid)
 
 class TestBitcastConstFolding(unittest.TestCase):
   def test_out_of_range_source_value(self):

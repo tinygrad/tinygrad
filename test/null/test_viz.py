@@ -455,16 +455,9 @@ class TestVizIntegration(unittest.TestCase):
       a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
       for _ in range(3): Tensor.realize(*f(a, b, c))
     out = load_profile(cpu_events)
-    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
+    self.assertEqual(["NULL", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
-    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 3)
-    for graph in out["layout"]["NULL Graph"]["events"]:
-      graph_st, graph_et = graph["st"], graph["st"]+graph["dur"]
-      for k in ["NULL", "NULL:1", "NULL:SDMA:0", "NULL:1:SDMA:0"]:
-        events = [e for e in out["layout"][k]["events"] if graph_st <= e["st"] and e["st"]+e["dur"] <= graph_et]
-        self.assertGreater(len(events), 0)
-        self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
 
   @needs_tracked_pm
   def test_view_source(self):
@@ -637,15 +630,13 @@ class TestVizProfiler(unittest.TestCase):
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1),
                                     ProfileGraphEntry(device='NV:1:SDMA:0', name='NV -> NV:1', st_id=2, en_id=3)],
-                              deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
     j = load_profile(prof)
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
-    self.assertEqual(tracks[1], 'NV Graph')
-    self.assertEqual(tracks[2], 'NV:1:SDMA:0')
+    self.assertEqual(tracks[1], 'NV:1:SDMA:0')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -656,17 +647,12 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(sdma_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(sdma_events[0]['st'], 954)
 
-    graph_events = j['layout']['NV Graph']['events']
-    self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
-    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], sdma_events[0]['st']+sdma_events[0]['dur'])
-
   def test_graph_copy_bandwidth(self):
     sz = 256*1024*1024
     dur = 10_000
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV:1:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st_id=0, en_id=1)],
-                              deps=[[]],
                               sigs=[decimal.Decimal(1004), decimal.Decimal(1004+dur)])]
 
     j = load_profile(prof)
@@ -681,10 +667,10 @@ class TestVizProfiler(unittest.TestCase):
             ProfileRangeEvent(device='NV:1', name='E_3', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
             ProfileRangeEvent(device='NV:SDMA:0', name='COPY', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_2', st_id=0, en_id=1)],
-                              deps=[[]], sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
+                              sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
     j = load_profile(prof)
-    # graph grouped with its device, memory at the end
-    self.assertListEqual(list(j['layout']), ['NV', 'NV Graph', 'NV:SDMA:0', 'NV:1'])
+    # memory at the end
+    self.assertListEqual(list(j['layout']), ['NV', 'NV:SDMA:0', 'NV:1'])
 
   def test_multi_sdma_ordering(self):
     props = {"gfx_target_version": 0}
@@ -706,14 +692,14 @@ class TestVizProfiler(unittest.TestCase):
             # graph spanning compute + copy on GPU 0
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='AMD', name='E_1', st_id=0, en_id=1),
                                     ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
-                              deps=[[], [0]], sigs=[St, En, St, En]),
+                              sigs=[St, En, St, En]),
             # memory alloc on both GPUs
             ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"nbytes":4096}, ts=St),
             ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"nbytes":2048}, ts=St)]
     j = load_profile(prof)
-    # graph grouped with its device, memory at the end
+    # memory at the end
     self.assertListEqual(list(j['layout']),
-      ['AMD', 'AMD Graph', 'AMD:SDMA:0', 'AMD:SDMA:1',
+      ['AMD', 'AMD:SDMA:0', 'AMD:SDMA:1',
        'AMD:1', 'AMD:1:SDMA:0', 'AMD:1:SDMA:1',
        'AMD Memory', 'AMD:1 Memory'])
 
@@ -913,7 +899,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     cfg = self.get_cfg("simple", k)["data"]
-    self.assertEqual(len(cfg["blocks"]), 3)
+    self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_repeat(self):
     k = Kernel()
@@ -961,7 +947,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_code_end())
     ret = self.get_cfg("diamond", k)
     cfg = ret["data"]
-    self.assertEqual(len(cfg["blocks"]), 6)
+    self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
@@ -1119,7 +1105,7 @@ class TestCfg(unittest.TestCase):
     k.label("loop")
     k.emit(s_branch(), target="cmp")
     ret = self.get_cfg("endpgm", k)
-    self.assertEqual(len(ret["data"]["blocks"]), 6)
+    self.assertEqual(len(ret["data"]["blocks"]), 5)
     # the endpgm block has no path out
     endpc = next(pc for pc,s in ret["data"]["pc_tokens"].items() if s[0]["st"].startswith("s_endpgm"))
     self.assertEqual(len(ret["data"]["paths"][endpc]), 0)
@@ -1196,14 +1182,16 @@ class TestCLI(unittest.TestCase):
     with save_viz() as viz:
       for _ in range(CNT:=4):
         # use kernel names unique to this test
-        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k1_test_viz_dedup")))[0].realize()
-        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k2_test_viz_dedup")))[0].realize()
-    with write_files(viz) as files, Context(NO_COLOR=1):
-      name = run_cli(*files, "-s", "NULL")[0]["name"]
-      with Context(DEBUG=3):
-        select = run_cli(*files, "-s", "NULL", name)
-    self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
-    self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
+        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(f"{colored('k1', 'cyan')}_viz")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(f"{colored('k2', 'cyan')}_viz")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(16, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(f"{colored('g1', 'cyan')}_viz")))[0].realize()
+    with write_files(viz) as files, Context(DEBUG=3):
+      k1q = run_cli(*files, "-s", "NULL", "-q", "k1")
+      both_kq = run_cli(*files, "-s", "NULL", "-q", "k1|k2")
+    self.assertEqual(len([s for s in k1q if s.get("value")]), 1, "debug output was not deduped")
+    self.assertEqual(len([s for s in k1q if s.get("dur_ms")]), CNT, "expected 4 runs for k1")
+    self.assertEqual(len([s for s in both_kq if s.get("value")]), 2)
+    self.assertEqual(len([s for s in both_kq if s.get("dur_ms")]), CNT*2)
 
   @needs_tracked_pm
   def test_call_graph(self):
@@ -1256,13 +1244,18 @@ class TestCLI(unittest.TestCase):
     with save_viz() as viz, Context(SCACHE=0):
       Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=kernel)[0].realize()
     with write_files(viz) as files:
+      programs = [s["name"] for s in run_cli(*files, "-s", "TINY") if s.get("name", "").startswith("do_to_program for ")]
       rewrites = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "--ls", json_fmt=False)[0]["out"].split("\n")
       with Context(NO_COLOR=1):
         uops = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View UOp List", json_fmt=False)[0]["out"]
+      source = run_cli(*files, "-s", "TINY", "do_to_program for nested_calls", "View Source")[1]["value"]
     codegen_count = [s for s in rewrites if "View Output AST" in s]
-    self.assertEqual(len(codegen_count), 3)
+    self.assertCountEqual(programs, [f"do_to_program for {name}" for name in ("inner", "outer", "nested_calls")])
+    self.assertEqual(len(codegen_count), 1)
     self.assertIn(" = linear ", uops)
     self.assertIn(" = call ", uops)
+    self.assertEqual(len([s for s in source.splitlines() if "inner(" in s]), 4) # define + declare + 2 calls
+    self.assertEqual(len([s for s in source.splitlines() if "nested_calls(" in s]), 1)
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):

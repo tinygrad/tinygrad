@@ -66,13 +66,16 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   inputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in input_names + list(symbolic_vars.values())]
   outputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in output_names]
   forward_args = ",".join(f"{dtype}{'*' if name not in symbolic_vars.values() else ''} {name}" for name,dtype,_ in (outputs+inputs if wasm else inputs+outputs))
+  def kernel_call(name:str, args:List[str]) -> str:
+    fields = " ".join(f"{dtype_map[bufs[a][1]] if a in symbolic_vars.values() else 'void*'} a{i};" for i,a in enumerate(args))
+    return f"{name}((unsigned char*)&(struct {{ {fields} }}){{{', '.join(args)}}});"
 
   if not wasm:
     for name,cl in bufs_to_save.items():
       weight = ''.join(["\\x%02X"%x for x in cl.as_memoryview()])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog += [f"{dtype_map[dtype]} {name}[{len}];" if name not in bufs_to_save else f"{dtype_map[dtype]} *{name} = ({dtype_map[dtype]} *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in input_names+output_names]
-    cprog += [f"void net({forward_args}) {{"] + [f"{name}(&(struct {name}_args){{{', '.join(args)}}});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    cprog += [f"void net({forward_args}) {{"] + [kernel_call(name, args) for (name, args, _global_size, _local_size) in statements] + ["}"]
     return '\n'.join(headers + cprog)
   else:
     if bufs_to_save:
@@ -88,7 +91,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
     cprog += [f"void net({forward_args})"] + ["{"]
     get_weight_ptr = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{buf_to_name[x]['idx']}]" if x in bufs_to_save else x
-    cprog += [f"  {name}(&(struct {name}_args){{{', '.join(map(get_weight_ptr, args))}}});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    cprog += ["  " + kernel_call(name, list(map(get_weight_ptr, args))) for (name, args, _global_size, _local_size) in statements] + ["}"]
     weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for weight_name in [v["name"] for v in buf_to_name.values()]])}];
 const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n"""
     top = f"""import {model_name}Module from './{model_name}.js'{weightMapping}"""

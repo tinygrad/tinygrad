@@ -1,4 +1,5 @@
 import ctypes, struct, time, functools, itertools
+from typing import cast
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
@@ -434,7 +435,7 @@ Compiled.pm_lower += PatternMatcher([
 # 6. bufferize
 
 def usb_reset(dev):
-  host = Compiled.link_bufs[to_name(dev.device, "usb_host")]
+  host = cast(Buffer, Compiled.link_bufs[to_name(dev.device, "usb_host")])
   for buf, off, n in ((dev.iface.ctrl, 0x800, 4), (dev.iface.ctrl, 0x5000, 0x80000), (host, 16, 8)): buf.host.view(off, n)[:] = bytes(n)
   for t in map(libusb.struct_libusb_transfer.from_address, host.host.view(fmt='Q')[3:5]): t.status = 0xff * (t.status == 0xff)
 
