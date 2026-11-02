@@ -424,13 +424,14 @@ class QSAIndexer:
     self.q_norm, self.k_norm = nn.RMSNorm(idx.head_dim, idx.norm_eps), nn.RMSNorm(idx.head_dim, idx.norm_eps)
 
   def _init_state(self, x:Tensor):
-    if not hasattr(self, "cache_k"): self.cache_k = Tensor.zeros(x.shape[0], self.max_context, self.idx.head_dim, dtype=dtypes.half, device=x.device)
+    if not hasattr(self, "cache_k"):
+      self.cache_k = Tensor.zeros(x.shape[0], round_up(self.max_context, self.idx.kpool), self.idx.head_dim, dtype=dtypes.half, device=x.device)
 
   def __call__(self, x:Tensor, start_pos:int|UOp, freqs:Tensor) -> Tensor:
     (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
     k = Tensor(self.cache_k.uop.after(self.cache_k[:, start_pos:S].uop.store(self.k_proj(x).half().uop))).float()
     k, q = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), self.q_norm(self.q_proj(x).reshape(B, T, idx.n_heads, idx.head_dim))
-    pool_freqs = freqs.reshape(-1, idx.kpool, freqs.shape[-1])[:, 0]
+    pool_freqs = freqs[::idx.kpool]
     k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), pool_freqs).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
     q = apply_rope(q[..., :idx.rope_dim].transpose(1, 2), freqs[start_pos:start_pos+T]).transpose(1, 2).cat(q[..., idx.rope_dim:], dim=-1)
     return _pool_mask((q @ k.transpose(-1, -2).unsqueeze(1)).relu().sum(2) * idx.head_dim**-0.5, start_pos, idx, x.dtype)
@@ -697,6 +698,7 @@ class Transformer:
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
     ple_entry = entries.pop('per_layer_token_embd.weight', None)  # the n-gram table stays in CPU RAM
+    assert ple_entry is None or ple_entry[2] == IQ4_NL, "PLE table must use IQ4_NL encoding"
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     shard_map:dict[str, int] = {}
@@ -920,7 +922,7 @@ class Transformer:
     # hash the n-grams ending at tokens[start:] (t0*m0 ^ t1*m1 for the bigram heads, then ^ t2*m2 for the trigram heads, predecessors
     # before the start or an EOS are EOS) and copy their packed table rows into the host buffer, without creating any tensor
     ple = unwrap(self.config.ple)
-    table, rows = (cast(Buffer, unwrap(t).uop.base.buffer).ensure_allocated().as_memoryview(allow_zero_copy=True)
+    table, rows = (cast(Buffer, unwrap(t).uop.buffer).ensure_allocated().as_memoryview(allow_zero_copy=True)
                    for t in (self.ple_table, self.ple_rows))
     rb, n, h = ple.head_dim // 32 * 18, len(ple.multipliers), len(ple.vocab_sizes)
     for p in range(start, len(tokens)):

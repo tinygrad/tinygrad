@@ -1,13 +1,13 @@
 import pathlib, re, tempfile, unittest
 import numpy as np
 from gguf import GGUFWriter, GGUFValueType, GGMLQuantizationType as Q
-from tinygrad import nn
+from tinygrad import Tensor, nn
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig, HCConfig, IndexerConfig, PLEConfig
 from test.helpers import not_support_multi_device
 
 VOCABS, MULS, EOS, PROMPT = (13, 17), (13703, 5749, 811), 63, [11, 15, 3, 63, 9, 8, 63, 12, 20, 33, 7]
 
-def load_tiny_qwen4exp(shard:int=1) -> Transformer:
+def load_tiny_qwen4exp(shard:int=1, max_context:int=32) -> Transformer:
   # GDN then QSA with the PLE, two hyper-connection streams, one KV head
   config = TransformerConfig(num_blocks=2, dim=64, hidden_dim=32, n_heads=2, n_kv_heads=1, norm_eps=1e-5, vocab_size=64, head_dim=32,
     rope_theta=10000, rope_dim=16, v_head_dim=32, max_context=32, num_experts=4, num_experts_per_tok=2, shared_expert_dim=32,
@@ -36,7 +36,7 @@ def load_tiny_qwen4exp(shard:int=1) -> Transformer:
   writer.write_kv_data_to_file()
   writer.write_tensors_to_file()
   writer.close()
-  return Transformer.from_gguf(path, shard=shard)[0]
+  return Transformer.from_gguf(path, max_context=max_context, shard=shard)[0]
 
 class TestQwen4Exp(unittest.TestCase):
   def test_generate(self):
@@ -53,6 +53,27 @@ class TestQwen4Exp(unittest.TestCase):
     # chunked prefill and token by token decode agree
     gen = load_tiny_qwen4exp().generate(list(PROMPT), chunk_size=1)
     self.assertEqual(out, [next(gen) for _ in range(6)])
+
+  def test_ple_rows_views(self):
+    model = load_tiny_qwen4exp()
+    model.ple_rows = Tensor.empty(1, len(PROMPT), len(VOCABS), 18, dtype="uint8", device="CPU").realize()
+    model._write_ple_rows(PROMPT, 0)
+    expected = model.ple_rows.numpy()
+    # Both the table and destination may be views into larger host buffers (e.g. a Tensor-backed GGUF).
+    model.ple_table = model.ple_table.pad((7, 11)).contiguous().realize()[7:-11]
+    rows = Tensor.full(model.ple_rows.numel()+18, 255, dtype="uint8", device="CPU").contiguous().realize()
+    model.ple_rows = rows[9:-9].reshape(model.ple_rows.shape)
+    model._write_ple_rows(PROMPT, 0)
+    np.testing.assert_array_equal(model.ple_rows.numpy(), expected)
+    np.testing.assert_array_equal(rows.numpy()[:9], 255)
+    np.testing.assert_array_equal(rows.numpy()[-9:], 255)
+
+  def test_partial_indexer_pool(self):
+    prompt = (PROMPT * 3)[:29]
+    out = list(load_tiny_qwen4exp(max_context=31).generate(list(prompt), chunk_size=8))
+    self.assertEqual(len(out), 2)
+    gen = load_tiny_qwen4exp().generate(list(prompt), chunk_size=8)
+    self.assertEqual(out, [next(gen) for _ in out])
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_shard_two(self):
