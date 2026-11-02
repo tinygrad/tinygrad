@@ -1258,7 +1258,7 @@ class TestF16EdgeCases(unittest.TestCase):
 
 
 class TestExpEdgeCases(unittest.TestCase):
-  """Additional edge cases for V_EXP_F32."""
+  """Tests for V_EXP_F32 and V_EXP_F16."""
 
   def test_v_exp_f32_zero(self):
     """V_EXP_F32 of 0.0 returns 1.0 (2^0 = 1)."""

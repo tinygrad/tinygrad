@@ -15,25 +15,27 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.END), name="r"), flatten_range),
 ])
 
-# index/range arithmetic uses DIV/MOD prior to late rewrite
-def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.DIV, Ops.MOD} for u in x.backward_slice)
-def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
-  # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
-  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
-    # check same type and neither bound depends on the other range
-    if r0.axis_type == r1.axis_type and r0 not in r1.ranges and r1 not in r0.ranges:
-      # check if the ranges to merge are in the same reduces
-      if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
-        s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
-        new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                             name=f"check_merge_{r0.axis_id}_{r1.axis_id}")
+# TODO: something in GroupOp
+pure_ops = GroupOp.Elementwise|GroupOp.Irreducible|{Ops.INDEX, Ops.LOAD, Ops.STACK}
 
-        # check if it simplifies. return after one merge so the next rewrite uses the new ranges,
-        # rather than continuing with stale pairs from the original ended_ranges.
-        if count_divmod(nidx) <= count_divmod(u): return nidx
+def mergeable_pairs(x:UOp) -> list[tuple[UOp, UOp]]:
+  # an END or a REDUCE with effects runs its ranges as loops nested by axis id, so only neighbors merge
+  if x.op is Ops.REDUCE and all(y.op in pure_ops|{Ops.REDUCE} for y in x.backward_slice): return list(itertools.permutations(x.ended_ranges, 2))
+  return list(itertools.pairwise(sorted(x.ended_ranges, key=lambda r: r.arg))) if x.op in {Ops.END, Ops.REDUCE} else []
+
+def merge_ranges(u:UOp) -> UOp|None:
+  enders = {x:mergeable_pairs(x) for x in u.backward_slice if x.op in range_start}
+  impure = [x for x in u.backward_slice if x.op not in pure_ops]
+  for r0, r1 in dedup(p for pairs in enders.values() for p in pairs):
+    if r0.axis_type is not r1.axis_type or r0 in r1.ranges or r1 in r0.ranges: continue
+    # every op that ends r0 or r1 must merge them, and an op that isn't pure must run as often as before
+    if any((r0, r1) not in pairs for x, pairs in enders.items() if {r0, r1} & set(x.ended_ranges)): continue
+    if any((r0 in x.ranges) != (r1 in x.ranges) for x in impure): continue
+    s1 = r1.src[0]
+    n = r0.replace(src=((r0.src[0]*s1).simplify(),))
+    sub = {r0:n//s1, r1:n%s1}
+    ret = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx=sub, name=f"check_merge_{r0.axis_id}_{r1.axis_id}")
+    if not any(v in ret.backward_slice for v in sub.values()): return ret
   return None
 
 def mark_gated(ctx, idx):
@@ -50,11 +52,11 @@ def mark_gated(ctx, idx):
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
   if x.arg is None: return None
-  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
+  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None and k in x.backward_slice})
   return None if ret is x else ret.simplify()
 
 pm_simplify_ranges = PatternMatcher([
-  (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
+  (UPat(Ops.SINK, name="u"), merge_ranges),
   (UPat(Ops.INDEX, name="idx"), mark_gated),
   # reduce ranges can't be shrunk
   (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
