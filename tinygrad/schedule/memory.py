@@ -12,7 +12,7 @@ def _collect_bufs(u:UOp) -> list[UOp]:
 def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   if b in held_bufs: return False
   # CL and WEBGPU do not support views, see explanation in contiguous_view_offset
-  return all(not d.startswith(("DISK", "CL", "WEBGPU")) for d in to_tuple(b.device))
+  return all(not d.startswith(("DISK", "NVME", "CL", "WEBGPU")) for d in to_tuple(b.device))
 
 LaneKey = tuple[str, int]
 
