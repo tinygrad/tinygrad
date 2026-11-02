@@ -133,6 +133,17 @@ class TestEffectFrequency(unittest.TestCase):
     self.assertEqual(d.tolist(), [1, 1, 0, 0, 0, 0, 0, 0])
 
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
+  def test_shrink_range_keeps_custom(self):
+    # the CUSTOM sets C[0] to r every iteration, so r keeps its 4 iterations though the D store gates it to r<2
+    r = UOp.range(4, 0, AxisType.LOOP)
+    def kernel(C:UOp, D:UOp) -> UOp:
+      val = UOp(Ops.CUSTOM, (C[0], r.cast(dtypes.int)), ("({0}[0] = {1})", dtypes.int))
+      return D[r.valid(r<2)].store(val).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
+    Tensor.realize(c, d)
+    self.assertEqual((c.tolist(), d.tolist()), ([3], [0, 1, 0, 0]))
+
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
   def test_reduce_collapse_keeps_custom(self):
     # the CUSTOM increments C[r] every iteration, though the sum only picks r==2
     r = UOp.range(4, 0, AxisType.LOOP)
