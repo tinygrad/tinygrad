@@ -114,7 +114,7 @@ def _iattr(inst, name: str, default: int = 0) -> int:
   v = getattr(inst, name, default)
   return default if v is None else v
 # SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants
-SGPR_COUNT = 260
+SGPR_COUNT = 256
 
 def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
