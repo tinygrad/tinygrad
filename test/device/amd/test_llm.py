@@ -3,7 +3,8 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4, _use_i8_wmma)
+                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4, _use_i8_wmma, I8_WMMA_QUANTS)
+from tinygrad.helpers import getenv
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -304,6 +305,45 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     for r in np.nonzero(rows >= 0)[0]:
       t, k = divmod(int(rows[r]), K)
       np.testing.assert_allclose(out[r], weight[sel[0, t, k]] @ xq[t], rtol=1e-3, atol=1e-3)
+
+  def test_grouped_fused_gate_up(self):
+    # grouped experts (prefill) with the gate and up rows interleaved (fuse_gate_up): the kernel stores their gated activation in half.
+    # eight waves of two output tiles: on RDNA3 the accumulator halves are exchanged by permlanex16 (their LDS exchange is too big)
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    from tinygrad.llm.kernels.amd import moe_route, moe_grouped_linear, fuse_gate_up
+    rng = np.random.default_rng(5)
+    T, E, K, IN, OUT, act = 96, 8, 4, 512, 256, (1.0, 10.0, 0.0)
+    for typ in (22, 10, 11, 21, 23):  # IQ2_S, Q2_K, Q3_K, IQ3_S, IQ4_XS: GLM-5.3-Flash UD-IQ3_XXS's experts
+      with self.subTest(ggml_type=typ):
+        size = QUANT_SIZES[typ]
+        weights, raws = [], []
+        for _ in range(2):
+          packed = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
+          offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
+          packed[:, offset:offset+2] = np.array([0.0005], np.float16).view(np.uint8)
+          if typ == 10: packed[:, 82:84] = np.array([0.0002], np.float16).view(np.uint8)
+          weights.append(ggml_data_to_tensor(Tensor(packed.flatten()), E*OUT*IN, typ).reshape(E, OUT, IN).numpy())
+          raws.append(Tensor(packed.flatten().view(np.uint16 if typ in HALFWORD_QUANTS else np.uint32)))
+        raw = fuse_gate_up(raws[0], raws[1], E, OUT).contiguous().realize()
+        x = rng.standard_normal((T, IN)).astype(np.float16)
+        sel = rng.integers(0, E, (1, T, K)).astype(np.int32)
+        _, entries, tiles, _ = moe_route(Tensor(sel), Tensor([0], dtype=dtypes.int32), E)
+        out = moe_grouped_linear(raw, typ, E, Tensor(x), entries, tiles, slots=K, act=act).numpy()
+        self.assertEqual(out.shape[1], OUT)
+        rows = entries.numpy().reshape(-1)
+        valid = np.nonzero(rows >= 0)[0]
+        t, k = np.divmod(rows[valid], K)
+        xr = x.astype(np.float32)
+        if typ in I8_WMMA_QUANTS and (_wmma_rdna4(Device.DEFAULT) or getenv("I8_WMMA_RDNA3", 1)):
+          # (the int8 tensor cores of the grid formats: the activations quantized in groups of 32)
+          grouped = xr.reshape(T, -1, 32)
+          dq = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
+          xr = (np.clip(np.rint(grouped / dq), -127, 127) * dq).reshape(T, IN)
+        g, u = (np.einsum("roi,ri->ro", w[sel[0, t, k]], xr[t]) for w in weights)
+        g, u = np.minimum(g, act[1]), np.clip(u, -act[1], act[1])
+        expected, actual = g / (1 + np.exp(-g)) * u, out[valid].astype(np.float32)
+        # (the weights decode to half: errors of a few thousandths of the outputs' scale; a wrong row or column is of its scale)
+        self.assertLess(np.abs(actual - expected).max(), 5e-3 * np.abs(expected).max())
 
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

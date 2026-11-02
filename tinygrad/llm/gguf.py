@@ -414,7 +414,8 @@ def _run_gather(fxn:Callable, *bufs:UOp):
 
 def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
                    units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str],
-                   defer:list[Callable[[], None]]|None=None) -> dict[str, Tensor]|None:
+                   defer:list[Callable[[], None]]|None=None,
+                   row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]|None:
   """
   _direct_load in parallel: every device's tensors are file reads (os.preadv, threads) into host buffers of the device, then copies to its
   buffer, the devices in turn. tensors split by columns (an expert's slices of the down projection, the parts of a row parallel weight) are
@@ -438,6 +439,12 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
   for name, (data, shape, typ) in entries.items():
     _, off, nb = locs[name]
     if name in fused_up: continue
+    if row_sel is not None and name in row_sel:
+      # every device its rows of the file's tensor (src_rows of them): one read each
+      src_rows, sel = row_sel[name]
+      rb = nb // src_rows
+      plan[name] = [(cnt*rb, ("segs", [(off + r0*rb, cnt*rb, 0, cnt*rb, 0)], [])) for r0, cnt in sel]
+      continue
     if name in fuse:
       slices, per_device = units[name]
       E, rows, _ = shape
@@ -653,7 +660,8 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
-               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None, defer:list[Callable[[], None]]|None=None) -> dict[str, Tensor]:
+               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None, defer:list[Callable[[], None]]|None=None,
+               row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   a tensor (E, rows, cols) in `units` (slices, per device unit lists) is cut in E*slices units: unit e*slices+j is expert e's rows j*rows/slices..
@@ -661,22 +669,36 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
   pads: a sharded tensor is zero padded on its shard axis to this size (gguf_pad)
   fuse: gate -> up tensors in units to load as one gate tensor, their unit rows interleaved by 16 (if loaded straight from the file)
   defer: the bytes are read later, by the function added to it (if loaded straight from the file)
+  row_sel: a tensor (its entry's shape the loaded one: devices*count rows, sharded on axis 0) is every device's rows (start, count) of the file's
+  tensor of src_rows rows: (src_rows, [(start, count) of every device])
   """
   pads, fuse = pads or {}, fuse or {}
   n, packed, shard_map, units, shapes = len(devices), {}, shard_map or {}, units or {}, {}
   for name, (_, shape, _) in entries.items():
     if name in units: shapes[name] = (n*len(units[name][1][0]), shape[1] // units[name][0], shape[2]) if not name.endswith("down_exps.weight") else \
       (n*len(units[name][1][0]), shape[1], shape[2] // units[name][0])
-  direct = _parallel_load(entries, devices, shard_map, units, pads, fuse, defer) if getenv("GGUF_LOAD2", 1) else \
-           _direct_load(entries, devices, shard_map, units, pads, fuse)
+  # the tensors of the files are read straight into the devices' memory, the others (made from them: a model's layout of them) copied
+  row_sel = row_sel or {}
+  load2 = bool(getenv("GGUF_LOAD2", 1))
+  disk = {k:v for k,v in entries.items() if _disk_bytes(v[0]) is not None and (load2 or k not in row_sel)}
+  direct = (_parallel_load(disk, devices, shard_map, units, pads, fuse, defer, row_sel) if load2 else
+            _direct_load(disk, devices, shard_map, units, pads, fuse)) if disk else None
   if direct is not None:
-    packed, entries_left = direct, {}
+    packed = direct
+    entries_left = {k:gguf_pad(v, unwrap(shard_map.get(k)), pads[k]) if k in pads else v for k,v in entries.items() if k not in disk}
     for g, u in fuse.items():
       shapes[g] = (shapes[g][0], 2*shapes[g][1], shapes[g][2])
       del entries[u]
   else: entries_left = {k:gguf_pad(v, unwrap(shard_map.get(k)), pads[k]) if k in pads else v for k,v in entries.items()}
   entries = {k:(d, s[:shard_map[k]] + (pads[k],) + s[shard_map[k]+1:] if k in pads else s, t) for k,(d,s,t) in entries.items()}
   for name, (data, shape, typ) in entries_left.items():
+    if name in row_sel:
+      src_rows, sel = row_sel[name]
+      rb = int(data.shape[0]) // src_rows
+      parts = [data[r0*rb:(r0+cnt)*rb].reshape(1, -1).to(d).contiguous() for (r0, cnt), d in zip(sel, devices)]
+      Tensor.realize(*parts)
+      packed[name] = Tensor(UOp.mstack(*[p.uop.base for p in parts]).reshape(parts[0].shape).unshard(0))
+      continue
     if name in units:
       slices, per_device = units[name]
       E, rows, cols = shape
