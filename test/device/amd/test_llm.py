@@ -250,10 +250,10 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           np.testing.assert_allclose(state.numpy(), expected_state, rtol=2e-4, atol=2e-6)
 
   def test_gated_delta_lds_scan(self):
-    # a scan of 32 tokens (the workgroups share the operands of 16 tokens through LDS) against the recurrence
+    # The 128-wide state selects the LDS scan, including its 32-token staging on Qwen shapes.
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(1)
-    H, T, K, V = 2, 32, 128, 32
+    H, T, K, V = 2, 32, 128, 128
     q, k = (rng.normal(0, 0.1, (1, H, T, K)).astype(np.float32) for _ in range(2))
     v = rng.normal(size=(1, H, T, V)).astype(np.float32)
     beta = rng.uniform(0, 1, (1, H, T)).astype(np.float32)
@@ -284,7 +284,9 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def _test_grouped_k256(self, ggml_type, block_bytes, word):
     # grouped experts (prefill): every sorted row is the weights of its expert times its token's activations, quantized to int8 with a
     # scale per 256 inputs (as llama.cpp's q8_K for the IQ formats)
-    if not amd_custom_kernels_supported(Tensor.empty(1).device) or not _wmma_rdna4(Tensor.empty(1).device): self.skipTest("RDNA4 required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    if ggml_type != 21 and not _wmma_rdna4(Device.DEFAULT): self.skipTest("IQ4 K256 requires RDNA4")
+    from tinygrad import TinyJit
     from tinygrad.helpers import getenv
     from tinygrad.llm.kernels.amd import moe_route, moe_grouped_linear
     getenv.cache_clear()
@@ -294,17 +296,23 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     packed[:, :2] = np.array([0.01], dtype=np.float16).view(np.uint8)
     raw = Tensor(packed.flatten().view(word)).realize()
     weight = ggml_data_to_tensor(Tensor(packed.flatten()), E*OUT*IN, ggml_type).reshape(E, OUT, IN).numpy()
-    x = rng.standard_normal((T, IN)).astype(np.float32)
     sel = rng.integers(0, E, (1, T, K)).astype(np.int32)
-    _, entries, tiles, _ = moe_route(Tensor(sel), Tensor([0], dtype=dtypes.int32), E)
-    out = moe_grouped_linear(raw, ggml_type, E, Tensor(x), entries, tiles, slots=K).numpy()
-    blocks = x.reshape(T, -1, 256)
-    d = np.maximum(np.abs(blocks).max(-1, keepdims=True) / 127, 1e-8)
-    xq = (np.clip(np.rint(blocks / d), -127, 127) * d).reshape(T, IN)
-    rows = entries.numpy().reshape(-1)
-    for r in np.nonzero(rows >= 0)[0]:
-      t, k = divmod(int(rows[r]), K)
-      np.testing.assert_allclose(out[r], weight[sel[0, t, k]] @ xq[t], rtol=1e-3, atol=1e-3)
+    for tile in (32, 64):
+      _, entries, tiles, _ = moe_route(Tensor(sel), Tensor([0], dtype=dtypes.int32), E, tile=tile)
+      Tensor.realize(entries, tiles)
+      @TinyJit
+      def run(x): return moe_grouped_linear(raw, ggml_type, E, x, entries, tiles, slots=K).realize()
+      for iteration in range(3):
+        x = rng.standard_normal((T, IN)).astype(np.float32)
+        out = run(Tensor(x).realize()).numpy()
+        blocks = x.reshape(T, -1, 256)
+        d = np.maximum(np.abs(blocks).max(-1, keepdims=True) / 127, 1e-8)
+        xq = (np.clip(np.rint(blocks / d), -127, 127) * d).reshape(T, IN)
+        rows = entries.numpy().reshape(-1)
+        with self.subTest(tile=tile, iteration=iteration):
+          for r in np.nonzero(rows >= 0)[0]:
+            t, k = divmod(int(rows[r]), K)
+            np.testing.assert_allclose(out[r], weight[sel[0, t, k]] @ xq[t], rtol=1e-3, atol=1e-3)
 
   def test_grouped_fused_gate_up(self):
     # grouped experts (prefill) with the gate and up rows interleaved (fuse_gate_up): the kernel stores their gated activation in half.
@@ -335,8 +343,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         t, k = np.divmod(rows[valid], K)
         xr = x.astype(np.float32)
         if typ in I8_WMMA_QUANTS and (_wmma_rdna4(Device.DEFAULT) or getenv("I8_WMMA_RDNA3", 1)):
-          # (the int8 tensor cores of the grid formats: the activations quantized in groups of 32)
-          grouped = xr.reshape(T, -1, 32)
+          # IQ3_S accumulates 256-input blocks in int32; other formats use per-32 activation scales.
+          grouped = xr.reshape(T, -1, 256 if typ == 21 else 32)
           dq = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
           xr = (np.clip(np.rint(grouped / dq), -127, 127) * dq).reshape(T, IN)
         g, u = (np.einsum("roi,ri->ro", w[sel[0, t, k]], xr[t]) for w in weights)

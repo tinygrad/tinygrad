@@ -14,19 +14,21 @@ class TestQ8Gemm(unittest.TestCase):
         Tensor.custom_kernel(Tensor.empty(M, 32), Tensor.empty(544, dtype=dtypes.uint16), Tensor.empty(M, K),
                              fxn=functools.partial(_q8_gemm_kernel, token_tile=tile, block_n=bn, rdna4=target == 12))
     # Odd group count exercises GS=1 with padded weight staging for block_n=64.
-    for M, N, K, tile, bn in ((32, 144, 288, 32, 64), (64, 128, 512, 64, 64),
-                              (192, 320, 1024, 64, 64), (128, 144, 256, 64, 128)):
-      with self.subTest(shape=(M, N, K), tile=tile, block_n=bn):
+    for M, N, K, tile, bn, splits in ((32, 144, 288, 32, 64, 1), (64, 128, 512, 64, 64, 1),
+                                      (192, 320, 1024, 64, 64, 1), (128, 144, 256, 64, 128, 1),
+                                      (352, 320, 10240, 32, 64, 4), (352, 320, 10240, 32, 64, 16)):
+      with self.subTest(shape=(M, N, K), tile=tile, block_n=bn, splits=splits):
         scales = rng.uniform(0.001, 0.04, size=(N, K//32, 1)).astype(np.float16)
         quant = rng.integers(-127, 128, size=(N, K//32, 32), dtype=np.int8)
         raw = np.concatenate((scales.view(np.uint8), quant.view(np.uint8)), axis=-1).copy().view(np.uint16).ravel()
         weights = (quant.astype(np.float32)*scales.astype(np.float32)).astype(np.float16).reshape(N, K)
         tw = Tensor(raw).realize()
-        for dtype, npdtype in ((dtypes.float32, np.float32), (dtypes.half, np.float16)):
+        for dtype, npdtype in (((dtypes.float32, np.float32),) if splits > 1 else ((dtypes.float32, np.float32), (dtypes.half, np.float16))):
           @TinyJit
           def run(x, w):
-            fxn = functools.partial(_q8_gemm_kernel, token_tile=tile, block_n=bn, rdna4=target == 12)
-            return Tensor.custom_kernel(Tensor.empty(M, N, dtype=dtype), w, x, fxn=fxn)[0].realize()
+            fxn = functools.partial(_q8_gemm_kernel, token_tile=tile, block_n=bn, rdna4=target == 12, k_splits=splits)
+            y = Tensor.custom_kernel(Tensor.empty(splits*M, N, dtype=dtype), w, x, fxn=fxn)[0]
+            return y.reshape(splits, M, N).sum(0).realize()
           for _ in range(3):
             data = rng.normal(size=(M, K)).astype(np.float16)
             actual = run(Tensor(data).realize(), tw).numpy()

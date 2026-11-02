@@ -12,8 +12,8 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
-  grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, Q8_0, \
-  mla_bmm, bmm_wmma, weighted_sum, \
+  grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
+  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes
 from tinygrad.uop.ops import resolve, Ops
@@ -636,10 +636,15 @@ class GatedResidual:
       if lin.ggml_type is None and lin.use_custom_quant: lin.set_quantized(lin.weight)
     if self.down.ggml_type != Q8_0 or self.up.ggml_type != Q8_0 or getattr(self, "_winj", None) is None: return None
     xn, xq, part = ghc_pre(xs.reshape(B*T, self.count*self.dim), self.norm["weight"], unwrap(self._winj), self.count, self.eps)
-    if B*T <= getenv("GHC_POST_ROWS", 1):
-      mixed, inj = ghc_post(q8_linear(self.down, xn, xq=xq), self.up.weight, xn, part, self.count)
+    down = q8_linear(self.down, xn, xq=xq)
+    if 1 < B*T <= 8 and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and 0 < self.up.in_features <= 512 and \
+       not _wmma_rdna4(xs.device):
+      mixed, inj = ghc_decode_mix(down, self.up.weight, xn, part, self.count)
       return mixed.reshape(B, T, self.dim), inj.reshape(B, T, -1)[..., :self.count]
-    lo = q8_linear(self.down, xn, xq=xq) * (1 / self.count)
+    if B*T <= getenv("GHC_POST_ROWS", 1):
+      mixed, inj = ghc_post(down, self.up.weight, xn, part, self.count)
+      return mixed.reshape(B, T, self.dim), inj.reshape(B, T, -1)[..., :self.count]
+    lo = down * (1 / self.count)
     # (more rows: the up projection is the decode linear, its weights read once for the rows. ghc_post's every row reads them)
     g = self.up((lo * lo.sigmoid()).contiguous()).reshape(B*T, self.count, self.dim)
     # (materialized: the sublayer's kernels read it, inlined into them it's computed again by every one)
@@ -668,12 +673,22 @@ class GatedResidual:
     weights (2*sigmoid(inject)), twice (the phases' coefficients are three, see post_split)
     """
     B, R = xs.shape[:2]
-    xn = (xs.float().rmsnorm(eps=self.eps) * self.norm["weight"].reshape(self.count, self.dim)).flatten(2).contiguous()
     rows = int(B * R)
-    lo = q8_linear(self.down, xn.reshape(rows, -1), split=True) * (1 / self.count)
-    g = q8_linear(self.up, (lo * lo.sigmoid()).contiguous(), split=True).reshape(B, R, self.count, self.dim)
-    mixed = (g.sigmoid() * xn.reshape(B, R, self.count, self.dim)).mean(2)
-    post = (self.inject(xn) / self.count).sigmoid() * 2
+    if self._winj is not None and self.dim % 256 == 0 and amd_custom_kernels_supported(xs.device):
+      xn, xhalf, part = ghc_prefill_norm(xs.reshape(rows, -1), self.norm["weight"], self._winj, self.count, self.eps)
+      inj = part.sum(1).reshape(B, R, -1)
+    else:
+      xn = (xs.float().rmsnorm(eps=self.eps) * self.norm["weight"].reshape(self.count, self.dim)).flatten(2).contiguous()
+      xhalf, inj = xn.reshape(rows, -1).half().contiguous(), self.inject(xn)
+    lo = q8_linear(self.down, xhalf, split=True) * (1 / self.count)
+    act = (lo * lo.sigmoid()).contiguous()
+    if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and not _wmma_rdna4(xs.device) and \
+       int(act.uop.shard_shape[0]) % 32 == 0:
+      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1)).reshape(B, R, self.dim)
+    else:
+      g = q8_linear(self.up, act, split=True).reshape(B, R, self.count, self.dim)
+      mixed = (g.sigmoid() * xn.reshape(B, R, self.count, self.dim)).mean(2)
+    post = (inj / self.count).sigmoid() * 2
     return mixed, post, post
 
   def post_split(self, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
@@ -769,6 +784,17 @@ class FFNBlock:
         # (the rows of batched decoding (3 a sequence): padded to whole tiles of 16, the matmul's kernel of 60 rows is several times slower)
         logits = router(xr.pad((None, (0, round_up(T, 16) - T), None)))[:, :T]
       else: logits = router(xr)
+      if bias is None and (gating == ExpertGating.SOFTMAX_WEIGHT or (gating == ExpertGating.SOFTMAX and normalize_topk)) and \
+         self.config.num_experts % 32 == 0 and self.config.num_experts_per_tok <= 32 and amd_custom_kernels_supported(x.device):
+        k, scale = self.config.num_experts_per_tok, self.config.routed_scaling_factor
+        if rows is None and xr.shape[1] <= _decode_rows() and exps.slices and exps.ggml_type is not None and exps.slice_table.shape[-1]*k <= 32:
+          return self._experts(x, h, *moe_softmax_router(logits, k, scale, exps.slice_table), local=True)
+        sel, probs = moe_softmax_router(logits, k, scale)
+        if rows is not None:
+          # One exchange for both outputs: separate independent collectives share the same mutable flag counter.
+          gathered = all_gather(sel.bitcast(dtypes.float32).stack(probs, dim=-1).contiguous(), 1)
+          sel, probs = gathered[..., 0].bitcast(dtypes.int32), gathered[..., 1]
+        return self._experts(x, h, sel, probs)
       if gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and isinstance(xr.shape[1], int) and \
          amd_custom_kernels_supported(x.device) and self.config.num_experts <= 1024 and getenv("MOE_ROUTER", 1):
         k, scale, exps = self.config.num_experts_per_tok, self.config.routed_scaling_factor, self.ffn_gate_exps
@@ -855,9 +881,8 @@ class FFNBlock:
     if not isinstance(T, int): x, sel, probs = x.pad_to(x.max_shape), sel.pad_to(sel.max_shape), probs.pad_to(probs.max_shape)
     gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
     # (batched decoding: a few rows an expert, small tiles)
-    # (RDNA3: tiles of 32 rows for the f16 tensor cores (their tiles of 64 are slower even with the rows to fill them), 64 for the int8 ones
-    # of the grid formats)
-    i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and getenv("I8_WMMA_RDNA3", 1)
+    # RDNA3: 32 rows for f16 and IQ3_S K256 kernels; the latter needs fewer padded rows and fits two LDS tiles per WGP.
+    i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type != IQ3_S and getenv("I8_WMMA_RDNA3", 1)
     tile = getenv("MOE_BATCH_TILE", 16) if _batch_rows[0] is not None and _batch_prefill[0] is None else \
       MOE_TILE if _wmma_rdna4(x.device) or getenv("MOE_TILE", 0) or i8 else 32
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
@@ -877,7 +902,8 @@ class FFNBlock:
     down = down_exps.grouped(act.contiguous(), entries, tiles, selections=tokens*k, out_dtype=dtypes.half if down_exps.slices else dtypes.float32,
                              sorted_out=sorted_down)
     # sequence parallel: summed over the devices and split on the tokens around the ring as they're combined
-    if half and gate_exps.expert_parallel and _sp_rows[0] is not None and isinstance(T, int) and tokens % len(cast(tuple, x.device)) == 0 and \
+    if not self.gated and half and gate_exps.expert_parallel and _sp_rows[0] is not None and isinstance(T, int) and \
+       tokens % len(cast(tuple, x.device)) == 0 and \
        tokens == T and getenv("MOE_SCATTER", 1):
       return moe_combine_scatter(down, pos, probs, tokens, k, add, by_selection=not sorted_down)
     y = moe_combine(down, pos, probs, tokens, k, add, out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32,
@@ -938,8 +964,8 @@ class FFNBlock:
     def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
       # (AG_Q8: sent as int8 groups of 32, as the quantized layers would make them)
       x = all_gather_q8(hn, 1) if getenv("AG_Q8", 1) and hn.shape[-1] % 256 == 0 else all_gather(hn, 1, dtypes.half)
-      # (gated hyper-connections (qwen4exp): its softmax router has no kernel of a device's rows, it routes all of them)
-      _partial_out[0], _sp_rows[0] = True, (None if self.gated else hn)
+      # Route each device's own rows; gather the small selections/probabilities rather than repeat the router projection everywhere.
+      _partial_out[0], _sp_rows[0] = True, hn
       # (in half: the layers' kernels read it so, a cast to float and back is two copies)
       xin = x if getenv("SUB_HALF_IN", 1) else x.float()
       if sub != "attn": _ffn_rows[0] = T
@@ -1196,14 +1222,20 @@ class QSABlock(TransformerBlock):
   def _qkv(self, x:Tensor, cos:Tensor, sin:Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """x (B, Tq, dim): q (B, H, Tq, hd), the output gate (B, Tq, H*hd), k and v (B, KV, Tq, hd); roped with cos and sin broadcast to them"""
     B, Tq, _ = x.shape
-    H, KV, hd, rd = self.config.n_heads, self.config.n_kv_heads, self.config.head_dim, self.config.rope_dim
+    H, hd, rd = self.config.n_heads, self.config.head_dim, self.config.rope_dim
     qg = self.attn_q(x).reshape(B, Tq, H, 2, hd)
     q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, Tq, H * hd)
-    k, v = self.attn_k(x).reshape(B, Tq, KV, hd), self.attn_v(x).reshape(B, Tq, KV, hd)
-    q, k = self.attn_q_norm(q).transpose(1, 2), self.attn_k_norm(k).transpose(1, 2)
+    q = self.attn_q_norm(q).transpose(1, 2)
     q = _rope(q[..., :rd], cos, sin).cat(q[..., rd:], dim=-1)
-    k = _rope(k[..., :rd], cos, sin).cat(k[..., rd:], dim=-1)
-    return q, gate, k, v.transpose(1, 2)
+    k, v = self._kv(x, cos, sin)
+    return q, gate, k, v
+
+  def _kv(self, x:Tensor, cos:Tensor, sin:Tensor) -> tuple[Tensor, Tensor]:
+    B, Tq, _ = x.shape
+    KV, hd, rd = self.config.n_kv_heads, self.config.head_dim, self.config.rope_dim
+    k, v = self.attn_k(x).reshape(B, Tq, KV, hd), self.attn_v(x).reshape(B, Tq, KV, hd)
+    k = self.attn_k_norm(k).transpose(1, 2)
+    return _rope(k[..., :rd], cos, sin).cat(k[..., rd:], dim=-1), v.transpose(1, 2)
 
   def _out_gated(self, attn:Tensor, gate:Tensor) -> Tensor:
     """the attention (B, H, Tq, hd) gated, through the output projection"""
@@ -1990,13 +2022,53 @@ class QwenMTPBlock(QSABlock):
     self.enorm = nn.RMSNorm(config.dim, config.norm_eps)
     self.hnorm = {"weight": Tensor.zeros(unwrap(config.hc).count * config.dim)}
     self.hc_head = GatedResidual(config, inject=False)
-  def predict(self, emb:Tensor, h:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
-    """emb (B, Tq, dim) the embeddings of the next tokens, h (B, Tq, count*dim) the streams of their positions: the streams (B, Tq, count, dim)"""
+  def _project_input(self, emb:Tensor, h:Tensor) -> Tensor:
     count, dim = unwrap(self.config.hc).count, self.config.dim
     hs = h.reshape(*h.shape[:2], count, dim).float()
     hn = hs.rmsnorm(eps=self.config.norm_eps) * self.hnorm["weight"].reshape(count, dim)
     en = self.enorm(emb.float()).unsqueeze(2).expand(*hn.shape)
-    return self(self.eh_proj(en.cat(hn, dim=-1)), start_pos, T)
+    return self.eh_proj(en.cat(hn, dim=-1))
+
+  def predict(self, emb:Tensor, h:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
+    """emb (B, Tq, dim) the embeddings of the next tokens, h (B, Tq, count*dim) the streams of their positions: the streams (B, Tq, count, dim)"""
+    return self(self._project_input(emb, h), start_pos, T)
+
+  def prefill_cache(self, emb:Tensor, h:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    # Prompt outputs are unused. KV/indexer caches depend only on the attention input, not Q, attention output, or the stateless FFN.
+    xs = self._project_input(emb, h)
+    self._init_state(xs)
+    return self._cache_input(cast(GatedResidual, self.hc_attn).mixed(xs), start_pos, T)
+
+  def _cache_input(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    Tq = x.shape[1]
+    freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
+    k, v = self._kv(x, *(f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1)))
+    kv = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype)
+    deps = [self.cache_k[:, :, start_pos:start_pos+T].uop.store(kv.uop)]
+    if self.indexer is not None: deps.append(self.indexer.update(x, start_pos, T, self.freqs_cis)[0].uop)
+    return Tensor(self.cache_k.uop.after(*deps))
+
+  def predict_selected(self, emb:Tensor, h:Tensor, start_pos:int|UOp, row:int|UOp) -> Tensor:
+    # Catch up all KV/indexer rows, but only the accepted position needs Q, attention output, and the stateless FFN.
+    if not (_qsa_dense[0] and self._flash(emb)):
+      return self.predict(emb, h, start_pos).shrink((None, (row, row+1), None, None))
+    xs = self._project_input(emb, h)
+    self._init_state(xs)
+    hc = cast(GatedResidual, self.hc_attn)
+    if (fused:=hc._fused(xs)) is not None: mixed, inj = fused
+    else:
+      mixed, xn = hc.mix(xs)
+      inj = (s if (s:=_skinny(hc.inject, xn)) is not None else hc.inject(xn)) / hc.count
+    cache = self._cache_input(mixed, start_pos, mixed.shape[1])
+    pos, hd = start_pos + row, self.config.head_dim
+    freqs = self.freqs_cis.shrink(((pos, pos+1), None)).reshape(1, 1, 1, -1)
+    q, gate, _, _ = self._qkv(mixed[:, row:row+1], *freqs.chunk(2, dim=-1))
+    attn = flash_attention_decode(q.cat(q.zeros_like(), dim=-1).half(), cache.unsqueeze(2), pos+1,
+                                  self.config.max_context, shared=True, scale=hd**-0.5)
+    out = self._out_gated(attn[..., hd:], gate)
+    x = xs[:, row:row+1] + out.unsqueeze(2) * (inj[:, row:row+1].sigmoid()*2).unsqueeze(-1)
+    return self.hc_ffn(x, self._feed_forward, self.ffn_norm)
+
   def head(self, streams:Tensor) -> Tensor:
     """the streams' mix: the output head's input"""
     return self.hc_head.mixed(streams)
@@ -2145,7 +2217,7 @@ class Transformer:
     q, nb = _GGML_QUANT[ple.ggml_type]
     return ggml_data_to_tensor(rows.flatten(), int(prod(rows.shape)) // nb * q, ple.ggml_type).reshape(B, T, -1).float()
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
     x = emb = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     ple = None
@@ -2177,21 +2249,22 @@ class Transformer:
         if self.gated:
           # (the streams of all the rows: the MTP layer's input, their last mix the output's)
           x = Tensor.cat(*[all_gather(xi, 1) for xi in xs], dim=1).float()
-          x = self._hc_out(self._mtp_prefill(emb, x, cast(UOp, start_pos), T) if self.config.spec_drafts else x)
+          if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T)
         else: x = Tensor.cat(*[all_gather(xi.mean(2), 1) for xi in xs], dim=1)
       else:
         # (gated hyper-connections split their rows in the phases only: without them every device has all the rows)
         if sp and self.gated: sp = False
         if sp: x = shard_rows(x, 1)
         for block in self.blk: x = block(x, start_pos, T, ple_emb=ple)
-        if self.gated and self.config.spec_drafts: x = self._hc_out(self._mtp_prefill(emb, x, cast(UOp, start_pos), T))
+        if self.gated:
+          if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T)
         else: x = all_gather(x.mean(2), 1) if sp else self._hc_out(x)
       if self.config.spec_drafts and not self.gated: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T, sp=bool(sp))
       x = x[:, :T]
     else:
       for block in self.blk: x = block(x, start_pos, ple_emb=ple)
-    if hc is not None and x.ndim == 4: x = self._hc_out(x)
-    # only run the output projection on the last token
+    if hc is not None and x.ndim == 4: x = self._hc_out(x[:, -1:])
+    # Only the last token needs the final stream mix and vocabulary projection.
     tok = self._sample(self.output_norm(x[:, -1:])[:, -1, :], temperature, tokens.device)
     q8_quantize_cache_clear()  # don't keep the graph alive
     # the tokens are a view of generate's token buffer: the sampled token goes after them unless that is a prompt token (chunked prefill)
@@ -2251,7 +2324,7 @@ class Transformer:
       # (the streams of every position: the MTP layer's input of the next one, the ones before the chunk's first in _spec_h's row 0)
       hs = x.flatten(2).float()
       emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
-      m = cast(QwenMTPBlock, self.mtp).predict(emb, carry.cat(hs[:, :-1], dim=1), start_pos, T)
+      m = cast(QwenMTPBlock, self.mtp).prefill_cache(emb, carry.cat(hs[:, :-1], dim=1), start_pos, T)
       effects = [m[:, :, :1, :1].contiguous(), self._spec_h[0:1].assign(hs[0].shrink(((T-1, T), None)))]
       if self._effects is None: Tensor.realize(*effects)
       else: self._effects += effects
@@ -2272,7 +2345,7 @@ class Transformer:
     else: self._effects += effects
     return x
 
-  def forward_spec(self, mtp_pos:UOp, j:UOp, start_pos:UOp, par:UOp, temperature:Tensor, *chain:UOp) -> Tensor:
+  def forward_spec(self, mtp_pos:UOp, j:UOp, start_pos:UOp, par:UOp, temperature:Tensor|None, *chain:UOp) -> Tensor:
     """
     a step of speculative decoding. the last one verified the tokens at mtp_pos-1 (_spec_in: the sampled token after every one, _spec_h: their
     hidden states, the rows of the other parity), j were accepted: the token at start_pos=mtp_pos+j is the sampled one after the last accepted.
@@ -2298,11 +2371,11 @@ class Transformer:
     out = tok.reshape(1, k+1).cat(*drafts, dim=1).cast(dtypes.int32)
     return self._spec_out.assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
 
-  def _forward_spec_gated(self, last:Tensor, j:UOp, start_pos:UOp, par:UOp, temperature:Tensor, mtp_pos:UOp, *chain:UOp) -> Tensor:
+  def _forward_spec_gated(self, last:Tensor, j:UOp, start_pos:UOp, par:UOp, temperature:Tensor|None, mtp_pos:UOp, *chain:UOp) -> Tensor:
     """forward_spec of gated hyper-connections (qwen4exp): the MTP layer reads and writes the streams, the drafts' n-gram rows on the devices"""
     k, devs, y = self.config.spec_drafts, self.token_embd.weight.device, self._spec_in
     mtp, hc = cast(QwenMTPBlock, self.mtp), unwrap(self.config.hc)
-    m = mtp.predict(self.token_embd(y.to(devs)).float(), last, mtp_pos).shrink((None, (j, j+1), None, None))
+    m = mtp.predict_selected(self.token_embd(y.to(devs)).float(), last, mtp_pos, j)
     drafts:list[Tensor] = []
     for i in range(k):
       drafts.append(self._sample(mtp.head(m)[:, 0, :], None, y.device))
@@ -2324,12 +2397,12 @@ class Transformer:
     out = tok.reshape(1, k+1).cat(*drafts, dim=1).cast(dtypes.int32)
     return self._spec_out.assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
 
-  def _spec_call(self, mtp_pos:int, j:int, par:int, temperature:Tensor):
+  def _spec_call(self, mtp_pos:int, j:int, par:int, temperature:Tensor|None):
     """a step of speculative decoding (forward_spec, its jit)"""
     k, pos = self.config.spec_drafts, mtp_pos + j
     # (the step's positions mtp_pos..pos+k covered by the top_k of the qwen sparse attention: its jit of all the keys, see _qsa_dense)
     dense = self._dense_ctx(pos, k + 1)
-    name = "_spec_jit_dense" if dense else "_spec_jit"
+    name = ("_spec_jit_dense" if dense else "_spec_jit") + ("_greedy" if temperature is None else "")
     if not hasattr(self, name): setattr(self, name, TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False),
                                                             scratch=self._scratch))
     jit = getattr(self, name)
@@ -2353,7 +2426,7 @@ class Transformer:
         break
     return v
 
-  def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
+  def _spec_steps(self, tokens:list[int], temperature:Tensor|None) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
     k, host, host_out = self.config.spec_drafts, self._spec_host, self._spec_host_out
     def launch(mtp_pos:int, j:int, par:int) -> bool:
@@ -3150,13 +3223,13 @@ class Transformer:
     else: Tensor.realize(*todo)
     self._states_ready = True
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
     key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
     # (a context the qwen sparse attention's top_k covers: the jits of all the keys, see _qsa_dense)
     dense = self._dense_ctx(start_pos, T)
-    jits = self.jits if not dense else self.__dict__.setdefault("jits_dense", {})
+    jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + ("_greedy" if temperature is None else ""), {})
     if (jit:=jits.get(key)) is None:
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
@@ -3171,7 +3244,7 @@ class Transformer:
     def val(u:int|UOp) -> int: return u if isinstance(u, int) else int(u.unbind()[1])
     return val(start_pos) + val(T) <= idx.top_k
 
-  def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> tuple[Tensor, ...]:
+  def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> tuple[Tensor, ...]:
     # forward and the tensors realized with its output for their effects (e.g. the caches of the MTP layer)
     self._effects = []
     out = self.forward(tokens, start_pos, temperature)
@@ -3544,24 +3617,24 @@ class Transformer:
     for d in to_tuple(devs):
       key, ctr = Tensor._next_counter(d, 0)
       Tensor.realize(key, ctr, Tensor._device_rng_counters[d])
-    temp = Tensor([0.0, 1.0]).to(devs).realize()  # (temperature, top_p)
     v_start_pos, calls = UOp.variable("start_pos", 0, self.max_context-1), cast(list[tuple[Any, Callable[[], Any]]], [])
     for n in sizes:
-      if n not in self.jits: self.jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
       sp, nt = v_start_pos.bind(0), UOp.variable("toks", 1, n).bind(n)
-      calls.append((self.jits[n], functools.partial(self, self._token_buf[:, sp:sp+nt], sp, temp)))
+      jits = self.__dict__.setdefault("jits" + ("_dense" if self._dense_ctx(sp, nt) else "") + "_greedy", {})
+      if n not in jits: jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+      calls.append((jits[n], functools.partial(self, self._token_buf[:, sp:sp+nt], sp, None)))
     # the computations left of loading (their jits) too: run after the weights are read
     calls += [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)]
     if self.config.spec_drafts > 0:
       self._spec_init()
-      if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
+      if not hasattr(self, "_spec_jit_greedy"): self._spec_jit_greedy = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
       # (and the one of a context the qwen sparse attention's top_k covers, see _qsa_dense)
       if self._dense_ctx(0, 1):
-        self._spec_jit_dense = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
-        calls.append((self._spec_jit_dense, functools.partial(self._spec_call, 0, 0, 1, temp)))
+        self._spec_jit_dense_greedy = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
+        calls.append((self._spec_jit_dense_greedy, functools.partial(self._spec_call, 0, 0, 1, None)))
         if (top:=unwrap(self.config.indexer).top_k) + 2*self.config.spec_drafts + 2 < self.max_context:
-          calls.append((self._spec_jit, functools.partial(self._spec_call, top, 0, 1, temp)))
-      else: calls.append((self._spec_jit, functools.partial(self._spec_call, 0, 0, 1, temp)))
+          calls.append((self._spec_jit_greedy, functools.partial(self._spec_call, top, 0, 1, None)))
+      else: calls.append((self._spec_jit_greedy, functools.partial(self._spec_call, 0, 0, 1, None)))
     # batched decoding: a jit of every step size (the slots made here: the processes don't allocate)
     if (slots:=self.batch_slots()):
       # (their memory isn't made yet, the jits are linked on their first call: after the weights are read, the memory loading used is free)
@@ -3669,7 +3742,8 @@ class Transformer:
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     # (made once a temperature and top_p: a realize outside a jit walks every tensor of the model)
     if not hasattr(self, "_temps"): self._temps:dict[tuple[float, float], Tensor] = {}
-    if (temp:=self._temps.get((temperature, top_p))) is None:
+    temp = None
+    if temperature != 0 and (temp:=self._temps.get((temperature, top_p))) is None:
       temp = self._temps[(temperature, top_p)] = Tensor([temperature, top_p]).to(self.token_embd.weight.device).realize()
     if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
       # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
