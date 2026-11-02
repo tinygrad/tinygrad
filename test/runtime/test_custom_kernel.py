@@ -598,6 +598,27 @@ class TestCustomKernel(unittest.TestCase):
     Tensor.realize(c, d)
     self.assertEqual((c.tolist(), d.tolist()), ([3], [1, 1, 0, 0]))
 
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
+  def test_group_keeps_custom(self):
+    r = UOp.range(4, 0, AxisType.LOOP)
+    def kernel(C:UOp, D:UOp) -> UOp:
+      inc = UOp(Ops.CUSTOM, src=(C.index(r),), arg=("{0}[0] += 1;", dtypes.void))
+      return UOp.group(inc, D[r].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    c, d = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
+    Tensor.realize(c, d)
+    self.assertEqual((c.tolist(), d.tolist()), ([1]*4, [1]*4))
+
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
+  def test_reduce_collapse_keeps_custom(self):
+    # the CUSTOM increments C[r] every iteration, though the sum only picks r==2
+    r = UOp.range(4, 0, AxisType.LOOP)
+    def kernel(C:UOp, O:UOp) -> UOp:
+      inc = UOp(Ops.CUSTOM, src=(C.index(r),), arg=("({0}[0] += 1)", dtypes.int))
+      return O[0].store(UOp.const(2, dtypes.int).eq(r.cast(dtypes.int)).where(inc, 0).reduce(r, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    c, o = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
+    Tensor.realize(c, o)
+    self.assertEqual((c.tolist(), o.tolist()), ([1]*4, [1]))
+
   def test_shrink_range_keeps_symbolic_end(self):
     # D gates r to r<4, but r only runs to n=2
     def kernel(D:UOp, N:UOp) -> UOp:
