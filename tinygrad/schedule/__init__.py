@@ -59,7 +59,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for a, write_kernels in writes.get(s, []):
         if a is u: continue
         for t in write_kernels:
-          if t is not k:
+          # (a write the reader depends on already ran before it: no edge back to it, see redflash's in place state updates)
+          if t is not k and t not in k.backward_slice:
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
 
