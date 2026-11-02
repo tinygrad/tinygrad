@@ -120,12 +120,14 @@ class _System:
     # the addresses of its pages for the devices: physical, or behind the iommu an io address range
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
-    if iommu and not contiguous and size >= (2 << 20) and (not vaddr or vaddr % (2 << 20) == 0):
-      # behind the iommu the pages are pinned by it: private huge pages (17x faster to populate than shared small ones)
+    if not contiguous and size >= (2 << 20) and (not vaddr or vaddr % (2 << 20) == 0):
+      # private huge pages (17x faster to populate than shared small ones, and mapped on the devices 512x fewer entries: contiguous_ranges).
+      # behind the iommu the pages are pinned by it, else locked. (then no khugepaged: it moves pages it collapses, a device would miss them)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|flags, 0)
       libc.madvise(va, size, libc.MADV_HUGEPAGE)
       libc.madvise(va, size, libc.MADV_POPULATE_WRITE)
       System.lock_memory(va, size)
+      if not iommu: libc.madvise(va, size, libc.MADV_NOHUGEPAGE)
     else:
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
     # the devices' memory isn't a forked process's (not copied for it, it can't touch it)
@@ -133,6 +135,15 @@ class _System:
     if not iommu: return MMIOInterface(va, size), self.system_paddrs(va, round_up(size, mmap.PAGESIZE))
     iova = self.dma_map(va, size:=round_up(size, mmap.PAGESIZE))
     return MMIOInterface(va, size), [iova + i for i in range(0, size, mmap.PAGESIZE)]
+
+  @staticmethod
+  def contiguous_ranges(paddrs:list[int], page:int=0x1000) -> list[tuple[int, int]]:
+    # the pages (their addresses in order) as ranges of contiguous ones
+    ranges:list[list[int]] = []
+    for p in paddrs:
+      if ranges and ranges[-1][0] + ranges[-1][1] == p: ranges[-1][1] += page
+      else: ranges.append([p, page])
+    return [(p, sz) for p, sz in ranges]
 
   def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []
@@ -378,7 +389,7 @@ class PCIIfaceBase:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = self.pci_dev.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
       # behind the iommu the io addresses are contiguous: one range (big pages)
-      ranges = [(paddrs[0], size)] if getattr(self.pci_dev, "iommu", False) else [(paddr, 0x1000) for paddr in paddrs]
+      ranges = [(paddrs[0], size)] if getattr(self.pci_dev, "iommu", False) else System.contiguous_ranges(paddrs)
       mapping = self.dev_impl.mm.map_range(vaddr, size, ranges, aspace=AddrSpace.SYS, snooped=True, uncached=True)
       return BufferStorage(vaddr, PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), memview)
 
@@ -419,12 +430,14 @@ class PCIIfaceBase:
         paddrs = [(m[0], size)]  # (contiguous: big pages)
       else:
         if self.remote is None: System.lock_memory(lo, size)
-        paddrs = [(x, 0x1000) for x in (b.meta if self.remote is not None else System.system_paddrs(lo, size))]
+        paddrs = System.contiguous_ranges(b.meta if self.remote is not None else System.system_paddrs(lo, size))
       aspace, snooped, uncached = AddrSpace.SYS, True, True
       if b.options.cpu_access: lo = self.dev_impl.mm.alloc_vaddr(size) # nv semaphores only reach 40 bits
     elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase) and ifa.peer_group == self.peer_group:
       if ifa.is_bar_small(): raise RuntimeError(f"P2P mapping not supported for small bar devices: {b.device} -> {self.dev.device}")
       lo, size, snooped, uncached = b._buf, b.meta.mapping.size, True, b.meta.mapping.uncached
+      # (peer_mtype: the memory type of the peers' mappings, see get_pte_flags)
+      if (mt:=getattr(b, "peer_mtype", None)) is not None: uncached = 100 + mt
       if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
       else: paddrs, aspace = ifa.p2p_paddrs(b.meta.mapping.paddrs)
     else: raise RuntimeError(f"map failed: {b.device} -> {self.dev.device}")

@@ -113,13 +113,14 @@ def _slice_table(experts:int, slices:int, devices:tuple[str, ...]) -> Tensor:
 def expert_slicing(experts:int, slices:int, n:int) -> list[list[int]]|None:
   """
   the units (expert*slices + slice) of every device: every device holds slices//n slices of every expert, the slices%n left go to a class of
-  devices (by expert, cycling): the work of a token's experts is spread over all the devices. None if the devices don't get the same count
+  devices (by expert, cycling): the work of a token's experts is spread over all the devices. None if the devices don't get the same count.
+  The remainder rotates around the device ring, including when it doesn't divide the device count.
   """
   base, r = divmod(slices, n)
-  if r and (n % r or experts % (n // r)): return None
+  if experts*slices % n: return None
   per:list[list[int]] = [[] for _ in range(n)]
   for e in range(experts):
-    extra = set(range((e % (n // r))*r, (e % (n // r))*r + r)) if r else set()
+    extra = {(e*r+j) % n for j in range(r)}
     devs = [d for d in range(n) if d in extra for _ in range(base+1)] + [d for d in range(n) if d not in extra for _ in range(base)]
     for j, d in enumerate(devs): per[d].append(e*slices + j)
   return per
@@ -3232,6 +3233,10 @@ class Transformer:
       # experts are split by their hidden dim, or by experts when it doesn't split (expert parallel)
       exp_hidden, exp_count = kv.get(f'{arch}.expert_feed_forward_length', 0), kv.get(f'{arch}.expert_count', 0)
       down_block = max([_GGML_QUANT.get(t, (1,))[0] for k,(_,_,t) in entries.items() if k.endswith('ffn_down_exps.weight')], default=1)
+      # tinyr9: five 128-wide slices per Qwen expert reduce routing and down-projection intermediates.
+      if arch == 'qwen4exp' and shard == 6:
+        down_block = math.lcm(down_block, 128)
+        assert exp_hidden % down_block == 0
       exp_names = ('ffn_gate_exps.weight', 'ffn_up_exps.weight', 'ffn_down_exps.weight')
       if exp_hidden % shard == 0 and (exp_hidden // shard) % down_block == 0:
         ffn_rules.update({'ffn_gate_exps.weight': 1, 'ffn_up_exps.weight': 1, 'ffn_down_exps.weight': 2})
@@ -3436,7 +3441,7 @@ class Transformer:
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
                     for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
-    # with the weights still to read: the small ones' memory now, their values after
+    # With the weights still to read: the small ones' memory now, their values after.
     if self._pending_load: _realize_later(small, self._pending_load)
     Tensor.realize(*tables, *([] if self._pending_load else small))
 

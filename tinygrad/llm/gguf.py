@@ -390,27 +390,57 @@ def _gather_word(*nbytes:int) -> Any:
 
 def _units_gather_kernel(dst:UOp, src:UOp, units:UOp, rows:int, slices:int) -> UOp:
   # dst (units, rows, L) words: unit i (expert e, slice j) is the column block j of the rows of expert e in src (experts, rows, slices, L)
+  # (one index, the words innermost: a wave's loads of consecutive words, src can be host memory)
   from tinygrad.uop.ops import AxisType, KernelInfo
-  U, L = units.shape[0], dst.shape[0] // (units.shape[0] * rows)
-  i, r, k = UOp.range(U, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOOP)
-  u = units[i].load().cast(dtypes.weakint)
-  return dst[(i*rows + r)*L + k].store(src[((u // slices * rows + r) * slices + u % slices) * L + k].load()).end(i, r, k).sink(
-    arg=KernelInfo(name="units_gather"))
+  L = dst.shape[0] // (units.shape[0] * rows)
+  g = UOp.range(dst.shape[0], 0, AxisType.GLOBAL)
+  k, r, u = g % L, (g // L) % rows, units[g // (L*rows)].load().cast(dtypes.weakint)
+  return dst[g].store(src[((u // slices * rows + r) * slices + u % slices) * L + k].load()).end(g).sink(arg=KernelInfo(name="units_gather"))
+
+def _rows_gather_kernel(dst:UOp, src:UOp, units:UOp, parts:int, chunk:int) -> UOp:
+  # dst (units, chunks, parts, chunk) words: the chunks of unit i of every part interleaved. src (parts, units', unit): a unit's rows contiguous
+  from tinygrad.uop.ops import AxisType, KernelInfo
+  unit, part = dst.shape[0] // (units.shape[0] * parts), src.shape[0] // parts
+  g = UOp.range(dst.shape[0], 0, AxisType.GLOBAL)
+  w, p, c, u = g % chunk, (g // chunk) % parts, (g // (chunk*parts)) % (unit // chunk), units[g // (unit*parts)].load().cast(dtypes.weakint)
+  return dst[g].store(src[p*part + u*unit + c*chunk + w].load()).end(g).sink(arg=KernelInfo(name="rows_gather"))
 
 def _part_gather_kernel(dst:UOp, src:UOp, outer:int, off:int) -> UOp:
   # dst (outer, P) words: the words off.. of every row of src (outer, R), zero past the row
   from tinygrad.uop.ops import AxisType, KernelInfo
   P, R = dst.shape[0] // outer, src.shape[0] // outer
-  r, k = UOp.range(outer, 0, AxisType.GLOBAL), UOp.range(P, 1, AxisType.LOOP)
-  c = off + k
-  return dst[r*P + k].store((c < R).where(src[r*R + c.minimum(R-1)].load(), UOp.const(0, src.dtype))).end(r, k).sink(
-    arg=KernelInfo(name="part_gather"))
+  g = UOp.range(dst.shape[0], 0, AxisType.GLOBAL)
+  r, c = g // P, off + g % P
+  return dst[g].store((c < R).where(src[r*R + c.minimum(R-1)].load(), UOp.const(0, src.dtype))).end(g).sink(arg=KernelInfo(name="part_gather"))
 
-def _run_gather(fxn:Callable, *bufs:UOp):
-  # the kernel on the buffers, a call run as is (compiled once: the kernel is the same for buffers of the same sizes, no schedule)
-  from tinygrad.engine.realize import run_linear
-  from tinygrad.uop.ops import Ops
-  run_linear(UOp(Ops.LINEAR, src=(fxn(*[UOp.placeholder_like(b, slot=i) for i,b in enumerate(bufs)]).call(*bufs),)), update_stats=False)
+def _gather_call(fxn:Callable, *bufs:UOp) -> UOp:
+  # the kernel on the buffers, a call (compiled once: the kernel is the same for buffers of the same sizes, no schedule)
+  return fxn(*[UOp.placeholder_like(b, slot=i) for i,b in enumerate(bufs)]).call(*bufs)
+
+def _merge_reads(reads:list[tuple]) -> list[tuple]:
+  """
+  the reads (fd, src, [(at, len)]) as few as can be: the ones of contiguous bytes of a file one read (up to IOV_MAX pieces), its pieces
+  contiguous in the host buffer one piece. a fill thread holds the gil between its reads (a read of many small ones waits for it every time)
+  """
+  out:list[list] = []
+  for fd, src, iov in sorted(reads, key=lambda r: (r[0], r[1])):
+    if out and out[-1][0] == fd and out[-1][1] + out[-1][3] == src and len(out[-1][2]) + len(iov) <= 1024:
+      cur = out[-1]
+    else: out.append(cur:=[fd, src, [], 0])
+    for at, ln in iov:
+      if cur[2] and cur[2][-1][0] + cur[2][-1][1] == at: cur[2][-1] = (cur[2][-1][0], cur[2][-1][1] + ln)
+      else: cur[2].append((at, ln))
+      cur[3] += ln
+  return [(fd, src, iov) for fd, src, iov, _ in out]
+
+def _preadv_exact(fd:int, views:list[memoryview], offset:int):
+  """Fill every view, handling short reads and raising instead of spinning forever at EOF."""
+  import os
+  while views:
+    if (count:=os.preadv(fd, views, offset)) == 0: raise EOFError(f"short read at file offset {offset}")
+    offset += count
+    while views and count >= len(views[0]): count -= len(views.pop(0))
+    if views and count: views[0] = views[0][count:]
 
 def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
                    units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str],
@@ -418,11 +448,11 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
                    row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]|None:
   """
   _direct_load in parallel: every device's tensors are file reads (os.preadv, threads) into host buffers of the device, then copies to its
-  buffer, the devices in turn. tensors split by columns (an expert's slices of the down projection, the parts of a row parallel weight) are
-  read whole into device memory and gathered there (a kernel). the same bytes as _direct_load
+  buffer, the devices in turn. expert tensors and column-split weights are read once into shared host buffers; device kernels gather each
+  shard directly from host memory. the same bytes as _direct_load
   defer: the device memory is allocated (the tensors are made), the bytes are read by the function added to it
   """
-  import os, time, concurrent.futures
+  import os, time, concurrent.futures, contextlib
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
   n = len(devices)
   if not getenv("GGUF_DIRECT", 1) or not all(d.split(":")[0] == "AMD" for d in devices): return None
@@ -445,22 +475,16 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
       rb = nb // src_rows
       plan[name] = [(cnt*rb, ("segs", [(off + r0*rb, cnt*rb, 0, cnt*rb, 0)], [])) for r0, cnt in sel]
       continue
-    if name in fuse:
-      slices, per_device = units[name]
-      E, rows, _ = shape
-      unit, up_off = nb // (E*slices), locs[fuse[name]][1]
-      chunk = unit // (rows // slices) * 16
-      # a unit's gate and up rows interleaved by 16 (fuse_gate_up): the chunks of each go every 2*chunk
-      plan[name] = [(2*unit*len(us), ("segs", [(base + u*unit, unit, 2*i*unit + k*chunk, chunk, 2*chunk) for i,u in enumerate(us)
-                                                for k, base in enumerate((off, up_off))], [])) for us in per_device]
-      continue
     if name in units:
       slices, per_device = units[name]
       E, rows, cols = shape
       unit = nb // (E*slices)
       if name.endswith("down_exps.weight"):
         plan[name] = [(unit*len(us), ("gather", "units", (E, rows, slices, unit // rows, us))) for us in per_device]
-      else: plan[name] = [(unit*len(us), ("segs", [(off + u*unit, unit, i*unit, unit, 0) for i,u in enumerate(us)], [])) for us in per_device]
+      else:
+        # a unit is rows of an expert. fused (fuse_gate_up): a unit's gate and up rows interleaved by 16, the chunks of each every 2*chunk
+        nparts, chunk = (2, unit // (rows // slices) * 16) if name in fuse else (1, unit)
+        plan[name] = [(nparts*unit*len(us), ("gather", "rows", (E, nparts, slices, unit, chunk, us))) for us in per_device]
     elif (axis:=shard_map.get(name)) is None: plan[name] = [(nb, ("segs", [(off, nb, 0, nb, 0)], []))]*n
     else:
       outer, size = prod(shape[:axis]), pads.get(name, shape[axis])
@@ -479,10 +503,14 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     for i,(nb, _) in enumerate(parts):
       offsets[name].append(totals[i])
       totals[i] += round_up(nb, align)
-  fds = {path: os.open(path, os.O_RDONLY) for path in dedup(path for path, _, _ in locs.values())}
   STAGE, K = getenv("LOAD_STAGE", 256 << 20), getenv("LOAD_STAGES", 3)
-  # every device's jobs in order: ("copy", reads, zeros, size, target, offset) a host buffer filled by reads (fd, src, [(at, len)]) and zero
-  # ranges then copied to the buffer or the temp buffer, ("gather", ...) a kernel from the temp buffer
+  assert STAGE > 0 and K > 0
+  fds = {path: os.open(path, os.O_RDONLY) for path in dedup(path for path, _, _ in locs.values())}
+  # the gathered tensors (split by columns: every device a part of the same bytes) are read once into a host buffer mapped on every device,
+  # every device's gather kernel reads its part of it over its link. shared[name]: the reads, the bytes, {device: (kind, args, offset, nb)}
+  shared:dict[str, tuple[list[tuple], int, dict[int, tuple], dict[int, int]|None]] = {}
+  # every device's jobs in order: ("copy", reads, zeros, size, offset) a host buffer filled by reads (fd, src, [(at, len)]) and zero ranges,
+  # then copied to the device's buffer
   def device_jobs(i:int) -> list[tuple]:
     jobs:list[tuple] = []
     start, end = 0, 0
@@ -490,7 +518,7 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     zeros:list[tuple[int, int]] = []
     def flush():
       nonlocal reads, zeros
-      if (reads or zeros) and end > start: jobs.append(("copy", reads, zeros, end - start, "buf", start))
+      if (reads or zeros) and end > start: jobs.append(("copy", _merge_reads(reads), zeros, end - start, start))
       reads, zeros = [], []
     def place(lo:int, hi:int):
       # a window of the buffer covering lo..hi (a new one starts at lo)
@@ -514,112 +542,130 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
         for z0, z1 in fill[2]:
           place(base + z0, base + z1)
           zeros.append((base + z0 - start, z1 - z0))
-      else:
-        flush()
-        # the tensor (or the experts used) into the temp buffer, a host buffer at a time, then the gather to the device's part
-        _, src_off, src_nb = locs[name]
-        args = fill[2]
-        if fill[1] == "units" and (ebytes:=src_nb // args[0]) <= STAGE:
-          # only the experts of the device's units (contiguous in the file): compacted in the temp buffer, the units renumbered in them
-          ex = sorted(set(u // args[2] for u in args[4]))
-          pos = {e: j for j, e in enumerate(ex)}
-          args = (*args[:4], [pos[u // args[2]]*args[2] + u % args[2] for u in args[4]])
-          for e0 in range(0, len(ex), per:=max(1, STAGE // ebytes)):
-            ereads:list[tuple] = []
-            at = 0
-            for j in range(e0, min(len(ex), e0 + per)):  # runs of consecutive experts in one read
-              if ereads and ex[j] == ex[j-1] + 1: ereads[-1][2][0] = (ereads[-1][2][0][0], ereads[-1][2][0][1] + ebytes)
-              else: ereads.append((fd, src_off + ex[j]*ebytes, [(at, ebytes)]))
-              at += ebytes
-            jobs.append(("copy", ereads, [], at, "tmp", e0*ebytes))
-          src_nb = len(ex) * ebytes
-        else:
-          for o in range(0, src_nb, STAGE): jobs.append(("copy", [(fd, src_off + o, [(0, sz:=min(STAGE, src_nb - o))])], [], sz, "tmp", o))
-        jobs.append(("gather", name, fill[1], args, base, nb, src_nb))
+        continue
+      # (a window doesn't cover a gathered tensor: its copy would write over what the gather writes)
+      flush()
+      _, src_off, src_nb = locs[name]
+      if name not in shared:
+        if fill[1] in ("units", "rows"):
+          # only the experts some device uses (contiguous in the file), compacted (a fused up's after the gate's), the units renumbered in them
+          E, slices = fill[2][0], fill[2][2]
+          ebytes, ex = src_nb // E, sorted(set(u // slices for _, p in plan[name] for u in p[2][-1]))
+          sreads:list[tuple] = []
+          for pi, so in enumerate([src_off] + ([locs[fuse[name]][1]] if name in fuse else [])):
+            for j, e in enumerate(ex):  # runs of consecutive experts in one read
+              if j and e == ex[j-1] + 1: sreads[-1] = (fd, sreads[-1][1], [(sreads[-1][2][0][0], sreads[-1][2][0][1] + ebytes)])
+              else: sreads.append((fd, so + e*ebytes, [((pi*len(ex) + j)*ebytes, ebytes)]))
+          shared[name] = (sreads, (2 if name in fuse else 1)*len(ex)*ebytes, {}, {e: j for j, e in enumerate(ex)})
+        else: shared[name] = ([(fd, src_off, [(0, src_nb)])], src_nb, {}, None)
+      args, pos = fill[2], shared[name][3]
+      if pos is not None: args = (*args[:-1], [pos[u // args[2]]*args[2] + u % args[2] for u in args[-1]])
+      shared[name][2][i] = (fill[1], args, base, nb)
     flush()
     return jobs
   jobs = [device_jobs(i) for i in range(n)]
-  tmp_size = max([j[6] for js in jobs for j in js if j[0] == "gather"], default=0)
   def fill(mv:memoryview, reads:list, zeros:list):
     for fd, src, iov in reads:
-      views, total, got = [mv[at:at+ln] for at, ln in iov], sum(ln for _, ln in iov), 0
-      while got < total:
-        got += os.preadv(fd, views, src + got)
-        if got < total:  # a short read: the rest of the views
-          skip, rest = got, []
-          for v in views:
-            if skip >= len(v):
-              skip -= len(v)
-              continue
-            rest.append(v[skip:])
-            skip = 0
-          views = rest
+      _preadv_exact(fd, [mv[at:at+ln] for at, ln in iov if ln], src)
     for at, ln in zeros: mv[at:at+ln] = bytes(ln)
+  def pieces(reads:list[tuple], size:int) -> list[list[tuple]]:
+    # the reads of one piece (a read) in parts of up to size bytes: fills in parallel
+    return [[(fd, src + o, [(iov[0][0] + o, min(size, iov[0][1] - o))])] for fd, src, iov in reads for o in range(0, iov[0][1], size)]
   with Context(ALLOW_DEVICE_USAGE=1): bufs = [Buffer(d, t).ensure_allocated() for d,t in zip(devices, totals)]
   def fill_all():
-    with Context(ALLOW_DEVICE_USAGE=1):
-      tmps = [Buffer(d, round_up(tmp_size, align)).ensure_allocated() for d in devices] if tmp_size else []
-      stages = [[Buffer(d, STAGE, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in range(K)] for d in devices]
+    import sys
+    # (the fill threads wait for the gil after every read: handed over sooner)
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(50 / 1e6)
+    try: _fill_all()
+    finally:
+      sys.setswitchinterval(switch)
+      for fd in fds.values(): os.close(fd)
+  def _fill_all():
+    from tinygrad.device import BufferStorage
+    with Context(ALLOW_DEVICE_USAGE=1), contextlib.ExitStack() as cleanup:
+      for d in devices: cleanup.callback(Device[d].synchronize)
+      # Small loads need small staging buffers, not 3 x 256MB per GPU regardless of the actual copy jobs.
+      stages = [[Buffer(d, max(j[3] for j in jobs[i]), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+                 for _ in range(min(K, len(jobs[i])))] for i, d in enumerate(devices)]
       mvs = [[s.as_memoryview(allow_zero_copy=True) for s in ss] for ss in stages]
-      pool = concurrent.futures.ThreadPoolExecutor(getenv("LOAD_THREADS", 16))
+      # the shared host buffers: on the first device, mapped on the others at the same address
+      KS, sh_items = 3, list(shared)
+      sh_size = round_up(max([v[1] for v in shared.values()], default=0), align)
+      sbufs = [Buffer(devices[0], sh_size, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in range(KS if shared else 0)]
+      smvs = [b.as_memoryview(allow_zero_copy=True) for b in sbufs]
+      def alias(b:Buffer, d:str) -> Buffer:
+        return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
+      salias = [[b] + [alias(b, d) for d in devices[1:]] for b in sbufs]
+      pool = cleanup.enter_context(concurrent.futures.ThreadPoolExecutor(getenv("LOAD_THREADS", 16)))
       # per device: the next job to fill, the next job to issue, the timeline (the device signals it: the value of the last work issued),
-      # per host buffer: its job and fill, or the timeline value of its copy (free once reached). the temp buffer is written once the gather
-      # before read it, a gather runs once the copies before it are done. nothing waits holding the gil (fills run meanwhile)
+      # per host buffer: its job and fill, or the timeline value of its copy (free once reached). per shared buffer: free, its tensor and
+      # fills, or the timeline values of the gathers from it. nothing waits holding the gil (fills run meanwhile)
       nxt, done = [0]*n, [0]*n
       tls = [Device[d].timeline.host.view(fmt='Q') for d in devices]
-      fills:list[list[Any]] = [[None]*K for _ in range(n)]
-      busy:list[list[int]] = [[0]*K for _ in range(n)]
-      last_copy, last_gather = [0]*n, [0]*n
+      fills:list[list[Any]] = [[None]*len(ss) for ss in stages]
+      busy:list[list[int]] = [[0]*len(ss) for ss in stages]
+      snext = 0
+      sstate:list[Any] = [None]*len(sbufs)
       unit_tables:dict[tuple, Buffer] = {}
-      def gather(i:int, job:tuple):
-        _, name, kind, args, dst0, nb, src_nb = job
-        word = _gather_word(nb, src_nb, *((args[3],) if kind == "units" else (args[1], args[2])))
+      from tinygrad.engine.realize import run_linear
+      from tinygrad.uop.ops import Ops
+      def launch(call:UOp): run_linear(UOp(Ops.LINEAR, src=(call,)), update_stats=False)
+      def gather(i:int, src_buf:Buffer, src_nb:int, kind:str, args:tuple, dst0:int, nb:int) -> UOp:
+        word = _gather_word(nb, src_nb, *((args[3],) if kind == "units" else args[3:5] if kind == "rows" else (args[1], args[2])))
         dst = UOp.from_buffer(bufs[i].view(nb, dst0).ensure_allocated(), word, devices[i])
-        src = UOp.from_buffer(tmps[i].view(src_nb, 0).ensure_allocated(), word, devices[i])
-        if kind == "units":
-          E, rows, slices, blk, us = args
+        src = UOp.from_buffer(src_buf.view(src_nb, 0).ensure_allocated(), word, devices[i])
+        if kind in ("units", "rows"):
+          us = args[-1]
           if (ut:=unit_tables.get((i, tuple(us)))) is None:
             ut = unit_tables[(i, tuple(us))] = Buffer(devices[i], 4*len(us), initial_value=struct.pack(f"<{len(us)}i", *us)).ensure_allocated()
-          _run_gather(functools.partial(_units_gather_kernel, rows=rows, slices=slices), dst, src, UOp.from_buffer(ut, dtypes.int32, devices[i]))
-        else:
-          outer, row, part, di = args
-          _run_gather(functools.partial(_part_gather_kernel, outer=outer, off=di*part//word.itemsize), dst, src)
-      while any(done[i] < len(jobs[i]) for i in range(n)):
+          fxn = functools.partial(_units_gather_kernel, rows=args[1], slices=args[2]) if kind == "units" else \
+            functools.partial(_rows_gather_kernel, parts=args[1], chunk=args[4] // word.itemsize)
+          return _gather_call(fxn, dst, src, UOp.from_buffer(ut, dtypes.int32, devices[i]))
+        outer, row, part, di = args
+        return _gather_call(functools.partial(_part_gather_kernel, outer=outer, off=di*part//word.itemsize), dst, src)
+      while any(done[i] < len(jobs[i]) for i in range(n)) or snext < len(sh_items) or any(s is not None for s in sstate):
         progressed = False
         for i in range(n):
           cur = tls[i][0]
           # fill the free host buffers with the next copy jobs
-          for k in range(K):
-            if fills[i][k] is None and cur >= busy[i][k] and nxt[i] < len(jobs[i]) and (job:=jobs[i][nxt[i]])[0] == "copy":
-              fills[i][k], nxt[i], progressed = (job, pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1, True
+          for k in range(len(stages[i])):
+            if fills[i][k] is None and cur >= busy[i][k] and nxt[i] < len(jobs[i]):
+              fills[i][k], nxt[i], progressed = (job:=jobs[i][nxt[i]], pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1, True
           if done[i] >= len(jobs[i]): continue
           job = jobs[i][done[i]]
-          if job[0] == "gather":
-            if cur < last_copy[i]: continue
-            gather(i, job)
-            last_gather[i] = tls[i][1]
-            nxt[i] = max(nxt[i], done[i] + 1)
-          else:
-            kf = next((k for k in range(K) if fills[i][k] is not None and fills[i][k][0] is job), None)
-            if kf is None or not fills[i][kf][1].done() or (job[4] == "tmp" and cur < last_gather[i]): continue
-            k = kf
-            fills[i][k][1].result()
-            target = bufs[i] if job[4] == "buf" else tmps[i]
-            # (a copy at a time: a linear of the same structure is compiled once)
-            target.view(job[3], job[5]).ensure_allocated().copy_from(stages[i][k].view(job[3], 0).ensure_allocated())
-            fills[i][k], busy[i][k] = None, tls[i][1]
-            if job[4] == "tmp": last_copy[i] = tls[i][1]
+          kf = next((k for k in range(len(stages[i])) if fills[i][k] is not None and fills[i][k][0] is job), None)
+          if kf is None or not fills[i][kf][1].done(): continue
+          fills[i][kf][1].result()
+          dst = UOp.from_buffer(bufs[i].view(job[3], job[4]).ensure_allocated(), dtypes.uint8)
+          src = UOp.from_buffer(stages[i][kf].view(job[3], 0).ensure_allocated(), dtypes.uint8)
+          launch(dst.store_call(src))
+          fills[i][kf], busy[i][kf] = None, tls[i][1]
           done[i], progressed = done[i] + 1, True
+        for k, st in enumerate(sstate):
+          if st is None and snext < len(sh_items):
+            name = sh_items[snext]
+            futs = [pool.submit(fill, smvs[k], p, []) for p in pieces(shared[name][0], 64 << 20)]
+            sstate[k], snext, progressed = ("fill", name, futs), snext + 1, True
+          elif st is not None and st[0] == "fill" and all(f.done() for f in st[2]):
+            for f in st[2]: f.result()
+            targets = [0]*n
+            for i, g in shared[st[1]][2].items(): launch(gather(i, salias[k][i], shared[st[1]][1], *g))
+            for i in shared[st[1]][2]: targets[i] = tls[i][1]
+            sstate[k], progressed = ("busy", targets), True
+          elif st is not None and st[0] == "busy" and all(tls[i][0] >= st[1][i] for i in range(n)): sstate[k], progressed = None, True
         if not progressed:
-          pending = [x[1] for row in fills for x in row if x is not None and not x[1].done()]
+          pending = [x[1] for row in fills for x in row if x is not None and not x[1].done()] + \
+                    [f for s in sstate if s is not None and s[0] == "fill" for f in s[2] if not f.done()]
           if pending: concurrent.futures.wait(pending, timeout=0.0005, return_when=concurrent.futures.FIRST_COMPLETED)
           else: time.sleep(0.0002)
       for d in devices: Device[d].synchronize()
       pool.shutdown()
       mvs.clear()
       stages.clear()
-      tmps.clear()
-    for fd in fds.values(): os.close(fd)
+      smvs.clear()
+      salias.clear()
+      sbufs.clear()
   if defer is not None: defer.append(fill_all)
   else: fill_all()
   packed:dict[str, Tensor] = {}

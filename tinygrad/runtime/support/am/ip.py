@@ -182,7 +182,8 @@ class AM_GMC(AM_IP):
       extra |= am.AMDGPU_PTE_MTYPE_GFX12(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE_GFX12 if not is_table and pte_lv != am.AMDGPU_VM_PTB else (am.AMDGPU_PTE_IS_PTE if not is_table else 0))
     elif self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
-      extra |= am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
+      # (uncached from 100: the mtype uncached-100)
+      extra |= am.AMDGPU_PTE_MTYPE_NV10(0, uncached - 100 if uncached >= 100 else self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
     else:
       extra |= am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
