@@ -5,7 +5,7 @@
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
-import ctypes, functools, itertools, re, struct, platform, subprocess, tempfile, traceback
+import ctypes, functools, itertools, re, platform, subprocess, tempfile, traceback
 from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
@@ -50,7 +50,7 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, uopfunc, AxisType, rewrite_group
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, AxisType, rewrite_group
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
@@ -1730,35 +1730,11 @@ F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000
               244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
 
 @uopfunc
-def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
-              scratch_size:int, rsrc2:int, arch:str="rdna3"):
-  # set CONST registers
+def store_consts(sgpr:UOp, wave_size:int):
   ci = UOp.range(81, 2, AxisType.LOOP, dtype=dtypes.int)
   init_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
-  fi = UOp.range(len(F32_INLINE), 3, AxisType.LOOP, dtype=dtypes.int)
-  floats_buf = UOp(Ops.BINARY, arg=struct.pack(f"<{len(F32_INLINE)}I", *F32_INLINE.values())).bitcast(dtypes.uint32)
-  init_floats = sgpr.index(fi+240).store(floats_buf[fi]).end(fi)
-  # set RANGE registers
-  gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
-  n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
-  initial:list[tuple[int, sint]] = [(124, 0)] if wave_size == 32 else []
-  initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
-  if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
-  else:
-    sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
-    for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
-                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
-                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
-      if rsrc2 & enabled:
-        initial.append((sgpr_id, gid))
-        sgpr_id += 1
-  initial += [(EXEC_LO.offset, ((_c(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32)),
-              (SCRATCH_STRIDE_IDX, scratch_size)]
-  if wave_size == 64: initial.append((EXEC_LO.offset+1, ((_c(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
-  lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
-  tid = wave*wave_size+lane
-  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(_c(v)) for i,v in dict(initial).items()))
+  init_floats = UOp.group(*[sgpr.index(i).store(_c(v)) for i,v in F32_INLINE.items()])
+  return UOp.sink(init_ints, init_floats, *([sgpr.index(124).store(_c(0))] if wave_size == 32 else []))
 
 @uopfunc
 def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
@@ -1907,7 +1883,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   routed = len(unconditional) != len(regions)
   axes = itertools.count(sum(inst.size() for inst in insts.values()))
   gx, gy, gz, lx, ly, lz, rsrc2, scratch_size = dispatch
-  # construct CALL graph
+  # init ranges
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
   wg = UOp.range(gx*gy*gz, 0, AxisType.LOOP, dtype=dtypes.uint64)
@@ -1929,8 +1905,31 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   route = UOp.param(6, dtypes.int, (1,), name="route")
   taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
-  init = init_wave(wg, wave, sgpr.shrink(((wave*SGPR_COUNT, (wave+1)*SGPR_COUNT),)), vgpr.shrink(((wave*256*wave_size, (wave+1)*256*wave_size),)),
-                   args_ptr, gx, gy, lx, ly, total_threads, wave_size, scratch_size, rsrc2, arch)
+  # set per wave registers
+  wave_sgpr = sgpr.shrink(((wave*SGPR_COUNT, (wave+1)*SGPR_COUNT),)).after(wg)
+  wave_vgpr = vgpr.shrink(((wave*256*wave_size, (wave+1)*256*wave_size),)).after(wg)
+  consts = store_consts(wave_sgpr, wave_size)
+  gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
+  n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
+  runtime_sgprs = [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
+  if arch == "rdna4": runtime_sgprs += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
+  else:
+    sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+    for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+      if rsrc2 & enabled:
+        runtime_sgprs.append((sgpr_id, gid))
+        sgpr_id += 1
+  runtime_sgprs += [(EXEC_LO.offset, ((_c(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32)),
+                    (SCRATCH_STRIDE_IDX, scratch_size)]
+  if wave_size == 64:
+    runtime_sgprs.append((EXEC_LO.offset+1, ((_c(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
+  lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
+  tid = wave*wave_size+lane
+  init_vgpr = wave_vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
+  init = UOp.group(init_vgpr, *(wave_sgpr.after(consts).index(i).store(_c(v)) for i,v in dict(runtime_sgprs).items()))
+  # construct CALL graph
   initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
