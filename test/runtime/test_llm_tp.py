@@ -153,7 +153,7 @@ class TestTensorParallel(unittest.TestCase):
   def test_repeat_kv_heads(self):
     if Device.DEFAULT != "CPU" and Device[Device.DEFAULT].count() < 4: self.skipTest("needs 4 devices")
     config = TransformerConfig(num_blocks=1, dim=8, hidden_dim=8, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=16, head_dim=2,
-      v_head_dim=2, rope_theta=10000, rope_dim=2, max_context=16)
+      v_head_dim=2, rope_theta=10000, rope_dim=2, max_context=16, qkv_bias=True)
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'qwen3')
       for key,value in {'context_length':16, 'embedding_length':8, 'feed_forward_length':8, 'block_count':1, 'attention.head_count':4,
