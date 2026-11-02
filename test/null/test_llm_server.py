@@ -895,6 +895,22 @@ class TestStash(unittest.TestCase):
     # (no free slot: no pair)
     self.assertIsNone(srv.make_pair({0: long, 2: short, 3: short}))
 
+  def test_prio_slots(self):
+    # (PRIO) with few requests left the longest conversations are moved into the first slots, for steps of their own
+    from tinygrad.llm.serve import Request
+    m, srv = self.model, self.server
+    m.batch_sizes = Mock(return_value=(1, 2, 4, 8))
+    srv.slots, srv.spec, srv.PRIO_N, srv.PRIO_BELOW = 8, 2, 2, 10
+    srv.waiting = Mock(qsize=Mock(return_value=0))
+    a, b, c, d = (Request(list(range(n)), "", None, 0.0) for n in (100, 200, 5000, 3000))
+    active = {0: a, 1: b, 3: c, 5: d}
+    self.assertEqual(srv.prio_slots(active, []), 2)
+    self.assertEqual(active, {0: c, 1: d, 2: a, 3: b})
+    self.assertEqual(srv.prio_slots(active, []), 2)
+    self.assertEqual(active, {0: c, 1: d, 2: a, 3: b})
+    # (too many requests left: none)
+    self.assertEqual(srv.prio_slots(active, [Request([1], "", None, 0.0)] * 10), 0)
+
   def test_pause_long(self):
     # (aliased slots) the batch waits for a long request: only the ones in the slots its cache overwrites stop, it runs alone (the others' slots
     # busy: nothing of theirs written), its conversation kept (in host memory) before the next step writes those slots

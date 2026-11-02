@@ -896,6 +896,70 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       if self.emit(req, first): active[slot] = req
     self.landing = left
 
+  def step_results(self, active:dict, pending:list[Request], spec:list, which:list[int]):
+    """a speculative step's tokens of the requests in slots `which`: the drafts accepted, the ones done (or whose slot is full) out of the batch"""
+    model, k, slots = self.model, self.spec, self.slots
+    for i in which:
+      req = active[i]
+      req.steps += 1
+      # the drafts accepted: up to the first that isn't the sampled token, the sampled tokens after them (see Transformer._spec_steps)
+      sampled, drafts = spec[i]
+      j = next((t for t in range(k) if drafts[t] != sampled[t]), k)
+      start = req.mtp + req.j
+      req.y, req.mtp, req.j, req.par, req.pos = sampled, start + 1, j, 1 - req.par, start + j + 1
+      if not all(self.emit(req, t) for t in sampled[:j+1]):
+        del active[i]
+        self.slot_done(i, req, active)
+        continue
+      if req.pos + k + 2 >= model.batch_ctx() and i not in self.partner and self.span_max() > 1 and i + 1 < slots and \
+         i + 1 not in self.taken(active) and self.free_slots(active) > 0:
+        # (WIDE) its slot is full, the next is free: its positions go on there
+        self.partner[i] = i + 1
+        self.slot_taken(i + 1)
+        trace(f"wide req {req.rid} slot {i} -> {i+1} pos {req.pos}")
+      if req.pos + k + 2 >= self.wide_limit(i):
+        # its slot is full: it goes on alone (from its kept states, or prefilled again), when the model is free
+        del active[i]
+        self.slot_done(i, req, active)
+        pending.insert(0, req)
+
+  # (PRIO) with at most PRIO_BELOW requests (decoding or waiting: the last agents), the PRIO_N longest conversations in the first slots get
+  # PRIO_R steps of their own after every step of all of them: the last agents' turns (the end of the benchmark) aren't the batch's speed
+  PRIO_N, PRIO_R, PRIO_BELOW = getenv("PRIO_N", 0), getenv("PRIO_R", 1), getenv("PRIO_BELOW", 40)
+  def prio_slots(self, active:dict, pending:list[Request]) -> int:
+    """(PRIO) the longest conversations moved into the first slots (a step of them only writes no other slot): how many, 0: none"""
+    model = self.model
+    if not self.PRIO_N or self.landing or len(active) + len(pending) + self.waiting.qsize() > self.PRIO_BELOW: return 0
+    spanned = set(self.partner) | set(self.partner.values())
+    cands = sorted((i for i in active if i not in spanned), key=lambda i: -(len(active[i].ids) + len(active[i].generated)))
+    n = max((m for m in model.batch_sizes() if m <= min(self.PRIO_N, len(cands))), default=0)
+    if not n or n >= len(active) or spanned & set(range(n)): return 0
+    prio = cands[:n]
+    for t in range(n):
+      if t in prio: continue
+      src = next(i for i in prio if i >= n)
+      if t in active:
+        # (another one there: to a free slot first)
+        if (f:=self.free_slot(active)) is None or self.free_slots(active) < 1: return 0
+        self.slot_taken(f)
+        model.slot_move(t, f)
+        active[f] = active.pop(t)
+      self.slot_taken(t)
+      trace(f"slot_move req {active[src].rid} {src} -> {t} (prio)")
+      model.slot_move(src, t)
+      active[t] = active.pop(src)
+      prio[prio.index(src)] = t
+    return n
+  def prio_steps(self, active:dict, pending:list[Request]):
+    """(PRIO) PRIO_R steps of the longest conversations only (see prio_slots)"""
+    for _ in range(self.PRIO_R):
+      if not (n:=self.prio_slots(active, pending)): return
+      _t0 = time.perf_counter()
+      spec = self.model.batch_spec_step([(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p))
+                                         for i in range(n)])
+      self.stats.step_time += time.perf_counter() - _t0
+      self.step_results(active, pending, spec, list(range(n)))
+
   def bcp_batch(self, cands:list[Request], most:int, busy:set[int]) -> list[Request]:
     """
     (BCP) the requests of a batch_continue: the oldest, then the ones of the fewest new tokens, as many as a step of the rows of the class of
@@ -1148,34 +1212,18 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                                       (0, 0, 0.0)
                                       for i in range(max(active)+1)])
         self.stats.step_time += time.perf_counter() - _t0
-        for i, req in list(active.items()):
-          req.steps += 1
-          if k:
-            # the drafts accepted: up to the first that isn't the sampled token, the sampled tokens after them (see Transformer._spec_steps)
-            sampled, drafts = spec[i]
-            j = next((t for t in range(k) if drafts[t] != sampled[t]), k)
-            start = req.mtp + req.j
-            req.y, req.mtp, req.j, req.par, req.pos = sampled, start + 1, j, 1 - req.par, start + j + 1
-            if not all(self.emit(req, t) for t in sampled[:j+1]):
-              del active[i]
-              self.slot_done(i, req, active)
-              continue
-          else:
+        if k: self.step_results(active, pending, spec, list(active))
+        else:
+          for i, req in list(active.items()):
+            req.steps += 1
             req.pos += 1
             if not self.emit(req, out[i]):
               del active[i]
               continue
-          if req.pos + k + 2 >= model.batch_ctx() and i not in self.partner and self.span_max() > 1 and i + 1 < slots and \
-             i + 1 not in self.taken(active) and self.free_slots(active) > 0:
-            # (WIDE) its slot is full, the next is free: its positions go on there
-            self.partner[i] = i + 1
-            self.slot_taken(i + 1)
-            trace(f"wide req {req.rid} slot {i} -> {i+1} pos {req.pos}")
-          if req.pos + k + 2 >= self.wide_limit(i):
-            # its slot is full: it goes on alone (from its kept states, or prefilled again), when the model is free
-            del active[i]
-            self.slot_done(i, req, active)
-            pending.insert(0, req)
+            if req.pos + k + 2 >= self.wide_limit(i):
+              del active[i]
+              self.slot_done(i, req, active)
+              pending.insert(0, req)
         if self.landing: self.mix_done(firsts, active)
         # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
         while active and (hi:=max(active)) >= len(active) and hi not in self.partner and \
@@ -1185,6 +1233,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           trace(f"slot_move req {active[hi].rid} {hi} -> {lo}")
           model.slot_move(hi, lo)
           active[lo] = active.pop(hi)
+        # (PRIO) the longest conversations' steps of their own too, when few are left
+        if k: self.prio_steps(active, pending)
         # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster
         if not k and len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1):
           pending.append(active.pop(next(iter(active))))
