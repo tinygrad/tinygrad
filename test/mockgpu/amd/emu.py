@@ -1,6 +1,6 @@
 # RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
-#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
+#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], SCC=258
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
@@ -113,9 +113,7 @@ def _iattr(inst, name: str, default: int = 0) -> int:
   """Optional integer attribute of a decoded instruction (None/missing -> default)."""
   v = getattr(inst, name, default)
   return default if v is None else v
-# Special registers stored after inline constants (256-259)
-SCRATCH_STRIDE_IDX = 259
-# SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
+# SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants
 SGPR_COUNT = 260
 
 def _op_name(inst) -> str:
@@ -296,6 +294,7 @@ class _Ctx:
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
+  scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
 
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
@@ -1497,8 +1496,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(False)
     if is_scratch:
-      scratch_stride = ctx.rsgpr_dyn(_c(SCRATCH_STRIDE_IDX)).cast(dtypes.uint64)
-      base = lane.cast(dtypes.uint64) * scratch_stride
+      base = lane.cast(dtypes.uint64) * ctx.scratch_stride.cast(dtypes.uint64)
       # SVE (Scratch VGPR Enable): when SVE=1, VADDR is used as offset; when SVE=0, VADDR is ignored
       sve = _iattr(inst, 'sve')
       vaddr = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
@@ -1942,12 +1940,12 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
       call, branch_cond = instruction_call(inst, arch, renderer)
       if branch_cond is not None: cond = branch_cond
       if call is not None: instructions.append(call)
-    values = {}
+    values = {ctx.scratch_stride:_c(scratch_size)}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
-      values = {taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
-          else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)}
+      values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
+                    else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
       instructions.append(lower_body(route[0].store(target).sink(), "asm_branch"))
     if not instructions: return end
     body, bufs = instruction_block(instructions)
