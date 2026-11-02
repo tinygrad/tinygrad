@@ -1801,7 +1801,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
     sink = _get_handler(inst)(inst, ctx)
     base, mask = ctx.canonical_mask(inst_bytes)
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
-    ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
+    ret = lower_body(sink, name), ctx.branch_cond
     entries.append((base, mask, ret))
   call, cond = ret
   words = {_Ctx.inst_word(i):_c((bits >> (32*i)) & 0xffffffff) for i in range(inst.size()//4)}
