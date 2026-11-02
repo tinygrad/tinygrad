@@ -590,6 +590,11 @@ class Transformer:
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     shard_map:dict[str, int] = {}
     if shard > 1:
+      if not kv.get(f'{arch}.attention.kv_lora_rank') and n_kv_heads < shard and shard % n_kv_heads == 0:
+        # too few KV heads to split: repeat each one so every device holds one
+        entries |= {k: (d.to("CPU").reshape(n_kv_heads, -1).repeat_interleave(shard//n_kv_heads, 0).flatten(), (s[0]*shard//n_kv_heads, s[1]), t)
+                    for k, (d, s, t) in entries.items() if k.endswith(('attn_k.weight', 'attn_v.weight'))}
+        n_kv_heads = shard
       heads = n_heads if kv.get(f'{arch}.attention.kv_lora_rank') else n_kv_heads
       assert heads % shard == 0, f"tensor parallel needs the attention heads to split over {shard} devices"
       # shard MLA heads and routed experts while replicating latent projections, KV cache and shared experts
