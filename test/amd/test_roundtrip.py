@@ -273,7 +273,6 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
 
 class TestTinygradKernelRoundtripRDNA4(TestTinygradKernelRoundtrip): arch = 'rdna4'
 
-@unittest.skip("CDNA decode roundtrip not yet supported")
 class TestTinygradKernelRoundtripCDNA(TestTinygradKernelRoundtrip): arch = 'cdna'
 
 if __name__ == "__main__":

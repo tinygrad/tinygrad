@@ -1429,10 +1429,70 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane))
 
+def _compile_tr_read(inst: irc.DS, ctx: _Ctx) -> UOp:
+  """CDNA4 MFMA transpose loads (DS_READ_B64_TR_B16/B8/B4, DS_READ_B96_TR_B6).
+
+  The wave is split into groups of 16 lanes. Each lane reads `m` packed E-bit elements (m*E = 64 or 96 bits)
+  at its own LDS address; the hardware then transposes the 16x16 element matrix so that output lane L (tx = L%16)
+  holds, at output element j, the element B[row j][col tx] of the group's matrix:
+    out[L][j] = elem (tx & (m-1)) of the word read by lane 16*(L//16) + j*(16//m_blocks) + (tx >> log2(m))
+  Element e (E bits) of the m-element word at byte address `a` lives at bit a*8 + e*E in LDS.
+  The output elements are packed back into vdst VGPRs (2 for b64, 3 for b96).
+  """
+  op_name = _op_name(inst)
+  tr_variant = 'TR_' + op_name.split('TR_')[1]
+  elem_bits, out_bits = {'TR_B16': (16, 64), 'TR_B8': (8, 64), 'TR_B4': (4, 64), 'TR_B6': (6, 96)}[tr_variant]
+  m, n_out = out_bits // elem_bits, out_bits // 32  # elements per lane, output VGPRs
+  exec_mask = ctx.rexec()
+  addr_reg = ctx.inst_field(type(inst).addr)
+  offset = (ctx.inst_field(type(inst).offset1) << _c(8)) | ctx.inst_field(type(inst).offset0)  # 16-bit DS offset
+  vdst_reg = ctx.inst_field(type(inst).vdst)
+  use_acc = bool(_iattr(inst, 'acc'))
+  wdst = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
+  b_col = 16 // m  # column blocks spanned by one reader's word
+  log2m = (m - 1).bit_length()  # m is a power of two for 4/8/16-bit elements
+
+  # Phase 1: snapshot the per-lane LDS addresses before any vdst writes (vdst may overlap the addr VGPR).
+  snap_lane = ctx.range()
+  snap = UOp.alloc((ctx.wave_size,), dtypes.uint32, 8, AddrSpace.REG)
+  snap_store = snap.index(snap_lane).store(ctx.rvgpr_dyn(addr_reg, snap_lane))
+  snap_phase = snap_store.end(snap_lane)
+
+  # Phase 2: transpose gather from LDS, then write vdst.
+  lane = ctx.range()  # 64 lanes (cdna wave64)
+  g, tx = lane // _c(16, dtypes.int), lane % _c(16, dtypes.int)
+  snap_after = snap.after(snap_phase)
+  # output words: n_out u32 accumulators built from the transposed elements
+  out_words: list[UOp] = [_c(0) for _ in range(n_out)]
+  for j in range(m):
+    reader = g * _c(16, dtypes.int) + _c(j * b_col, dtypes.int) + (tx >> _c(log2m, dtypes.int))
+    addr = snap_after.index(reader).load() + offset
+    # element index within the reader's word depends only on the output lane
+    elem = tx if log2m == 0 else (tx & _c(m - 1, dtypes.int))
+    bit_off = addr.cast(dtypes.uint32) * _c(8, dtypes.uint32) + elem.cast(dtypes.uint32) * _c(elem_bits, dtypes.uint32)
+    word_addr = bit_off >> _c(5, dtypes.uint32)
+    # an element can straddle two LDS words (unaligned source addresses); combine both halves
+    shift = bit_off & _c(31, dtypes.uint32)
+    needs_hi = shift + _c(elem_bits, dtypes.uint32) > _c(32, dtypes.uint32)
+    lo_word, hi_word = ctx.lds.index(word_addr).load(), ctx.lds.index(word_addr + _c(1, dtypes.uint32)).load()
+    val = (needs_hi.where((lo_word >> shift) | (hi_word << (_c(32, dtypes.uint32) - shift)), lo_word >> shift)) \
+      & _c((1 << elem_bits) - 1, dtypes.uint32)
+    # place element j into the output at bit j*elem_bits (an element can straddle output words for 6-bit)
+    out_bit = j * elem_bits
+    for w in range(out_bits // 32):
+      lo_w, hi_w = out_bit - w * 32, out_bit - w * 32 + elem_bits  # element range relative to word w
+      if lo_w < 32 and hi_w > 0:  # element intersects output word w
+        start, nbits = max(lo_w, 0), min(hi_w, 32) - max(lo_w, 0)
+        part = ((val >> _c(start - lo_w, dtypes.uint32)) & _c((1 << nbits) - 1, dtypes.uint32)) if nbits < elem_bits else val
+        out_words[w] = out_words[w] | (part << _c(start, dtypes.uint32)).cast(dtypes.uint32)
+  stores = [wdst(vdst_reg + _c(w), lane, out_words[w], exec_mask) for w in range(n_out)]
+  return UOp.sink(snap_phase, UOp.group(*stores).end(lane))
+
 def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  if isinstance(inst, irc.DS) and '_TR_' in op_name: return _compile_tr_read(inst, ctx)
   pcode = get_pcode(inst.op)
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).

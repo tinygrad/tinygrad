@@ -493,11 +493,15 @@ jobs:
       uses: ./.github/actions/process-replay
 
   testamdasm:
-    name: AMD ASM IDE
+    name: AMD ASM IDE (${{ matrix.arch }})
     runs-on: *linux
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [gfx1100, gfx950]
     env:
-      DEV: MOCKKFD+AMD
+      DEV: MOCKKFD+AMD::${{ matrix.arch }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -532,6 +536,7 @@ jobs:
           PYTHONPATH=. DEV=NULL:HIP:gfx1100 python extra/mmapeak/mmapeak.py
           PYTHONPATH=. DEV=NULL:HIP:gfx950 python3 -m pytest -n=auto test/testextra/test_tk.py
       - name: Run matmul on MOCKKFD
+        if: matrix.arch == 'gfx1100'
         run: |
           PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_asm_matmul.py
           PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_copy_matmul.py
