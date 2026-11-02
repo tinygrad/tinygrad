@@ -6,6 +6,7 @@ from test.amd.hw.test_cdna_vop3 import run_cdna
 class TestCDNASDWA(unittest.TestCase):
   def test_v_add_co_u32_e32_writes_vcc(self):
     out = run_cdna([
+      cdna.s_mov_b64(cdna.VCC, 0),
       cdna.s_mov_b32(cdna.s[0], 0xffffffff),
       cdna.v_mov_b32_e32(cdna.v[0], cdna.s[0]),
       cdna.v_mov_b32_e32(cdna.v[13], 1),
