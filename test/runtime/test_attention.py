@@ -281,7 +281,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
   def test_kda_qk_l2norm(self):
     # q/k are normalized as x/sqrt(sum(x²)+1e-6) like FLA: tiny vectors aren't scaled up to unit length
-    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True)
+    ssm = SSMConfig(conv_kernel=4, state_size=8, group_count=2, time_step_rank=2, inner_size=16, kda=True, sigmoid_gate=True)
     block = GatedDeltaNetBlock(self._make_config(dim=16, n_heads=2, ssm=ssm), ssm)
     block.attn_q.weight = block.attn_k.weight = Tensor.full((16, 16), 1e-4/16)  # x of ones: q = k = 1e-4, v = 1
     block.attn_v.weight, block.ssm_beta.weight = Tensor.full((16, 16), 1/16), Tensor.zeros(2, 16)
@@ -295,7 +295,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
   def test_kda_channel_decay(self):
     config = self._make_config(dim=4, hidden_dim=8, n_heads=2, head_dim=4, rope_dim=4, v_head_dim=4,
-      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
+      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True, sigmoid_gate=True))
     block, x = GatedDeltaNetBlock(config, config.ssm), Tensor([[[1., 2., 0., 0.], [2., 1., 0., 0.]]])
     block.ssm_f_a.weight = Tensor([[1., 0., 0., 0.], [0., 1., 0., 0.]])
     block.ssm_f_b.weight = Tensor([[1., 0.], [0., 1.], [1., 1.], [2., 1.]])
@@ -308,7 +308,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[:, None, :], rtol=1e-5, atol=1e-5)
 
   def test_kda_prefill_matches_decode(self):
-    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True))
+    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True, sigmoid_gate=True))
     block = GatedDeltaNetBlock(config, config.ssm)
     for p in nn.state.get_parameters(block):
       p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
@@ -327,7 +327,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     # full prefill is proven equivalent to decode by test_gatedeltanet_reference_and_reset (delta rule) and
     # test_kda_prefill_matches_decode (kda), so use it as the baseline and only exercise multi-chunk handoffs here
     for kda in (False, True):
-      ssm = SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda)
+      ssm = SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda, sigmoid_gate=kda)
       config = self._make_config(ssm=ssm)
       if kda:
         block = GatedDeltaNetBlock(config, config.ssm)

@@ -73,6 +73,7 @@ class SSMConfig:
   kda: bool = False
   gate_lower_bound: float|None = None  # kda: bounded decay gate
   full_rank_gate: bool = False
+  sigmoid_gate: bool = False
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -528,7 +529,7 @@ class GatedDeltaNetBlock(FFNBlock):
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, *conv_writes))
 
     # output; undo the padding before the output projection
-    z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
+    z = (self.ssm_norm(core) * (out_gate.sigmoid() if unwrap(self.config.ssm).sigmoid_gate else out_gate.silu())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
     return self.ssm_out(z.reshape(B, T, -1))
 
@@ -609,8 +610,8 @@ class Transformer:
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
-    hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv[f'{arch}.hyper_connection.sinkhorn_iterations'],
-                  kv[f'{arch}.hyper_connection.epsilon']) if f'{arch}.hyper_connection.count' in kv else None
+    hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
+                  kv.get(f'{arch}.hyper_connection.epsilon', 0.0)) if f'{arch}.hyper_connection.count' in kv else None
     if hc is not None: state_dict = {k.replace('.hc_attn_', '.hc_attn.').replace('.hc_ffn_', '.hc_ffn.'):v for k,v in state_dict.items()}
 
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
@@ -630,7 +631,7 @@ class Transformer:
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]
       n_kv_heads = max(n_kv_heads)
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True,
-                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), full_rank_gate=arch == 'kimi-k3')
+                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), full_rank_gate=arch == 'kimi-k3', sigmoid_gate=True)
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)
