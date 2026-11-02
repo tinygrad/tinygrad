@@ -334,8 +334,10 @@ class TransformerBlock(FFNBlock):
     v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
-    k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
+    # start_pos and T have independent symbolic bounds, so pad the slice's possible overrun past the context.
+    rot = self.freqs_cis.pad(((0, x.max_shape[1]-1), (0, 0)))[start_pos:start_pos+T]
+    q = apply_rope(q[..., :self.config.rope_dim], rot).cat(q[..., self.config.rope_dim:], dim=-1)
+    k = apply_rope(k[..., :self.config.rope_dim], rot).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     store = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(self.cache_kv.dtype).uop)
@@ -433,7 +435,8 @@ class QSAIndexer:
     k, q = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), self.q_norm(self.q_proj(x).reshape(B, T, idx.n_heads, idx.head_dim))
     pool_freqs = freqs[::idx.kpool]
     k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), pool_freqs).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
-    q = apply_rope(q[..., :idx.rope_dim].transpose(1, 2), freqs[start_pos:start_pos+T]).transpose(1, 2).cat(q[..., idx.rope_dim:], dim=-1)
+    rot = freqs.pad(((0, x.max_shape[1]-1), (0, 0)))[start_pos:start_pos+T]
+    q = apply_rope(q[..., :idx.rope_dim].transpose(1, 2), rot).transpose(1, 2).cat(q[..., idx.rope_dim:], dim=-1)
     return _pool_mask((q @ k.transpose(-1, -2).unsqueeze(1)).relu().sum(2) * idx.head_dim**-0.5, start_pos, idx, x.dtype)
 
 class Indexer:
