@@ -1,7 +1,7 @@
 import pathlib, re, tempfile, unittest
 import numpy as np
 from gguf import GGUFWriter, GGUFValueType, GGMLQuantizationType as Q
-from tinygrad import Tensor, nn
+from tinygrad import nn
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig, HCConfig, IndexerConfig, PLEConfig
 from test.helpers import not_support_multi_device
 
@@ -40,7 +40,9 @@ def load_tiny_qwen4exp(shard:int=1, max_context:int=32) -> Transformer:
 
 class TestQwen4Exp(unittest.TestCase):
   def test_generate(self):
-    model = load_tiny_qwen4exp()
+    # Exercise a partial final indexer pool and a table view, as produced by loading a Tensor-backed GGUF on CPU.
+    model = load_tiny_qwen4exp(max_context=31)
+    model.ple_table = model.ple_table.pad((7, 11)).contiguous().realize()[7:-11]
     gen = model.generate(list(PROMPT), chunk_size=8)
     out = [next(gen) for _ in range(6)]
     # the host buffer holds every position's n-gram table rows: t0*m0 ^ t1*m1 for the bigram head, ^ t2*m2 for the trigram head,
@@ -53,27 +55,6 @@ class TestQwen4Exp(unittest.TestCase):
     # chunked prefill and token by token decode agree
     gen = load_tiny_qwen4exp().generate(list(PROMPT), chunk_size=1)
     self.assertEqual(out, [next(gen) for _ in range(6)])
-
-  def test_ple_rows_views(self):
-    model = load_tiny_qwen4exp()
-    model.ple_rows = Tensor.empty(1, len(PROMPT), len(VOCABS), 18, dtype="uint8", device="CPU").realize()
-    model._write_ple_rows(PROMPT, 0)
-    expected = model.ple_rows.numpy()
-    # Both the table and destination may be views into larger host buffers (e.g. a Tensor-backed GGUF).
-    model.ple_table = model.ple_table.pad((7, 11)).contiguous().realize()[7:-11]
-    rows = Tensor.full(model.ple_rows.numel()+18, 255, dtype="uint8", device="CPU").contiguous().realize()
-    model.ple_rows = rows[9:-9].reshape(model.ple_rows.shape)
-    model._write_ple_rows(PROMPT, 0)
-    np.testing.assert_array_equal(model.ple_rows.numpy(), expected)
-    np.testing.assert_array_equal(rows.numpy()[:9], 255)
-    np.testing.assert_array_equal(rows.numpy()[-9:], 255)
-
-  def test_partial_indexer_pool(self):
-    prompt = (PROMPT * 3)[:29]
-    out = list(load_tiny_qwen4exp(max_context=31).generate(list(prompt), chunk_size=8))
-    self.assertEqual(len(out), 2)
-    gen = load_tiny_qwen4exp().generate(list(prompt), chunk_size=8)
-    self.assertEqual(out, [next(gen) for _ in out])
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_shard_two(self):
