@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
-from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -741,7 +741,6 @@ class TestCallInKernel(unittest.TestCase):
   @unittest.expectedFailure
   def test_call_loop_split(self): self.test_call_loop_mini((Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),))
 
-  @unittest.expectedFailure
   def test_call_loop_pad(self):
     @uopfunc
     def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
@@ -752,8 +751,8 @@ class TestCallInKernel(unittest.TestCase):
       return call.end(i).sink(arg=KernelInfo(name="call_loop_padto", opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
-    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
-    self.assertEqual(out.tolist(), [1, 2, 3, 0])
+    # the CALL body can't be gated, so padding i is refused
+    with self.assertRaises(KernelOptError): Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0].realize()
 
   def test_uopfunc(self):
     @uopfunc

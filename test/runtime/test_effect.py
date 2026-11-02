@@ -1,8 +1,9 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, Device, Variable
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
 class TestEffectRetention(unittest.TestCase):
   def test_unused_reduce_dependency(self):
@@ -153,6 +154,30 @@ class TestEffectFrequency(unittest.TestCase):
     c, o = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, o)
     self.assertEqual((c.tolist(), o.tolist()), ([1]*4, [1]))
+
+  def test_padto_gates_store(self):
+    # C[0] is 3 after the 3 iterations of r, and padding r to 4 adds a no-op iteration
+    r, l = UOp.range(3, 0, AxisType.LOOP), UOp.loop(1)
+    def loop_until(C:UOp) -> UOp:  # a padded iteration exits the loop: its gated reg never reaches 3 again
+      reg = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG).after(r)[0].set(0)
+      nxt = reg.after(l)[0]+1
+      return C[0].store(reg.after(reg[0].store(nxt).backedge(l, nxt.ne(3)))[0])
+    stores = {"after": lambda C: (c:=C.after(r)[0]).store(c+1), "shared_load": lambda C: (c:=C[0]).store(c.load()+r.cast(dtypes.int)+1),
+              "backedge": loop_until}
+    for name, store in stores.items():
+      with self.subTest(name):
+        def kernel(C:UOp, store=store) -> UOp: return store(C).end(r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
+        self.assertEqual(Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [3])
+
+  def test_padto_refuses_ungatable(self):
+    # a CUSTOM and a STORE to a whole buffer can't be no-ops, so padding r is refused
+    r = UOp.range(3, 0, AxisType.LOOP)
+    effects = {"custom": lambda C: UOp(Ops.CUSTOM, src=(C.index(0), r.cast(dtypes.int)), arg=("{0}[0] += {1}+1;", dtypes.void)),
+               "whole_store": lambda C: C.store((r.cast(dtypes.int)+1).reshape((1,)))}
+    for name, effect in effects.items():
+      with self.subTest(name):
+        def kernel(C:UOp, effect=effect) -> UOp: return effect(C).end(r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
+        with self.assertRaises(KernelOptError): Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].realize()
 
 if __name__ == '__main__':
   unittest.main()
