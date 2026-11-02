@@ -73,7 +73,7 @@ class SSMConfig:
   kda: bool = False
   gate_lower_bound: float|None = None  # kda: bounded decay gate
   full_rank_gate: bool = False
-  sigmoid_gate: bool = False
+  silu_gate: bool = False
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -529,7 +529,7 @@ class GatedDeltaNetBlock(FFNBlock):
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, *conv_writes))
 
     # output; undo the padding before the output projection
-    z = (self.ssm_norm(core) * (out_gate.sigmoid() if unwrap(self.config.ssm).sigmoid_gate else out_gate.silu())).cast(x.dtype).contiguous()
+    z = (self.ssm_norm(core) * (out_gate.silu() if unwrap(self.config.ssm).silu_gate else out_gate.sigmoid())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
     return self.ssm_out(z.reshape(B, T, -1))
 
@@ -625,13 +625,13 @@ class Transformer:
     ssm = None
     ssm_layers: tuple[bool, ...] = ()
     if arch in ('qwen35', 'qwen35moe'):
-      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
+      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}, silu_gate=True)
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
     elif arch in ('kimi-linear', 'glm5-next', 'kimi-k3'):
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]
       n_kv_heads = max(n_kv_heads)
       ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True,
-                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), full_rank_gate=arch == 'kimi-k3', sigmoid_gate=True)
+                      gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'), full_rank_gate=arch == 'kimi-k3')
       for i, is_ssm in enumerate(ssm_layers):
         if not is_ssm: continue
         state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(n_heads, 1)
