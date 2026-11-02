@@ -20,8 +20,10 @@ regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6, "cdna4": 0x39e9}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
+# gfx9 (gc_9_4_3) places the SQ_THREAD_TRACE registers at different offsets than gc_11/gc_12
+regSQ_THREAD_TRACE_WPTR = {"rdna3": 0x39ef, "rdna4": 0x39ef, "cdna4": 0x2339}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_STATUS = {"rdna3": 0x39f4, "rdna4": 0x39f4, "cdna4": 0x233a}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_MODE_ADDR = 0x2336 + amd_gpu.GC_BASE__INST0_SEG1
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
 regCPG_PERFCOUNTER1_LO = 0x3000 + amd_gpu.GC_BASE__INST0_SEG1
 regGUS_PERFCOUNTER_HI = 0x3643 + amd_gpu.GC_BASE__INST0_SEG1
@@ -165,7 +167,11 @@ class PM4Executor(AMDQueue):
     _ = (info >> 8) & 0b1 # mem_engine
 
     if mem_space == 0 and mem_op == 1: mval = val # hack for memory barrier, should properly handle (req_req, reg_done)
-    elif mem_space == 0: mval = self.gpu.regs[addr_hi<<32|addr_lo]
+    # gfx9 passes SQ thread trace status registers in the UCONFIG packet-relative space; the CP adds the base
+    elif mem_space == 0:
+      reg_addr = addr_hi<<32|addr_lo
+      if MOCKGPU_ARCH == "cdna4" and reg_addr < pm4.PACKET3_SET_UCONFIG_REG_START: reg_addr += pm4.PACKET3_SET_UCONFIG_REG_START
+      mval = self.gpu.regs[reg_addr]
     elif mem_space == 1: mval = to_mv(self.gpu.translate_addr(addr_lo + (addr_hi << 32)), 4).cast('I')[0]
 
     mval &= mask
@@ -179,10 +185,16 @@ class PM4Executor(AMDQueue):
     return can_cont
 
   def _exec_set_reg(self, n, off):
-    reg = off + self._next_dword()
+    first_reg = off + self._next_dword()
+    reg = first_reg
     for i in range(n):
       self.gpu.regs[reg] = self._next_dword()
       reg += 1
+    # gfx9 stops SQTT by writing SQ_THREAD_TRACE_MODE (mode=0) without a THREAD_TRACE_FINISH event;
+    # mark the status register not busy and the wptr empty so the driver's wait_reg_mem/copy can complete
+    if MOCKGPU_ARCH == "cdna4" and first_reg == regSQ_THREAD_TRACE_MODE_ADDR:
+      self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 0
+      self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = 0
 
   def _exec_dispatch_direct(self, n):
     assert n == 3
