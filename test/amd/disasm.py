@@ -701,9 +701,9 @@ def _disasm_vop3b(inst) -> str:
   n = inst.num_srcs() or _num_srcs(inst)
   regs = inst.canonical_op_regs
   dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
-  s0 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0)
-  s1 = _cdna_src(inst, inst.src1, inst.neg&2, n=r1)
-  s2 = _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
+  s0 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1 if hasattr(inst, 'abs') else 0, n=r0)
+  s1 = _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2 if hasattr(inst, 'abs') else 0, n=r1)
+  s2 = _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4 if hasattr(inst, 'abs') else 0, n=r2)
   # CDNA VOP3_SDST uses vdst field for sdst (but vdst adds 256), RDNA uses separate sdst field
   sdst_val = getattr(inst, 'sdst', None)
   if sdst_val is None and hasattr(inst, 'vdst'):
