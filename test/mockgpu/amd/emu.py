@@ -1794,7 +1794,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
   return call, cond.substitute(words) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({b for call in instructions for b in call.src[1:] if b.op is Ops.PARAM}, key=lambda b:b.arg.slot)
+  bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   for call in instructions:
