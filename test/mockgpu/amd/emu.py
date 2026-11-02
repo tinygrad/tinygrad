@@ -1767,8 +1767,10 @@ def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
 def lower_body(sink:UOp, name:str) -> UOp:
-  bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
-  body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
+  reads = [u for u in sink.toposort() if u.op is Ops.LOAD and u.src[0].buf_uop is _Ctx.sgpr]
+  bufs = sorted((u for u in sink.toposort(lambda u:u not in reads) if u.op is Ops.PARAM), key=lambda u: u.arg.slot) + reads
+  body = sink.substitute({b:b.param_like(i, name=b.arg.name) if b.op is Ops.PARAM else UOp.param(i, b.dtype, addrspace=AddrSpace.ALU)
+                          for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs, name=name)
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None]]]] = {}
@@ -1788,20 +1790,18 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
     entries.append((base, mask, ret))
   call, cond = ret
   words = {_Ctx.inst_word(i):_c((bits >> (32*i)) & 0xffffffff) for i in range(inst.size()//4)}
-  if call is not None: call = call.replace(src=(call.body, *(words.get(b, b) for b in call.src[1:])))
+  if call is not None: call = call.replace(src=(call.body, *(b.substitute(words).simplify() for b in call.src[1:])))
   return call, cond.substitute(words) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({b for call in instructions for b in call.src[1:] if b.op is Ops.PARAM}, key=lambda b:b.arg.slot)
+  bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
-  seen = set(linear)
   for call in instructions:
     args = [params.get(b, b) for b in call.src[1:]]
     inputs = UOp.sink(*args)
-    nodes = inputs.toposort(lambda u:u not in seen)
+    nodes = inputs.toposort(lambda u:u.op is not Ops.PARAM)
     nodes.pop(inputs)
-    seen.update(nodes)
     linear.extend(nodes)
     linear.append(call.replace(src=(call.body, *args)))
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
