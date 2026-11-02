@@ -41,7 +41,7 @@ class _MXCSRContext:
   __slots__ = ('_saved',)
   def __enter__(self):
     lib, ftz_bits = _get_ftz_lib()
-    if lib is None: return self
+    if lib is None or not hasattr(self, '_saved'): return
     self._saved = lib.get_fpcr()
     lib.set_fpcr(self._saved | ftz_bits)
     return self
@@ -931,7 +931,6 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
     if is_float and is_dpp16:
       s0 = _apply_src_mods(s0, 0, 1 if _iattr(inst, 'src0_abs') else 0, 1 if _iattr(inst, 'src0_neg') else 0, bits['s0'])
       s1 = _apply_src_mods(s1, 0, 1 if _iattr(inst, 'src1_abs') else 0, 1 if _iattr(inst, 'src1_neg') else 0, bits['s1'])
-    # Integer compares also honor abs/neg as bit-level sign clear/flip.
     s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
     s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc, 'D0': _c(0, dtypes.uint64)})[1]:
