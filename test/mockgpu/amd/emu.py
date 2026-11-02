@@ -825,13 +825,10 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
         old = ctx.rvgpr_dyn(vdst_reg, lane)
         result = _sdwa_write(old, result, dst_sel, dst_unused)
       stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
-    elif dest.startswith('VCC'):
-      stores.extend(ctx.wmask_lane_bit(_c(VCC_LO.offset), lane, val, exec_mask))
+    elif dest.startswith('VCC'): vcc_val = val
   if vcc_val is not None:
-    # Initialize sdst to 0 before lane loop (old value may be unrelated data), then set lane bits in loop
-    init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
-    stores.extend(ctx.wmask_lane_bit(sdst_off, lane, vcc_val, exec_mask))
-    return UOp.sink(*init_stores, UOp.sink(*stores).end(lane))
+    mask = ctx.unroll_lanes(lambda l: (_to_u32(vcc_val.substitute({lane:l})) & _c(1)).cast(dtypes.uint32), exec_mask)
+    return UOp.sink(*ctx.wmask(sdst_off, mask), UOp.sink(*stores).end(lane))
   if stores:
     return UOp.sink(UOp.sink(*stores).end(lane))
   return UOp.sink()
