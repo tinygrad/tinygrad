@@ -23,10 +23,9 @@
 <div id="composer">
 <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
 <select id="model" aria-label="Model"></select></div>
-<script src="/assets/cdn.jsdelivr.net/npm/markdown-it@15.0.1/dist/browser/markdown-it.umd.min.js"
-  integrity="sha384-lX8HkDCIMBsB/UN/Vv18JAmM0RGX9rzKdL1513w2k3hKLBDcvj5jHUaMZdQpbOm4"></script>
+<script src="./assets/cdn.jsdelivr.net/npm/markdown-it@15.0.1/dist/browser/markdown-it.umd.min.js"></script>
 <script>
-  const params = new URLSearchParams(location.hash.slice(1)), server = params.get('server') || '';
+  const params = new URLSearchParams(location.hash.slice(1)), server = (params.get('server') || '').replace(/\/+$/, '');
   const headers = {'Content-Type': 'application/json'};
   if (params.get('api_key')) headers.Authorization = 'Bearer ' + params.get('api_key');
   function showError(e) {
@@ -52,7 +51,8 @@
   async function send() {
     if (!input.value.trim()) return;
     msgs.push({role: 'user', content: input.value.trim()});
-    chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
+    const user = document.createElement('div'); user.className = 'msg user';
+    user.textContent = input.value.trim(); chat.appendChild(user);
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     d.innerHTML = '<span style="color:#888"></span><div class="answer"></div>'; const [thinking, answer] = d.children;
@@ -66,8 +66,10 @@
       const lines = buf.split('\n');
       buf = lines.pop();
       for (const ln of lines)
-        if (ln.startsWith('data: ') && !ln.includes('[DONE]')) {
-          const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
+        if (ln.startsWith('data: ') && ln.slice(6).trim() !== '[DONE]') {
+          const data = JSON.parse(ln.slice(6));
+          if (data.error) throw new Error(data.error.message || 'API error');
+          const dl = data.choices?.[0]?.delta;
           if (dl?.reasoning_content) { rsn += dl.reasoning_content; thinking.textContent = rsn }
           if (dl?.content) { txt += dl.content; answer.innerHTML = md.render(txt) }
         }
