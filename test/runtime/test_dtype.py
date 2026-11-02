@@ -147,6 +147,13 @@ class TestFp8sConversions(unittest.TestCase):
     x = [math.inf, -math.inf, math.nan]
     for dt in dtypes.fp8s: self.assertEqual(Tensor(x).cast(dt).bitcast(dtypes.uint8).tolist(), [float_to_fp8(v, dt) for v in x])
 
+  @Context(EMULATED_DTYPES="fp8e4m3,fp8e5m2,fp8e4m3fnuz,fp8e5m2fnuz")
+  def test_nan_compare(self):
+    for dt in dtypes.fp8s:
+      self.assertEqual((Tensor([math.nan]).cast(dt).float() < 1e6).tolist(), [False])
+      self.assertEqual((Tensor([math.nan]).cast(dt).realize().float() < 1e6).tolist(), [False])
+      if dt.max != math.inf: self.assertEqual((Tensor([True, False]).where(-math.inf, 0.).cast(dt).float() < 1).tolist(), [False, True])
+
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
   def test_float_to_fp8e4m3(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
