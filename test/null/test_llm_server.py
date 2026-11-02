@@ -902,12 +902,14 @@ class TestStash(unittest.TestCase):
     m.batch_sizes = Mock(return_value=(1, 2, 4, 8))
     srv.slots, srv.spec, srv.PRIO_N, srv.PRIO_BELOW = 8, 2, 2, 10
     srv.waiting = Mock(qsize=Mock(return_value=0))
-    a, b, c, d = (Request(list(range(n)), "", None, 0.0) for n in (100, 200, 5000, 3000))
-    active = {0: a, 1: b, 3: c, 5: d}
+    a, b, c, d, e, f = (Request(list(range(n)), "", None, 0.0) for n in (100, 200, 5000, 3000, 4000, 4500))
+    active = {0: a, 1: b, 3: c, 5: d, 6: e, 7: f}
     self.assertEqual(srv.prio_slots(active, []), 2)
-    self.assertEqual(active, {0: c, 1: d, 2: a, 3: b})
+    self.assertEqual(active, {0: c, 1: f, 2: a, 3: b, 5: d, 6: e})
+    # (the ones there about the longest: kept, no moves)
+    active[0].ids, active[1].ids = list(range(3500)), list(range(3200))
     self.assertEqual(srv.prio_slots(active, []), 2)
-    self.assertEqual(active, {0: c, 1: d, 2: a, 3: b})
+    self.assertEqual(active, {0: c, 1: f, 2: a, 3: b, 5: d, 6: e})
     # (too many requests left: none)
     self.assertEqual(srv.prio_slots(active, [Request([1], "", None, 0.0)] * 10), 0)
 

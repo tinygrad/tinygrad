@@ -934,6 +934,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     cands = sorted((i for i in active if i not in spanned), key=lambda i: -(len(active[i].ids) + len(active[i].generated)))
     n = max((m for m in model.batch_sizes() if m <= min(self.PRIO_N, len(cands))), default=0)
     if not n or n >= len(active) or spanned & set(range(n)): return 0
+    # (the ones there already kept while they're about the longest: no moves every step)
+    if all(t in active and t in cands[:2*n] for t in range(n)): return n
     prio = cands[:n]
     for t in range(n):
       if t in prio: continue
