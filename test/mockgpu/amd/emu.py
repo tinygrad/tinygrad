@@ -41,13 +41,13 @@ class _MXCSRContext:
   __slots__ = ('_saved',)
   def __enter__(self):
     lib, ftz_bits = _get_ftz_lib()
-    if lib is None or not hasattr(self, '_saved'): return
+    if lib is None: return self
     self._saved = lib.get_fpcr()
     lib.set_fpcr(self._saved | ftz_bits)
     return self
   def __exit__(self, *args):
     lib, _ = _get_ftz_lib()
-    if lib is None: return
+    if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
 from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, uopfunc, AxisType, rewrite_group
