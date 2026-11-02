@@ -580,6 +580,32 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(c.tolist(), [1, 1, 1, 1])
     self.assertEqual(d.tolist(), [1, 1, 0, 0, 1, 1, 0, 0] + [0]*8)
 
+  def test_shrink_range_keeps_ungated_store(self):
+    # C[0] stores r every iteration, so r keeps its 4 iterations though D gates it to r<2
+    r = UOp.range(4, 0, AxisType.LOOP)
+    def kernel(C:UOp, D:UOp) -> UOp:
+      return UOp.group(C[0].store(r.cast(dtypes.int)), D[r.valid(r<2)].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
+    Tensor.realize(c, d)
+    self.assertEqual((c.tolist(), d.tolist()), ([3], [1, 1, 0, 0]))
+
+  def test_shrink_range_keeps_store_gated_otherwise(self):
+    # C[0] is gated by r>=2, not r<c, so r keeps its 4 iterations though D gates it to r<2
+    r = UOp.range(4, 0, AxisType.LOOP)
+    def kernel(C:UOp, D:UOp) -> UOp:
+      return UOp.group(C[UOp.const(0).valid(r>=2)].store(r.cast(dtypes.int)), D[r.valid(r<2)].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
+    Tensor.realize(c, d)
+    self.assertEqual((c.tolist(), d.tolist()), ([3], [1, 1, 0, 0]))
+
+  def test_shrink_range_keeps_symbolic_end(self):
+    # D gates r to r<4, but r only runs to n=2
+    def kernel(D:UOp, N:UOp) -> UOp:
+      r = UOp.range(N, 0, AxisType.LOOP)
+      return D[r.valid(r<4)].store(1).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    d = Tensor.custom_kernel(Tensor.zeros(8, dtype=dtypes.int).contiguous(), Tensor(Variable("n", 1, 8, dtypes.int).bind(2)), fxn=kernel)[0]
+    self.assertEqual(d.tolist(), [1, 1, 0, 0, 0, 0, 0, 0])
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
     a = Tensor.full((4, 4), 3.).contiguous()

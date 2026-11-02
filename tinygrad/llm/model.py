@@ -74,7 +74,7 @@ class SSMConfig:
   kda: bool = False
   gate_lower_bound: float|None = None  # kda: bounded decay gate
   full_rank_gate: bool = False
-  sigmoid_gate: bool = False
+  silu_gate: bool = False
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -630,7 +630,7 @@ class GatedDeltaNetBlock(FFNBlock):
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, *conv_writes))
 
     # output; undo the padding before the output projection
-    z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda or unwrap(self.config.ssm).sigmoid_gate else out_gate.silu())).cast(x.dtype).contiguous()
+    z = (self.ssm_norm(core) * (out_gate.silu() if unwrap(self.config.ssm).silu_gate else out_gate.sigmoid())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
     return self.ssm_out(z.reshape(B, T, -1))
 
@@ -754,7 +754,7 @@ class Transformer:
     ssm_layers: tuple[bool, ...] = ()
     if arch in ('qwen35', 'qwen35moe', 'qwen4exp'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')},
-                      sigmoid_gate=arch == 'qwen4exp')
+                      silu_gate=arch != 'qwen4exp')
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
     elif arch in ('kimi-linear', 'glm5-next', 'kimi-k3'):
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]

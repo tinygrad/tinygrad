@@ -11,7 +11,7 @@ def load_tiny_qwen4exp(shard:int=1, max_context:int=32) -> Transformer:
   # GDN then QSA with the PLE, two hyper-connection streams, one KV head
   config = TransformerConfig(num_blocks=2, dim=64, hidden_dim=32, n_heads=2, n_kv_heads=1, norm_eps=1e-5, vocab_size=64, head_dim=32,
     rope_theta=10000, rope_dim=16, v_head_dim=32, max_context=32, num_experts=4, num_experts_per_tok=2, shared_expert_dim=32,
-    shared_expert_gate=True, attn_output_gate=True, ssm=SSMConfig(4, 32, 1, 2, 64, sigmoid_gate=True), ssm_layers=(True, False),
+    shared_expert_gate=True, attn_output_gate=True, ssm=SSMConfig(4, 32, 1, 2, 64), ssm_layers=(True, False),
     hc=HCConfig(2, 0, 0.0, low_rank=8), indexer=IndexerConfig(2, 32, 8, 4), ple=PLEConfig(1, 32, MULS, VOCABS, (0, 13), EOS, 4))
   writer = GGUFWriter(path:=pathlib.Path(tempfile.mkdtemp())/"model.gguf", "qwen4exp")
   for k, v in {"block_count": 2, "context_length": 32, "embedding_length": 64, "attention.head_count": 2, "attention.head_count_kv": 1,

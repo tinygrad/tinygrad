@@ -1,11 +1,11 @@
 # RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
-#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
+#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], SCC=258
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
-import ctypes, functools, itertools, re, struct, platform, subprocess, tempfile, traceback
+import ctypes, functools, itertools, re, platform, subprocess, tempfile, traceback
 from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
@@ -50,7 +50,7 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, sint, Ops, KernelInfo, uopfunc, AxisType, rewrite_group
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, AxisType, rewrite_group
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
@@ -79,7 +79,7 @@ def _u64(lo: UOp, hi: UOp) -> UOp:
 
 def _split64(val: UOp) -> tuple[UOp, UOp]:
   """Split a 64-bit value into (lo, hi) 32-bit values."""
-  v64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
+  v64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64)
   return v64.cast(dtypes.uint32), (v64 >> _c(32, dtypes.uint64)).cast(dtypes.uint32)
 
 _SRC_MOD_TYPES = {16: (dtypes.uint16, dtypes.half, 0x7FFF), 32: (dtypes.uint32, dtypes.float32, 0x7FFFFFFF),
@@ -113,14 +113,12 @@ def _iattr(inst, name: str, default: int = 0) -> int:
   """Optional integer attribute of a decoded instruction (None/missing -> default)."""
   v = getattr(inst, name, default)
   return default if v is None else v
-# Special registers stored after inline constants (256-259)
-SCRATCH_STRIDE_IDX = 259
-# SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
-SGPR_COUNT = 260
+# SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants
+SGPR_COUNT = 256
 
 def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
-  return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+  return inst.op.name
 
 def _lane_active(exec_mask: UOp, lane: UOp) -> UOp:
   if exec_mask.dtype == dtypes.uint64: return ((exec_mask >> lane.cast(dtypes.uint64)) & _c(1, dtypes.uint64)).ne(_c(0, dtypes.uint64))
@@ -134,7 +132,6 @@ def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp: return _hi16(val) i
 
 def _val_to_u32(val: UOp) -> UOp:
   """Convert any value to uint32 for storage (bitcast floats, cast ints)."""
-  if val.dtype == dtypes.uint32: return val
   if val.dtype == dtypes.float32: return val.bitcast(dtypes.uint32)
   if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
@@ -168,6 +165,7 @@ _pcode_fixes = {
   'V_CMP_CLASS_F32': ('64\'F(abs(S0.f32)) > 0.0', '(64\'U(S0.u32 & 0x7FFFFFFF) != 0)'),
   'V_CMP_CLASS_F16': ('64\'F(abs(S0.f16)) > 0.0', '(64\'U(S0.u32 & 0x7FFF) != 0)'),
   'V_CMP_CLASS_F64': ('64\'F(abs(S0.f64)) > 0.0', '(64\'U(S0.u64 & 0x7FFFFFFFFFFFFFFF) != 0)'),
+  'V_MUL_F32': ('D0.f32 = S0.f32 * S1.f32', 'D0.f32 = isNAN(S0.f32) ? cvtToQuietNAN(S0.f32) : isNAN(S1.f32) ? cvtToQuietNAN(S1.f32) : S0.f32*S1.f32'),
 }
 
 def _get_pcode_dict(op) -> dict:
@@ -232,7 +230,7 @@ def _write_val(bits: int, val: UOp, wfn, reg_or_addr, *args, is_mem: bool = Fals
 def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
   """Store to byte-addressable memory. addr is byte offset, mem is uint8 buffer."""
   stores = []
-  val_u32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+  val_u32 = val.cast(dtypes.uint32)
   for i in range(data_bits // 8):
     byte_val = (val_u32 >> _c(i * 8)) & _c(0xFF)
     stores.append(mem.index((addr + _c(i, dtypes.uint64)).valid(active)).store(byte_val.cast(dtypes.uint8)))
@@ -291,11 +289,12 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond')
+  __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond', 'sgpr_reads')
   sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
+  scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
 
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
@@ -303,6 +302,7 @@ class _Ctx:
     self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
     self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr") if wave_size == 64 else self.vgpr
     self.branch_cond: UOp | None = None
+    self.sgpr_reads: dict[UOp, UOp] = {}
 
   def range(self, n: int | None = None) -> UOp:
     """Create a lane range UOp with unique axis ID."""
@@ -370,15 +370,14 @@ class _Ctx:
 
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
-    """Read SGPR with dynamic register index."""
-    if valid is not None: return self.sgpr.index(reg.valid(valid)).load()
-    return self.sgpr.index(reg).load()
+    index = reg.valid(valid) if valid is not None else reg
+    if index not in self.sgpr_reads: self.sgpr_reads[index] = UOp.param(SGPR_COUNT+len(self.sgpr_reads), dtypes.uint32, addrspace=AddrSpace.ALU)
+    return self.sgpr_reads[index]
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
     """Write SGPR with dynamic register index. On RDNA, index 124 = NULL (writes discarded). On CDNA, index 124 = M0 (read/write)."""
     # RDNA: NULL (124) discards writes. CDNA: M0 (124) is writable.
-    valid = None if self.wave_size == 64 else reg.ne(_c(124))
-    return self.sgpr.index(reg.valid(valid) if valid is not None else reg).store(val.cast(dtypes.uint32))
+    return self.sgpr.index(reg if self.wave_size == 64 else reg.valid(reg.ne(_c(124)))).store(val.cast(dtypes.uint32))
 
   def wmask(self, reg: UOp, val: UOp) -> list[UOp]:
     """Write a lane mask (VCC/EXEC). Splits into lo/hi for wave64."""
@@ -492,16 +491,16 @@ class _Ctx:
   def compile_lane_pcode(self, op, inst) -> UOp:
     """Compile cross-lane ops (READLANE/WRITELANE/PERMLANE) using pcode parser."""
     pcode = get_pcode(op)
-    op_name = op.name if hasattr(op, 'name') else str(op)
+    op_name = op.name
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
     src1_off, src2_off = self.optional_field(inst, 'src1'), self.optional_field(inst, 'src2')
     src1_reg = (src1_off >= _c(256)).where(src1_off - _c(256), src1_off) if src1_off is not None else _c(0)
     src2_reg = (src2_off >= _c(256)).where(src2_off - _c(256), src2_off) if src2_off is not None else _c(0)
     exec_val = self.rexec()
-    exec_lo = exec_val.cast(dtypes.uint32) if exec_val.dtype == dtypes.uint64 else exec_val
+    exec_lo = exec_val.cast(dtypes.uint32)
     srcs = {
-      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_val if exec_val.dtype == dtypes.uint64 else exec_val.cast(dtypes.uint64),
+      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_val.cast(dtypes.uint64),
       '_vgpr': self.vgpr, '_wave_size': self.wave_size, 'SRC1': src1_reg, 'SRC2': src2_reg,
       'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
       'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
@@ -554,7 +553,7 @@ class _Ctx:
       elif dest.startswith('D0'):
         if (dest_suffix := re.match(r'D0\.(\w+)', dest)) is not None:
           target_dt = {'u16': dtypes.uint16, 'i16': dtypes.int16, 'f16': dtypes.half}.get(dest_suffix.group(1))
-          if target_dt is not None and val.dtype != target_dt: val = val.cast(target_dt)
+          if target_dt is not None: val = val.cast(target_dt)
         if (slice_match := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)) and (int(slice_match.group(1)), int(slice_match.group(2))) != (31, 0):
           slice_stores.append((int(slice_match.group(2)), int(slice_match.group(1)) - int(slice_match.group(2)) + 1, _val_to_bits(val)))
           continue
@@ -784,17 +783,16 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
 
   # For VOPC: use unroll_lanes to build the bitmask from scratch (no read-modify-write on stale data)
   if is_vopc:
-    def get_cmp_bit(lane) -> UOp:
-      lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
+    def get_cmp_bit(lane: UOp) -> UOp:
+      lc = lane.cast(dtypes.int)
       s0_raw = ctx.rsgpr_dyn(vsrc0_reg) if inst.s0 else ctx.rvgpr_dyn(vsrc0_reg, lc)
       s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
       s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lc)
       s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
-      srcs = {'S0': s0, 'S1': s1, 'laneId': lc}
-      for dest, val in parse_pcode(pcode, srcs)[1]:
+      for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc})[1]:
         if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
       return _c(0)
-    new_result = ctx.unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False) & exec_mask
+    new_result = ctx.unroll_lanes(get_cmp_bit, exec_mask)
     stores = ctx.wmask(sdst_off, new_result)
     return UOp.sink(*stores)
 
@@ -827,15 +825,10 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
         old = ctx.rvgpr_dyn(vdst_reg, lane)
         result = _sdwa_write(old, result, dst_sel, dst_unused)
       stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
-    elif dest.startswith('VCC'):
-      stores.extend(ctx.wmask_lane_bit(_c(VCC_LO.offset), lane, val, exec_mask))
+    elif dest.startswith('VCC'): vcc_val = val
   if vcc_val is not None:
-    # Initialize sdst to 0 before lane loop (old value may be unrelated data), then set lane bits in loop
-    init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
-    stores.extend(ctx.wmask_lane_bit(sdst_off, lane, vcc_val, exec_mask))
-    if stores:
-      return UOp.sink(*init_stores, UOp.sink(*stores).end(lane))
-    return UOp.sink(*init_stores)
+    mask = ctx.unroll_lanes(lambda l: (_to_u32(vcc_val.substitute({lane:l})) & _c(1)).cast(dtypes.uint32), exec_mask)
+    return UOp.sink(*ctx.wmask(sdst_off, mask), UOp.sink(*stores).end(lane))
   if stores:
     return UOp.sink(UOp.sink(*stores).end(lane))
   return UOp.sink()
@@ -877,7 +870,6 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | 
   vdst_reg = ctx.inst_field(type(inst).vdst)
   write_hi_half = bits['d'] == 16 and not isinstance(inst, (irc.VOP1, irc.VOP2)) and (vdst_reg >= _c(128))
   if isinstance(write_hi_half, UOp): vdst_reg = write_hi_half.where(vdst_reg - _c(128), vdst_reg)
-  elif write_hi_half: vdst_reg -= 128
   if isinstance(inst, (ir3.VOP1, ir4.VOP1, irc.VOP1)):
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
     s0, src0_off = _load_vsrc0(ctx, inst, lane, bits, literal, is_f64, is_float, d0)
@@ -908,8 +900,8 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
   is_dpp16 = hasattr(type(inst), 'dpp') and hasattr(type(inst), 'vsrc0')
 
   # Handle both VOPC (vsrc1) and VOP3 (src1) instruction formats - read operands dynamically
+  src0_off = ctx.inst_field(type(inst).src0)
   if is_vopc:
-    src0_off = ctx.inst_field(type(inst).src0)
     vsrc1_off = ctx.inst_field(type(inst).vsrc1)  # type: ignore[union-attr]
     # For 16-bit ops, vsrc1 >= 128 means hi-half of v[vsrc1-128]
     if bits['s0'] == 16 and not isinstance(inst, irc.VOPC):
@@ -919,15 +911,14 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
       vsrc1_hi = False
       src1_off = _c(256) + vsrc1_off
   else:
-    src0_off = ctx.inst_field(type(inst).src0)
     src1_off = ctx.inst_field(type(inst).src1)  # type: ignore[union-attr]
     dst_off = ctx.inst_field(type(inst).vdst)  # type: ignore[union-attr]
     vsrc1_hi = False
   literal = ctx.optional_field(inst, 'literal')
 
   is_float, is_f64, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), '_F64' in op_name, get_pcode(inst.op)
-  def get_cmp_bit(lane) -> UOp:
-    lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
+  def get_cmp_bit(lane: UOp) -> UOp:
+    lc = lane.cast(dtypes.int)
     s0 = _load_dpp16_src0(ctx, inst, lc, _c(0)) if is_dpp16 else ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal, is_f64)
     if is_vopc and not isinstance(inst, irc.VOPC) and bits['s0'] == 16 and not is_dpp16:
       src0_hi = src0_off >= _c(384)
@@ -935,22 +926,17 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
     s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)) if bits['s0'] == 16 \
       else ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)
     if bits['s0'] == 16 and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
-    if is_float:
-      if is_dpp16:
-        s0 = _apply_src_mods(s0, 0, 1 if _iattr(inst, 'src0_abs') else 0, 1 if _iattr(inst, 'src0_neg') else 0, bits['s0'])
-        s1 = _apply_src_mods(s1, 0, 1 if _iattr(inst, 'src1_abs') else 0, 1 if _iattr(inst, 'src1_neg') else 0, bits['s1'])
-      s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
-      s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
-    elif abs_bits or neg_bits:  # int compares also honor abs/neg, as bit-level sign clear/flip (not integer abs/negate)
-      s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
-      s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
+    if is_float and is_dpp16:
+      s0 = _apply_src_mods(s0, 0, 1 if _iattr(inst, 'src0_abs') else 0, 1 if _iattr(inst, 'src0_neg') else 0, bits['s0'])
+      s1 = _apply_src_mods(s1, 0, 1 if _iattr(inst, 'src1_abs') else 0, 1 if _iattr(inst, 'src1_neg') else 0, bits['s1'])
+    s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
+    s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc, 'D0': _c(0, dtypes.uint64)})[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
 
-  new_bits = ctx.unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
   # Both VOPC and VOP3 clear inactive lane bits (hardware verified)
-  new_result = new_bits & exec_mask
+  new_result = ctx.unroll_lanes(get_cmp_bit, exec_mask)
 
   # CMPX writes EXEC only (hardware verified: e64 CMPX does not write SDST); non-CMPX writes SDST/VCC
   if is_cmpx: stores = ctx.wmask(_c(EXEC_LO.offset), new_result)
@@ -992,7 +978,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
     return ctx.compile_lane_pcode(inst.op, inst)
 
    # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
-  if 'V_CMP' in op_name or 'V_CMPX' in op_name:
+  if 'V_CMP' in op_name:
     return _compile_vopc(inst, ctx, opsel=opsel, abs_bits=_iattr(inst, 'abs'), neg_bits=_iattr(inst, 'neg'))
 
   # BITOP3: abs/neg/omod encode truth table, not source modifiers
@@ -1025,7 +1011,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
   src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
   srcs = {'S0': src0, 'S1': src1, 'S2': src2, 'OPSEL': _c(opsel, dtypes.uint32)}
-  if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
+  if 'CNDMASK' in op_name: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and bits['d'] == 16
@@ -1215,7 +1201,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   b_off = _c(n_a_elems, dtypes.int)
   def out_ab(out_reg: int) -> tuple[UOp, UOp]:  # A/B tmp base indices for one output element of this lane
     if M == 32:  # 16 outputs per lane: rows (lane//32)*16 + blocks of 4 within the wave
-      m_base = c_grp * _c(16, dtypes.int) + _c((out_reg // 4) * 4 + out_reg % 4, dtypes.int)
+      m_base = c_grp * _c(16, dtypes.int) + _c(out_reg, dtypes.int)
       return m_base * _c(K, dtypes.int), b_off + c_mn * _c(K, dtypes.int)
     if M == 4:  # each group of 4 lanes computes an independent 4x4 block
       a_base = c_grp * _c(M * K, dtypes.int) + _c(out_reg * K, dtypes.int)
@@ -1320,11 +1306,11 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _
     exec_mask = ctx.rexec()
     vdst_reg = ctx.inst_field(type(inst).vdst)
     src0_off = ctx.inst_field(type(inst).src0)
-    if src0_is_acc and not vdst_is_acc:
+    if not vdst_is_acc:
       # v_accvgpr_read: VGPR[vdst] = ACCVGPR[src0]
       val = ctx.raccvgpr_dyn(src0_off - _c(256), lane)
       return UOp.sink(ctx.wvgpr_dyn(vdst_reg, lane, val, exec_mask).end(lane))
-    elif vdst_is_acc and not src0_is_acc:
+    elif not src0_is_acc:
       # v_accvgpr_write: ACCVGPR[vdst] = src0 (src0 can be VGPR or SGPR/const)
       src0 = ctx.rsrc_dyn(src0_off, lane, 32)
       return UOp.sink(ctx.waccvgpr_dyn(vdst_reg, lane, src0, exec_mask).end(lane))
@@ -1359,8 +1345,7 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _
     # v_pk_mov_b32: D[lo] = src0[opsel_bit0 ? hi : lo], D[hi] = src1[opsel_bit1 ? hi : lo]
     lo_val = _pk_sel(src0, ctx.inst_field(type(inst).src0), opsel & 1)
     hi_val = _pk_sel(src1, ctx.inst_field(type(inst).src1), opsel & 2)
-    lo_out, hi_out = _split64(_u64(lo_val, hi_val))
-    stores = [ctx.wvgpr_dyn(vdst_reg, lane, lo_out, exec_mask), ctx.wvgpr_dyn(vdst_reg + _c(1), lane, hi_out, exec_mask)]
+    stores = [ctx.wvgpr_dyn(vdst_reg, lane, lo_val, exec_mask), ctx.wvgpr_dyn(vdst_reg + _c(1), lane, hi_val, exec_mask)]
     return UOp.sink(UOp.group(*stores).end(lane))
 
   srcs: dict[str, UOp | int] = {}
@@ -1438,7 +1423,6 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
     if vop in (ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOP2Op.V_FMAMK_F32_E32):
       assert literal is not None
       srcs['SIMM32'] = literal
-    if op in (ir3.VOPDOp.V_DUAL_CNDMASK_B32, ir4.VOPDOp.V_DUAL_CNDMASK_B32): srcs['VCC'] = ctx.rmask(_c(VCC_LO.offset))
     pcode = get_pcode(vop)
     srcs.update(ctx.base_srcs(exec_mask, lane), VCC=ctx.rmask(_c(VCC_LO.offset)))
     for dest, val in parse_pcode(pcode, srcs)[1]:
@@ -1480,7 +1464,6 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   # Data width from canonical_op_bits (32/64/96/128), default to 32 for untyped ops
   data_bits_mem = inst.canonical_op_bits.get('data', 32)
   is_atomic, glc = 'ATOMIC' in op_name, _iattr(inst, 'glc')
-  has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
   data1_reg = ctx.inst_field(type(inst).data1) if is_lds else _c(0)  # type: ignore[union-attr]
 
   if is_lds and op_name == 'DS_SWIZZLE_B32':
@@ -1513,8 +1496,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(False)
     if is_scratch:
-      scratch_stride = ctx.rsgpr_dyn(_c(SCRATCH_STRIDE_IDX)).cast(dtypes.uint64)
-      base = lane.cast(dtypes.uint64) * scratch_stride
+      base = lane.cast(dtypes.uint64) * ctx.scratch_stride.cast(dtypes.uint64)
       # SVE (Scratch VGPR Enable): when SVE=1, VADDR is used as offset; when SVE=0, VADDR is ignored
       sve = _iattr(inst, 'sve')
       vaddr = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
@@ -1550,10 +1532,10 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     _rvdata = ctx.raccvgpr_dyn if use_acc else ctx.rvgpr_dyn
     if is_lds:
       if data_bits_mem <= 32:
-        data = {'DATA': _rvdata(vdata_reg, lane), 'DATA2': _rvdata(data1_reg, lane) if has_data1 else _c(0, dtypes.uint32)}
+        data = {'DATA': _rvdata(vdata_reg, lane), 'DATA2': _rvdata(data1_reg, lane)}
       elif data_bits_mem == 64:  # DATA/DATA2 are the 64-bit input registers, formed from register pairs
         data = {'DATA': _u64(_rvdata(vdata_reg, lane), _rvdata(vdata_reg + _c(1), lane)),
-                'DATA2': _u64(_rvdata(data1_reg, lane), _rvdata(data1_reg + _c(1), lane)) if has_data1 else _c(0, dtypes.uint64)}
+                'DATA2': _u64(_rvdata(data1_reg, lane), _rvdata(data1_reg + _c(1), lane))}
       else:  # 96/128-bit: one register per dword
         data = {'DATA': _rvdata(vdata_reg, lane), **{f'DATA{i}': _rvdata(vdata_reg + _c(i), lane) for i in range(1, data_bits_mem // 32)}}
       if 'D16' in op_name: data['RETURN_DATA'] = _rvdata(vdst_reg, lane)
@@ -1738,45 +1720,19 @@ def _get_handler(inst: Inst) -> Callable[..., UOp]:
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
-if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
-_BARRIER_SOP1_OPS: set = set()
-if hasattr(ir4.SOP1Op, 'S_BARRIER_SIGNAL'): _BARRIER_SOP1_OPS.add(ir4.SOP1Op.S_BARRIER_SIGNAL)
+_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER, ir4.SOPPOp.S_BARRIER_WAIT}
+_BARRIER_SOP1_OPS = {ir4.SOP1Op.S_BARRIER_SIGNAL}
 
 # Inline float constants (as bit patterns) for GPU instructions
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
               244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
 
 @uopfunc
-def init_wave(wg:UOp, wave:UOp, sgpr:UOp, vgpr:UOp, args_ptr:UOp, gx:int, gy:int, lx:int, ly:int, total_threads:int, wave_size:int,
-              scratch_size:int, rsrc2:int, arch:str="rdna3"):
-  # set CONST registers
+def store_consts(sgpr:UOp, wave_size:int):
   ci = UOp.range(81, 2, AxisType.LOOP, dtype=dtypes.int)
   init_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
-  fi = UOp.range(len(F32_INLINE), 3, AxisType.LOOP, dtype=dtypes.int)
-  floats_buf = UOp(Ops.BINARY, arg=struct.pack(f"<{len(F32_INLINE)}I", *F32_INLINE.values())).bitcast(dtypes.uint32)
-  init_floats = sgpr.index(fi+240).store(floats_buf[fi]).end(fi)
-  # set RANGE registers
-  gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
-  n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
-  initial:list[tuple[int, sint]] = [(124, 0)] if wave_size == 32 else []
-  initial += [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
-  if arch == "rdna4": initial += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
-  else:
-    sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
-    for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
-                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
-                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
-      if rsrc2 & enabled:
-        initial.append((sgpr_id, gid))
-        sgpr_id += 1
-  initial += [(EXEC_LO.offset, ((_c(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32)),
-              (SCRATCH_STRIDE_IDX, scratch_size)]
-  if wave_size == 64: initial.append((EXEC_LO.offset+1, ((_c(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
-  lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
-  tid = wave*wave_size+lane
-  init_vgpr = vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  return UOp.sink(init_vgpr, *(sgpr.after(init_ints, init_floats).index(i).store(_c(v)) for i,v in dict(initial).items()))
+  init_floats = UOp.group(*[sgpr.index(i).store(_c(v)) for i,v in F32_INLINE.items()])
+  return UOp.sink(init_ints, init_floats, *([sgpr.index(124).store(_c(0))] if wave_size == 32 else []))
 
 @uopfunc
 def loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
@@ -1788,7 +1744,7 @@ def lower_body(sink:UOp, name:str) -> UOp:
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs, name=name)
 
-instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None]]]] = {}
+instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None, dict[UOp, UOp]]]]] = {}
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
@@ -1801,26 +1757,32 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
     sink = _get_handler(inst)(inst, ctx)
     base, mask = ctx.canonical_mask(inst_bytes)
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
-    ret = lower_body(sink, name) if sink.src else None, ctx.branch_cond
+    call = lower_body(sink, name) if sink.src else None
+    used = UOp.sink(call, ctx.branch_cond).toposort()
+    ret = call, ctx.branch_cond, {p:index for index,p in ctx.sgpr_reads.items() if p in used}
     entries.append((base, mask, ret))
-  call, cond = ret
-  words = {_Ctx.inst_word(i):_c((bits >> (32*i)) & 0xffffffff) for i in range(inst.size()//4)}
-  if call is not None: call = call.replace(src=(call.body, *(words.get(b, b) for b in call.src[1:])))
-  return call, cond.substitute(words) if cond is not None else None
+  call, cond, reads = ret
+  words = {f"inst_w{i}":(bits >> (32*i)) & 0xffffffff for i in range(inst.size()//4)}
+  bindings = {_Ctx.inst_word(i):_c(words[f"inst_w{i}"]) for i in range(inst.size()//4)}
+  bindings.update({p:_Ctx.sgpr.index(_c(index.get_idx().sym_infer(words))).load() if index.get_valid().sym_infer(words) else _c(0)
+                   for p,index in reads.items()})
+  if call is not None: call = call.replace(src=(call.body, *(bindings.get(b, b) for b in call.src[1:])))
+  return call, cond.substitute(bindings) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({b for call in instructions for b in call.src[1:] if b.op is Ops.PARAM}, key=lambda b:b.arg.slot)
+  bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
-  seen = set(linear)
+  seen: set[UOp] = set()
   for call in instructions:
     args = [params.get(b, b) for b in call.src[1:]]
     inputs = UOp.sink(*args)
-    nodes = inputs.toposort(lambda u:u not in seen)
+    nodes = inputs.toposort(lambda u:u.op is not Ops.PARAM and u not in seen)
     nodes.pop(inputs)
     seen.update(nodes)
     linear.extend(nodes)
     linear.append(call.replace(src=(call.body, *args)))
+    if _Ctx.sgpr in call.src[1:]: seen.clear()
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
@@ -1919,7 +1881,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   routed = len(unconditional) != len(regions)
   axes = itertools.count(sum(inst.size() for inst in insts.values()))
   gx, gy, gz, lx, ly, lz, rsrc2, scratch_size = dispatch
-  # construct CALL graph
+  # init ranges
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
   wg = UOp.range(gx*gy*gz, 0, AxisType.LOOP, dtype=dtypes.uint64)
@@ -1941,8 +1903,30 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   route = UOp.param(6, dtypes.int, (1,), name="route")
   taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
-  init = init_wave(wg, wave, sgpr.shrink(((wave*SGPR_COUNT, (wave+1)*SGPR_COUNT),)), vgpr.shrink(((wave*256*wave_size, (wave+1)*256*wave_size),)),
-                   args_ptr, gx, gy, lx, ly, total_threads, wave_size, scratch_size, rsrc2, arch)
+  # set per wave registers
+  wave_sgpr = sgpr.shrink(((wave*SGPR_COUNT, (wave+1)*SGPR_COUNT),)).after(wg)
+  wave_vgpr = vgpr.shrink(((wave*256*wave_size, (wave+1)*256*wave_size),)).after(wg)
+  consts = store_consts(wave_sgpr, wave_size)
+  gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
+  n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
+  runtime_sgprs = [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
+  if arch == "rdna4": runtime_sgprs += [(ttmp[7].offset, (gidy&0xFFFF)|((gidz&0xFFFF)<<16)), (ttmp[9].offset, gidx)]
+  else:
+    sgpr_id = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+    for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                         (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+      if rsrc2 & enabled:
+        runtime_sgprs.append((sgpr_id, gid))
+        sgpr_id += 1
+  runtime_sgprs += [(EXEC_LO.offset, ((_c(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32))]
+  if wave_size == 64:
+    runtime_sgprs.append((EXEC_LO.offset+1, ((_c(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
+  lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
+  tid = wave*wave_size+lane
+  init_vgpr = wave_vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
+  init = UOp.group(init_vgpr, *(wave_sgpr.after(consts).index(i).store(_c(v)) for i,v in dict(runtime_sgprs).items()))
+  # construct CALL graph
   initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
@@ -1954,12 +1938,12 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
       call, branch_cond = instruction_call(inst, arch, renderer)
       if branch_cond is not None: cond = branch_cond
       if call is not None: instructions.append(call)
-    values = {}
+    values = {ctx.scratch_stride:_c(scratch_size)}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
-      values = {taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2 \
-          else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)}
+      values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
+                    else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
       instructions.append(lower_body(route[0].store(target).sink(), "asm_branch"))
     if not instructions: return end
     body, bufs = instruction_block(instructions)
