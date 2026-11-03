@@ -283,6 +283,8 @@ class TransformerConfig:
   v_head_dim: int
   yarn: YaRNConfig|None = None
   max_context: int = 0
+  # (the qwen sparse attention's caches: rows of the regions of the sequences sharing them (see Transformer.regions), at least max_context)
+  cache_rows: int = 0
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
@@ -631,6 +633,16 @@ class GatedResidual:
     ghc_post) instead of a dozen. None: not those rows or weights
     """
     B, T = xs.shape[:2]
+    if isinstance(B, int) and isinstance(T, int) and getenv("GHC_ROWS", 8) < B*T <= 64 and amd_custom_kernels_supported(xs.device) and \
+       not _wmma_rdna4(xs.device) and self.down.ggml_type == self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 256 == 0 and \
+       getattr(self, "_winj", None) is not None and not token_sharded(xs) and getenv("GHC_BATCH", 1):
+      # (the rows of batched decoding: the prefill's kernels on whole tiles of 32 rows (the rows past them padding), not a dozen of generic ones)
+      n = B*T
+      flat = xs.reshape(n, self.count*self.dim).float().pad(((0, round_up(n, 32) - n), None))
+      xn, xhalf, part = ghc_prefill_norm(flat, self.norm["weight"], unwrap(self._winj), self.count, self.eps)
+      lo = q8_linear(self.down, xhalf) * (1 / self.count)
+      mixed = ghc_prefill_mix((lo * lo.sigmoid()).contiguous(), self.up.weight, xn)
+      return mixed[:n].reshape(B, T, self.dim), (part.sum(1) * (1 / self.count))[:n].reshape(B, T, -1)[..., :self.count]
     if not (isinstance(B, int) and isinstance(T, int) and B*T <= getenv("GHC_ROWS", 8) and getenv("GHC_FUSED", 1) and
             amd_custom_kernels_supported(xs.device)): return None
     for lin in (self.down, self.up):
@@ -1160,7 +1172,7 @@ class QSAIndexer:
   pool_k:Tensor  # batched decoding: the keys of every slot, their pooled keys (QSABlock._init_slots)
   pool_pk:Tensor
   def __init__(self, config:TransformerConfig):
-    self.idx, self.max_context = (idx:=unwrap(config.indexer)), config.max_context
+    self.idx, self.max_context, self.cache_rows = (idx:=unwrap(config.indexer)), config.max_context, config.cache_rows
     self.q_proj, self.k_proj = Linear(config.dim, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
     self.q_norm, self.k_norm = nn.RMSNorm(idx.head_dim, idx.norm_eps), nn.RMSNorm(idx.head_dim, idx.norm_eps)
 
@@ -1168,7 +1180,7 @@ class QSAIndexer:
     if hasattr(self, "cache_k"): return
     # every token's key, and the pooled keys (a call pools the pools of its tokens: the ones before them are cached). the rows of every sequence's
     # region (see Transformer.regions), REGION_ALIGN more than a context: the region of the padding sequences of a step
-    rows = self.max_context + REGION_ALIGN
+    rows = max(self.max_context, self.cache_rows) + REGION_ALIGN
     self.cache_k = Tensor.zeros(rows, self.idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
     self.cache_pk = Tensor.zeros(rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
 
@@ -1449,7 +1461,7 @@ class QSABlock(TransformerBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       # (the rows of every sequence's region, see QSAIndexer._init_state)
-      KV, N, D = self.config.n_kv_heads, self.config.max_context + REGION_ALIGN, 2*self.config.head_dim
+      KV, N, D = self.config.n_kv_heads, max(self.config.max_context, self.config.cache_rows) + REGION_ALIGN, 2*self.config.head_dim
       # (zeroed: the flash kernels read whole tiles past the valid region)
       if isinstance(x.device, tuple): self.cache_k = Tensor.empty(KV, 1, N, D, dtype=dtypes.half, device=x.device, axis=0).zeros_like().contiguous()
       else: self.cache_k = Tensor.zeros(KV, 1, N, D, dtype=dtypes.half, device=x.device).contiguous()
@@ -3351,9 +3363,12 @@ class Transformer:
   def seq_slots(self) -> int:
     """the slots of the sequences (the one after them is the padding sequences' of a step)"""
     return getenv("SEQ_SLOTS", max(self.SEQ_SIZES))
+  def _token_rows(self) -> int:
+    """the token buffer: a token of every row of the caches (the regions of the sequences sharing them), and one past"""
+    return max(self.max_context, self.config.cache_rows) + REGION_ALIGN + 1
   def seq_rows(self) -> int:
     """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
-    return self.max_context
+    return max(self.max_context, self.config.cache_rows)
 
   def _seq_init(self):
     if hasattr(self, "seq_spec_h"): return
@@ -3369,7 +3384,7 @@ class Transformer:
     self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]))[0]] +
                             [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     self._spec_init()
-    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+REGION_ALIGN+1)
+    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
     self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
     tmv, self._seq_temp = _host_buffer(devs, 8*m + 4, dtypes.float32)
@@ -3853,7 +3868,9 @@ class Transformer:
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
-      spec_drafts=getenv("SPEC_DRAFTS", 4 if arch == "qwen4exp" else 2) if mtp else 0, ple=ple, qsa=arch == 'qwen4exp', expert_pad=expert_pad)
+      spec_drafts=getenv("SPEC_DRAFTS", 4 if arch == "qwen4exp" else 2) if mtp else 0, ple=ple, qsa=arch == 'qwen4exp', expert_pad=expert_pad,
+      # (SEQ_ROWS: the rows of the caches of the sequences sharing them, past a context: more conversations kept)
+      cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN) if arch == 'qwen4exp' else 0)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
     # gate experts loaded with the up rows (fused): one weight of twice the rows
     for name, b in [(f"blk.{i}", b) for i, b in enumerate(model.blk)] + ([("mtp", model.mtp)] if mtp else []):
@@ -4002,7 +4019,7 @@ class Transformer:
     from tinygrad.llm.kernels.amd import host_allreduce, p2p_allreduce
     # (the device memory the jits use is made here: not in the processes)
     if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
-    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+REGION_ALIGN+1)
+    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     self._token_prev:list[int]|None = None  # (the captures write the buffer: the next generate writes all of it)
     # the random state of every device (sampling's noise) made here: one made in a capture's process isn't the one the jits run with, its
     # counter wouldn't advance (every step and request the same noise)
@@ -4140,7 +4157,7 @@ class Transformer:
     if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
       # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
       if not hasattr(self, "_token_buf"):
-        self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self.max_context+REGION_ALIGN+1)
+        self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self._token_rows())
       for d in devs: Device[d].synchronize()  # a step run ahead by the last generate may still use it
       # the prompt, then -1 (not sampled yet) up to the tokens the last generate wrote (its list grew with them, steps run ahead write a few
       # more): the whole buffer only the first time (a write of max_context ints takes ~20 ms)

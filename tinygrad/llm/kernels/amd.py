@@ -1234,7 +1234,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # the tiles of 16 of the tensor cores)
   skinny = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and xq is None and not split and 16 < tokens <= 64 and \
     layer.in_features % 32 == 0 and getenv("SKINNY_GEMM", 1)
-  if not pad and skinny and tokens % 32: pad = round_up(tokens, 32)
+  skinny_i8 = skinny and getenv("SKINNY_I8", 0)
+  if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
   elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
     pad = round_up(tokens, 16)
   if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device)) and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
@@ -1260,11 +1261,16 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
   if skinny:
     # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
-    groups, blocks = in_features // 32, (tokens // 32) * round_up(local_out, 64) // 64
+    tile = (64 if tokens % 64 == 0 else 32 if tokens % 32 == 0 else 16) if skinny_i8 else 32
+    groups, blocks = in_features // 32, (tokens // tile) * round_up(local_out, 64) // 64
     ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8)]
     ksplits = next((s for s in ks if blocks * s >= getenv("SKINNY_WGS", 192)), ks[-1])
-    fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=Q8_0, rdna4=False, block_n=64, k_splits=ksplits)
-    srcs = (x.cast(dtypes.float16).contiguous(),)
+    if skinny_i8:
+      fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=Q8_0, splits=ksplits, rdna4=False)
+      srcs = tuple(q8_quantize(x, tokens, in_features)[:3])
+    else:
+      fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=Q8_0, rdna4=False, block_n=64, k_splits=ksplits)
+      srcs = (x.cast(dtypes.float16).contiguous(),)
     out_shape = (splits*ksplits*tokens, out_features)
   elif tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8 or dense_i8):
     # (a few rows: the inputs split over the waves of a workgroup, more of them read the weights)
