@@ -677,7 +677,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """the kept conversations' tokens: the model's, the slots', the host's"""
     model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
     # (sequences sharing the caches: every resident one's, and its checkpoint's)
-    seqs = [t for s in list(getattr(getattr(self, "engine", None), "seqs", [])) for t in (s.tokens, s.tokens[:s.ckpt])]
+    eng = getattr(self, "engine", None)
+    seqs = [t for s in list(getattr(eng, "seqs", [])) for t in (s.tokens, s.tokens[:s.ckpt])]
+    # (and the stashed ones': a conversation's prompt as the model's tokens, not the text's, continues it)
+    seqs += [t for x in list(getattr(eng, "stashed", [])) for t in (x.tokens, x.tokens[:x.ckpt])]
     return [list(model)] + [t for t, _ in list(self.stash.values())] + [e.tokens for e in list(self.host)] + seqs
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
