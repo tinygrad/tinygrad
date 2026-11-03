@@ -490,7 +490,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, symbolic, name="simplify", cache_key="_simplified")
+      return graph_rewrite(self, symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType:
     if (ret := self.simplify()).op is Ops.CAST and ret.src[0].op is Ops.CONST: return ret.dtype.const(ret.src[0].val)
     return ret.val if ret.op is Ops.CONST else ret
@@ -1734,7 +1734,7 @@ class CountCtx(itertools.count): pass
 class MapCtx(dict): pass
 
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None, enter_calls=False, cache_key:str|None=None):
+  def __init__(self, pm, bpm, ctx=None, enter_calls=False, cache_key=None):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
@@ -1742,6 +1742,10 @@ class RewriteContext:
     self.replace: dict[UOp, UOp] = {}
     self.enter_calls = enter_calls
     self.cache_key = cache_key
+
+  def cached(self, n:UOp) -> UOp|None:
+    if self.cache_key is not None and (ref:=n.__dict__.get("_rewrite_cache", {}).get(self.cache_key)) is not None: return ref()
+    return None
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1757,6 +1761,9 @@ class RewriteContext:
     while stack:
       n, processed = stack.pop()
       if n in self.replace: continue
+      if not processed and (cached:=self.cached(n)) is not None:
+        self.replace[n] = cached
+        continue
       if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
         if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
@@ -1785,7 +1792,7 @@ class RewriteContext:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0 and self.cache_key is not None and (ref:=n.__dict__.get(self.cache_key)) is not None and (cached:=ref()) is not None:
+      if stage == 0 and (cached:=self.cached(n)) is not None:
         self.replace[n] = cached
         if n in waitlist: stack.extend(waitlist.pop(n))
         continue
@@ -1850,20 +1857,28 @@ class RewriteContext:
                  for dep, waiters in itertools.islice(waitlist.items(), 5) for n, _, new_n in waiters[:1]]
       raise RuntimeError("graph_rewrite stalled: unresolved rewrite dependencies (possible cycle). "
                          "A replacement may depend on the node being rewritten.\n" + "\n".join(details))
-    if self.cache_key is not None:
-      for node, rewritten in self.replace.items(): node.__dict__[self.cache_key] = weakref.ref(rewritten)
     return self.replace[root]
 
 @rewrite_group(new_ctx=False)
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False,
-                  init_ctx:type|None=None, cache_key:str|None=None) -> UOp:
-  # TODO: init_ctx might be fine to cache
-  if cache_key is not None: assert ctx is None and init_ctx is None and not walk, "no context allowed for cached rewrites"
+                  init_ctx:type|None=None) -> UOp:
+  if ctx is None:
+    cache_key:tuple|None = (weakref.ref(pm), weakref.ref(bpm) if bpm is not None else None, bottom_up, walk, enter_calls, init_ctx,
+                            tuple(tuple(v.value) if isinstance(v.value, list) else v.value for v in ContextVar._cache.values()))
+    # TODO: what is this?
+    try: hash(cache_key)
+    except TypeError: cache_key = None
+  else: cache_key = None
+  if cache_key is not None and (ref:=sink.__dict__.get("_rewrite_cache", {}).get(cache_key)) is not None and (ret:=ref()) is not None: return ret
   if init_ctx is not None:
     assert ctx is None
     ctx = init_ctx()
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls, cache_key)
-  return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls, cache_key if init_ctx is None else None)
+  ret = rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
+  if cache_key is not None:
+    for node, rewritten in (rewrite_ctx.replace.items() if init_ctx is None else ((sink, ret),)):
+      node.__dict__.setdefault("_rewrite_cache", {})[cache_key] = weakref.ref(rewritten)
+  return ret
 
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
