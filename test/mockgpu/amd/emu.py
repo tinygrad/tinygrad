@@ -1952,7 +1952,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
   tid = wave*wave_size+lane
   init_vgpr = wave_vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  init = UOp.group(consts, init_vgpr, *(wave_sgpr[i].after(consts).index(0).store(_c(v)) for i,v in dict(runtime_sgprs).items() if i in sgpr))
+  init = UOp.group(consts, init_vgpr, *(wave_sgpr[i].index(0).store(_c(v)) for i,v in dict(runtime_sgprs).items() if i in sgpr))
   # construct CALL graph
   initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
