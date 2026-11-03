@@ -454,13 +454,16 @@ class BatchStats:
   def __init__(self, every:float=5.0):
     self.every, self.st = every, time.perf_counter()
     self.reset()
-  def reset(self): self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0.0, 0, 0.0
+  def reset(self):
+    self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0.0, 0, 0.0
+    self.times:dict[str, float] = {}  # (more of the time: where it went)
+  def add(self, name:str, t:float): self.times[name] = self.times.get(name, 0.0) + t
   def step(self, running:int, waiting:int):
     if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
       sep = colored('--', 'BLACK')
       stderr_log(f"batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  {self.tokens/dt:5.0f} tok/s generated  {sep}  "
                  f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s)  "
-                 f"{sep}  in the last {dt:.0f}s\n")
+                 f"{sep}  in the last {dt:.0f}s" + "".join(f"  {sep}  {k} {v:.1f}s" for k, v in self.times.items()) + "\n")
       self.st = time.perf_counter()
       self.reset()
     self.steps += 1
@@ -1056,7 +1059,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # the waiting requests join (prefilled one at a time, the others wait for it)
         while pending and len(active) < eng.max_active:
           req = pending[0]
-          if (got:=eng.take(req.ids, req.max_tokens or 0)) is None: break
+          t0 = time.perf_counter()
+          got = eng.take(req.ids, req.max_tokens or 0)
+          self.stats.add("take", time.perf_counter() - t0)
+          for name, t in eng.times.items(): self.stats.add(name, t)
+          eng.times.clear()
+          if got is None: break
           pending.pop(0)
           s, start, restore = got
           req.cache_start = start
@@ -1079,6 +1087,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         st = time.perf_counter()
         outs = eng.step(seqs)
         self.stats.step_time += time.perf_counter() - st
+        st = time.perf_counter()
         for s, toks in zip(seqs, outs):
           req = active[s]
           req.steps += 1
@@ -1094,6 +1103,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               self.finish(req)
               eng.stop(s, len(s.tokens))
               del active[s]
+        self.stats.add("emit", time.perf_counter() - st)
         self.stats.step(len(active), len(pending))
       except KeyboardInterrupt: raise
       except Exception as e:

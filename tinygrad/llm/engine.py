@@ -54,6 +54,7 @@ def common_prefix(a:list[int], b:list[int]) -> int:
 class SeqEngine:
   # (the room for a reply a region has past its prompt when it's made, more is made as it's needed)
   ROOM = getenv("SEQ_ROOM", 2048)
+  EVICT_FIRST = 3  # (the idle ones evicted for a region before the regions are compacted)
   def __init__(self, model):
     from tinygrad.llm.model import REGION_ALIGN
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
@@ -63,6 +64,7 @@ class SeqEngine:
     # (the stash: the free chunks (in order) and entries, the evicted sequences in it)
     self.free_chunks, self.free_entries = list(range(getattr(model, "stash_chunks", 0))), list(range(getattr(model, "stash_entries", 0)))
     self.stashed:list[Stashed] = []
+    self.times:dict[str, float] = {}  # (the time of the moves, stashes and restores: see the server's status line)
 
   # ** regions and slots
   def _gaps(self, skip:Seq|None=None) -> list[tuple[int, int]]:
@@ -98,7 +100,9 @@ class SeqEngine:
         if h: self._free(chunks, entry)
         return False
     chunks, entry = chunks + self._take(n - len(chunks)), entry if entry >= 0 else self.free_entries.pop()
+    st = time.perf_counter()
     self.model.seq_stash(True, s.slot, s.base, self._segs(chunks, keep, n), entry, s.n, s.hrow)
+    self._time("stash", st)
     self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
     return True
   def _drop_one(self) -> Stashed|None:
@@ -130,12 +134,16 @@ class SeqEngine:
     return segs
   def _place(self, s:Seq, need:int) -> bool:
     """a free region of need rows for s (not a resident one yet): the regions compacted, the idle sequences evicted, for it"""
+    evicted = 0
     while need <= self.rows:
       if (b:=next((b for b, c in self._gaps() if c >= need), None)) is not None:
         s.base, s.cap = b, need
         return True
-      if self.rows - sum(t.cap for t in self.seqs) >= need: self._compact()
-      elif not self._evict(): return False
+      # (with the stash: a few idle ones out before the regions are compacted (it moves every one), their copies there cheap)
+      if (evicted < self.EVICT_FIRST and self.free_entries + self.stashed and self._evict()) or \
+         (self.rows - sum(t.cap for t in self.seqs) < need and self._evict()): evicted += 1
+      elif self.rows - sum(t.cap for t in self.seqs) >= need: self._compact()
+      else: return False
     return False
   def _slot(self) -> int|None:
     while len(self.seqs) >= self.nslots:
@@ -145,9 +153,12 @@ class SeqEngine:
   def _need(self, length:int) -> int:
     # (a step writes 2*(k+1) positions past the last token at most, a pool past that)
     return round_up(length + 2*(self.k + 1) + 8, self.align)
+  def _time(self, name:str, st:float): self.times[name] = self.times.get(name, 0.0) + time.perf_counter() - st
   def _move(self, s:Seq, base:int):
+    st = time.perf_counter()
     if base != s.base: self.model.seq_move(s.base, base, s.n)
     s.base = base
+    self._time("move", st)
   def _compact(self) -> list[Seq]:
     """the regions one after another from row 0, in their order (a region moved down never overwrites the ones after it): the free rows at the
     end. returns the sequences in order"""
@@ -162,14 +173,19 @@ class SeqEngine:
     need = self._need(length)
     if need <= s.cap: return True
     if need > self.rows: return False
-    end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > s.base), self.rows)
-    if s.base + need <= end:
-      s.cap = need
-      return True
-    if (base:=next((b for b, c in self._gaps(s) if c >= need and (b >= s.base + s.cap or b + need <= s.base)), None)) is not None:
-      self._move(s, base)
-      s.cap = need
-      return True
+    evicted = 0
+    while True:
+      end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > s.base), self.rows)
+      if s.base + need <= end:
+        s.cap = need
+        return True
+      if (base:=next((b for b, c in self._gaps(s) if c >= need and (b >= s.base + s.cap or b + need <= s.base)), None)) is not None:
+        self._move(s, base)
+        s.cap = need
+        return True
+      # (with the stash: a few idle ones out before the regions are compacted, see _place)
+      if not (evicted < self.EVICT_FIRST and self.free_entries + self.stashed and self._evict(s)): break
+      evicted += 1
     # (all the free rows: the regions compacted, the ones after s moved up by its growth, the last first)
     while self.rows - sum(t.cap for t in self.seqs) < need - s.cap:
       if not self._evict(s): return False
@@ -213,8 +229,9 @@ class SeqEngine:
       if not self._place(s, self._need(len(ids) + min(room, self.ROOM))) and not self._place(s, self._need(len(ids))): return None
       self.seqs.append(s)
       if stashed is None: return s, 0, False
-      n, restored = len(stashed.tokens), True
+      n, restored, st = len(stashed.tokens), True, time.perf_counter()
       self.model.seq_stash(False, s.slot, s.base, self._segs(stashed.chunks, 0, len(stashed.chunks)), stashed.entry, n, stashed.hrow)
+      self._time("restore", st)
       s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
       self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
       # (as it was: prefilled from its last token's states, or its checkpoint restored)
@@ -257,5 +274,5 @@ class SeqEngine:
       drop = len(s.tokens) - kept
       s.tokens, s.n, s.hrow = s.tokens[:kept], s.n - drop, s.hrow - drop
     s.active, s.used = False, time.perf_counter()
-    # (idle: its region no longer than its tokens need, the rest free)
-    s.cap = min(s.cap, self._need(len(s.tokens)))
+    # (idle: its region no longer than its tokens and the room of a turn need, the rest free)
+    s.cap = min(s.cap, self._need(len(s.tokens) + self.ROOM))

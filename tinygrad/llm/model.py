@@ -3566,7 +3566,7 @@ class Transformer:
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1))
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
-    self._seq_move_jit = TinyJit(self._seq_move_copy, capture_first=True)
+    self._seq_move_jits = {m: TinyJit(functools.partial(self._seq_move_copy, m), capture_first=True) for m in self.STASH_CALL}
     self._seq_stash_init()
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
       [t for c in self.seq_ckpt_states for t in c]
@@ -3598,9 +3598,9 @@ class Transformer:
                               UOp.variable("seq_ps", 0, S-1).bind(pos % S), UOp.variable("seq_pc", 0, SC-1).bind(pos % SC),
                               UOp.variable("seq_hrow", 0, 2*k+1).bind(hrow), UOp.variable("seq_keep", 0, 1).bind(int(keep)))
 
-  def _seq_move_copy(self, src:UOp, dst:UOp):
-    """SEQ_MOVE rows of every attention cache from row src to row dst (the indexer's pooled keys: their pools)"""
-    n, copies = self.SEQ_MOVE, []
+  def _seq_move_copy(self, chunks:int, src:UOp, dst:UOp):
+    """chunks*SEQ_MOVE rows of every attention cache from row src to row dst (the indexer's pooled keys: their pools)"""
+    n, copies = self.SEQ_MOVE * chunks, []
     def mv(t:Tensor, s:UOp, d:UOp, m:int, axis:int) -> Tensor:
       def rng(x:UOp) -> tuple: return tuple((x, x+m) if i == axis else None for i in range(t.ndim))
       return t.shrink(rng(d)).assign(t.shrink(rng(s)).contiguous())
@@ -3615,9 +3615,14 @@ class Transformer:
   def seq_move(self, src:int, dst:int, n:int):
     """the first n positions of the sequence of the region at src moved to the region at dst (not overlapping)"""
     v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
-    # (up: the last rows first, the source rows a chunk is written over are moved already)
-    chunks = range(0, n, self.SEQ_MOVE)
-    for o in (reversed(chunks) if dst > src else chunks): self._seq_move_jit(v("move_src").bind(src + o), v("move_dst").bind(dst + o))
+    # (calls of 16, 4 or 1 chunks. up: the last rows first, the source rows a call writes over are moved already)
+    calls, at, left = [], 0, -(-n // self.SEQ_MOVE)
+    while left:
+      m = next(m for m in self.STASH_CALL if m <= left)
+      calls.append((at, m))
+      at, left = at + m * self.SEQ_MOVE, left - m
+    for o, m in (reversed(calls) if dst > src else calls):
+      self._seq_move_jits[m](v("move_src").bind(src + o), v("move_dst").bind(dst + o))
     self._token_host[dst:dst+n+1] = array.array('i', self._token_host[src:src+n+1])
 
   # ** the stash: sequences evicted from the caches kept in host memory, back when a prompt continues one
@@ -3804,7 +3809,7 @@ class Transformer:
     for sv in (True, False):
       add(f"copy{int(sv)}", self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0))
       add(f"ckpt{int(sv)}", self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))
-    add("move", self._seq_move_jit, functools.partial(self.seq_move, 0, REGION_ALIGN, 1))
+    add("move", self._seq_move_jits[1], functools.partial(self.seq_move, 0, REGION_ALIGN, 1))
     # the prefills' and steps' jits captured and compiled at once (in forked processes, see capture_parallel): their jits called alone (no
     # device work but theirs)
     par:list[tuple[Any, Callable[[], Any]]] = []
@@ -3818,7 +3823,7 @@ class Transformer:
       par += [(self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0)),
               (self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))]
     v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
-    par.append((self._seq_move_jit, lambda: self._seq_move_jit(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN))))
+    par += [(j, functools.partial(lambda j: j(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN)), j)) for j in self._seq_move_jits.values()]
     if self.stash_entries:
       for sv in (True, False):
         par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self.STASH_CALL]
