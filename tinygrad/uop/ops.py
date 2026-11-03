@@ -246,6 +246,10 @@ class recursive_property:
     if x is None: return self
     # (computed already: no walk, the most common case)
     if (ret:=x.__dict__.get(self.nm, _MISSING)) is not _MISSING: return ret
+    # (its sources' computed: no walk, a new node of known ones)
+    if all(self.nm in s.__dict__ for s in x.src):
+      ret = x.__dict__[self.nm] = self.fxn(x)
+      return ret
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 

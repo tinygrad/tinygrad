@@ -1,5 +1,5 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload
-import functools, os, io, pickle, itertools, threading, warnings, time, weakref
+import functools, os, io, pickle, itertools, threading, warnings, time, weakref, sys
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup
 from tinygrad.device import Buffer, MultiBuffer
@@ -300,6 +300,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
   children:list[tuple[int, int]] = []
   for i, (jit, call) in enumerate(calls):
     r, w = os.pipe()
+    sys.stdout.flush(), sys.stderr.flush() # (the child doesn't print the parent's buffered output again)
     with warnings.catch_warnings():
       warnings.simplefilter("ignore", DeprecationWarning) # (fork with threads: the child runs no other thread's work)
       pid = os.fork()
@@ -309,15 +310,19 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       from tinygrad.engine import worker
       from tinygrad.helpers import PARALLEL
       device_mod.FORKED_COMPILE, worker.worker_pool = True, None
-      # (the compilers of a quarter of the cores at least: the last ones to finish compile while the others are done)
-      PARALLEL.value = max(1, PARALLEL.value // len(calls), PARALLEL.value // 4)
+      # (behind the parent's work meanwhile, e.g. reading the weights: the compiles take the cores it leaves)
+      os.nice(10)
+      # (the cores shared by the processes: more compilers than cores slow the parent's work meanwhile)
+      PARALLEL.value = max(1, PARALLEL.value // len(calls))
       UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)
       _forked_capture[:] = [jit, functools.partial(_send_capture, w, reg, jit), functools.partial(_send_arenas, w)]
-      try: call()
+      try:
+        call()
+        print(f"capture_parallel: jit {todo[i]} wasn't captured by its call (cnt {jit.cnt})", file=sys.stderr)
       except BaseException:
-        import traceback, sys
+        import traceback
         traceback.print_exc(limit=-4 if DEBUG < 2 else None)
-        sys.stderr.flush()
+      sys.stderr.flush()
       _exit_child(1)
     os.close(w)
     children.append((pid, r))
@@ -360,7 +365,9 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     # (the first to have come: one done long ago isn't left behind ones that just came)
     k = min((k for k in left if len(msgs[k]) >= 2 or msgs[k][-1] == b""), key=lambda k: arrived[k][-1] if arrived[k] else 0)
     left.discard(k)
-    if os.waitpid(children[k][0], 0)[1] != 0 or len(msgs[k]) < 2 or not msgs[k][1]: continue
+    if (status:=os.waitpid(children[k][0], 0)[1]) != 0 or len(msgs[k]) < 2 or not msgs[k][1]:
+      if DEBUG >= 1: print(f"capture_parallel: jit {todo[k]} not captured (exit status {status:#x}), captured on its call")
+      continue
     jit = calls[k][0]
     arenas, recs, rest = pickle.loads(msgs[k][1])
     arena_at = {i: (jit.scratch or {})[key] for key, (i, _) in arenas.items()}

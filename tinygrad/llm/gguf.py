@@ -274,6 +274,14 @@ def _file_mmap(path:str) -> memoryview:
   import mmap
   with open(path, "rb") as f: return memoryview(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
 
+def _disk_location(data:Tensor) -> tuple[str, int, int]|None:
+  """the file, offset and size of the bytes of a parsed tensor in a gguf file, None if it isn't a view of one"""
+  from tinygrad.device import Buffer
+  try: buf = data.uop.buffer
+  except Exception: return None
+  if not isinstance(buf, Buffer) or not buf.device.startswith("DISK:") or buf.device.startswith("DISK:shm:"): return None
+  return buf.device[5:], buf.offset, buf.nbytes
+
 def _disk_bytes(data:Tensor) -> memoryview|None:
   # the bytes of a parsed tensor in the mmapped file, None if it isn't a view of a gguf file
   from tinygrad.device import Buffer

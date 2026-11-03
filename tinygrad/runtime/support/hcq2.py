@@ -536,7 +536,8 @@ def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
     # (the address a view of it has there, as Buffer.get_storage makes it: no view to make for every address)
     b = cast(Buffer, buf.buffer)
     addr = ctx.addrs[(buf, dev)] = Device[cdev:=Device.canonicalize(dev)].allocator._offset(b.base.get_buf(cdev), b.nbytes, b.offset)
-  return UOp.const(addr + v[1], dtypes.u64)
+  # (UOp.const's: a CAST of the CONST, made directly)
+  return UOp(Ops.CAST, src=(UOp(Ops.CONST, arg=truncate[dtypes.u64](addr + v[1])),), arg=dtypes.u64)
 
 def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   base, off = unwrap_view(buf)

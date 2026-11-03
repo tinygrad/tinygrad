@@ -265,7 +265,9 @@ class Allocator(Generic[DeviceType]):
     if FORKED_COMPILE and self.dev.device.split(":")[0] not in {"CPU", "PYTHON", "NPY"}: raise RuntimeError(f"no allocation on {self.dev.device}")
 
     # check if old most is free
-    if (c:=self.cache[(size, options)]) and all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
+    # (a forked compile process doesn't reuse its parent's freed buffers: their devices' timelines aren't mapped there)
+    if not FORKED_COMPILE and (c:=self.cache[(size, options)]) and \
+       all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
       return c.pop(0)[0]
 
     spec = options if options is not None else BufferSpec()

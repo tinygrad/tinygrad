@@ -51,6 +51,8 @@ MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "M
 
 def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
+_LOW7 = bytes(x & 0x7f for x in range(256)) # (a byte's bit 7 cleared)
+
 class _System:
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
     if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
@@ -114,7 +116,10 @@ class _System:
 
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
-    return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
+    # the page frame numbers: the flags (bits 55-63) cleared bytewise (not an and of every entry)
+    data = bytearray(self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))
+    data[7::8], data[6::8] = bytes(len(data) // 8), bytes(data[6::8]).translate(_LOW7)
+    return list(map(mmap.PAGESIZE.__mul__, array.array('Q', data)))
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, iommu:bool=False) -> tuple[MMIOInterface, list[int]]:
     # the addresses of its pages for the devices: physical, or behind the iommu an io address range
@@ -138,12 +143,16 @@ class _System:
 
   @staticmethod
   def contiguous_ranges(paddrs:list[int], page:int=0x1000) -> list[tuple[int, int]]:
-    # the pages (their addresses in order) as ranges of contiguous ones
-    ranges:list[list[int]] = []
-    for p in paddrs:
-      if ranges and ranges[-1][0] + ranges[-1][1] == p: ranges[-1][1] += page
-      else: ranges.append([p, page])
-    return [(p, sz) for p, sz in ranges]
+    # the pages (their addresses in order) as ranges of contiguous ones: a block of a huge page's compared at once if its last page is in the run
+    ranges:list[tuple[int, int]] = []
+    i, n, B = 0, len(paddrs), (2 << 20) // page
+    while i < n:
+      p, j = paddrs[i], i + 1
+      while j + B <= n and paddrs[j+B-1] == p + (j+B-1-i)*page and paddrs[j:j+B] == list(range(p + (j-i)*page, p + (j+B-i)*page, page)): j += B
+      while j < n and paddrs[j] == p + (j-i)*page: j += 1
+      ranges.append((p, (j-i)*page))
+      i = j
+    return ranges
 
   def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []
