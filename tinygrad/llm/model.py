@@ -13,7 +13,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
-  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, \
+  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes
 from tinygrad.uop.ops import resolve, Ops
@@ -1196,6 +1196,18 @@ class QSAIndexer:
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(Tq)).reshape(Tq, 1), Tensor.arange(N)[:S].reshape(1, -1)
     return _pool_select(scores, q_pos, k_pos, self.idx).reshape(1, 1, Tq, -1).cast(x.dtype)
 
+  def prefill_mask(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
+    """One uint32 per pool and 32 queries; score disjoint query rows on the devices, then gather the compact masks."""
+    idx, Tq = self.idx, cast(int, x.shape[1])
+    pk, pools = self.update(x, start_pos, T, freqs)
+    qf = freqs.shrink(((start_pos, start_pos+T), None)).pad_to((Tq, freqs.shape[-1])).reshape(Tq, 1, -1)
+    xx = x[0]
+    if isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
+    q = self._queries(xx, *qf.chunk(2, dim=-1))
+    sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(pk.T, dtype=dtypes.float).contiguous()
+    scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
+    return qsa_prefill_mask(scores, start_pos, pools, idx.top_k//idx.kpool, idx.kpool)
+
   def picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
     """the lists (Tq, top+kpool+1) of the keys every query sees (its top pools, its tail, the count last): one kernel picks them"""
     scores, pools = self.scores(x, start_pos, T, freqs)
@@ -1257,13 +1269,16 @@ class QSABlock(TransformerBlock):
     cos, sin = (f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1))
     q, gate, k, v = self._qkv(x, cos, sin)
     # (decoding with the indexer: the lists of the keys a query sees, the attention reads only them)
-    picks = mask = None
+    picks = mask = tile_mask = None
     upd:Tensor|None = None
     if self.indexer is not None and self._flash(x) and _qsa_dense[0]:
       # (a context the top_k covers: every key is seen, causal attention. the indexer's caches kept for a longer one)
       upd = self.indexer.update(x, start_pos, T, self.freqs_cis)[0]
     elif self.sparse and self.indexer is not None:
-      if isinstance(Tq, int) and Tq <= getenv("QSA_PICKS_ROWS", 8) and self._flash(x) and isinstance(start_pos, UOp) and getenv("QSA_PICKS", 1):
+      if B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and N % 128 == 0 and 64 <= hd <= 256 and hd % 32 == 0 and \
+         isinstance(start_pos, UOp) and self._flash(x) and not _wmma_rdna4(x.device) and self.indexer.idx.kpool == 4:
+        tile_mask = self.indexer.prefill_mask(x, start_pos, T, self.freqs_cis)
+      elif isinstance(Tq, int) and Tq <= getenv("QSA_PICKS_ROWS", 8) and self._flash(x) and isinstance(start_pos, UOp) and getenv("QSA_PICKS", 1):
         picks = self.indexer.picks(x, start_pos, T, self.freqs_cis)
       else: mask = self.indexer.mask(x, start_pos, T, self.freqs_cis)
     if not self._flash(x):
@@ -1275,6 +1290,8 @@ class QSABlock(TransformerBlock):
       return self._out_gated(attn, gate)
     k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T].uop.store(k_store.cast(self.cache_k.dtype).uop)))
+    if tile_mask is not None:
+      return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool), gate)
     if upd is not None and isinstance(Tq, int) and Tq >= 32 and Tq % 32 == 0 and self.indexer is not None and getenv("QSA_FLASH_PREFILL", 1) and \
        (getenv("QSA_FLASH_MTP", 1) or not isinstance(self, QwenMTPBlock)):
       # (a chunk of a prompt the top_k covers: its keys are the first top_k positions of the cache. their keys and values apart, the tensor
@@ -3554,8 +3571,9 @@ class Transformer:
     """the prefill chunk sizes, ascending: the custom kernels compute chunks padded to a static size, a piece of a prompt runs the smallest
     one it fits (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
     fast = amd_custom_kernels_supported(self.token_embd.weight.device)
-    # (a context of 64K or less (many sequences batched): chunks of 2048, their memory the slots')
-    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", (4096 if self.max_context > 65536 else 2048) if fast else 32), self.max_context)
+    # Qwen's gated streams keep the 2K chunk at long contexts too: larger chunks substantially increase prefill workspace.
+    default_chunk = 2048 if self.config.qsa and self.config.hc is not None else (4096 if self.max_context > 65536 else 2048)
+    chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", default_chunk if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
     sizes = [chunk_size] + [min(chunk_size, n) for n in ((getenv("PREFILL_TINY", 192), getenv("PREFILL_SMALL", 512), getenv("PREFILL_MID", 2048),
                                                           4096) if fast else ())]

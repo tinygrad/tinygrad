@@ -1,8 +1,55 @@
 # Qwen Flash on tinyr9
 
 This branch targets the full 48-layer Qwen3.8-Flash-Next UD-IQ4_XS with shared Q8_0 MTP on six RX 7900 XTX GPUs.
-The goals are **8,000 tok/s prefill and 400 tok/s single-user decode**. Both thresholds have been demonstrated on the named warm
-benchmarks below, including a fresh-process check of the defaults. Decode is acceptance- and workload-dependent, not a 400 tok/s guarantee.
+The goals are **8,000 tok/s prefill and 400 tok/s single-user decode on normal coding-agent workloads**, with testing at a
+**262,144-token context**. **These goals are not yet met.** The earlier short-context measurements below do not establish agent-workload
+or long-context performance.
+
+## Long-context coding-agent baseline (work in progress)
+
+`external_benchmark_llm_agent.py` constructs exact-sized prompts from actual repository source, relevant implementation excerpts,
+and coding/debugging tasks, without random-ID or repeated-text padding. Its bounded-step driver separates compilation from warm work
+and stops decoding at EOS or the model's context limit. Summed chunk times exclude RPC gaps; only `prefill_all()` measures an uninterrupted
+end-to-end prefill.
+
+The full model has processed a **262,000-token sampling-code-review prompt** with native max context **262,144**:
+- Late 2112-token prefill chunks: **265 / 263 / 261 / 259 tok/s**. Compilation of the final 112-token chunk is excluded from these figures.
+- Initial 128-token decode window: **37.8 tok/s** (3.3883 seconds of generator consumption).
+- A checkpoint-replayed 128-token decode window: **155.7 tok/s** (four consecutive 32-token segments, 0.82225 seconds total).
+- A separate 2048-token coding-task prefill: **8047.7 tok/s**, illustrating why short prefill is not sufficient evidence.
+
+The timing difference between initial decode and replay has not been isolated. Checkpoint replay also produced a text variation and
+needs investigation; this baseline is not a token-identical quality certification. The generated review correctly
+identified that removing greedy/stochastic capture separation is unsafe, but the response reached the context boundary before a full patch.
+The remaining speculative reserve meant the baseline decode stopped at 262,143 total tokens, not EOS.
+
+### Sparse-prefill checkpoint
+
+The new path scores sequence-local query rows, gathers compact 32-query pooled masks, compacts active key tiles, and runs masked tensor-core
+attention. It preserves inclusive threshold ties and causal masking. Ballots are materialized before predicated compaction stores to avoid
+incorrect ballot simplification and unwritten index-list entries. Qwen retains 2K prefill chunks at long contexts.
+
+A full-model resident run with the new code, using the **same frozen 262,000 input IDs**, completed:
+- Late prefill chunks: **3106–3624 tok/s**, versus approximately 259 tok/s before. The target is still missed.
+- Entire staged prefill: **92.95 seconds active time**, including **26.82 seconds** for the final chunk's first capture. This is not an
+  uninterrupted warm-prefill measurement and excludes RPC gaps.
+- 128-token coding-review decode: **143.4 tok/s** (0.8924 seconds); decode has not been optimized in this checkpoint.
+- **262,144-token boundary exercised:** restore the actual 262,000-token prompt checkpoint and prefill a 144-token source continuation.
+  All 48 layers completed through position 262,144. This is a capacity/boundary check, with no remaining output headroom.
+
+These model measurements used hot-loaded methods, not a fresh-process performance certification. Fresh standalone six-GPU sparse-attention,
+compaction, long-pool-list and replay regressions passed (3 tests, 17.42 seconds); existing dense-prefill regressions passed (4 tests,
+22.78 seconds). CPU regressions passed: 18 tests, 40 subtests, one skip. Ruff/diff checks pass; the same three pre-existing mypy errors remain.
+Unmeasured histogram tuning was discarded. The resident benchmark process has been stopped to release the GPUs.
+
+Next: profile long-context sparse attention/indexing, investigate checkpoint-replay text variation, improve decode, expand the coding-task
+matrix, and rerun fresh-process end-to-end benchmarks. Do not treat this checkpoint as meeting 8000/400.
+
+Reproduction artifacts retained on tinyr9: `/tmp/agent262prompt.i32` (frozen native-int32 prompt IDs),
+`/tmp/agent262baseline.jsonl`, `/tmp/agent262sparse.jsonl`, and `/tmp/qp262k.log`.
+The frozen prompt SHA-256 is `5d68f6e0b7853ae9c038fe24ee5ad077b47ee409f5620c506f7fad2b916c7906`.
+Use `AgentBenchmark.prepare(..., prompt=frozen_ids)` for paired runs so source edits cannot silently change the workload.
+The temporary RPC server overwrote top-level `seconds` with operation time; derive generator time from `tokens / tok_s` in those logs.
 
 ## Default policy
 

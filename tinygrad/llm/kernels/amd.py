@@ -4305,7 +4305,8 @@ def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
   return fragment.reshape(2, 2, 4)[:, lane//16, :].reshape(8) if rdna4 else fragment
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:int|UOp|None=None, rdna4:bool=False) -> UOp:
+def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *sparse:UOp, valid_kv_len:int|UOp, q_start:int|UOp|None=None, rdna4:bool=False,
+                         kpool:int=4) -> UOp:
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
   BH, M, D = q.shape
   _, B, H_KV, physical_n, cache_dim = cache.shape
@@ -4327,11 +4328,14 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   QP_lds = UOp.alloc((BLOCK_M, D + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)
   KV_lds = UOp.alloc((BLOCK_N, D + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :D]
   acc, m_i, l_i = _reg((TM, TD), 0), _reg((TM,), -math.inf), _reg((TM,), 0)
-  n_tile = UOp.range(((q_base + (block_m + 1) * BLOCK_M).minimum(valid_kv_len) + BLOCK_N - 1) // BLOCK_N, 100, AxisType.LOOP)
+  n_tiles = sparse[1][block_m, cast(int, sparse[1].shape[1])-1].load().cast(dtypes.weakint) if sparse else \
+    ((q_base + (block_m + 1) * BLOCK_M).minimum(valid_kv_len) + BLOCK_N - 1) // BLOCK_N
+  n_tile = UOp.range(n_tiles, 100, AxisType.LOOP)
+  tile_id = sparse[1][block_m, n_tile].load().cast(dtypes.weakint).maximum(0).minimum(physical_n//BLOCK_N-1) if sparse else n_tile
   Q_lds = QP_lds[:, :D]
   Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
   load_k = UOp.range(KV_ELEMS_PER_THREAD, 90)
-  kval = k.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k]
+  kval = k.reshape(physical_n*D)[tile_id*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k]
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_k].store(kval).end(load_k)
   Q_lds, KV_lds_k = Q_lds.after(Q_store, K_store), KV_lds.after(Q_store, K_store)
   S_reg = _reg((TM, TN), 0, n_tile)
@@ -4345,8 +4349,11 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   S_reg = S_reg.after(qk_done, S_reg.store(S_reg * SCALE))
   rm, rn = UOp.range(TM, 250), UOp.range(TN, 251)
   q_idx = q_base + block_m * BLOCK_M + wave_m * WMMA_M + (lane_m*TM + rm if rdna4 else rm*LANES_PER_WAVE_M + lane_m)
-  k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
+  k_idx = tile_id * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
   causal = (k_idx <= q_idx) & (k_idx < valid_kv_len)
+  if sparse:
+    qr = wave_m * WMMA_M + (lane_m*TM + rm if rdna4 else rm*LANES_PER_WAVE_M + lane_m)
+    causal = causal & (((sparse[0][block_m, k_idx//kpool].load() >> qr.cast(dtypes.uint32)) & 1) != 0)
   S_reg = S_reg.after(S_reg[rm, rn].store(causal.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
   m_ij, rm2 = _reg((TM,), -math.inf, n_tile), UOp.range(TN, 261, AxisType.LOOP)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
@@ -4365,6 +4372,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   P_store = P_write[tid].store(S_reg.cast(dtypes.half))
   beta_i, ri4, rj4 = UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG), UOp.range(TM, 330), UOp.range(TD, 331)
   m_new = m_i[ri4].maximum(m_ij[ri4])
+  if sparse: m_new = m_new.maximum(-1e30)  # a union tile can be entirely masked for an individual query
   alpha_val, beta_val = ((m_i[ri4] - m_new) * LOG2E).exp2(), ((m_ij[ri4] - m_new) * LOG2E).exp2()
   correction = UOp.group(acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
                          l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
@@ -4372,8 +4380,8 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   acc, l_i, m_i, beta_i = acc.after(correction), l_i.after(correction), m_i.after(correction), beta_i.after(correction)
   V_lds = UOp.alloc((D, BLOCK_N + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
   V_copy, load_v = V_lds.after(qk_done).permute(1, 0), UOp.range(KV_ELEMS_PER_THREAD, 390)
-  v_pos = n_tile*BLOCK_N + (tid*KV_ELEMS_PER_THREAD + load_v)//D
-  vval = (v_pos < valid_kv_len).where(v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v], 0)
+  v_pos = tile_id*BLOCK_N + (tid*KV_ELEMS_PER_THREAD + load_v)//D
+  vval = (v_pos < valid_kv_len).where(v.reshape(physical_n*D)[tile_id*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v], 0)
   V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(vval).end(load_v)
   P_lds, V_lds = P_lds.after(P_store, V_store), V_lds.after(P_store, V_store)
   pv_acc = _reg((TM, TD), 0, n_tile)
@@ -4382,15 +4390,16 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   p_frag = P_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
   v_frag = V_lds.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
   p_frag, v_frag = (_wmma_fragment(f, lane, rdna4) for f in (p_frag, v_frag))
-  pv_done = pv_frag.store(UOp.wmma(p_frag, v_frag, pv_frag.after(k_pv), *WMMA_ARG)).end(tm2, tn2).end(k_pv)
+  pv_done = pv_frag.store(UOp.wmma(p_frag, v_frag, pv_frag.after(k_pv), *WMMA_ARG)).end(tm2, tn2).end(k_pv).barrier()
   pv_acc = pv_acc.after(pv_done)
   ri5, rj5 = UOp.range(TM, 410), UOp.range(TD, 411)
   n_tile_end = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5).end(n_tile)
   acc, l_i, m_i = acc.after(n_tile_end), l_i.after(n_tile_end), m_i.after(n_tile_end)
-  acc = acc.after(acc.store(acc * (1 / l_i).reshape(TM, 1).expand(TM, TD)))
+  acc = acc.after(acc.store(acc * (1 / (l_i.maximum(1e-20) if sparse else l_i)).reshape(TM, 1).expand(TM, TD)))
   o = o.reshape(WAVES_M, *row_shape, WAVES_N, TD, LANES_PER_WAVE_N) \
     .permute(0, 3, row_lane-1, 5, row_elem-1, 4).reshape(THREADS_PER_BLOCK, TM, TD)
-  return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
+  est = Estimates(4*BH*M*D*physical_n, 4*BH*M*D*physical_n, 4*BH*M*D) if sparse else None
+  return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=(), estimates=est))
 
 def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   # cached flash attention on the half KV cache (already written through assigned_kv); valid_end stays bound at the graph level
@@ -4881,8 +4890,12 @@ def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wav
   W, zero = DECODE_THREADS // WARP_SIZE, UOp.const(0, dtypes.int32)
   # the picks of every (chunk, wave): the counts of a ballot
   wc = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  ballots = UOp.alloc((per, W), dtypes.uint32, addrspace=AddrSpace.LOCAL)
   c2 = UOp.range(npc, 5, AxisType.LOOP)
-  wc = wc.after(wc[c2, wave.valid(lane.eq(0))].store(_popcount(_ballot(key(c2) >= thr))).end(c2).barrier())
+  bits = _ballot(key(c2) >= thr)
+  init = UOp.group(wc[c2, wave.valid(lane.eq(0))].store(_popcount(bits)),
+                   ballots[c2, wave.valid(lane.eq(0))].store(bits)).end(c2).barrier()
+  wc, ballots = wc.after(init), ballots.after(init)
   # the offsets of the (chunk, wave)s in pool order: in every chunk a scan of its waves' counts (a wave per chunk), then a scan of the
   # chunks' totals (one wave). the chunks without pools count 0
   # (the offsets of the waves in place of their counts: a thread reads its count, then writes its offset. LDS for a long context's pools)
@@ -4907,13 +4920,99 @@ def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wav
   cb = cb.after(UOp.group(*st_b).barrier())
   # the picked ones of every chunk at their offsets
   c3 = UOp.range(npc, 6, AxisType.LOOP)
-  pk = key(c3) >= thr
-  pos = cb[c3].load() + wpre[c3, wave].load() + _popcount(_ballot(pk) & ((UOp.const(1, dtypes.uint32) << lane.cast(dtypes.uint32)) - 1))
+  # Materialize the wave ballot before predicating stores. Simplifying an address under `pk` must not turn ballot(pk) into ballot(true).
+  bits = ballots[c3, wave].load()
+  pk = ((bits >> lane.cast(dtypes.uint32)) & 1) != 0
+  pos = cb[c3].load() + wpre[c3, wave].load() + _popcount(bits & ((UOp.const(1, dtypes.uint32) << lane.cast(dtypes.uint32)) - 1))
   return [write(c3, pos, pk).end(c3)], cb[per].load()
 
 # ** the indexer's pooled keys split as the sequence sharded cache (SEQ_IDX_SHARD): pool p (kpool positions) is on device (p // PB) % n, its
 # local row (p // (PB*n)) * PB + p % PB (PB = SEQ_BLK // kpool, the pools of a block). a device scores its pools, its top k of them (their
 # scores and pools) are exchanged, every device picks the top k of all (the same lists everywhere: the attention's keys of every device)
+
+def _qsa_threshold_kernel(out:UOp, scores:UOp, *dev:UOp, q_start:UOp, pools:UOp, top:int, kpool:int) -> UOp:
+  rows, P = cast(tuple[int, int], scores.shape)
+  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(32, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  t = wave*32 + lane
+  q = q_start + row + (dev[0][0].load().cast(dtypes.weakint)*rows if dev else 0)
+  npc = (pools+DECODE_THREADS-1)//DECODE_THREADS
+  def key(c:UOp) -> UOp:
+    p = c*DECODE_THREADS + t
+    ok = (p < pools) & ((p+1)*kpool <= q+1)
+    return ok.where(_order_key(scores[row, p.minimum(P-1).valid(ok)].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
+  threshold = _radix_kth(key, npc, top, pools, t, wave, lane)
+  return out[row.valid(t.eq(0))].store(threshold).end(row, wave, lane).sink(arg=KernelInfo(name="qsa_threshold", opts_to_apply=()))
+
+
+def _qsa_pool_mask_kernel(out:UOp, scores:UOp, threshold:UOp, *dev:UOp, q_start:UOp, pools:UOp, kpool:int) -> UOp:
+  # Transpose a coalesced 32-query x 32-pool tile in LDS, then ballot the query bits of each pool.
+  rows, P = cast(tuple[int, int], scores.shape)
+  qr, pc = UOp.range(rows//32, 0, AxisType.GLOBAL), UOp.range(P//32, 1, AxisType.GLOBAL)
+  wave, lane = UOp.range(8, 2, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  base = q_start + (dev[0][0].load().cast(dtypes.weakint)*rows if dev else 0)
+  stage = UOp.alloc((32, 33), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  stores = []
+  for i in range(4):
+    r, p = qr*32+wave*4+i, pc*32+lane
+    q = base+r
+    key = _order_key(scores[r, p].load().bitcast(dtypes.uint32))
+    picked = (p < pools) & ((p+1)*kpool <= q+1) & (key >= threshold[r].load())
+    picked = picked | p.eq((q+1)//kpool)
+    stores.append(stage[wave*4+i, lane].store(picked.cast(dtypes.uint32)))
+  stage = stage.after(UOp.group(*stores).barrier())
+  writes = [out[qr, (pc*32+wave*4+i).valid(lane.eq(0))].store(_ballot(stage[lane, wave*4+i].load() != 0)) for i in range(4)]
+  return UOp.group(*writes).end(qr, pc, wave, lane).sink(arg=KernelInfo(name="qsa_pool_mask", opts_to_apply=()))
+
+
+def _qsa_tiles_kernel(out:UOp, mask:UOp, q_start:UOp, valid_end:UOp, kpool:int) -> UOp:
+  rows, P = cast(tuple[int, int], mask.shape)
+  tiles, per = P*kpool//BLOCK_N, (P*kpool//BLOCK_N+DECODE_THREADS-1)//DECODE_THREADS
+  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(32, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  t = wave*32+lane
+  end = (q_start+(row+1)*32).minimum(valid_end)
+  npc = (end+BLOCK_N*DECODE_THREADS-1)//(BLOCK_N*DECODE_THREADS)
+  def key(c:UOp) -> UOp:
+    tile = c*DECODE_THREADS+t
+    val = functools.reduce(lambda a,b: a|b,
+                           [mask[row, (tile*(BLOCK_N//kpool)+j).minimum(P-1)].load() for j in range(BLOCK_N//kpool)])
+    return ((tile*BLOCK_N < end) & (val != 0)).cast(dtypes.uint32)
+  def write(c:UOp, pos:UOp, picked:UOp) -> UOp:
+    return out[row, pos.valid(picked & (pos < tiles))].store((c*DECODE_THREADS+t).cast(dtypes.int32))
+  stores, count = _pick_stores(key, npc, per, UOp.const(1, dtypes.uint32), t, wave, lane, write)
+  stores.append(out[row, UOp.const(tiles, dtypes.weakint).valid(t.eq(0))].store(count))
+  return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="qsa_tiles", opts_to_apply=()))
+
+
+def qsa_prefill_mask(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
+  rows, P = cast(tuple[int, int], scores.shape)
+  assert rows % 32 == P % 32 == 0 and scores.uop.axis in (None, 0)
+  axis = scores.uop.axis
+  dev = [_device_index(cast(tuple[str, ...], scores.device))] if axis == 0 else []
+  pu = cast(UOp, _unbind(pools)) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
+  qs = cast(UOp, _unbind(q_start))
+  sc = Tensor(scores.uop.after(q_start, *([pools] if isinstance(pools, UOp) else [])))
+  threshold = Tensor.custom_kernel(Tensor.empty(rows, dtype=dtypes.uint32, device=scores.device, axis=axis), sc, *dev,
+    fxn=functools.partial(_qsa_threshold_kernel, q_start=qs, pools=pu, top=top, kpool=kpool))[0]
+  mask = Tensor.custom_kernel(Tensor.empty(rows//32, P, dtype=dtypes.uint32, device=scores.device, axis=axis), sc, threshold, *dev,
+    fxn=functools.partial(_qsa_pool_mask_kernel, q_start=qs, pools=pu, kpool=kpool))[0]
+  return all_gather(mask, 0) if axis == 0 else mask
+
+
+def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_end:int|UOp, kpool:int) -> Tensor:
+  # Cache is (KV, B, N, K+V), sharded over KV heads. Compact active 32-key tiles before the tensor-core attention loop.
+  B, H, T, D = cast(tuple[int, int, int, int], q.shape)
+  N = cast(int, cache.shape[-2])
+  assert B == 1 and T % 32 == N % 32 == 0 and 64 <= D <= 256 and D % 32 == 0 and D == cache.shape[-1]//2 and BLOCK_N % kpool == 0
+  ve = cast(UOp, _unbind(valid_end)) if isinstance(valid_end, UOp) else UOp.const(valid_end, dtypes.weakint)
+  mask = Tensor(mask.uop.after(q_start, *([valid_end] if isinstance(valid_end, UOp) else [])))
+  tiles = Tensor.custom_kernel(Tensor.empty(T//32, N//32+1, dtype=dtypes.int32, device=q.device), mask,
+    fxn=functools.partial(_qsa_tiles_kernel, q_start=cast(UOp, _unbind(q_start)), valid_end=ve, kpool=kpool))[0]
+  kv = cache.transpose(0, 1)
+  kv = Tensor.stack(kv[..., :D], kv[..., D:]).contiguous()
+  out = Tensor.empty(B, H, T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
+  fxn = functools.partial(_amd_flash_attention, q_start=q_start, valid_kv_len=valid_end, rdna4=_wmma_rdna4(q.device), kpool=kpool)
+  return Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, fxn=fxn)[0].reshape(B, H, T, D)
+
 
 def _order_key(bits:UOp) -> UOp:
   """an order preserving uint32 key of a float's bits"""
