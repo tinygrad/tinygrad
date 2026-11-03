@@ -3595,10 +3595,13 @@ class Transformer:
     calls:dict[str, tuple[Any, Callable[[], Any]]] = {}
     def add(name:str, jit:Any, call:Callable[[], Any]):
       if all(j is not jit for j, _ in calls.values()): calls[name] = (jit, call)
-    for n in sorted(self.prefill_chunks(), reverse=True):
-      add(f"prefill{n}", self._prefill_jit(n, self._dense_ctx(0, n)), functools.partial(self.seq_prefill, 0, 0, [0]*n, 0, 0))
-      if top + n <= self.seq_rows():
-        add(f"prefill{n}_sparse", self._prefill_jit(n, False), functools.partial(self.seq_prefill, 0, 0, [0]*(top+n), top, 0))
+    # every chunk size's jits: of a context top_k covers (its fewest tokens from the start: a piece of a prompt it's the size for) and longer
+    chunks = [(c, min(c, top)) for c in sorted(self.prefill_chunks(), reverse=True)]
+    for c, n in chunks:
+      if self._dense_ctx(0, n) or top + c > self.seq_rows():
+        add(f"prefill{c}", self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self.seq_prefill, 0, 0, [0]*n, 0, 0))
+      if top + c <= self.seq_rows():
+        add(f"prefill{c}_sparse", self._prefill_jit(c, False), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
     for m in sorted(self.SEQ_SIZES, reverse=True):
       add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m))
     for sv in (True, False):
@@ -3608,8 +3611,9 @@ class Transformer:
     # the prefills' and steps' jits captured and compiled at once (in forked processes, see capture_parallel): their jits called alone (no
     # device work but theirs)
     par:list[tuple[Any, Callable[[], Any]]] = []
-    for c in self.prefill_chunks():
-      par.append((self._prefill_jit(c, self._dense_ctx(0, c)), functools.partial(self._seq_chunk, 0, 0, c)))
+    for c, n in chunks:
+      if self._dense_ctx(0, n) or top + c > self.seq_rows():
+        par.append((self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self._seq_chunk, 0, 0, n)))
       if top + c <= self.seq_rows(): par.append((self._prefill_jit(c, False), functools.partial(self._seq_chunk, 0, top, c)))
     for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
