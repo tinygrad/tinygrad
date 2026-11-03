@@ -183,7 +183,7 @@ class HyperConnection:
     out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
 
-class GatedResidual:  # qwen4exp: the sublayer sees a sigmoid gated low-rank mix of the normed streams, added back to each by a 2*sigmoid
+class GatedResidual(HyperConnection):  # qwen4exp: the sublayer sees a sigmoid gated low-rank mix of the normed streams, added to each by a 2*sigmoid
   def __init__(self, config:TransformerConfig, inject:bool=True):
     self.count, self.dim, self.norm_eps, low_rank = (hc:=unwrap(config.hc)).count, config.dim, config.norm_eps, hc.low_rank
     self.norm = {"weight": Tensor.zeros(self.count*self.dim)}
@@ -204,13 +204,12 @@ class FFNBlock:
     self.config = config
 
     # --- RMSNorms --------------------------------------------------------
-    self.hc_attn: GatedResidual|HyperConnection
-    self.hc_ffn: GatedResidual|HyperConnection
-    if config.hc and config.hc.low_rank: self.hc_attn, self.hc_ffn = GatedResidual(config), GatedResidual(config)
-    else:
-      self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
-      self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
-      if config.hc is not None: self.hc_attn, self.hc_ffn = HyperConnection(config), HyperConnection(config)
+    self.attn_norm: Callable[[Tensor], Tensor] = nn.RMSNorm(config.dim, config.norm_eps)
+    self.ffn_norm: Callable[[Tensor], Tensor]  = nn.RMSNorm(config.dim, config.norm_eps)
+    if config.hc is not None:
+      hc = GatedResidual if config.hc.low_rank else HyperConnection
+      self.hc_attn, self.hc_ffn = hc(config), hc(config)
+      if config.hc.low_rank: self.attn_norm = self.ffn_norm = lambda x: x  # GatedResidual norms the streams itself
     if config.ple is not None: self.ple = PLELayer(config)
     if config.attn_res_block_size:
       self.attn_res_score, self.ffn_res_score = AttentionResidual(config, config.attn_res_new_block), AttentionResidual(config)
@@ -285,16 +284,16 @@ class FFNBlock:
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None):
-      if hasattr(self, 'ple'): x = x + self.ple(x, start_pos)
+      if hasattr(self, 'ple'): x = x + self.ple(x, start_pos)  # (B, T, hc, D)
       def attend(h:Tensor) -> tuple[Tensor, Tensor|None]:
-        if hasattr(self, 'attn_norm'): h = self.attn_norm(h)
+        h = self.attn_norm(h)
         mask = self._indexer_mask(h, start_pos, idx_mask)
         return self._attention(h, start_pos, mask), mask
       res_attn = res_ffn = lambda xs, sublayer: (xs + (ret:=sublayer(xs))[0], ret[1])
       if self.config.hc is not None: res_attn, res_ffn = self.hc_attn, self.hc_ffn
       elif self.config.attn_res_block_size: res_attn, res_ffn = self.attn_res_score, self.ffn_res_score
       x, idx_mask = res_attn(x, attend)
-      out = res_ffn(x, lambda h: (self._feed_forward(self.ffn_norm(h) if hasattr(self, 'ffn_norm') else h), None))[0].contiguous()
+      out = res_ffn(x, lambda h: (self._feed_forward(self.ffn_norm(h)), None))[0].contiguous()
       return (out, idx_mask) if idx_mask is not None else out
     out = _run(x, start_pos, idx_mask)
     return out if isinstance(out, tuple) else (out, None)
@@ -654,8 +653,8 @@ class Transformer:
       if config.ple and i != config.ple.layer: c = replace(c, ple=None)
       self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else block_cls(c))
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
-    if config.hc and config.hc.low_rank: self.output_hc = GatedResidual(config, inject=False)
-    else: self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
+    self.output_norm: Callable[[Tensor], Tensor] = nn.RMSNorm(config.dim, config.norm_eps)
+    if config.hc and config.hc.low_rank: self.output_hc, self.output_norm = GatedResidual(config, inject=False), lambda x: x
     if config.attn_res_block_size: self.output_res_score = AttentionResidual(config)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
@@ -674,9 +673,7 @@ class Transformer:
     if hc is not None: x = self.output_hc.mix(x)[0] if hc.low_rank else x.mean(2)
     elif self.config.attn_res_block_size: x = self.output_res_score.mix(x)
     # only run the output projection on the last token
-    x = x[:, -1:]
-    if hasattr(self, 'output_norm'): x = self.output_norm(x)
-    logits = self.output(x)[:, -1, :].to(tokens.device)
+    logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
@@ -720,11 +717,11 @@ class Transformer:
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
-
-    hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
-                  kv.get(f'{arch}.hyper_connection.epsilon', 0.0),
-                  kv.get(f'{arch}.hyper_connection.low_rank', 0)) if f'{arch}.hyper_connection.count' in kv else None
-    if hc is not None: state_dict = {re.sub(r'(hc_attn|hc_ffn|output_hc|\.ple)_', r'\1.', k):v for k,v in state_dict.items()}
+    if f'{arch}.hyper_connection.count' in kv:
+      hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
+                    kv.get(f'{arch}.hyper_connection.epsilon', 0.0), kv.get(f'{arch}.hyper_connection.low_rank', 0))
+      state_dict = {re.sub(r'(hc_attn|hc_ffn|output_hc|\.ple)_', r'\1.', k):v for k,v in state_dict.items()}
+    else: hc = None
 
     # QSA has no kpool, its indexer pools compress_ratio keys
     kpool = max(kv[f'{arch}.attention.compress_ratios']) if arch == 'qwen4exp' else kv.get(f'{arch}.attention.indexer.kpool')
@@ -742,8 +739,8 @@ class Transformer:
     ssm = None
     ssm_layers: tuple[bool, ...] = ()
     if arch in ('qwen35', 'qwen35moe', 'qwen4exp'):
-      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}, silu_gate=True)
-      if arch == 'qwen4exp': ssm = replace(ssm, silu_gate=False)
+      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')},
+                      silu_gate=arch != 'qwen4exp')
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
     elif arch in ('kimi-linear', 'glm5-next', 'kimi-k3'):
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]
