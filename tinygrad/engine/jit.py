@@ -304,7 +304,8 @@ class _Compiles:
         with self.lock:
           res = [self.results.get(k) or self.results.setdefault(k, pool.apply_async(_compile_pickled, (t,))) for k, t in pickle.loads(msg)]
         try: _send(aw, pickle.dumps([r.get() for r in res]))
-        except Exception as e: _send(aw, pickle.dumps(f"{type(e).__name__}: {e}"))
+        # (the worker's traceback: the pool's exception holds it as its cause)
+        except Exception as e: _send(aw, pickle.dumps(f"{type(e).__name__}: {e}{chr(10) + str(e.__cause__) if e.__cause__ else ''}"))
     os.close(aw)
 
 def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[[_TinyJit], bool]], None]|None=None,

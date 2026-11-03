@@ -14,10 +14,10 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
-  flag_allreduce, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, \
+  flag_allreduce, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
-from tinygrad.uop.ops import resolve, Ops
+from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
 from tinygrad.dtype import DType
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup, DEBUG
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
@@ -519,6 +519,29 @@ def _zeros(*shape:int, dtype:DType=dtypes.float32, device:str|tuple[str, ...]|No
   """a tensor of zeros, realized (see _fill_zero): split on axis over the devices, or on every one"""
   _fill_zero(t:=_buffers(*shape, dtype=dtype, device=device, axis=axis))
   return t
+
+def _shared_host(owner:str, devs:tuple[str, ...], nbytes:int) -> list[Buffer]:
+  """nbytes of host memory (made when used) mapped on every device: its buffer of every device (the owner's, the others' its mappings)"""
+  host = Buffer(owner, max(nbytes, 1), options=BufferSpec(host=True))
+  class _Alias(Buffer):
+    # (the owner's mapping on another device: allocated with the owner's)
+    def allocate(self, opaque=None, external_ptr=None):
+      a = host.ensure_allocated().get_buf(self.device)
+      return super().allocate(opaque=BufferStorage(a), external_ptr=a)
+  return [host if d == owner else _Alias(d, max(nbytes, 1)) for d in devs]
+
+@functools.cache
+def _stash_save_kernel(dst:UOp, src:UOp, dev:UOp, row:UOp, at:UOp, n:int, writers:int) -> UOp:
+  # rows row..row+n of a cache (a device's: (.., rows, D)) into rows at.. of its copy in host memory, on the devices in writers (a bit each)
+  D = cast(int, src.shape[-1])
+  def flat(t:UOp) -> UOp: return t.reshape(prod(cast(tuple[int, ...], t.shape)))
+  s, d = flat(src), flat(dst)
+  # (a thread 8 values next to each other: its loads and stores wide)
+  V = 8 if D % 8 == 0 else 1
+  r, w = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(D // V, 1, AxisType.LOCAL)
+  ok = ((UOp.const(writers, dtypes.int32) >> dev[0].load()) & 1).ne(0)
+  stores = [d[((at + r) * D + w * V + j).valid(ok)].store(s[(row + r) * D + w * V + j].load()) for j in range(V)]
+  return UOp.group(*stores).end(r, w).sink(arg=KernelInfo(name="stash_save", opts_to_apply=()))
 
 def _host_like(specs:list[tuple[Tensor, int, int]]) -> list[Tensor]:
   """
@@ -2332,6 +2355,7 @@ class Transformer:
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     self.ple_table:memoryview|None = None  # (the n-gram table's bytes, see from_gguf)
+    self._kv_real = config.n_kv_heads  # (the file's KV heads, see from_gguf)
     self._ple_file:tuple[str, int, int]|None = None  # (its file, offset and size, if they're a gguf file's)
     self._effects: list[Tensor]|None = None  # tensors that forward realizes with its output (see _forward_effects)
     self._ckpt_tokens: list[int] = []  # the prompt of the recurrent state's checkpoint (_checkpoint)
@@ -3604,9 +3628,13 @@ class Transformer:
     """
     C, gb = self.SEQ_MOVE, getenv("SEQ_STASH_GB", 4.0)
     qsa = [b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)]
-    def per_row(t:Tensor, axis:int) -> int: return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) else 1)
-    chunk = C * sum(per_row(b.cache_k, 2) + (per_row(b.indexer.cache_k, 0) + per_row(b.indexer.cache_pk, 0) // b.indexer.idx.kpool
-                                              if b.indexer is not None else 0) for b in qsa)
+    def per_row(t:Tensor, axis:int) -> int:
+      # (a device's bytes of a row: split over the devices or not)
+      return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
+    # (the host memory of a chunk: every distinct KV head's rows and the indexers' (see below))
+    kvr = self._kv_real
+    chunk = C * sum(kvr * per_row(b.cache_k, 2) + (per_row(b.indexer.cache_k, 0) + per_row(b.indexer.cache_pk, 0) // b.indexer.idx.kpool
+                                                    if b.indexer is not None else 0) for b in qsa)
     self.stash_entries = getenv("SEQ_STASH_ENTRIES", 32) if gb > 0 else 0
     gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     entry = sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) + \
@@ -3615,29 +3643,59 @@ class Transformer:
     if not self.stash_chunks: self.stash_entries = 0
     if not self.stash_entries: return
     H, E = self.stash_chunks * C, self.stash_entries
-    kv = [[(b.cache_k, 2, H)] + ([(b.indexer.cache_k, 0, H), (b.indexer.cache_pk, 0, H // b.indexer.idx.kpool)] if b.indexer is not None else [])
-          for b in qsa]
+    # (the attention caches: a copy of every distinct one in host memory every device maps, written by one device: the KV heads repeated over
+    # the devices are the same, the indexers' caches are on every device)
+    devs, kvr = cast(tuple[str, ...], self.token_embd.weight.device), self._kv_real
+    head = [d * kvr // len(devs) for d in range(len(devs))]
+    self._stash_writers = sum(1 << d for d in range(len(devs)) if d == 0 or head[d] != head[d-1]), 1
+    self._stash_kv = []
+    kv_specs = [[(b.cache_k, H)] + ([(b.indexer.cache_k, H), (b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else [])
+                for b in qsa]
+    owners = [devs[head.index(h)] for h in range(kvr)] + [devs[0]]
+    def row_bytes(t:Tensor) -> int: return per_row(t, 2 if t is not None and t.ndim == 4 else 0)
+    sizes = [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[:1]) for _ in range(kvr)] + \
+            [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[1:])]
+    arenas = [_shared_host(o, devs, sz) for o, sz in zip(owners, sizes)]
+    offs = [0] * len(arenas)
+    def take(t:Tensor, rows:int, arena_of_dev:list[int]) -> Tensor:
+      local = (rows, *[int(x) for x in t.shape[3 if t.ndim == 4 else 1:]]) if t.ndim == 4 else (rows, *[int(x) for x in t.shape[1:]])
+      nb, views = prod(local) * t.dtype.itemsize, []
+      for d in range(len(devs)): views.append(arenas[arena_of_dev[d]][d].view(nb, offs[arena_of_dev[d]]))
+      for a in set(arena_of_dev): offs[a] += round_up(nb, 4096)
+      (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
+      u = UOp.from_buffer(mb, t.dtype, devs).reshape((1, 1, *local) if t.ndim == 4 else local)
+      return Tensor(u.unshard(0) if t.ndim == 4 else u)
+    for b in kv_specs:
+      self._stash_kv.append(tuple(take(t, rows, head if i == 0 else [kvr]*len(devs)) for i, (t, rows) in enumerate(b)))
     # (a sequence's states of its last position: the recurrent and conv ones, the hidden state of its last token. and its checkpoint's)
     states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
              [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
-    made = iter(_host_like([x for b in kv for x in b] + [(t, 0, E) for t in states]))
-    self._stash_kv = [tuple(next(made) for _ in b) for b in kv]
-    self._stash_state = [next(made) for _ in states]
+    self._stash_state = _host_like([(t, 0, E) for t in states])
     self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
                            for sv in (True, False) for n in self.STASH_CALL}
     self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
   STASH_CALL = (16, 4, 1)  # (the chunks a call of the stash copies: a run is copied by calls of these, the most first)
   def _stash_kv_copy(self, save:bool, chunks:int, row:UOp, chunk:UOp):
     """chunks*SEQ_MOVE rows from row of every attention cache into the stash from chunk (save), or back (static sizes: wide loads and stores)"""
-    C, pairs = self.SEQ_MOVE, []
+    C, pairs, saves = self.SEQ_MOVE, [], []
+    devs = cast(tuple[str, ...], self.token_embd.weight.device)
     def rows(t:Tensor, at:UOp, m:int, axis:int) -> Tensor: return t.shrink(tuple((at, at+m) if i == axis else None for i in range(t.ndim)))
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)], self._stash_kv):
-      pairs.append((rows(st[0], chunk*C, chunks*C, 2), rows(b.cache_k, row, chunks*C, 2)))
+      ts = [(st[0], b.cache_k, row, chunk*C, C*chunks, self._stash_writers[0])]
       if (idx:=b.indexer) is not None:
         kp = idx.idx.kpool
-        pairs += [(rows(st[1], chunk*C, chunks*C, 0), rows(idx.cache_k, row, chunks*C, 0)),
-                  (rows(st[2], chunk*(C//kp), chunks*(C//kp), 0), rows(idx.cache_pk, row//kp, chunks*(C//kp), 0))]
-    Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
+        ts += [(st[1], idx.cache_k, row, chunk*C, C*chunks, self._stash_writers[1]),
+               (st[2], idx.cache_pk, row//kp, chunk*(C//kp), (C//kp)*chunks, self._stash_writers[1])]
+      for dst, src, r, c, n, writers in ts:
+        axis = 2 if src.ndim == 4 else 0
+        if save:
+          # (a device of every distinct copy writes it: the host memory takes a few GB/s of the devices' writes at once)
+          # (the row and chunk: bound on an input, the kernel's variables)
+          s = Tensor(src.uop.after(r, c))
+          saves.append(Tensor.custom_kernel(dst, s, _device_index(devs), fxn=functools.partial(_stash_save_kernel, row=_unbind(r), at=_unbind(c),
+                                                                                              n=n, writers=writers))[0])
+        else: pairs.append((rows(dst, c, n, axis), rows(src, r, n, axis)))
+    Tensor.realize(*saves, *[x.assign(d) for d, x in pairs])
   def _stash_state_copy(self, save:bool, slot:UOp, entry:UOp, ps:UOp, pc:UOp, hrow:UOp):
     """the states of slot of a position (its rows ps of the recurrent states, pc of the conv ones, hrow of the hidden states) and its checkpoint
     into entry of the stash (save), or back"""
@@ -4167,6 +4225,8 @@ class Transformer:
       # (SEQ_ROWS: the rows of the caches of the sequences sharing them, past a context: more conversations kept)
       cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN) if arch == 'qwen4exp' else 0)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
+    # (the file's KV heads: repeated so every device holds one, device d holds head d*n//devices)
+    model._kv_real = kv[f'{arch}.attention.head_count_kv']
     # gate experts loaded with the up rows (fused): one weight of twice the rows
     for name, b in [(f"blk.{i}", b) for i, b in enumerate(model.blk)] + ([("mtp", model.mtp)] if mtp else []):
       if (g:=state_dict.get(f"{name}.ffn_gate_exps.weight")) is not None and f"{name}.ffn_up_exps.weight" not in state_dict and \
