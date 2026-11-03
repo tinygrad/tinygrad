@@ -3432,8 +3432,10 @@ class Transformer:
     """the first n positions of the sequence of the region at src moved to the region at dst (not overlapping)"""
     if not hasattr(self, "_seq_move_jit"): self._seq_move_jit = TinyJit(self._seq_move_copy, capture_first=True)
     v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
-    for o in range(0, n, self.SEQ_MOVE): self._seq_move_jit(v("move_src").bind(src + o), v("move_dst").bind(dst + o))
-    self._token_host[dst:dst+n+1] = self._token_host[src:src+n+1]
+    # (up: the last rows first, the source rows a chunk is written over are moved already)
+    chunks = range(0, n, self.SEQ_MOVE)
+    for o in (reversed(chunks) if dst > src else chunks): self._seq_move_jit(v("move_src").bind(src + o), v("move_dst").bind(dst + o))
+    self._token_host[dst:dst+n+1] = array.array('i', self._token_host[src:src+n+1])
 
   def _seq_ckpt_copy(self, save:bool, slot:UOp, ps:UOp, pc:UOp):
     """the checkpoint of slot `slot`: its recurrent states (rows ps, the conv ones pc) and its hidden state of row 0 (save), or back"""

@@ -38,13 +38,13 @@ def common_prefix(a:list[int], b:list[int]) -> int:
 
 class SeqEngine:
   # (the room for a reply a region has past its prompt when it's made, more is made as it's needed)
-  ROOM = getenv("SEQ_ROOM", 8192)
+  ROOM = getenv("SEQ_ROOM", 2048)
   def __init__(self, model):
     from tinygrad.llm.model import REGION_ALIGN
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []
-    self.max_active = max(model.SEQ_SIZES)
+    self.max_active, self.evictions = max(model.SEQ_SIZES), 0
 
   # ** regions and slots
   def _gaps(self, skip:Seq|None=None) -> list[tuple[int, int]]:
@@ -59,35 +59,59 @@ class SeqEngine:
     """the least recently used idle sequence out (its slot and region free): False if none"""
     idle = [s for s in self.seqs if not s.active and s is not keep]
     if not idle: return False
-    self.seqs.remove(min(idle, key=lambda s: s.used))
+    self.seqs.remove(out:=min(idle, key=lambda s: s.used))
+    self.evictions += 1
+    if getenv("SEQ_LOG", 0): print(f"seq slot {out.slot} evicted ({out.n} tokens)", flush=True)
     return True
-  def _region(self, need:int, skip:Seq|None=None) -> int|None:
-    """the first row of a free region of need rows (sequences evicted for it), None: none"""
-    while True:
-      if (fit:=[b for b, c in self._gaps(skip) if c >= need]): return fit[0]
-      if not self._evict(skip): return None
+  def _place(self, s:Seq, need:int) -> bool:
+    """a free region of need rows for s (not a resident one yet): the regions compacted, the idle sequences evicted, for it"""
+    while need <= self.rows:
+      if (b:=next((b for b, c in self._gaps() if c >= need), None)) is not None:
+        s.base, s.cap = b, need
+        return True
+      if self.rows - sum(t.cap for t in self.seqs) >= need: self._compact()
+      elif not self._evict(): return False
+    return False
   def _slot(self) -> int|None:
     while len(self.seqs) >= self.nslots:
       if not self._evict(): return None
     return min(set(range(self.nslots)) - {s.slot for s in self.seqs})
 
-  def room(self, s:Seq, length:int) -> bool:
-    """the region of s has rows for a sequence of `length` tokens (grown in place, or moved, if not): False if no region does"""
+  def _need(self, length:int) -> int:
     # (a step writes 2*(k+1) positions past the last token at most, a pool past that)
-    need = round_up(length + 2*(self.k + 1) + 8, self.align)
+    return round_up(length + 2*(self.k + 1) + 8, self.align)
+  def _move(self, s:Seq, base:int):
+    if base != s.base: self.model.seq_move(s.base, base, s.n)
+    s.base = base
+  def _compact(self) -> list[Seq]:
+    """the regions one after another from row 0, in their order (a region moved down never overwrites the ones after it): the free rows at the
+    end. returns the sequences in order"""
+    at, order = 0, sorted(self.seqs, key=lambda t: t.base)
+    for t in order:
+      self._move(t, at)
+      at += t.cap
+    return order
+  def room(self, s:Seq, length:int) -> bool:
+    """the region of s has rows for a sequence of `length` tokens (grown in place, moved, or the regions compacted, if not): False if no region
+    does (the idle sequences evicted for it)"""
+    need = self._need(length)
     if need <= s.cap: return True
     if need > self.rows: return False
-    end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs) if b > s.base), self.rows)
+    end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > s.base), self.rows)
     if s.base + need <= end:
       s.cap = need
       return True
-    if (base:=self._region(need, s)) is None: return False
-    # (moved with room to grow)
-    need = min(self.rows - base, max(need, round_up(length + self.ROOM, self.align)))
-    while (end:=next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > base), self.rows)) < base + need:
-      need -= self.align
-    self.model.seq_move(s.base, base, s.n)
-    s.base, s.cap = base, need
+    if (base:=next((b for b, c in self._gaps(s) if c >= need and (b >= s.base + s.cap or b + need <= s.base)), None)) is not None:
+      self._move(s, base)
+      s.cap = need
+      return True
+    # (all the free rows: the regions compacted, the ones after s moved up by its growth, the last first)
+    while self.rows - sum(t.cap for t in self.seqs) < need - s.cap:
+      if not self._evict(s): return False
+    order = self._compact()
+    delta = need - s.cap
+    for t in reversed(order[order.index(s)+1:]): self._move(t, t.base + delta)
+    s.cap = need
     return True
 
   # ** a prompt's sequence
@@ -109,14 +133,9 @@ class SeqEngine:
       if self.room(s, len(ids) + room): return best
       s.active = False
       self.seqs.remove(s)
-    need = min(self.rows, round_up(len(ids) + max(room, self.ROOM) + 2*(self.k+1) + 8, self.align))
     if (slot:=self._slot()) is None: return None
-    if (base:=self._region(need)) is None:
-      # (no room for a long reply: the prompt's at least)
-      need = round_up(len(ids) + 2*(self.k+1) + 8, self.align)
-      if (base:=self._region(need)) is None: return None
-    if (slot:=self._slot()) is None: return None  # (an eviction for the region may have taken it)
-    s = Seq(slot, base, need, active=True)
+    s = Seq(slot, 0, 0, active=True)
+    if not self._place(s, self._need(len(ids) + min(room, self.ROOM))) and not self._place(s, self._need(len(ids))): return None
     self.seqs.append(s)
     return s, 0, False
 
@@ -152,3 +171,5 @@ class SeqEngine:
       drop = len(s.tokens) - kept
       s.tokens, s.n, s.hrow = s.tokens[:kept], s.n - drop, s.hrow - drop
     s.active, s.used = False, time.perf_counter()
+    # (idle: its region no longer than its tokens need, the rest free)
+    s.cap = min(s.cap, self._need(len(s.tokens)))
