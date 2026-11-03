@@ -204,14 +204,13 @@ class UOpMetaClass(type):
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property:
-  def __init__(self, fxn, srcs=None):
+  def __init__(self, fxn):
     self.fxn = fxn
     self.nm = fxn.__name__
     self.__doc__ = fxn.__doc__
-    self.srcs = srcs
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True, srcs=self.srcs): node.__dict__[self.nm] = self.fxn(node)
+    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
 class _UOpTuple(tuple):
@@ -279,7 +278,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
 
-  def toposort(self, gate:Callable|None=None, enter_calls=False, srcs:Callable|None=None) -> dict[UOp, None]:
+  def toposort(self, gate:Callable|None=None, enter_calls=False) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
@@ -288,7 +287,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(srcs(node) if srcs is not None else node.src if enter_calls else node.src_without_body):
+          for s in reversed(node.src if enter_calls else node.src_without_body):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -312,9 +311,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  # A shape needs the shapes of its data sources, not the control dependencies carried by the UOp.
-  @functools.partial(recursive_property, srcs=lambda x: () if x.op in {Ops.RANGE, Ops.SPECIAL, Ops.CONST, Ops.GETADDR, Ops.BINARY} else
-                                                      x.src[:1] if x.op in {Ops.AFTER, Ops.END, Ops.STACK, Ops.NOOP} else x.src)
+  @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
@@ -791,7 +788,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else u.ccast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
-    return UOp(op, src=(self,)+tuple(usrcs))
+    return UOp(op, src=(self,)+UOp.sink(*usrcs).simplify().src)
 
   # *** uop Buffer stuff ***
 
