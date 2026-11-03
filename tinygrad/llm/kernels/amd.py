@@ -4357,7 +4357,9 @@ def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
 
 @functools.cache
 def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *sparse:UOp, valid_kv_len:int|UOp, q_start:int|UOp|None=None, rdna4:bool=False,
-                         kpool:int=4) -> UOp:
+                         kpool:int=4, parts:int=1) -> UOp:
+  # parts (sparse): a block's tiles split over parts workgroups (few blocks are few workgroups for the GPU), o (parts, BH, M, D) every part's
+  # normalized output and sparse[2] (parts, BH, M, 2) its rows' max and sum (see qsa_sparse_prefill: combined after)
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
   BH, M, D = q.shape
   _, B, H_KV, physical_n, cache_dim = cache.shape
@@ -4370,8 +4372,11 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *sparse:UOp, valid_kv_len:int|
   # query row 0 sits at sequence position q_base (the queries may be padded beyond valid_kv_len - q_base rows)
   q_base = valid_kv_len - M if q_start is None else q_start
   block_bh, block_m = UOp.range(BH, 0, AxisType.GLOBAL), UOp.range(M // BLOCK_M, 1, AxisType.GLOBAL)
+  part = UOp.range(parts, 4, AxisType.GLOBAL) if parts > 1 else None
   kv_head = block_bh // gqa_group
-  q, o = (x.reshape(BH, M//BLOCK_M, BLOCK_M, D)[block_bh, block_m] for x in (q, o))
+  q = q.reshape(BH, M//BLOCK_M, BLOCK_M, D)[block_bh, block_m]
+  o = o.reshape(BH, M//BLOCK_M, BLOCK_M, D)[block_bh, block_m] if part is None else \
+    o.reshape(parts, BH, M//BLOCK_M, BLOCK_M, D)[part, block_bh, block_m]
   k, v = k[kv_head], v[kv_head]
   wave_m, wave_n, lane = UOp.range(WAVES_M, 2, AxisType.LOCAL), UOp.range(WAVES_N, 3, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   tid, lane_m, lane_n = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane, lane // LANES_PER_WAVE_N, lane % LANES_PER_WAVE_N
@@ -4381,8 +4386,13 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *sparse:UOp, valid_kv_len:int|
   acc, m_i, l_i = _reg((TM, TD), 0), _reg((TM,), -math.inf), _reg((TM,), 0)
   n_tiles = sparse[1][block_m, cast(int, sparse[1].shape[1])-1].load().cast(dtypes.weakint) if sparse else \
     ((q_base + (block_m + 1) * BLOCK_M).minimum(valid_kv_len) + BLOCK_N - 1) // BLOCK_N
+  t0:UOp|int = 0
+  if part is not None:
+    # (the part's tiles of the block's)
+    per = (n_tiles + parts - 1) // parts
+    t0, n_tiles = part * per, (n_tiles - part * per).maximum(0).minimum(per)
   n_tile = UOp.range(n_tiles, 100, AxisType.LOOP)
-  tile_id = sparse[1][block_m, n_tile].load().cast(dtypes.weakint).maximum(0).minimum(physical_n//BLOCK_N-1) if sparse else n_tile
+  tile_id = sparse[1][block_m, t0 + n_tile].load().cast(dtypes.weakint).maximum(0).minimum(physical_n//BLOCK_N-1) if sparse else n_tile
   Q_lds = QP_lds[:, :D]
   Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
   load_k = UOp.range(KV_ELEMS_PER_THREAD, 90)
@@ -4450,7 +4460,16 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *sparse:UOp, valid_kv_len:int|
   o = o.reshape(WAVES_M, *row_shape, WAVES_N, TD, LANES_PER_WAVE_N) \
     .permute(0, 3, row_lane-1, 5, row_elem-1, 4).reshape(THREADS_PER_BLOCK, TM, TD)
   est = Estimates(4*BH*M*D*physical_n, 4*BH*M*D*physical_n, 4*BH*M*D) if sparse else None
-  return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=(), estimates=est))
+  stores = [o[tid].store(acc)]
+  if part is not None:
+    # a row's max and sum (the same in every wave of its waves_n, a lane of its row writes them)
+    rs = UOp.range(TM, 420)
+    row = block_m * BLOCK_M + wave_m * WMMA_M + (lane_m*TM + rs if rdna4 else rs*LANES_PER_WAVE_M + lane_m)
+    st, first = sparse[2].reshape(parts, BH, M, 2), wave_n.eq(0) & lane_n.eq(0)
+    stores.append(UOp.group(st[part, block_bh, row.valid(first), 0].store(m_i[rs]),
+                            st[part, block_bh, row.valid(first), 1].store(l_i[rs])).end(rs))
+  ends = (block_m, block_bh) + ((part,) if part is not None else ())
+  return UOp.group(*stores).end(wave_m, wave_n, lane).end(*ends).sink(arg=KernelInfo(opts_to_apply=(), estimates=est))
 
 def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   # cached flash attention on the half KV cache (already written through assigned_kv); valid_end stays bound at the graph level
@@ -5065,9 +5084,20 @@ def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_e
   tmp = Tensor.empty(2, *kv.shape[:2], N, D, dtype=cache.dtype, device=cache.device, axis=None if cache.uop.axis is None else 2)
   store = tmp.shrink((None, None, None, (0, valid_end), None)).uop.store(Tensor.stack(kv[..., :D], kv[..., D:]).uop)
   kv = Tensor(tmp.uop.after(store))
-  out = Tensor.empty(B, H, T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
-  fxn = functools.partial(_amd_flash_attention, q_start=q_start, valid_kv_len=valid_end, rdna4=_wmma_rdna4(q.device), kpool=kpool)
-  return Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, fxn=fxn)[0].reshape(B, H, T, D)
+  # (a block's tiles split over parts workgroups: the blocks of a small chunk are few workgroups for the GPU, ~8 a compute unit; combined after)
+  local_heads = H // (len(q.device) if isinstance(q.device, tuple) and q.uop.axis is not None else 1)
+  parts = max(1, min(8, 768 // (B * local_heads * (T // BLOCK_M))))
+  fxn = functools.partial(_amd_flash_attention, q_start=q_start, valid_kv_len=valid_end, rdna4=_wmma_rdna4(q.device), kpool=kpool, parts=parts)
+  ax = None if q.uop.axis is None else 1
+  if parts == 1:
+    out = Tensor.empty(B, H, T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
+    return Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, fxn=fxn)[0].reshape(B, H, T, D)
+  out = Tensor.empty(parts, B*H, T, D, dtype=dtypes.float32, device=q.device, axis=ax)
+  stats = Tensor.empty(parts, B*H, T, 2, dtype=dtypes.float32, device=q.device, axis=ax)
+  res = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, stats, fxn=fxn)
+  m, l = res[5][..., 0], res[5][..., 1]
+  w = (l > 0).where(l * (m - m.max(0)).exp(), 0)
+  return ((res[0] * w.unsqueeze(-1)).sum(0) / w.sum(0).maximum(1e-20).unsqueeze(-1)).reshape(B, H, T, D)
 
 
 def _order_key(bits:UOp) -> UOp:

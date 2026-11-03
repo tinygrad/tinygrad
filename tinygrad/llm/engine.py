@@ -1,12 +1,26 @@
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
+from typing import cast
 from tinygrad.helpers import getenv, round_up
 
 # ******** sequences sharing the model's caches (Transformer.seq_*): the host's side ********
 # every resident sequence (a conversation) has a slot of the recurrent states and a region of rows of the attention caches. a prompt continues
 # the idle sequence it extends (prefilled from its end, or from its checkpoint: the end of its last prompt), else a new one, the least recently
 # used idle ones evicted for its slot and region. steps decode every active sequence at once
+
+@dataclass(eq=False)
+class Stashed:
+  """
+  a sequence's copy in the stash (host memory, see Transformer.seq_stash): its tokens, their chunks (in order) and the entry of its states, its
+  row. an evicted one's, or a resident one's (its prefix: the chunks it hasn't written since are copied when it's evicted again)
+  """
+  tokens:list[int]
+  chunks:list[int]
+  entry:int
+  used:float
+  hrow:int
+  ckpt:int
 
 @dataclass(eq=False)
 class Seq:
@@ -19,22 +33,13 @@ class Seq:
   ckpt:int = 0  # the position of its checkpoint (the end of its last prompt, the states there kept), 0: none
   used:float = 0.0
   active:bool = False
+  host:Stashed|None = None  # (its copy in the stash: of the prefix of its tokens it shares)
   # decoding: the position the MTP layer catches up from, the drafts accepted, the parity, the last step's sampled tokens, the temperature
   mtp:int = 0
   j:int = 0
   par:int = 1
   y:list[int] = field(default_factory=list)
   temp:tuple[float, float] = (0.0, 1.0)
-
-@dataclass(eq=False)
-class Stashed:
-  """a sequence evicted into the stash (host memory, see Transformer.seq_stash): its tokens in the caches, their chunks and entry, its row"""
-  tokens:list[int]
-  chunks:list[int]
-  entry:int
-  used:float
-  hrow:int
-  ckpt:int
 
 def common_prefix(a:list[int], b:list[int]) -> int:
   n = min(len(a), len(b))
@@ -55,7 +60,7 @@ class SeqEngine:
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []
     self.max_active, self.evictions = max(model.SEQ_SIZES), 0
-    # (the stash: the free chunks and entries, the stashed sequences)
+    # (the stash: the free chunks (in order) and entries, the evicted sequences in it)
     self.free_chunks, self.free_entries = list(range(getattr(model, "stash_chunks", 0))), list(range(getattr(model, "stash_entries", 0)))
     self.stashed:list[Stashed] = []
 
@@ -78,20 +83,51 @@ class SeqEngine:
     if getenv("SEQ_LOG", 0): print(f"seq slot {out.slot} evicted ({out.n} tokens{', stashed' if stashed else ''})", flush=True)
     return True
   def _stash(self, s:Seq) -> bool:
-    """s (evicted) into the stash, the least recently used stashed ones out for it: False if it doesn't fit"""
-    if not self.free_entries and not self.stashed or s.n <= 0: return False
-    n = -(-s.n // self.model.SEQ_MOVE)
-    if n > len(self.free_chunks) + sum(len(x.chunks) for x in self.stashed): return False
-    while len(self.free_chunks) < n or not self.free_entries: self._unstash(min(self.stashed, key=lambda x: x.used))
-    chunks, entry = [self.free_chunks.pop() for _ in range(n)], self.free_entries.pop()
-    self.model.seq_stash(True, s.slot, s.base, chunks, entry, s.n, s.hrow)
+    """
+    s (evicted) into the stash: its chunks its copy there doesn't have (a resident's copy, of the prefix it shares) and its states, the least
+    recently used copies out for it (the residents' first: they're in the caches). False if it doesn't fit
+    """
+    C, n, h = self.model.SEQ_MOVE, -(-s.n // self.model.SEQ_MOVE), s.host
+    if s.n <= 0 or not (self.free_entries or self.stashed or h): return False
+    s.host = None
+    chunks, entry, keep = (h.chunks, h.entry, min(common_prefix(h.tokens, s.tokens[:s.n]) // C, len(h.chunks))) if h else ([], -1, 0)
+    if n < len(chunks): self._free(chunks[n:], None)
+    chunks = chunks[:n]
+    while len(self.free_chunks) < n - len(chunks) or (entry < 0 and not self.free_entries):
+      if self._drop_one() is None:
+        if h: self._free(chunks, entry)
+        return False
+    chunks, entry = chunks + self._take(n - len(chunks)), entry if entry >= 0 else self.free_entries.pop()
+    self.model.seq_stash(True, s.slot, s.base, self._segs(chunks, keep, n), entry, s.n, s.hrow)
     self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
     return True
-  def _unstash(self, x:Stashed):
-    """x out of the stash (its chunks and entry free)"""
-    self.stashed.remove(x)
-    self.free_chunks += x.chunks
-    self.free_entries.append(x.entry)
+  def _drop_one(self) -> Stashed|None:
+    """the least recently used copy in the stash out (a resident's first), None if none"""
+    residents = [t for t in self.seqs if t.host is not None]
+    if residents:
+      t = min(residents, key=lambda t: t.used)
+      x, t.host = cast(Stashed, t.host), None
+    elif self.stashed: self.stashed.remove(x:=min(self.stashed, key=lambda x: x.used))
+    else: return None
+    self._free(x.chunks, x.entry)
+    return x
+  def _take(self, n:int) -> list[int]:
+    """n free chunks: consecutive ones if there are (the copies' calls are of runs)"""
+    f = self.free_chunks
+    at = next((i for i in range(len(f) - n + 1) if f[i + n - 1] - f[i] == n - 1), 0) if n else 0
+    taken, self.free_chunks = f[at:at+n], f[:at] + f[at+n:]
+    return taken
+  def _free(self, chunks:list[int], entry:int|None):
+    self.free_chunks = sorted(self.free_chunks + chunks)
+    if entry is not None and entry >= 0: self.free_entries.append(entry)
+  @staticmethod
+  def _segs(chunks:list[int], lo:int, hi:int) -> list[tuple[int, int, int]]:
+    """the chunks lo..hi of a sequence as segments (its chunk, the stash's, count) of consecutive ones"""
+    segs:list[tuple[int, int, int]] = []
+    for i in range(lo, hi):
+      if segs and segs[-1][0] + segs[-1][2] == i and segs[-1][1] + segs[-1][2] == chunks[i]: segs[-1] = (segs[-1][0], segs[-1][1], segs[-1][2] + 1)
+      else: segs.append((i, chunks[i], 1))
+    return segs
   def _place(self, s:Seq, need:int) -> bool:
     """a free region of need rows for s (not a resident one yet): the regions compacted, the idle sequences evicted, for it"""
     while need <= self.rows:
@@ -178,17 +214,16 @@ class SeqEngine:
       self.seqs.append(s)
       if stashed is None: return s, 0, False
       n, restored = len(stashed.tokens), True
-      self.model.seq_stash(False, s.slot, s.base, stashed.chunks, stashed.entry, n, stashed.hrow)
+      self.model.seq_stash(False, s.slot, s.base, self._segs(stashed.chunks, 0, len(stashed.chunks)), stashed.entry, n, stashed.hrow)
+      s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
       self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
       # (as it was: prefilled from its last token's states, or its checkpoint restored)
       s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
       if getenv("SEQ_LOG", 0): print(f"seq slot {s.slot} unstashed ({n} tokens, from {start})", flush=True)
       return s, start, start < n
     finally:
-      # (back in the stash, then out if it's in the caches now)
-      if stashed is not None:
-        self.stashed.append(stashed)
-        if restored: self._unstash(stashed)
+      # (back in the stash if it's not in the caches now)
+      if stashed is not None and not restored: self.stashed.append(stashed)
 
   def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> int:
     """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""

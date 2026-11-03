@@ -520,10 +520,26 @@ def _zeros(*shape:int, dtype:DType=dtypes.float32, device:str|tuple[str, ...]|No
   _fill_zero(t:=_buffers(*shape, dtype=dtype, device=device, axis=axis))
   return t
 
-def _host_like(t:Tensor, axis:int, rows:int) -> Tensor:
-  """a tensor like t (its devices, split and dtype) of `rows` on axis, in the host memory of every device (allocated when used)"""
-  shape = tuple(rows if i == axis else int(x) for i, x in enumerate(t.shape))
-  return _buffers(*shape, dtype=t.dtype, device=cast(str|tuple[str, ...], t.device), axis=t.uop.axis, options=BufferSpec(host=True))
+def _host_like(specs:list[tuple[Tensor, int, int]]) -> list[Tensor]:
+  """
+  tensors like t (its devices, split and dtype) of `rows` on axis, for every (t, axis, rows): views of one buffer in the host memory of every
+  device (one allocation a device, made when used)
+  """
+  devs = to_tuple(cast(str|tuple[str, ...], specs[0][0].device))
+  locs, at = [], 0
+  for t, axis, rows in specs:
+    shape = tuple(rows if i == axis else int(x) for i, x in enumerate(t.shape))
+    local = tuple(x // len(devs) if isinstance(t.device, tuple) and i == t.uop.axis else x for i, x in enumerate(shape))
+    locs.append((t, shape, local, at))
+    at += round_up(prod(local) * t.dtype.itemsize, 4096)
+  bases = [Buffer(d, max(at, 1), options=BufferSpec(host=True)) for d in devs]
+  ret = []
+  for t, shape, local, off in locs:
+    views = [b.view(prod(local) * t.dtype.itemsize, off) for b in bases]
+    if isinstance(t.device, tuple): (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
+    u = UOp.from_buffer(mb if isinstance(t.device, tuple) else views[0], t.dtype, t.device).reshape(local)
+    ret.append(Tensor(u.unshard(t.uop.axis) if isinstance(t.device, tuple) and t.uop.axis is not None else u))
+  return ret
 
 @functools.cache
 def _freqs(dim:int, end:int, theta:float, device:str|tuple[str, ...]|None, yarn:YaRNConfig|None) -> Tensor:
@@ -3598,27 +3614,29 @@ class Transformer:
     self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if gb > 0 else 0
     if not self.stash_chunks: self.stash_entries = 0
     if not self.stash_entries: return
-    H = self.stash_chunks * C
-    def idx(b:QSABlock) -> tuple[Tensor, ...]:
-      if (ix:=b.indexer) is None: return ()
-      return (_host_like(ix.cache_k, 0, H), _host_like(ix.cache_pk, 0, H // ix.idx.kpool))
-    self._stash_kv = [(_host_like(b.cache_k, 2, H),) + idx(b) for b in qsa]
+    H, E = self.stash_chunks * C, self.stash_entries
+    kv = [[(b.cache_k, 2, H)] + ([(b.indexer.cache_k, 0, H), (b.indexer.cache_pk, 0, H // b.indexer.idx.kpool)] if b.indexer is not None else [])
+          for b in qsa]
     # (a sequence's states of its last position: the recurrent and conv ones, the hidden state of its last token. and its checkpoint's)
-    self._stash_state = [_host_like(t, 0, self.stash_entries) for b in gdn for t in (b.pool_rec, *b.pool_conv)] + \
-                        [_host_like(self.seq_spec_h, 0, self.stash_entries)] + \
-                        [_host_like(t, 0, self.stash_entries) for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
-    self._stash_kv_jits = {sv: TinyJit(functools.partial(self._stash_kv_copy, sv), capture_first=True) for sv in (True, False)}
+    states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
+             [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
+    made = iter(_host_like([x for b in kv for x in b] + [(t, 0, E) for t in states]))
+    self._stash_kv = [tuple(next(made) for _ in b) for b in kv]
+    self._stash_state = [next(made) for _ in states]
+    self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
+                           for sv in (True, False) for n in self.STASH_CALL}
     self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
-  def _stash_kv_copy(self, save:bool, row:UOp, chunk:UOp):
-    """SEQ_MOVE rows from row of every attention cache into chunk of the stash (save), or back"""
+  STASH_CALL = (16, 4, 1)  # (the chunks a call of the stash copies: a run is copied by calls of these, the most first)
+  def _stash_kv_copy(self, save:bool, chunks:int, row:UOp, chunk:UOp):
+    """chunks*SEQ_MOVE rows from row of every attention cache into the stash from chunk (save), or back (static sizes: wide loads and stores)"""
     C, pairs = self.SEQ_MOVE, []
     def rows(t:Tensor, at:UOp, m:int, axis:int) -> Tensor: return t.shrink(tuple((at, at+m) if i == axis else None for i in range(t.ndim)))
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)], self._stash_kv):
-      pairs.append((rows(st[0], chunk*C, C, 2), rows(b.cache_k, row, C, 2)))
+      pairs.append((rows(st[0], chunk*C, chunks*C, 2), rows(b.cache_k, row, chunks*C, 2)))
       if (idx:=b.indexer) is not None:
         kp = idx.idx.kpool
-        pairs += [(rows(st[1], chunk*C, C, 0), rows(idx.cache_k, row, C, 0)),
-                  (rows(st[2], chunk*(C//kp), C//kp, 0), rows(idx.cache_pk, row//kp, C//kp, 0))]
+        pairs += [(rows(st[1], chunk*C, chunks*C, 0), rows(idx.cache_k, row, chunks*C, 0)),
+                  (rows(st[2], chunk*(C//kp), chunks*(C//kp), 0), rows(idx.cache_pk, row//kp, chunks*(C//kp), 0))]
     Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
   def _stash_state_copy(self, save:bool, slot:UOp, entry:UOp, ps:UOp, pc:UOp, hrow:UOp):
     """the states of slot of a position (its rows ps of the recurrent states, pc of the conv ones, hrow of the hidden states) and its checkpoint
@@ -3640,12 +3658,16 @@ class Transformer:
             UOp.variable("stash_hrow", 0, 2*k+1).bind(hrow)]
   def _stash_kv_vars(self, row:int, chunk:int) -> list[UOp]:
     return [UOp.variable("stash_row", 0, self.seq_rows()).bind(row), UOp.variable("stash_chunk", 0, self.stash_chunks - 1).bind(chunk)]
-  def seq_stash(self, save:bool, slot:int, base:int, chunks:list[int], entry:int, pos:int, hrow:int):
+  def seq_stash(self, save:bool, slot:int, base:int, segs:list[tuple[int, int, int]], entry:int, pos:int, hrow:int):
     """
-    the sequence of slot (its region at base) of pos tokens into the stash's chunks (a chunk a SEQ_MOVE rows) and entry (its states of pos, its
-    hidden state row hrow), or back
+    the sequence of slot (its region at base) of pos tokens into the stash: its segments of chunks (a chunk SEQ_MOVE rows) (its chunk, the
+    stash's, count) and entry (its states of pos, its hidden state row hrow), or back
     """
-    for i, c in enumerate(chunks): self._stash_kv_jits[save](*self._stash_kv_vars(base + i*self.SEQ_MOVE, c))
+    for i, c, n in segs:
+      while n:
+        m = next(m for m in self.STASH_CALL if m <= n)
+        self._stash_kv_jits[(save, m)](*self._stash_kv_vars(base + i * self.SEQ_MOVE, c))
+        i, c, n = i + m, c + m, n - m
     self._stash_state_jits[save](*self._stash_state_vars(slot, entry, pos, hrow))
 
   def _seq_ckpt_copy(self, save:bool, slot:UOp, ps:UOp, pc:UOp):
@@ -3741,8 +3763,8 @@ class Transformer:
     par.append((self._seq_move_jit, lambda: self._seq_move_jit(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN))))
     if self.stash_entries:
       for sv in (True, False):
-        par += [(self._stash_kv_jits[sv], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), self._stash_kv_jits[sv])),
-                (self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv]))]
+        par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self.STASH_CALL]
+        par.append((self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv])))
     par += loads
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
     else: meanwhile(lambda j: False)
