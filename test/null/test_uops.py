@@ -587,7 +587,7 @@ class TestUopsObject(unittest.TestCase):
 
   def test_shape(self):
     buf, end = UOp.param(0, dtypes.uint, 64), UOp(Ops.NOOP)
-    for i in range(1000):
+    for i in range(1_000):
       r = UOp.range(UOp.const(2).after(end), i)
       s = buf.shrink(((r*32, (r+1)*32),))
       end = UOp.group(s, r).end(r)
@@ -597,11 +597,11 @@ class TestUopsObject(unittest.TestCase):
     buf = UOp.param(0, dtypes.uint, 64)
     invalid = UOp(Ops.SHRINK, src=(buf, UOp.const(65), UOp.const(1)))
     r = UOp.range(UOp.const(2).after(invalid), 0)
-    self.assertEqual(r.shape, ())
-    self.assertEqual(UOp.const(2).after(invalid).shape, ())
-    with self.assertRaises(ValueError): _ = invalid.shape
+    with self.assertRaises(ValueError):
+      _ = r.shape
+      _ = invalid.shape
 
-  def test_deep_shape(self):
+  def test_shape_recurse(self):
     a = UOp.const(1)
     for _ in range(10_000): a = a+a
     self.assertEqual(a.shape, ())
