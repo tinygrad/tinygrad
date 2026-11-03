@@ -1,6 +1,6 @@
 # RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
-#   SGPRs and inline constants each have their own buffer
+#   arg=0: sgpr - sgpr[0-127], inline constants[128-255], SCC=258
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
