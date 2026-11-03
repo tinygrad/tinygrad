@@ -1731,8 +1731,7 @@ F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000
 
 SGPR_CONSTS = {**{128+i:i if i<65 else 64-i for i in range(81)}, **F32_INLINE}
 
-def store_consts(wave_size:int, *sgprs:UOp):
-  values = [*SGPR_CONSTS.values(), *([0] if wave_size == 32 else [])]
+def store_consts(values:tuple[int, ...], *sgprs:UOp):
   return UOp.sink(*(s.param_like(i).index(0).store(_c(v)) for i,(s,v) in enumerate(zip(sgprs, values)))).call(*sgprs, name="store_consts")
 
 @uopfunc
@@ -1888,8 +1887,35 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   n_waves = (total_threads+wave_size-1)//wave_size
   wg = UOp.range(gx*gy*gz, 0, AxisType.LOOP, dtype=dtypes.uint64)
   wave = UOp.range(n_waves, 1, AxisType.LOOP, dtype=dtypes.int)
+  route = UOp.param(6, dtypes.int, (1,), name="route")
+  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
+  block_calls = {}
+  todo = list(regions)
+  while todo:
+    block_pc, children = todo.pop()
+    if children:
+      todo.extend(children)
+      continue
+    cond = UOp.const(True)
+    instructions = []
+    for off in cfg["blocks"][block_pc]:
+      inst = insts[off]
+      inst_st = getattr(inst, "op_name", "").lower()
+      if inst_st.startswith("s_code_end"): continue
+      call, branch_cond = instruction_call(inst, arch, renderer)
+      if branch_cond is not None: cond = branch_cond
+      if call is not None: instructions.append(call)
+    values = {_Ctx.scratch_stride:_c(scratch_size)}
+    if routed:
+      dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
+      target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
+      values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
+                    else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
+      instructions.append(lower_body(route[0].store(target).sink(), "asm_branch"))
+    if instructions: block_calls[block_pc] = (*instruction_block(instructions), values)
+  used = {b for _,bufs,_ in block_calls.values() for b in bufs}
   # alloc register and LDS buffers
-  sgpr = [UOp.alloc((n_waves,), dtypes.uint32, SGPR_COUNT+i, AddrSpace.REG) for i in range(SGPR_COUNT)]
+  sgpr = {i:UOp.alloc((n_waves,), dtypes.uint32, SGPR_COUNT+i, AddrSpace.REG) for i,p in enumerate(_Ctx.sgpr) if p in used}
   vgpr = UOp.alloc((n_waves*256*wave_size,), dtypes.uint32, 1, AddrSpace.REG)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT)*512
   lds = UOp.alloc((max(lds_size//4, 1),), dtypes.uint32, 3, AddrSpace.REG)
@@ -1897,18 +1923,17 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   accvgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   ctx = _Ctx(wave_size)
-  buffers = {**{p:(s, 1) for p,s in zip(ctx.sgpr, sgpr)}, ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
+  buffers = {**{ctx.sgpr[i]:(s, 1) for i,s in sgpr.items()}, ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
-  route = UOp.param(6, dtypes.int, (1,), name="route")
-  taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
   # set per wave registers
-  wave_sgpr = [s.shrink(((wave, wave+1),)).after(wg) for s in sgpr]
+  wave_sgpr = {i:s.shrink(((wave, wave+1),)).after(wg) for i,s in sgpr.items()}
   wave_vgpr = vgpr.shrink(((wave*256*wave_size, (wave+1)*256*wave_size),)).after(wg)
-  consts = store_consts(wave_size, *(wave_sgpr[i] for i in [*SGPR_CONSTS, *([124] if wave_size == 32 else [])]))
+  constants = {i:v for i,v in (SGPR_CONSTS | ({124:0} if wave_size == 32 else {})).items() if i in sgpr}
+  consts = store_consts(tuple(constants.values()), *(wave_sgpr[i] for i in constants))
   gidx, gidy, gidz = wg%gx, (wg//gx)%gy, wg//(gx*gy)
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   runtime_sgprs = [(0, args_ptr.cast(dtypes.uint32)), (1, (args_ptr>>32).cast(dtypes.uint32))]
@@ -1927,28 +1952,12 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
   tid = wave*wave_size+lane
   init_vgpr = wave_vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
-  init = UOp.group(init_vgpr, *(wave_sgpr[i].after(consts).index(0).store(_c(v)) for i,v in dict(runtime_sgprs).items()))
+  init = UOp.group(consts, init_vgpr, *(wave_sgpr[i].after(consts).index(0).store(_c(v)) for i,v in dict(runtime_sgprs).items() if i in sgpr))
   # construct CALL graph
   initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
-    cond = UOp.const(True)
-    instructions = []
-    for off in cfg["blocks"][block_pc]:
-      inst = insts[off]
-      inst_st = getattr(inst, "op_name", "").lower()
-      if inst_st.startswith("s_code_end"): continue
-      call, branch_cond = instruction_call(inst, arch, renderer)
-      if branch_cond is not None: cond = branch_cond
-      if call is not None: instructions.append(call)
-    values = {ctx.scratch_stride:_c(scratch_size)}
-    if routed:
-      dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
-      target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
-      values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
-                    else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
-      instructions.append(lower_body(route[0].store(target).sink(), "asm_branch"))
-    if not instructions: return end
-    body, bufs = instruction_block(instructions)
+    if block_pc not in block_calls: return end
+    body, bufs, values = block_calls[block_pc]
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
     args += [_c(block_pc, dtypes.int).after(end, *scopes)]
     params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
