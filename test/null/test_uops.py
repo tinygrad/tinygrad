@@ -592,6 +592,20 @@ class TestUopsObject(unittest.TestCase):
       s = buf.shrink(((r*32, (r+1)*32),))
       end = UOp.group(s, r).end(r)
     self.assertEqual(r.shape, ())
+    self.assertNotIn("_shape", s.__dict__)
+
+  def test_shape_does_not_visit_control_dependencies(self):
+    buf = UOp.param(0, dtypes.uint, 64)
+    invalid = UOp(Ops.SHRINK, src=(buf, UOp.const(65), UOp.const(1)))
+    r = UOp.range(UOp.const(2).after(invalid), 0)
+    self.assertEqual(r.shape, ())
+    self.assertEqual(UOp.const(2).after(invalid).shape, ())
+    with self.assertRaises(ValueError): _ = invalid.shape
+
+  def test_deep_shape(self):
+    a = UOp.const(1)
+    for _ in range(10_000): a = a+a
+    self.assertEqual(a.shape, ())
 
 class TestUOpRender(unittest.TestCase):
   def test_render_ssimplified_marg_outside_toposort(self):
