@@ -119,6 +119,18 @@ class TestAttention(unittest.TestCase):
     for t in range(4): expected[t, np.argsort(scores[t, :t+1])[-2:]] = 0.0
     np.testing.assert_allclose(indexer(x, q, 0, precompute_freqs_cis(2, 4, 10000.0)).numpy(), expected[None, None])
 
+  def test_indexer_msa(self):
+    # minimax-m3: each head selects the pools with its best max(q·k) and always its own pool
+    idx = IndexerConfig(n_heads=2, head_dim=2, top_k=4, kpool=2, norm_eps=1e-6, msa=True)
+    indexer = Indexer(self._make_config(dim=2, max_context=6, indexer=idx))
+    indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor([[1., 0.], [0., 0.], [0., 0.], [0., 1.]]), Tensor.eye(2)
+    x = Tensor([[[1., 0.], [-1., 0.], [1., 1.], [1., 1.], [-1., -1.], [-1., -1.]]])
+    indexer._init_state(x)
+    # head 0 picks the first pool by its best key (the second has the higher sum), head 1 the second, the last query keeps its own low pool
+    allowed = np.tril(np.ones((2, 6, 6)))
+    allowed[0, 4:, 2:4] = allowed[1, 4:, 0:2] = 0
+    np.testing.assert_array_equal(indexer(x, Tensor.ones(1, 6, 2), 0).numpy(), np.where(allowed, 0., -np.inf)[None])
+
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
     block = MLATransformerBlock(self._make_config(dim=2, kv_lora_rank=2, q_lora_rank=2, max_context=5, indexer=idx))
