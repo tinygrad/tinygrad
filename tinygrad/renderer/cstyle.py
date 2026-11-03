@@ -72,11 +72,11 @@ base_rewrite = PatternMatcher([
 
   # call to PROGRAM links BINARY at runtime
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{body.src[0].arg.function_name}({', '.join(f'({ctx.param_type(p)}){ctx[x.src[p.arg.slot+1]]}' for p in body.arg.params)});"),
+   f"{body.src[0].arg.function_name}({', '.join(ctx[x.src[p.arg.slot+1]] for p in body.arg.params)});"),
 
   # call to LINEAR renders the call in SOURCE
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
-   f"{', '.join(f'({ctx.param_type(p)}){ctx[x.src[s+1]]}' for s,p in [(u.arg.slot,u) for u in body.src if u.op is Ops.PARAM])});"),
+   f"{', '.join(ctx[x.src[p.arg.slot+1]] for p in body.src if p.op is Ops.PARAM)});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
