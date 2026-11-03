@@ -166,7 +166,9 @@ class CStyleLanguage(Renderer):
     tmp = ""
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, self.param_type(u, mutable)) for name,(u,mutable) in bufs]
+    buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
+                       self._render_dtype(u.dtype, addrspace=u.addrspace, mutable=mutable, override_ptr=u.addrspace != AddrSpace.ALU, shape=u._shape)+
+                       (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -272,10 +274,7 @@ class CStyleLanguage(Renderer):
 
     # NOTE: this relies on bufs dict preserving order
     return (name, kernel, list(bufs.values()))
-  def param_type(self, p:UOp, mutable=True) -> str:
-    return "".join(["volatile "*p.arg.volatile, self.var_prefix*(p.addrspace is AddrSpace.ALU),
-                    self._render_dtype(p.dtype, addrspace=p.addrspace, mutable=mutable, override_ptr=p.addrspace != AddrSpace.ALU, shape=p._shape),
-                    self.var_suffix if p.addrspace is AddrSpace.ALU else self.buffer_suffix])
+  def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
     bodies = dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL)
     inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
