@@ -93,6 +93,12 @@ class TestRawDiskBuffer(unittest.TestCase):
     pathlib.Path(tmp).unlink()
 
 class TestSafetensors(TempDirTestCase):
+  def test_column_to_cpu(self):
+    path = self.tmp("column.safetensors")
+    safe_save({"w": Tensor.arange(12).float().reshape(3, 4)}, path)
+    column = safe_load(path)["w"][:, 1]
+    self.assertEqual(column.to("CPU").tolist(), [1.0, 5.0, 9.0])
+
   def test_real_safetensors(self):
     import torch
     from safetensors.torch import save_file
