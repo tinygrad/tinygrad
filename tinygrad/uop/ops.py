@@ -1862,13 +1862,8 @@ class RewriteContext:
 @rewrite_group(new_ctx=False)
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False,
                   init_ctx:type|None=None) -> UOp:
-  if ctx is None:
-    cache_key:tuple|None = (weakref.ref(pm), weakref.ref(bpm) if bpm is not None else None, bottom_up, walk, enter_calls, init_ctx,
-                            tuple(tuple(v.value) if isinstance(v.value, list) else v.value for v in ContextVar._cache.values()))
-    # TODO: what is this?
-    try: hash(cache_key)
-    except TypeError: cache_key = None
-  else: cache_key = None
+  cache_key = (weakref.ref(pm), weakref.ref(bpm) if bpm is not None else None, bottom_up, walk, enter_calls, init_ctx,
+               tuple(tuple(v.value) if isinstance(v.value, list) else v.value for v in ContextVar._cache.values())) if ctx is None else None
   if cache_key is not None and (ref:=sink.__dict__.get("_rewrite_cache", {}).get(cache_key)) is not None and (ret:=ref()) is not None: return ret
   if init_ctx is not None:
     assert ctx is None
