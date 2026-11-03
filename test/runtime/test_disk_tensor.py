@@ -101,9 +101,9 @@ class TestSafetensors(TempDirTestCase):
 
   def test_bitcast_contiguous_to_cpu(self):
     path = self.tmp("column_contiguous.safetensors")
-    safe_save({"w": Tensor.zeros(2, 2)}, path)
+    safe_save({"w": Tensor.ones(2, 2)}, path)
     column = safe_load(path)["w"][:, :1].bitcast(dtypes.int32)
-    self.assertEqual(column.contiguous().to("CPU").tolist(), [[0], [0]])
+    self.assertEqual(column.contiguous().to("CPU").tolist(), [[1065353216], [1065353216]])
 
   def test_real_safetensors(self):
     import torch
