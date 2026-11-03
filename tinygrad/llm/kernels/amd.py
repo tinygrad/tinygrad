@@ -1230,7 +1230,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # rows of the int8 tensor cores, the extra rows sliced off)
   pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
-  if Q8_ROWS_I8[0] and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
+  # (RDNA3: more rows than share a decode kernel's weight loads, padded to the tiles of 16 of the tensor cores)
+  if not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
+    pad = round_up(tokens, 16)
+  if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device)) and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
     out = out[:, :tokens] if splits > 1 and not reduce else out[:tokens]
     return out.reshape(*((splits,) if splits > 1 and not reduce else ()), *x.shape[:-1], out_features)
@@ -3339,17 +3342,21 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv_len, max_kv_len, block_n, waves=4, group=None, shared=False,
-                                        scale=None, causal_rows=0, q_start=None, indexed=False):
+                                        scale=None, causal_rows=0, q_start=None, indexed=False, base=None, row_index=False):
   # shared: one kv head for every query head that is also the value (MLA latent), group: query heads per block. mask: additive (B, N)
   # causal_rows (prefill): the query heads are (head, token) rows of causal_rows tokens from q_start, mask: (B, tokens, N)
   # indexed: instead of the mask, the list of the keys to attend to (count last): a data dependent count of chunks
+  # base: the keys are the cache's rows from base (a sequence's region of a cache shared by sequences)
+  # row_index: every row b of q its own list index[b] (B, n+1) on the one cache (batch 1), its region from bases[b] (the source after index)
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
+  base = _unbind(base) if base is not None else None
   index = mask[0] if indexed else None
+  bases = mask[1] if row_index else None
   if index is not None:
-    mask, n_max = (), cast(int, index.shape[0]) - 1
-    valid_kv_len = index[n_max].load().cast(dtypes.weakint)
-  _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
-  _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
+    mask, n_max = (), cast(int, index.shape[-1]) - 1
+    if not row_index: valid_kv_len = index[n_max].load().cast(dtypes.weakint)
+  _, _, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
+  B, H, M, _ = cast(tuple[int, int, int, int], q.shape)
   if group is not None: H_KV = H // group
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
   G, CHUNK, DPL, WAVES, PARTIALS = H // H_KV, block_n, D // WARP_SIZE, waves, out.shape[2]
@@ -3362,6 +3369,14 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   block_bhkv, block_chunk = UOp.range(B*H_KV, 0, AxisType.GLOBAL), UOp.range(live_chunks, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   b, kv_head = block_bhkv // H_KV, block_bhkv % H_KV
+  # (the cache's batch of row b, the offset of its keys)
+  cb = UOp.const(0, dtypes.weakint) if row_index else b
+  koff = bases[b].load().cast(dtypes.weakint) if bases is not None else base if base is not None else None
+  if row_index:
+    assert index is not None
+    index = index[b]
+    valid_kv_len = index[n_max].load().cast(dtypes.weakint)
+    total_chunks = (valid_kv_len+CHUNK-1)//CHUNK
   # per-lane query fragments for every GQA head, kept packed in registers; unpacked at use
   qf = tuple(_vec_load(q[b, kv_head*G+h, 0, lane*DPL], DPL) for h in range(G))
   zerof = UOp.const(0, dtypes.float)
@@ -3384,9 +3399,10 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
     row_valids.append([key < n for n in row_len])
     # (the list past the count isn't written: clamped)
     if index is not None: key = index[key.minimum(n_max-1)].load().cast(dtypes.weakint).maximum(0).minimum(N-1)
-    kfrag = _vec_load(cache_kv[0, b, 0 if shared else kv_head, key, lane*DPL], DPL)
+    row = key if koff is None else (koff + key).minimum(N-1)
+    kfrag = _vec_load(cache_kv[0, cb, 0 if shared else kv_head, row, lane*DPL], DPL)
     # V is prefetched in the score pass so both streams are in flight together
-    vfrags[j] = tuple(valid.where(v, zerof) for v in (kfrag if shared else _vec_load(cache_kv[1, b, kv_head, key, lane*DPL], DPL)))
+    vfrags[j] = tuple(valid.where(v, zerof) for v in (kfrag if shared else _vec_load(cache_kv[1, cb, kv_head, row, lane*DPL], DPL)))
     for h in range(G):
       s = warp_reduce(sum((qf[h][i]*kfrag[i] for i in range(DPL)), UOp.const(0, dtypes.float)), full_wave=True) * scale
       if mask: s = s + (mask[0][b, row_tok[h], key.minimum(N-1)] if causal_rows else mask[0][b, key.minimum(N-1)]).load().float()
@@ -3471,14 +3487,19 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int, shared:bool=False, scale:float|None=None,
                                mask:Tensor|None=None, causal_rows:int=0, group:int=1, partials:int=48, block_n:int=64,
-                               q_start:int|UOp|None=None, index:Tensor|None=None) -> Tensor:
+                               q_start:int|UOp|None=None, index:Tensor|None=None, base:int|UOp=0, bases:Tensor|None=None) -> Tensor:
   """
   shared: the cache (1, B, 1, N, D) is the key and the value of every head (MLA latent), mask: additive (B, N) over the keys.
   causal_rows: the query heads are (head, token) rows of that many tokens from q_start, `group` of them per block, mask (B, tokens, N)
+  base: the keys are the cache's rows from base (a sequence's region). index (B, n+1) with q (B, ...): every row its own list on the one
+  cache (batch 1), its keys from bases[b]
   """
   # Carry length bindings even when the cache was populated independently of this call.
   if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
-  B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
+  if isinstance(base, UOp): cache_kv = Tensor(cache_kv.uop.after(base))
+  row_index = index is not None and index.ndim == 2
+  assert not row_index or bases is not None, "a list a row: the regions of the rows"
+  B, H, D = q.shape[0] if row_index else cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
   chunks, axis = min(partials, max_kv_len // block_n), q.uop.axis
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
@@ -3488,13 +3509,13 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   assert waves > 0, "attention head group exceeds shared memory capacity"
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n, waves=waves,
                           group=group if shared else None, shared=shared, scale=scale, causal_rows=causal_rows, q_start=q_start,
-                          indexed=index is not None)
-  extra = (index,) if index is not None else () if mask is None else (mask,)
+                          indexed=index is not None, base=None if isinstance(base, int) and base == 0 else base, row_index=row_index)
+  extra = ((index, cast(Tensor, bases)) if row_index else (index,)) if index is not None else () if mask is None else (mask,)
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, *extra, fxn=fxn)[:2]
   live = (valid_kv_len+block_n-1)//block_n
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
   # indexed: the partials of every block (the empty ones weigh nothing)
-  if index is not None: live = min((int(index.shape[0])-1+block_n-1)//block_n, chunks)
+  if index is not None: live = min((int(index.shape[-1])-1+block_n-1)//block_n, chunks)
   out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
   fxn = functools.partial(_amd_flash_decode_combine, live=live)
   return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
@@ -4998,16 +5019,19 @@ def qsa_prefill_mask(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:i
   return all_gather(mask, 0) if axis == 0 else mask
 
 
-def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_end:int|UOp, kpool:int) -> Tensor:
-  # Cache is (KV, B, N, K+V), sharded over KV heads. Compact active 32-key tiles before the tensor-core attention loop.
+def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_end:int|UOp, kpool:int, base:int|UOp=0, N:int=0) -> Tensor:
+  # Cache is (KV, B, rows, K+V), sharded over KV heads, the sequence's keys the rows from base (N of them at most: its region).
+  # Compact active 32-key tiles before the tensor-core attention loop.
   B, H, T, D = cast(tuple[int, int, int, int], q.shape)
-  N = cast(int, cache.shape[-2])
+  N = N or cast(int, cache.shape[-2])
   assert B == 1 and T % 32 == N % 32 == 0 and 64 <= D <= 256 and D % 32 == 0 and D == cache.shape[-1]//2 and BLOCK_N % kpool == 0
   ve = cast(UOp, _unbind(valid_end)) if isinstance(valid_end, UOp) else UOp.const(valid_end, dtypes.weakint)
   mask = Tensor(mask.uop.after(q_start, *([valid_end] if isinstance(valid_end, UOp) else [])))
   tiles = Tensor.custom_kernel(Tensor.empty(T//32, N//32+1, dtype=dtypes.int32, device=q.device), mask,
     fxn=functools.partial(_qsa_tiles_kernel, q_start=cast(UOp, _unbind(q_start)), valid_end=ve, kpool=kpool))[0]
-  kv = cache.transpose(0, 1)
+  # the keys and values apart: the copy of the region's valid keys (the rows past them zeros)
+  kv = cache.transpose(0, 1).shrink((None, None, (base, base + valid_end), None))
+  kv = kv.pad_to((kv.shape[0], kv.shape[1], N, kv.shape[3]))
   kv = Tensor.stack(kv[..., :D], kv[..., D:]).contiguous()
   out = Tensor.empty(B, H, T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
   fxn = functools.partial(_amd_flash_attention, q_start=q_start, valid_kv_len=valid_end, rdna4=_wmma_rdna4(q.device), kpool=kpool)
@@ -5176,12 +5200,95 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
                                 fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, kpool=kpool, shard=n))[0]
   return pool_index_shard(scores, q_start, pools, top, kpool) if n else pool_index_rows(scores, q_start, pools, top, kpool)
 
+# ******** sequences sharing the caches (each its region of rows, see Transformer.regions): rows gathered and scattered by index, the indexer's
+# scores of every sequence's own pools ********
+
+@functools.cache
+def _rows_gather_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
+  # out[r] (n, F) <- table[idx[r]] (P, F), cast to out's dtype
+  n, F = cast(tuple[int, int], out.shape)
+  P, L = cast(int, table.shape[0]), math.gcd(F, 256)
+  r, blk, lane = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(F // L, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOCAL)
+  f, row = blk * L + lane, idx[r].load().cast(dtypes.weakint).maximum(0).minimum(P-1)
+  return out[r, f].store(table[row, f].load().cast(out.dtype)).end(r, blk, lane).sink(arg=KernelInfo(name="rows_gather", opts_to_apply=()))
+
+def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None) -> Tensor:
+  """the rows idx (n,) int32 of table (P, F): (n, F) (a table split on its rows: every device's of its own)"""
+  out = Tensor.empty(int(idx.shape[0]), int(table.shape[1]), dtype=dtype or table.dtype, device=table.device)
+  return Tensor.custom_kernel(out, table, idx, fxn=_rows_gather_kernel)[0]
+
+@functools.cache
+def _rows_scatter_kernel(buf:UOp, rows:UOp, idx:UOp) -> UOp:
+  # buf[idx[r]] (P, F) <- rows[r] (n, F), cast to buf's dtype (an index out of buf's rows isn't written)
+  n, F = cast(tuple[int, int], rows.shape)
+  P, L = cast(int, buf.shape[0]), math.gcd(F, 256)
+  r, blk, lane = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(F // L, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOCAL)
+  f, row = blk * L + lane, idx[r].load().cast(dtypes.weakint)
+  return buf[row.valid((row >= 0) & (row < P)), f].store(rows[r, f].load().cast(buf.dtype)).end(r, blk, lane) \
+    .sink(arg=KernelInfo(name="rows_scatter", opts_to_apply=()))
+
+def rows_scatter(buf:Tensor, rows:Tensor, idx:Tensor) -> Tensor:
+  """rows (n, F) into the rows idx (n,) int32 of buf (P, F): buf after (split on the rows of both: every device its own)"""
+  return Tensor.custom_kernel(buf, rows.contiguous(), idx, fxn=_rows_scatter_kernel)[0]
+
+SEQ_SCORE_TILE = 256
+
+@functools.cache
+def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *, R:int, kpool:int, WG:int) -> UOp:
+  # out[g*R + r, p] (rows, P) = sum over the heads h of relu(q[g*R+r, h] . pk[bases[g]//kpool + p]) * D**-0.5, for the pools p of sequence g up
+  # to its last row's (the rows of g at positions[g]..; the others aren't written). WG workgroups a sequence loop over its tiles of pools, a
+  # thread a pool (its key in registers), the sequence's queries in LDS
+  rows, P = cast(tuple[int, int], out.shape)
+  _, H, D = cast(tuple[int, int, int], q.shape)
+  PT, G, TILE = cast(int, pk.shape[0]), rows // R, SEQ_SCORE_TILE
+  g, w, t = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(WG, 1, AxisType.GLOBAL), UOp.range(TILE, 2, AxisType.LOCAL)
+  start = positions[g].load().cast(dtypes.weakint)
+  pools = ((start + R + kpool - 1) // kpool).minimum(P)
+  tiles = (pools + TILE - 1) // TILE
+  n = R*H*D
+  ql = UOp.alloc((n,), dtypes.float, addrspace=AddrSpace.LOCAL)
+  qf = q.reshape(rows*H*D)
+  ld = [ql[(t + i*TILE).valid(t + i*TILE < n)].store(qf[g*n + (t + i*TILE).minimum(n-1)].load().float()) for i in range((n + TILE - 1) // TILE)]
+  ql = ql.after(UOp.group(*ld).barrier())
+  active = UOp.range(((tiles - w + WG - 1) // WG).maximum(0), 3, AxisType.LOOP)
+  p = (w + active * WG) * TILE + t
+  prow = (bases[g].load().cast(dtypes.weakint) // kpool + p).minimum(PT-1)
+  kv = [x for i in range(D // 8) for x in _vec_load(pk[prow, i*8], 8)]
+  stores = []
+  for r in range(R):
+    s = UOp.const(0, dtypes.float)
+    for h in range(H):
+      dot = functools.reduce(lambda a, d: a + ql[(r*H + h)*D + d].load() * kv[d], range(1, D), ql[(r*H + h)*D].load() * kv[0])
+      s = s + dot.maximum(0)
+    stores.append(out[g*R + r, p.valid(p < pools)].store(s * D**-0.5))
+  est = Estimates(2*rows*H*D*P, P*D*2*G, rows*P*4)  # (a data dependent count of tiles: an upper bound)
+  return UOp.group(*stores).end(active).end(g, w, t).sink(arg=KernelInfo(name="seq_scores", opts_to_apply=(), estimates=est))
+
+def seq_scores(q:Tensor, pk:Tensor, bases:Tensor, positions:Tensor, R:int, kpool:int, P:int) -> Tensor:
+  """
+  the indexer's scores (G*R, P) of the queries q (G*R, H, D) of G sequences (R rows each, the first at positions[g]) on their pooled keys, the
+  rows of pk (all the sequences') from bases[g]//kpool: the columns of the pools up to a sequence's last row written
+  """
+  rows = int(q.shape[0])
+  out = Tensor.empty(rows, P, dtype=dtypes.float32, device=q.device)
+  fxn = functools.partial(_seq_scores_kernel, R=R, kpool=kpool, WG=getenv("SEQ_SCORE_WG", 16))
+  return Tensor.custom_kernel(out, q.float().contiguous(), pk, bases, positions, fxn=fxn)[0]
+
+def seq_index(scores:Tensor, positions:Tensor, top:int, kpool:int) -> Tensor:
+  """
+  the lists (G*R, top*kpool+kpool+1) of the keys (positions of its sequence) of every query row of seq_scores' scores (the rows of G
+  sequences, the first at positions[g]): its top pools, its tail, the count last
+  """
+  rows, zero = int(scores.shape[0]), UOp.const(0, dtypes.weakint)
+  out = Tensor.empty(rows, top*kpool + kpool + 1, dtype=dtypes.int32, device=scores.device)
+  return Tensor.custom_kernel(out, scores, positions, fxn=functools.partial(_pool_index_kernel, q_start=zero, pools=zero, k=top, kpool=kpool))[0]
+
 KDA_WAVES = 8
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
                        dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0, G:int=1,
-                       positions:UOp|None=None, S:int=0, SC:int=0) -> UOp:
+                       positions:UOp|None=None, S:int=0, SC:int=0, slots:UOp|None=None) -> UOp:
   # row0: the tokens are rows row0.. of the inputs (a row of batched decoding: the inputs of all of them, not a copy of its own)
   # G: groups (batched decoding: a sequence each, its tokens the rows g*T.., its states the S of g*S.. in the states, its start position the
   # g-th of positions)
@@ -5208,9 +5315,11 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   ghr, wave, lane = UOp.range(G*heads*max(R, 1), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   grp, hr = (ghr // (heads*max(R, 1)), ghr % (heads*max(R, 1))) if G > 1 else (UOp.const(0, dtypes.weakint), ghr)
   if positions is not None: start_pos = positions[grp].load().cast(dtypes.weakint)
+  # (slots: the states of group g are slot slots[g]'s, else g's)
+  slot = slots[grp].load().cast(dtypes.weakint) if slots is not None else grp
   rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
-  rpc, wpcs, cbase = start_pos % SC, [(start_pos + t + 1) % SC for t in range(T)], grp*SC
-  sbase, prow = grp*S, [grp*T + row0 + t for t in range(T)]  # (the group's states and the rows of its tokens)
+  rpc, wpcs, cbase = start_pos % SC, [(start_pos + t + 1) % SC for t in range(T)], slot*SC
+  sbase, prow = slot*S, [grp*T + row0 + t for t in range(T)]  # (the group's states and the rows of its tokens)
   qrows, krows, vrows, gate_rows, alpha_rows, beta_rows = ([x[r] for r in prow] for x in (pq, pk, pv, gate, alpha, beta))
   hr = ghr if G == 1 else hr
   h, chunk = (hr // R, hr % R) if R else (hr, UOp.const(0, dtypes.weakint))
@@ -5292,7 +5401,7 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
-               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0, calls_out:list[UOp]|None=None) -> Tensor:
+               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0, calls_out:list[UOp]|None=None, slots:Tensor|None=None) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
   are p%S: the ones of start_pos are read, the ones after every token written (T < S). calls_out: the kernel appended (a later write of
@@ -5310,12 +5419,16 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   z = Tensor.empty(1, G*T, heads*V, dtype=dtypes.float if R else dtypes.half, device=state.device, axis=axis)
   # the states are written in place
   inplace = tuple(Tensor(s.uop.after(start_pos.uop)) for s in (state, *conv_states))
-  srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm) + ((positions,) if positions is not None else ())
+  assert slots is None or positions is not None, "the slots of groups"
+  extra = ((positions,) if positions is not None else ()) + ((slots,) if slots is not None else ())
+  srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm) + extra
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  pos_param = params[-1] if positions is not None else None
-  call = _kda_decode_kernel(*(params[:-1] if positions is not None else params), cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
-                            pos_param, S, SC).call(*contig)
+  nx = len(extra)
+  pos_param = params[len(params)-nx] if positions is not None else None
+  slot_param = params[-1] if slots is not None else None
+  call = _kda_decode_kernel(*params[:len(params)-nx], cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
+                            pos_param, S, SC, slot_param).call(*contig)
   out = Tensor(contig[0].after(call))
   if calls_out is not None: calls_out.append(call)
   if not R: return out

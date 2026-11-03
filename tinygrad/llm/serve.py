@@ -510,7 +510,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     sys.setswitchinterval(getenv("SWITCH_INTERVAL", 0.0005))
     # the model runs here, not on a thread of its own: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
     threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
-    self.schedule()
+    if callable(f:=getattr(self.model, "seqs_supported", None)) and f() and getenv("SEQS", 1): self.schedule_seqs()
+    else: self.schedule()
 
   # ** the requests' tokens and their end
   def emit(self, req:Request, tok:int) -> bool:
@@ -630,8 +631,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     return bool(self.slots) and getenv("HOST_STASH", 0.0) > 0 and bool(getenv("SLOT_HOST", 1))
   def keeps(self) -> bool:
-    """conversations are kept past the model's (in slots, or in host memory: HOST_STASH)"""
-    return bool(self.slots) or getenv("HOST_STASH", 0.0) > 0
+    """conversations are kept past the model's (in slots, or in host memory: HOST_STASH, or the sequences sharing its caches)"""
+    return bool(self.slots) or getenv("HOST_STASH", 0.0) > 0 or hasattr(self, "engine")
   def host_save(self, tokens:list[int]):
     """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
     model = self.model
@@ -672,7 +673,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def kept(self) -> list[list[int]]:
     """the kept conversations' tokens: the model's, the slots', the host's"""
     model = c if isinstance(c:=getattr(self.model, "_cached_tokens", []), list) else []
-    return [list(model)] + [t for t, _ in list(self.stash.values())] + [e.tokens for e in list(self.host)]
+    # (sequences sharing the caches: every resident one's, and its checkpoint's)
+    seqs = [t for s in list(getattr(getattr(self, "engine", None), "seqs", [])) for t in (s.tokens, s.tokens[:s.ckpt])]
+    return [list(model)] + [t for t, _ in list(self.stash.values())] + [e.tokens for e in list(self.host)] + seqs
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation (the model's, or one in a slot) as its text but not its tokens (the model's reply
@@ -1029,6 +1032,76 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       _close(g)
       # (its positions and the drafts past them)
       self.main_writes(max(len(ids) + len(req.generated), len(getattr(model, "_cached_tokens", []))) + 64)
+
+  # ** sequences sharing the model's caches (Transformer.seqs_supported): continuous batching
+  def schedule_seqs(self):
+    """
+    every request has a sequence of its own (the resident one its prompt continues: an agent's turn is prefilled from its last one), prefilled
+    when it comes, then decoded with all the others decoding (a step of speculative decoding of every one at once, see Transformer.seq_step)
+    """
+    from tinygrad.llm.engine import SeqEngine, Seq
+    eng = self.engine = SeqEngine(self.model)
+    active: dict[Seq, Request] = {}
+    pending: list[Request] = []
+    k = self.model.config.spec_drafts
+    while True:
+      try:
+        while not active and not pending:
+          try: pending.append(self.waiting.get(timeout=0.2))
+          except queue.Empty: pass
+        while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
+        pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
+        self.inflight = len(active) + len(pending)
+        # the waiting requests join (prefilled one at a time, the others wait for it)
+        while pending and len(active) < eng.max_active:
+          req = pending[0]
+          if (got:=eng.take(req.ids, req.max_tokens or 0)) is None: break
+          pending.pop(0)
+          s, start, restore = got
+          req.cache_start = start
+          self.miss_log(req.ids, start)
+          st = time.perf_counter()
+          try: first = eng.prefill(s, req.ids, start, restore, (req.temperature, req.top_p))
+          except Exception as e:
+            traceback.print_exc()
+            eng.seqs.remove(s)
+            self.finish(req, e)
+            continue
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - st
+          if getenv("SEQ_LOG", 0):
+            stderr_log(f"seq slot {s.slot} base {s.base} cap {s.cap}: {len(req.ids)-start} of {len(req.ids)} prefilled from {start}"
+                       f"{' (checkpoint)' if restore else ''} in {time.perf_counter()-st:.3f}s, waited {st-req.st:.3f}s\n")
+          if self.emit(req, first): active[s] = req
+          else: eng.stop(s, len(s.tokens))
+        if not active: continue
+        seqs = list(active)
+        st = time.perf_counter()
+        outs = eng.step(seqs)
+        self.stats.step_time += time.perf_counter() - st
+        for s, toks in zip(seqs, outs):
+          req = active[s]
+          req.steps += 1
+          for i, t in enumerate(toks):
+            if not self.emit(req, t):
+              # (its tokens up to this one: the ones after it aren't the conversation's)
+              eng.stop(s, len(s.tokens) - (len(toks) - 1 - i))
+              del active[s]
+              break
+          else:
+            if not eng.room(s, len(s.tokens) + 2*(k+1)):
+              req.finish_reason = "length"
+              self.finish(req)
+              eng.stop(s, len(s.tokens))
+              del active[s]
+        self.stats.step(len(active), len(pending))
+      except KeyboardInterrupt: raise
+      except Exception as e:
+        # (a step that failed: its requests fail, the sequences are dropped)
+        traceback.print_exc()
+        for s, req in active.items():
+          self.finish(req, e)
+          if s in eng.seqs: eng.seqs.remove(s)
+        active = {}
 
   def schedule(self):
     model, slots, k = self.model, self.slots, self.spec

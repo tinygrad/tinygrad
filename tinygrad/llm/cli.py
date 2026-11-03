@@ -214,7 +214,10 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
+    with Context(DEBUG=max(DEBUG.value, 1)):
+      # (sequences sharing the caches, served batched: their jits, see Transformer.seq_warmup)
+      if args.serve and model.seqs_supported() and getenv("SEQS", 1): model.seq_warmup()
+      else: model.warmup()
 
   # start server
   # (a request's top_p without one: TOP_P, else the model's recommended one)

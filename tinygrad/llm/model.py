@@ -13,7 +13,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
-  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, \
+  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes
 from tinygrad.uop.ops import resolve, Ops
@@ -854,7 +854,8 @@ class FFNBlock:
       # (batched decoding: a row a selection of a slice, in half as the grouped experts' (their weighted sum in float))
       # (the activation computed by the kernel that quantizes it: custom kernel inputs are inlined)
       x_down = self.ffn_down_exps(sel, act if INLINE_ACT else act.contiguous(),
-                                  dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices else dtypes.float32)
+                                  dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices and
+                                  (_seq_batch[0] is None or getenv("SEQ_HALF_DOWN", 0)) else dtypes.float32)
       ws = weighted_sum(x_down, probs) if _batch_rows[0] is not None else None
       out = ws if ws is not None else (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
@@ -1107,6 +1108,32 @@ class TransformerBlock(FFNBlock):
 
 # set while a call whose context the indexer's top_k covers is traced (its jit): the qwen sparse attention attends all the keys (see QSABlock)
 _qsa_dense:list[bool] = [False]
+# the first row of the sequence's region of the qwen sparse attention's caches (shared by sequences, see Transformer.regions) while its call is
+# traced: a bound variable (or 0), a multiple of REGION_ALIGN
+_seq_base:list[UOp|int] = [0]
+REGION_ALIGN = 2048
+
+@dataclass(frozen=True)
+class SeqBatch:
+  """
+  a step of G sequences sharing the caches (Transformer.forward_seqs): R rows of every one, its state slot, the first row of its region of the
+  caches, the position of its first row (int32 tensors (G,) of the devices)
+  """
+  G:int; R:int; slots:Tensor; bases:Tensor; positions:Tensor # noqa: E702
+  def _rows(self, t:Tensor) -> Tensor: return t.reshape(self.G, 1).expand(self.G, self.R).reshape(-1)
+  @property
+  def row_positions(self) -> Tensor:
+    """(G*R,) the position of every row"""
+    ar = Tensor.arange(self.R, dtype=dtypes.int32).reshape(1, self.R).expand(self.G, self.R).reshape(-1)
+    return (self._rows(self.positions) + ar.to(self.positions.device)).contiguous()
+  @property
+  def row_bases(self) -> Tensor: return self._rows(self.bases).contiguous()
+  @property
+  def row_phys(self) -> Tensor:
+    """(G*R,) the row of the caches of every row"""
+    return (self.row_positions + self.row_bases).contiguous()
+# (set while a step of sequences sharing the caches is traced)
+_seq_batch:list[SeqBatch|None] = [None]
 
 def _rope(x:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
   """half-split rope of x (..., d) with cos and sin (..., d/2) broadcast to it"""
@@ -1138,9 +1165,11 @@ class QSAIndexer:
 
   def _init_state(self, x:Tensor):
     if hasattr(self, "cache_k"): return
-    # every token's key, and the pooled keys (a call pools the pools of its tokens: the ones before them are cached)
-    self.cache_k = Tensor.zeros(self.max_context, self.idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
-    self.cache_pk = Tensor.zeros(self.max_context // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
+    # every token's key, and the pooled keys (a call pools the pools of its tokens: the ones before them are cached). the rows of every sequence's
+    # region (see Transformer.regions), REGION_ALIGN more than a context: the region of the padding sequences of a step
+    rows = self.max_context + REGION_ALIGN
+    self.cache_k = Tensor.zeros(rows, self.idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
+    self.cache_pk = Tensor.zeros(rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device).contiguous()
 
   def _pooled(self, keys:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
     """keys (..., pools, kpool, D): the pooled keys (..., pools, D), roped with cos and sin (pools, rope/2) of the pools' first positions"""
@@ -1172,22 +1201,31 @@ class QSAIndexer:
     q = self._queries(x[0], *qf.chunk(2, dim=-1))
     if isinstance(Tq, int) and Tq >= 32:
       # many queries: the heads' scores of all the pools (a static count: the pools past the last token's aren't seen) on the tensor cores
-      sc = q.reshape(Tq * idx.n_heads, idx.head_dim).half().contiguous().matmul(pk.T, dtype=dtypes.float).contiguous()
+      sc = q.reshape(Tq * idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
       return sc.reshape(Tq, idx.n_heads, -1).relu().sum(1).shrink((None, (0, pools))) * idx.head_dim**-0.5, pools
-    sc = (q.transpose(0, 1) @ pk.shrink(((0, pools), None)).float().T).relu().sum(0) * idx.head_dim**-0.5  # (Tq, pools)
+    sc = (q.transpose(0, 1) @ pk.float().T).relu().sum(0) * idx.head_dim**-0.5  # (Tq, pools)
     return sc.contiguous(), pools
 
+  def _static(self, pk:Tensor) -> Tensor:
+    """the pooled keys of a sequence (pools, D) as a static (max_context//kpool, D) copy (zeros past them)"""
+    return pk.pad_to((self.max_context // self.idx.kpool, self.idx.head_dim)).contiguous()
+
   def update(self, x:Tensor, start_pos:int|UOp, T:int|UOp, freqs:Tensor) -> tuple[Tensor, int|UOp]:
-    """the keys of the T tokens of x at start_pos and their pools cached: the pooled keys (after) and the count of pools up to the last token's"""
-    idx, kp = self.idx, self.idx.kpool
-    S = start_pos + T
-    cache = Tensor(self.cache_k.uop.after(self.cache_k[start_pos:S].uop.store(self._proj(self.k_proj, x[0])[:T].half().uop)))
+    """
+    the keys of the T tokens of x at start_pos and their pools cached (the sequence's region, from _seq_base): the pooled keys (pools, D) of the
+    sequence (after) and that count of pools up to the last token's
+    """
+    idx, kp, b = self.idx, self.idx.kpool, _seq_base[0]
+    S, pb = start_pos + T, b // kp
+    keys = self._proj(self.k_proj, x[0])[:T].half()
+    cache = Tensor(self.cache_k.uop.after(self.cache_k.shrink(((b+start_pos, b+S), None)).uop.store(keys.uop)))
     # the pools of the tokens (the first one's tokens before them are cached), from the cached keys
     first, new = start_pos // kp, (start_pos % kp + T + kp - 1) // kp
     pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].shrink(((first, first + new), None))
-    pk_new = self._pooled(cache.reshape(-1, kp, idx.head_dim).shrink(((first, first + new), None, None)), *pf.chunk(2, dim=-1))
-    pk = Tensor(self.cache_pk.uop.after(self.cache_pk.shrink(((first, first + new), None)).uop.store(pk_new.half().uop)))
-    return pk, (S + kp - 1) // kp
+    pk_new = self._pooled(cache.reshape(-1, kp, idx.head_dim).shrink(((pb + first, pb + first + new), None, None)), *pf.chunk(2, dim=-1))
+    pk = Tensor(self.cache_pk.uop.after(self.cache_pk.shrink(((pb + first, pb + first + new), None)).uop.store(pk_new.half().uop)))
+    pools = (S + kp - 1) // kp
+    return pk.shrink(((pb, pb + pools), None)), pools
 
   def mask(self, x:Tensor, start_pos:int|UOp, T:int|UOp, freqs:Tensor) -> Tensor:
     """the mask (1, 1, Tq, S) of the keys every query sees"""
@@ -1204,7 +1242,7 @@ class QSAIndexer:
     xx = x[0]
     if isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
     q = self._queries(xx, *qf.chunk(2, dim=-1))
-    sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(pk.T, dtype=dtypes.float).contiguous()
+    sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
     scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
     return qsa_prefill_mask(scores, start_pos, pools, idx.top_k//idx.kpool, idx.kpool)
 
@@ -1255,6 +1293,7 @@ class QSABlock(TransformerBlock):
     return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, H * hd) * gate.sigmoid())
 
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
+    if (sb:=_seq_batch[0]) is not None: return self._attention_seqs(x, sb)
     if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
     if T is not None: return self._attention_rows(x, start_pos, T)
     # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
@@ -1281,23 +1320,27 @@ class QSABlock(TransformerBlock):
       elif isinstance(Tq, int) and Tq <= getenv("QSA_PICKS_ROWS", 8) and self._flash(x) and isinstance(start_pos, UOp) and getenv("QSA_PICKS", 1):
         picks = self.indexer.picks(x, start_pos, T, self.freqs_cis)
       else: mask = self.indexer.mask(x, start_pos, T, self.freqs_cis)
+    b = _seq_base[0]  # (the sequence's region of the cache)
     if not self._flash(x):
       # (the generic path: the cache's halves are the keys and the values)
-      store = self.cache_k[:, :, start_pos:start_pos+T].uop.store(k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype).uop)
-      cache = Tensor(self.cache_k.uop.after(store))[:, :, :start_pos+T].transpose(0, 1).float()
+      rows = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype)
+      store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(rows.uop)
+      cache = Tensor(self.cache_k.uop.after(store)).shrink((None, None, (b, b+start_pos+T), None)).transpose(0, 1).float()
       causal = Tensor.full((1, 1, Tq, start_pos+T), float("-inf")).triu(start_pos+1)
       attn = q.scaled_dot_product_attention(cache[..., :hd], cache[..., hd:], attn_mask=causal if mask is None else causal + mask, enable_gqa=True)
       return self._out_gated(attn, gate)
     k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
-    cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T].uop.store(k_store.cast(self.cache_k.dtype).uop)))
+    store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(k_store.cast(self.cache_k.dtype).uop)
+    cache = Tensor(self.cache_k.uop.after(store))
     if tile_mask is not None:
-      return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool), gate)
+      return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool,
+                                                base=b, N=N), gate)
     if upd is not None and isinstance(Tq, int) and Tq >= 32 and Tq % 32 == 0 and self.indexer is not None and getenv("QSA_FLASH_PREFILL", 1) and \
        (getenv("QSA_FLASH_MTP", 1) or not isinstance(self, QwenMTPBlock)):
       # (a chunk of a prompt the top_k covers: its keys are the first top_k positions of the cache. their keys and values apart, the tensor
       # cores' flash attention of the GQA heads)
       top = self.indexer.idx.top_k
-      kvc = Tensor(cache.uop.after(upd.uop))[:, :, :top].transpose(0, 1)  # (B, KV, top, 2*hd)
+      kvc = Tensor(cache.uop.after(upd.uop)).shrink((None, None, (b, b+top), None)).transpose(0, 1)  # (B, KV, top, 2*hd)
       kv = Tensor.stack(kvc[..., :hd], kvc[..., hd:]).contiguous()
       if (fa:=flash_attention_rows(q, kv, start_pos, start_pos+T)) is not None: return self._out_gated(fa, gate)
     latent, q, scale = cache.unsqueeze(2), q.cat(q.zeros_like(), dim=-1), hd**-0.5
@@ -1305,14 +1348,56 @@ class QSABlock(TransformerBlock):
     if picks is not None:
       # (a few queries (the drafts of speculative decoding): every one on the keys of its list, a decode each)
       attn = Tensor.cat(*[flash_attention_decode(q[:, :, r:r+1].half(), latent, start_pos+T, N, shared=True, scale=scale,
-                                                 index=picks[r].contiguous()) for r in range(Tq)], dim=2)
+                                                 index=picks[r].contiguous(), base=b) for r in range(Tq)], dim=2)
     elif Tq == 1:
       if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
-      attn = flash_attention_decode(q.half(), latent, start_pos+T, N, shared=True, scale=scale, mask=mask)
+      attn = flash_attention_decode(q.half(), latent, start_pos+T, N, shared=True, scale=scale, mask=mask, base=b)
     else:
       if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
+      # (the region's keys: a copy of them from its first row)
+      if not (isinstance(b, int) and b == 0):
+        latent = latent.shrink((None, None, None, (b, b+start_pos+T), None))
+        latent = latent.pad_to(latent.shape[:3] + (N,) + latent.shape[4:]).contiguous()
       attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, N, scale, mask)
     return self._out_gated(attn[..., hd:], gate)
+
+  def _attention_seqs(self, x:Tensor, sb:SeqBatch) -> Tensor:
+    """
+    a step of G sequences sharing the caches (each its region of rows from its base): R rows of every one from its position, every query on
+    the keys of its region its indexer picks (every key before it with a context of top_k or less)
+    """
+    assert self.indexer is not None and self._flash(x), "sequences sharing the caches: the indexer's and the flash kernels"
+    G, R, hd, N = sb.G, sb.R, self.config.head_dim, int(self.cache_k.shape[2])
+    rows, idx, ic = G*R, self.indexer, self.indexer.idx
+    kp = ic.kpool
+    pos, phys = sb.row_positions, sb.row_phys
+    freqs = rows_gather(self.freqs_cis, pos)  # (rows, rope)
+    cos, sin = (f.reshape(1, 1, rows, -1) for f in freqs.chunk(2, dim=-1))
+    q, gate, k, v = self._qkv(x, cos, sin)
+    # the keys and values of the rows into their rows of the cache (a device's of its KV head)
+    kv = k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*hd).cast(self.cache_k.dtype)
+    cache = rows_scatter(self.cache_k.reshape(-1, 2*hd), kv, phys).reshape(self.cache_k.shape)
+    # the indexer: the keys of the rows, then the pools they're in (NP from a sequence's first row's, the ones past its last row's are
+    # incomplete: never picked, made again when they are) pooled from the cached keys
+    ck = rows_scatter(idx.cache_k, idx._proj(idx.k_proj, x[0]).half(), phys)
+    NP = (R - 1) // kp + 2
+    pools = ((sb.positions // kp).reshape(G, 1) + Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP).to(x.device)).reshape(-1)  # (G*NP,)
+    pbase = sb.bases.reshape(G, 1).expand(G, NP).reshape(-1) // kp
+    krows = (((pbase + pools) * kp).reshape(-1, 1) + Tensor.arange(kp, dtype=dtypes.int32).reshape(1, kp).to(x.device)).reshape(-1)
+    pkeys = rows_gather(ck, krows.contiguous()).reshape(G*NP, kp, ic.head_dim)
+    pf = rows_gather(self.freqs_cis, (pools * kp).contiguous())
+    pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
+    pk = rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous())
+    # every query's scores of its sequence's pools, the lists of the keys it sees
+    iq = idx._queries(x[0], *(f.reshape(rows, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (rows, H, D)
+    scores = seq_scores(iq, pk, sb.bases, sb.positions, R, kp, self.config.max_context // kp)
+    picks = seq_index(scores, sb.positions, ic.top_k // kp, kp)
+    # every row its own list of the keys of its region: [q|0] on the latent [k|v] rows (the second half of the output is the attention's)
+    qr = q.permute(2, 1, 0, 3)  # (rows, H, 1, hd)
+    latent = Tensor(cache.uop.after(pk.uop)).unsqueeze(2)
+    attn = flash_attention_decode(qr.cat(qr.zeros_like(), dim=-1).half(), latent, N, N, shared=True, scale=hd**-0.5, index=picks,
+                                  bases=sb.row_bases)
+    return self._out_gated(attn[..., hd:].permute(2, 1, 0, 3), gate)
 
   def _attention_batch(self, x:Tensor, groups:list[tuple[UOp, int]]) -> Tensor:
     """batched decoding: a row a sequence at its position, its caches in its slot (slot g the group g's), one kernel for all of them"""
@@ -1362,7 +1447,8 @@ class QSABlock(TransformerBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
-      KV, N, D = self.config.n_kv_heads, self.config.max_context, 2*self.config.head_dim
+      # (the rows of every sequence's region, see QSAIndexer._init_state)
+      KV, N, D = self.config.n_kv_heads, self.config.max_context + REGION_ALIGN, 2*self.config.head_dim
       # (zeroed: the flash kernels read whole tiles past the valid region)
       if isinstance(x.device, tuple): self.cache_k = Tensor.empty(KV, 1, N, D, dtype=dtypes.half, device=x.device, axis=0).zeros_like().contiguous()
       else: self.cache_k = Tensor.zeros(KV, 1, N, D, dtype=dtypes.half, device=x.device).contiguous()
@@ -1485,6 +1571,7 @@ class Indexer:
 
 class MLATransformerBlock(FFNBlock):
   _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: see Transformer._aliased)
+  pool_k:Tensor  # (batched decoding: the slots' caches, see _init_slots)
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
@@ -1748,6 +1835,18 @@ class GatedDeltaNetBlock(FFNBlock):
     """
     ple, (B, Tq) = self.ple, x.shape[:2]
     g, inp = ple.gated(x, emb)
+    if (sb:=_seq_batch[0]) is not None:
+      # sequences sharing the caches: R rows of every one from its position, its state of the position read from its slot, the ones after
+      # every row written (a step's rows past the ones accepted are taken back)
+      G, R, SC = sb.G, sb.R, int(self.slot_conv[0][3].shape[0])
+      assert R < SC, "the states of the rows and the one before"
+      pool = self.pool_conv[3].reshape(self.pool_conv[3].shape[0], ple.hist, -1)
+      before = slot_gather(pool, sb.slots, sb.positions, SC, dtypes.float)  # (G, hist, width)
+      window = (sb.positions.reshape(G, 1, 1) > 0).where(before, 0).cat(inp.reshape(G, R, -1).float(), dim=1).contiguous()
+      effects = [slot_scatter(pool, window, sb.slots, Tensor.full((G,), r+1, dtype=dtypes.int32).to(x.device).contiguous(), SC, shift=1,
+                              starts=sb.positions) for r in range(R)]
+      conv = Tensor(ple.conv(window, R).contiguous().uop.after(*[e.uop for e in effects])).reshape(B, Tq, -1)
+      return g + conv.unflatten(-1, (ple.count, ple.dim))
     if (groups:=_batch_rows[0]) is not None:
       # batched decoding: a row a sequence (its slot g the group g), its state of its position read from the slot, the one after written
       assert all(t == 1 for _, t in groups) and _batch_prefill[0] is None, "batched n-gram embeddings: a token a sequence"
@@ -1861,9 +1960,12 @@ class GatedDeltaNetBlock(FFNBlock):
     # groups of the same size: a kernel for all of them (their states in the pools, their positions in a tensor)
     if len({T for _, T in groups}) == 1 and getenv("KDA_GROUPS", 1):
       S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), groups[0][1]
+      # (sequences sharing the caches: their slots)
+      sb = _seq_batch[0]
       z = kda_decode(self.pool_rec, self.pool_conv[:3], projs, weights, gate, alpha, beta, self._dt_ch, self.ssm_a,
                      unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
-                     positions=_group_positions(groups, self.pool_rec.device), groups=len(groups), S=S, SC=SC)
+                     positions=sb.positions if sb is not None else _group_positions(groups, self.pool_rec.device), groups=len(groups), S=S, SC=SC,
+                     slots=sb.slots if sb is not None else None)
       return self.ssm_out(z)
     # (every row's kernel reads its row of the inputs)
     starts = list(itertools.accumulate((t for _, t in groups), initial=0))
@@ -1873,7 +1975,7 @@ class GatedDeltaNetBlock(FFNBlock):
           for g, (pos, T) in enumerate(groups)]
     return self.ssm_out(zs[0].cat(*zs[1:], dim=1))
 
-  def _init_slots(self, n:int, ctx:int):
+  def _init_slots(self, n:int, ctx:int, half:bool|None=None):
     """
     the states of n sequences of batched decoding (one slot each): S of each state, the one of a position p is p%S (see slot_states)
     """
@@ -1882,7 +1984,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # (in one buffer of every device: slot_store writes what a step reads)
     # (in float as the model's: a step reads and writes it, in half its rounding adds up over a long reply. in half for many slots
     # (SLOT_STATE_HALF, default past 8): their memory, a long context's model and 32 slots of it don't fit)
-    half = getenv("SLOT_STATE_HALF", -1) == 1 or (getenv("SLOT_STATE_HALF", -1) == -1 and n > 8)
+    if half is None: half = getenv("SLOT_STATE_HALF", -1) == 1 or (getenv("SLOT_STATE_HALF", -1) == -1 and n > 8)
     self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]), dtypes.half if half else None)
     pools = [_slot_pool(n, c, (SC, *c.shape[1:])) for c in self.conv_states]
     self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[i] for _, slots in pools] for i in range(n)]
@@ -2060,8 +2162,8 @@ class QwenMTPBlock(QSABlock):
     Tq = x.shape[1]
     freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
     k, v = self._kv(x, *(f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1)))
-    kv = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype)
-    deps = [self.cache_k[:, :, start_pos:start_pos+T].uop.store(kv.uop)]
+    kv, b = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype), _seq_base[0]
+    deps = [self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(kv.uop)]
     if self.indexer is not None: deps.append(self.indexer.update(x, start_pos, T, self.freqs_cis)[0].uop)
     return Tensor(self.cache_k.uop.after(*deps))
 
@@ -2081,7 +2183,7 @@ class QwenMTPBlock(QSABlock):
     freqs = self.freqs_cis.shrink(((pos, pos+1), None)).reshape(1, 1, 1, -1)
     q, gate, _, _ = self._qkv(mixed[:, row:row+1], *freqs.chunk(2, dim=-1))
     attn = flash_attention_decode(q.cat(q.zeros_like(), dim=-1).half(), cache.unsqueeze(2), pos+1,
-                                  self.config.max_context, shared=True, scale=hd**-0.5)
+                                  self.config.max_context, shared=True, scale=hd**-0.5, base=_seq_base[0])
     out = self._out_gated(attn[..., hd:], gate)
     x = xs[:, row:row+1] + out.unsqueeze(2) * (inj[:, row:row+1].sigmoid()*2).unsqueeze(-1)
     return self.hc_ffn(x, self._feed_forward, self.ffn_norm)
@@ -2207,13 +2309,14 @@ class Transformer:
   def _ple_rows_dev(self, window:Tensor) -> Tensor:
     """
     window (W,) the tokens of positions p0-(n-1).. (EOS before the start): the packed rows (W-(n-1), heads*rb) of the n-grams ending at p0..,
-    hashed and gathered on the devices
+    hashed and gathered on the devices. (G, W): the windows of G sequences, their rows one after another
     """
     ple = unwrap(self.config.ple)
     self._ple_dev_init()
-    n, H, W = len(ple.multipliers), len(ple.vocab_sizes), int(window.shape[0])
+    if window.ndim == 1: window = window.unsqueeze(0)
+    n, H, W = len(ple.multipliers), len(ple.vocab_sizes), int(window.shape[1])
     T = W - (n-1)
-    cols = [window[n-1-i:n-1-i+T].cast(dtypes.int64) for i in range(n)]  # t[p-i]
+    cols = [window[:, n-1-i:n-1-i+T].reshape(-1).cast(dtypes.int64) for i in range(n)]  # t[p-i]
     ctx, seen = [cols[0]], None
     for i in range(1, n):
       seen = (cols[i] == ple.eos) if seen is None else seen | (cols[i] == ple.eos)
@@ -2234,8 +2337,16 @@ class Transformer:
     q, nb = _GGML_QUANT[ple.ggml_type]
     return ggml_data_to_tensor(rows.flatten(), int(prod(rows.shape)) // nb * q, ple.ggml_type).reshape(B, T, -1).float()
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
-    x = emb = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> Tensor:
+    """base: the first row of the sequence's region of the caches (and of the token buffer), see regions"""
+    _seq_base[0] = base
+    try: return self._forward(tokens, start_pos, temperature, base)
+    finally: _seq_base[0] = 0
+
+  def _forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp) -> Tensor:
+    # (a view of the token buffer from a variable base: copied, the lookup of the embedding's rows of a view at two variables is a reduce over
+    # the vocabulary)
+    x = emb = self.token_embd((tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     ple = None
     if (pc:=self.config.ple) is not None:
@@ -2243,7 +2354,7 @@ class Transformer:
       width, R, n = len(pc.vocab_sizes) * self._ple_rb, int(x.max_shape[1]), len(pc.multipliers)
       if self._ple_dev() and (buf:=getattr(self, "_token_buf", None)) is not None and tokens.uop.base is buf.uop.base:
         # (the tokens of the rows and the n-1 before them from the token buffer, EOS before the start)
-        win = buf.pad(((0, 0), (n-1, 0)), value=pc.eos)[0].shrink(((start_pos, start_pos + R + n-1),))
+        win = self._token_window(buf, base, start_pos, R + n-1)
         ple = self._ple_emb(self._ple_rows_dev(win).unsqueeze(0))
       else: ple = self._ple_emb(self._ple_buf.reshape(-1, width).shrink(((start_pos, start_pos + R), None)).unsqueeze(0))
     # a symbolic chunk with hyper-connections runs every block on static padded rows (their real count is T), sliced at the end
@@ -2286,8 +2397,19 @@ class Transformer:
     q8_quantize_cache_clear()  # don't keep the graph alive
     # the tokens are a view of generate's token buffer: the sampled token goes after them unless that is a prompt token (chunked prefill)
     if (buf:=getattr(self, "_token_buf", None)) is not None and tokens.uop.base is buf.uop.base:
-      tok = (dst:=buf[:, (nxt:=start_pos + tokens.shape[1]):nxt+1]).assign((dst < 0).where(tok.cast(buf.dtype), dst))
+      tok = (dst:=buf[:, (nxt:=base + start_pos + tokens.shape[1]):nxt+1]).assign((dst < 0).where(tok.cast(buf.dtype), dst))
     return tok
+
+  def _token_window(self, buf:Tensor, base:int|UOp, start:int|UOp, n:int) -> Tensor:
+    """
+    the n tokens (n,) of the sequence of the region at base from position start-(n_gram-1) in the token buffer buf (1, rows): EOS before its
+    first (a region's rows before it are another's)
+    """
+    ple = unwrap(self.config.ple)
+    k = len(ple.multipliers) - 1
+    win = buf.pad(((0, 0), (k, 0)), value=ple.eos)[0].shrink(((base + start, base + start + n),))
+    if isinstance(base, int) and base == 0: return win
+    return ((Tensor.arange(n) + Tensor(start - k)).to(buf.device) >= 0).where(win, ple.eos)
 
   def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None, noise:tuple[Tensor, Tensor]|None=None) -> Tensor:
     """
@@ -3213,6 +3335,245 @@ class Transformer:
     out = list(self._bspec_host_out[:n*(2*k+1)])
     return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)], list(self._bpf_host_out[:G])
 
+  # ******** sequences sharing the caches (qwen4exp): every one its region of the attention caches' rows (the token buffer's too) and a slot of
+  # the recurrent states. a sequence is prefilled by the model's calls on its region (its states loaded from its slot before, stored after),
+  # a step of speculative decoding takes every sequence decoding at once (forward_seqs). the regions are the caller's (see SeqEngine) ********
+
+  SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,4,8")).split(","))
+  def seqs_supported(self) -> bool:
+    devs = self.token_embd.weight.device
+    return bool(self.config.qsa and self.gated and self.config.spec_drafts and self.config.indexer is not None and isinstance(devs, tuple) and
+                amd_custom_kernels_supported(devs))
+  def seq_slots(self) -> int:
+    """the slots of the sequences (the one after them is the padding sequences' of a step)"""
+    return getenv("SEQ_SLOTS", max(self.SEQ_SIZES))
+  def seq_rows(self) -> int:
+    """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
+    return self.max_context
+
+  def _seq_init(self):
+    if hasattr(self, "seq_spec_h"): return
+    self._init_states()
+    k, n, devs, m = self.config.spec_drafts, self.seq_slots() + 1, cast(tuple[str, ...], self.token_embd.weight.device), max(self.SEQ_SIZES)
+    # (the slots' recurrent states in float, SEQ_STATE_HALF: in half)
+    for b in self.blk:
+      if isinstance(b, GatedDeltaNetBlock): b._init_slots(n, 0, half=bool(getenv("SEQ_STATE_HALF", 0)))
+    # every slot's hidden states (the streams) of the last step's tokens, two parities of k+1
+    self.seq_spec_h = Tensor.zeros(n*2*(k+1), self._spec_dim, device=devs).contiguous()
+    # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
+    self.seq_ckpt_h = Tensor.zeros(n, self._spec_dim, device=devs).contiguous()
+    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]))[0]] +
+                            [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
+    self._spec_init()
+    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+REGION_ALIGN+1)
+    # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
+    self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
+    tmv, self._seq_temp = _host_buffer(devs, 8*m, dtypes.float32)
+    self._seq_host_temp = tmv.cast('f')
+    # (a prefill's temperature and top_p: in host memory, a new value isn't a new tensor (its realize walks every tensor of the model))
+    tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
+    self._seq_pf_host_temp = tmv.cast('f')
+    self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1))
+    todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
+      [t for c in self.seq_ckpt_states for t in c]
+    for t in todo:
+      for u in t.uop.toposort():
+        if u.op is Ops.BUFFER:
+          for x in (mb.bufs if isinstance(mb:=u.buffer, MultiBuffer) else [mb]): x.ensure_allocated()
+    Tensor.realize(*[t.assign(t.zeros_like()) for t in todo])
+
+  def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
+    """
+    the recurrent states of the model of a position (its rows pm) into slot `slot` (its rows ps of the recurrent states, pc of the conv ones) and
+    the hidden state of the last token (the model's row 0) into the slot's row hrow (save), or back (the hidden state times keep: 0 none)
+    """
+    def rows(t:Tensor, start:UOp|int) -> Tensor: return t.shrink(((start, start+1),) + (None,)*(t.ndim-1))
+    H = 2*(self.config.spec_drafts+1)
+    pairs:list[tuple[Tensor, Tensor]] = [(rows(self.seq_spec_h, slot*H + hrow), rows(self._spec_h, 0))]
+    for b in self.blk:
+      if isinstance(b, GatedDeltaNetBlock):
+        S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
+        pairs.append((rows(b.pool_rec, slot*S + ps), rows(b.recurrent_state, pm)))
+        pairs += [(rows(d, slot*SC + pc), rows(c, pm)) for d, c in zip(b.pool_conv, b.conv_states)]
+    if save: Tensor.realize(*[d.assign(s.cast(d.dtype)) for d, s in pairs])
+    else:
+      (h, hs), rest = pairs[0], pairs[1:]
+      Tensor.realize(hs.assign(h.contiguous() * Tensor(keep).cast(dtypes.float)), *[s.assign(d.cast(s.dtype)) for d, s in rest])
+
+  def _seq_copy_call(self, save:bool, slot:int, pos:int, hrow:int, keep:bool=True):
+    k = self.config.spec_drafts
+    if not hasattr(self, "_seq_copy_jits"):
+      self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
+    S, SC = slot_states(k)
+    Sm = self.config.rewind + 1
+    self._seq_copy_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_pm", 0, Sm-1).bind(pos % Sm),
+                              UOp.variable("seq_ps", 0, S-1).bind(pos % S), UOp.variable("seq_pc", 0, SC-1).bind(pos % SC),
+                              UOp.variable("seq_hrow", 0, 2*k+1).bind(hrow), UOp.variable("seq_keep", 0, 1).bind(int(keep)))
+
+  def _seq_move_copy(self, src:UOp, dst:UOp):
+    """SEQ_MOVE rows of every attention cache from row src to row dst (the indexer's pooled keys: their pools)"""
+    n, copies = self.SEQ_MOVE, []
+    def mv(t:Tensor, s:UOp, d:UOp, m:int, axis:int) -> Tensor:
+      def rng(x:UOp) -> tuple: return tuple((x, x+m) if i == axis else None for i in range(t.ndim))
+      return t.shrink(rng(d)).assign(t.shrink(rng(s)).contiguous())
+    for b in self.blk + [self.mtp]:
+      if not isinstance(b, QSABlock): continue
+      copies.append(mv(b.cache_k, src, dst, n, 2))
+      if (idx:=b.indexer) is not None:
+        kp = idx.idx.kpool
+        copies += [mv(idx.cache_k, src, dst, n, 0), mv(idx.cache_pk, src // kp, dst // kp, n // kp, 0)]
+    Tensor.realize(*copies)
+  SEQ_MOVE = REGION_ALIGN
+  def seq_move(self, src:int, dst:int, n:int):
+    """the first n positions of the sequence of the region at src moved to the region at dst (not overlapping)"""
+    if not hasattr(self, "_seq_move_jit"): self._seq_move_jit = TinyJit(self._seq_move_copy, capture_first=True)
+    v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
+    for o in range(0, n, self.SEQ_MOVE): self._seq_move_jit(v("move_src").bind(src + o), v("move_dst").bind(dst + o))
+    self._token_host[dst:dst+n+1] = self._token_host[src:src+n+1]
+
+  def _seq_ckpt_copy(self, save:bool, slot:UOp, ps:UOp, pc:UOp):
+    """the checkpoint of slot `slot`: its recurrent states (rows ps, the conv ones pc) and its hidden state of row 0 (save), or back"""
+    def rows(t:Tensor, start:UOp|int) -> Tensor: return t.shrink(((start, start+1),) + (None,)*(t.ndim-1))
+    H = 2*(self.config.spec_drafts+1)
+    pairs:list[tuple[Tensor, Tensor]] = [(rows(self.seq_ckpt_h, slot), rows(self.seq_spec_h, slot*H))]
+    for b, c in zip([b for b in self.blk if isinstance(b, GatedDeltaNetBlock)], self.seq_ckpt_states):
+      S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
+      pairs += [(rows(c[0], slot), rows(b.pool_rec, slot*S + ps))] + [(rows(d, slot), rows(p, slot*SC + pc)) for d, p in zip(c[1:], b.pool_conv)]
+    Tensor.realize(*[(d.assign(s) if save else s.assign(d)) for d, s in pairs])
+  def seq_ckpt(self, save:bool, slot:int, pos:int):
+    """the checkpoint of slot `slot`: its states of position pos (and the hidden state of row 0) saved, or restored"""
+    if not hasattr(self, "_seq_ckpt_jits"):
+      self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
+    S, SC = slot_states(self.config.spec_drafts)
+    self._seq_ckpt_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_ps", 0, S-1).bind(pos % S),
+                              UOp.variable("seq_pc", 0, SC-1).bind(pos % SC))
+
+  def seq_warmup(self):
+    """capture every jit of the sequences sharing the caches: a prefill of every chunk size (a context the indexer's top_k covers, and longer),
+    a step of every size, the copies of the slots' states and of a region"""
+    self._finish_load()
+    self._seq_init()
+    top = unwrap(self.config.indexer).top_k
+    for n in sorted(self.prefill_chunks(), reverse=True):
+      self.seq_prefill(0, 0, [0]*n, 0, 0)
+      if top + n <= self.seq_rows(): self.seq_prefill(0, 0, [0]*(top+n), top, 0)
+    k = self.config.spec_drafts
+    for m in sorted(self.SEQ_SIZES, reverse=True): self.seq_step([(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m)
+    self.seq_ckpt(True, 0, 1), self.seq_ckpt(False, 0, 1)
+    self.seq_move(0, REGION_ALIGN, 1)
+
+  def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0) -> int:
+    """
+    the tokens from start of the sequence of slot `slot` (its region of the caches from base) prefilled, from its states of position start (the
+    slot's, and its row hrow the hidden state of the token before it; start 0: none): its states of position len(tokens) into the slot (the
+    hidden state of the last token its row 0). returns the token sampled after the last
+    """
+    self._finish_load()
+    self._seq_init()
+    assert 0 <= start < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
+    L, devs = len(tokens), to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+    for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
+    self._token_host[base+start:base+L+1] = array.array('i', tokens[start:] + [-1])
+    self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
+    sizes = self.prefill_chunks()
+    v_start, v_base = UOp.variable("start_pos", 0, self.max_context-1), UOp.variable("seq_base", 0, self.seq_rows())
+    v_toks = {n: UOp.variable("toks", 1, n) for n in sizes}
+    self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
+    pos, t, vb = start, self._seq_pf_temp, v_base.bind(base)
+    while pos < L:
+      n = min(sizes[-1], L - pos)
+      sp, nt = v_start.bind(pos), v_toks[next(s for s in sizes if n <= s)].bind(n)
+      self(self._token_buf[:, vb+sp:vb+sp+nt], sp, t, vb)
+      pos += n
+    self._seq_copy_call(True, slot, L, 0)
+    return self._wait_host(lambda: self._token_host[base + L], "the token after a prefill")
+
+  def forward_seqs(self, *vs:UOp) -> Tensor:
+    """
+    a step of speculative decoding of G sequences sharing the caches: vs the slot, the base of the region, mtp_pos, j and par of every one (as
+    forward_spec's), its k+1 tokens (the last step's sampled ones) in _seq_in, its temperature and top_p in _seq_temp. returns (1, G*(2k+1)):
+    every one's k+1 sampled tokens and k drafts. (the drafts are sampled with the noise of the row they're verified at: an exact sample of the
+    model, more of them accepted at a temperature)
+    """
+    k, G, devs = self.config.spec_drafts, len(vs) // 5, self.token_embd.weight.device
+    hc, mtp, ple = unwrap(self.config.hc), cast(QwenMTPBlock, self.mtp), unwrap(self.config.ple)
+    sl, bs, mp, js, ps = (list(vs[i::5]) for i in range(5))
+    slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(k+1)
+    y = self._seq_in[:, :G*(k+1)]
+    temps = self._seq_temp[:2*G].reshape(G, 2)
+    def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
+    # the hidden states of the last step's tokens: every slot's rows of parity 1-par
+    last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(k+1), s*H + (2-p)*(k+1)), None)) for s, p in zip(sl, ps)])
+    seed = (Tensor.rand_like(temps[:1, :1]) * (1 << 24)).cast(dtypes.uint32).reshape(1)
+    Q8_ROWS_I8[0] = bool(getenv("SEQ_I8", 0))
+    try:
+      # the MTP layer catches up on the k+1 positions from mtp_pos, row j of every sequence drafts
+      _seq_batch[0], _batch_rows[0] = batch(mp, k+1), [(p, k+1) for p in mp]
+      m = mtp.predict(self.token_embd(y.to(devs)).float(), last.unsqueeze(0), 0)
+      m = Tensor.cat(*[m.shrink((None, (g*(k+1)+j, g*(k+1)+j+1), None, None)) for g, j in enumerate(js)], dim=1)
+      drafts:list[Tensor] = []
+      for i in range(k):
+        # (draft i of sequence g: verified at its row i, sampled with that row's noise at its temperature, not its top_p)
+        drafts.append(self._sample(mtp.head(m)[0], temps[:, :1], y.device, (seed, Tensor.arange(G) * (k+1) + i)).reshape(1, G))
+        if i < k-1:
+          pos = [p + j + 1 + i for p, j in zip(mp, js)]
+          _seq_batch[0], _batch_rows[0] = batch(pos, 1), [(p, 1) for p in pos]
+          m = mtp.predict(self.token_embd(drafts[-1].to(devs)).float(), m.flatten(2), 0)
+      # verify: the model on every sequence's token at start_pos (mtp_pos+j) and its drafts
+      vt = Tensor.cat(*[y.shrink((None, (g*(k+1)+j, g*(k+1)+j+1))).cat(*[d[:, g:g+1] for d in drafts], dim=1) for g, j in enumerate(js)],
+                      dim=1).contiguous()
+      starts = [p + j for p, j in zip(mp, js)]
+      x = self.token_embd(vt.to(devs)).float()
+      x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
+      # (the n-gram rows: every sequence's tokens before its start from the token buffer, then its verified ones)
+      n = len(ple.multipliers)
+      wins = Tensor.cat(*[self._token_window(self._token_buf, b, s, n-1).reshape(1, n-1) for b, s in zip(bs, starts)])
+      ple_emb = self._ple_emb(self._ple_rows_dev(wins.cat(vt.reshape(G, k+1).to(devs), dim=1)).unsqueeze(0))
+      _seq_batch[0], _batch_rows[0] = batch(starts, k+1), [(s, k+1) for s in starts]
+      for block in self.blk: x = block(x, 0, ple_emb=ple_emb)
+      hsv = x.flatten(2)[0].float()
+      hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hsv[g*(k+1):(g+1)*(k+1)])
+                        for g, (s, p) in enumerate(zip(sl, ps))])
+      tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
+      tok = self._sample(self._hc_out(hs.reshape(1, G*(k+1), hc.count, -1))[0], tt, y.device, (seed, Tensor.arange(G*(k+1))))
+    finally: _seq_batch[0], _batch_rows[0], Q8_ROWS_I8[0] = None, None, False
+    q8_quantize_cache_clear()  # don't keep the graph alive
+    out = tok.reshape(G, k+1).cat(*[d.reshape(G, 1) for d in drafts], dim=1).reshape(1, G*(2*k+1)).cast(dtypes.int32)
+    return self._seq_out[:, :G*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
+
+  def _seq_jit(self, m:int):
+    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[int, Any] = {}
+    if m not in self._seq_jits: self._seq_jits[m] = TinyJit(self.forward_seqs, capture_first=True, scratch=self._scratch)
+    return self._seq_jits[m]
+  def _seq_vars(self, seqs:list[tuple[int, int, int, int, int]]) -> list[UOp]:
+    k, n = self.config.spec_drafts, self.seq_slots()
+    return [v for g, (sl, b, mp, j, par) in enumerate(seqs) for v in (
+      UOp.variable(f"seq_slot{g}", 0, n).bind(sl), UOp.variable(f"seq_base{g}", 0, self.seq_rows()).bind(b),
+      UOp.variable(f"seq_mtp{g}", 0, self.max_context-1).bind(mp), UOp.variable(f"seq_j{g}", 0, k).bind(j),
+      UOp.variable(f"seq_par{g}", 0, 1).bind(par))]
+
+  def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
+    """
+    a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
+    temperature) of every one (see _spec_steps), their k+1 sampled tokens and k drafts
+    """
+    self._seq_init()
+    k, n = self.config.spec_drafts, len(seqs)
+    m = next(s for s in self.SEQ_SIZES if s >= n)
+    # (the sequences past n: the padding slot's at position 0 in the padding region)
+    seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
+    self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in y])
+    self._seq_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
+    self._seq_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
+    jit = self._seq_jit(m)
+    if (cap:=getattr(jit, "captured", None)) is not None:
+      # (captured: the variables' values as they are, no bound variables made a step)
+      cap([], {name: v for g, (sl, b, mp, j, par, _, _) in enumerate(seqs)
+               for name, v in ((f"seq_slot{g}", sl), (f"seq_base{g}", b), (f"seq_mtp{g}", mp), (f"seq_j{g}", j), (f"seq_par{g}", par))})
+    else: jit(*self._seq_vars([(sl, b, mp, j, par) for sl, b, mp, j, par, _, _ in seqs]))
+    out = self._wait_host(lambda: min(o:=self._seq_host_out[:m*(2*k+1)].tolist()) >= 0 and o or -1, f"a step of {m} sequences")
+    return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)]
+
   def _init_states(self):
     """the states and caches of the blocks, realized (the jits capture on their first call: not the one time setup)"""
     if getattr(self, "_states_ready", False): return
@@ -3240,19 +3601,21 @@ class Transformer:
     else: Tensor.realize(*todo)
     self._states_ready = True
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
+  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
     key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
     # (a context the qwen sparse attention's top_k covers: the jits of all the keys, see _qsa_dense)
     dense = self._dense_ctx(start_pos, T)
-    jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + ("_greedy" if temperature is None else ""), {})
+    # (a sequence's region from a variable base: jits of their own, see seq_prefill)
+    jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + ("_greedy" if temperature is None else "") +
+                                    ("_seq" if isinstance(base, UOp) else ""), {})
     if (jit:=jits.get(key)) is None:
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
       jit = jits[key] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
     _qsa_dense[0] = dense
-    try: return jit(tokens, start_pos, temperature)[0]
+    try: return jit(tokens, start_pos, temperature, base)[0]
     finally: _qsa_dense[0] = False
 
   def _dense_ctx(self, start_pos:int|UOp, T:int|UOp) -> bool:
@@ -3261,10 +3624,10 @@ class Transformer:
     def val(u:int|UOp) -> int: return u if isinstance(u, int) else int(u.unbind()[1])
     return val(start_pos) + val(T) <= idx.top_k
 
-  def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> tuple[Tensor, ...]:
+  def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> tuple[Tensor, ...]:
     # forward and the tensors realized with its output for their effects (e.g. the caches of the MTP layer)
     self._effects = []
-    out = self.forward(tokens, start_pos, temperature)
+    out = self.forward(tokens, start_pos, temperature, base)
     effects, self._effects = self._effects, None
     return (out, *effects)
 
@@ -3628,7 +3991,7 @@ class Transformer:
     from tinygrad.llm.kernels.amd import host_allreduce, p2p_allreduce
     # (the device memory the jits use is made here: not in the processes)
     if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
-    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
+    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+REGION_ALIGN+1)
     self._token_prev:list[int]|None = None  # (the captures write the buffer: the next generate writes all of it)
     # the random state of every device (sampling's noise) made here: one made in a capture's process isn't the one the jits run with, its
     # counter wouldn't advance (every step and request the same noise)
@@ -3766,7 +4129,7 @@ class Transformer:
     if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
       # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
       if not hasattr(self, "_token_buf"):
-        self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self.max_context+1)
+        self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self.max_context+REGION_ALIGN+1)
       for d in devs: Device[d].synchronize()  # a step run ahead by the last generate may still use it
       # the prompt, then -1 (not sampled yet) up to the tokens the last generate wrote (its list grew with them, steps run ahead write a few
       # more): the whole buffer only the first time (a write of max_context ints takes ~20 ms)
