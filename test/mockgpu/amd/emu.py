@@ -1769,7 +1769,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
-  params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
+  params = {b:b.param_like(i) for i,b in enumerate(bufs)}
   sgprs = {params[b] for b in bufs if b in _Ctx.sgpr}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   seen: set[UOp] = set()
@@ -1948,7 +1948,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
     args += [_c(block_pc, dtypes.int).after(end, *scopes)]
     params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
-                        else AddrSpace.GLOBAL, name=bufs[i].arg.name if i < len(bufs) else None) for i,a in enumerate(args)]
+                        else AddrSpace.GLOBAL) for i,a in enumerate(args)]
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, AxisType.LOOP, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
