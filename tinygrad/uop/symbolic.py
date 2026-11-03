@@ -168,7 +168,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
    a.replace(src=tuple(s.ccast(dt) if s.dtype in dtypes.weaks else s for s in a.src))
    if (dt:=promo_dtype(a.src)) not in dtypes.weaks else None),
   # ** two stage ALU folding **
-  *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
+  *((UPat.var("x", dtypes.wints if op is Ops.ADD else None).alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2)) if fits(x, exec_alu(f.op, dtypes.weakint, [c1.vmin, c2.vmin])) else None)
     for op in GroupOp.Associative),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
@@ -323,15 +323,16 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_lossless_cast(x.dtype, a.dtype) else None),
   (UPat.var('x', dtypes.wints).cast(dtypes.wints, name="a").cast(name="b"), lambda x,a,b: x.ccast(b.dtype) if not x.overflows(a.dtype) else None),
-  # try to do math in int instead of long, keep weak const weak
-  (UPat(GroupOp.Binary, src=(UPat.var("x", (dtypes.long, dtypes.weakint)), UPat.var("y", (dtypes.long, dtypes.weakint))), name="u"), lambda u,x,y:
-    (UOp.const(x.val) if x.op is Ops.CONST else x.cast(dtypes.int)).alu(u.op,
-     UOp.const(y.val) if y.op is Ops.CONST else y.cast(dtypes.int)).cast(u.dtype)
-    if dtypes.long in (x.dtype, y.dtype) and not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
+  # try to do math in int instead of long, keep weak const weak=
+  (UPat(GroupOp.Binary, src=(UPat(dtype=(dtypes.long, dtypes.weakint)),)*2, name="u"), lambda u:
+    UOp(u.op, src=tuple(UOp.const(s.val) if s.op is Ops.CONST else s.cast(dtypes.int) for s in u.src)).cast(u.dtype)
+    if dtypes.long in (s.dtype for s in u.src) and not any(v.overflows(dtypes.int) for v in (u,*u.src))
+    and not (u.op is Ops.SHR and u.src[1].vmax >= 32)
+    and not (u.op in (Ops.MOD, Ops.TRUNCMOD) and u.src[0].vmin <= dtypes.int.min and u.src[1].vmin <= -1 <= u.src[1].vmax) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
-  # an AFTER waits only on the effect ops listed here, any other dep is replaced by its srcs
+  # an AFTER waits only on effects and the ops listed here, a REDUCE dep keeps its body ended by its ranges, any other dep is replaced by its srcs
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
-    tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.BARRIER, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE}
+    tuple(dedup(flatten([(y,) if y.op in GroupOp.Effect|{Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.LOAD}
                         else (UOp(Ops.NOOP).after(y.src[0]).end(*y.src[1:]),) if y.op is Ops.REDUCE else y.src for y in x.src[1:]]))))),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
@@ -463,7 +464,7 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow_int(p.src[0], p.src[1], p.dtype) if dtypes.is_int(p.dtype) else xpow(*p.src))),
   # ** load/store folding **
-  (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index")), name="x"), lambda index,x: UOp(Ops.NOOP).after(*x.src)),
+  (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP).after(index)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),

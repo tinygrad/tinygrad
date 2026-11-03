@@ -24,8 +24,8 @@ class TestMLA(unittest.TestCase):
     c = config
     B, T = 1, 4
     q_nope_head_dim = c.head_dim - c.rope_dim
-    block.attn_k_b['weight'] = Tensor.randn(c.n_heads, c.kv_lora_rank, q_nope_head_dim) * .1
-    block.attn_v_b['weight'] = Tensor.randn(c.n_heads, c.v_head_dim, c.kv_lora_rank) * .1
+    block.attn_k_b['weight'] = (Tensor.randn(c.n_heads, c.kv_lora_rank, q_nope_head_dim) * .1).realize()
+    block.attn_v_b['weight'] = (Tensor.randn(c.n_heads, c.v_head_dim, c.kv_lora_rank) * .1).realize()
     fp8_weights = []
     if fnuz is not None:
       block.kv_b_block_size = (4, 8)

@@ -8,8 +8,8 @@ from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
 from tinygrad.runtime.support.hcq2 import unwrap_view, to_name, ins
-from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
-from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System, filter_visible_devices
+from tinygrad.runtime.support.memory import AddrSpace, MemoryManager
+from tinygrad.runtime.support.system import PCIIfaceBase, System, filter_visible_devices
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
 
 RDMA_CHUNK = 1 << 30 # a wqe length is 32 bits
@@ -21,13 +21,6 @@ class BNXTIface(PCIIfaceBase):
     super().__init__(dev, index, *BNXT_IDS[:2], vram_bar=2, va_start=MemoryManager.va_allocator.base, va_size=MemoryManager.va_allocator.size,
                      dev_impl_t=BNXTDev, base_class=BNXT_IDS[2])
   def device_fini(self): self.dev_impl.fini()
-
-  def storage(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> BufferStorage: # nic memory any gpu of the node maps
-    va = MemoryManager.alloc_vaddr(size:=round_up(mem.nbytes, 0x1000), 0x1000)
-    mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
-    return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
-  def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
-    return Buffer(self.dev.device, mem.nbytes, opaque=self.storage(mem, paddrs, snooped))
 
   @functools.cached_property
   def doorbell(self) -> Buffer:
