@@ -180,7 +180,7 @@ pm_disk_copy = PatternMatcher([
    copy.replace(src=(x,)) if x.on_disk() else None),
   # push all movement ops to the destination: views exposed here are no longer normalized into input PARAMs,
   # so leaving SHRINK/RESHAPE behind can cause materialize_cross_device_src to allocate a temporary on disk
-  (UPat(GroupOp.Movement, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+  (UPat(GroupOp.Movement | {Ops.BITCAST}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
 ])
 
