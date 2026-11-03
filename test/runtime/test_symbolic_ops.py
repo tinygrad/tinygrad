@@ -371,5 +371,18 @@ class TestSymbolicOps(unittest.TestCase):
     expected = x_full[:, :, :val].conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
     np.testing.assert_allclose(result[:, :, :13].numpy(), expected.numpy(), atol=1e-5, rtol=1e-5)
 
+  def test_argmax(self):
+    a = Tensor.rand(10, 3)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      for axis in [None, 0, 1]:
+        expected = a[:i].argmax(axis).numpy()
+        symbolic = a[:vi].argmax(axis)
+        if axis is None:
+          symbolic = symbolic.numpy()
+        else:
+          symbolic = symbolic[:expected.shape[0]].numpy()
+        np.testing.assert_equal(symbolic, expected)
+
 if __name__ == '__main__':
   unittest.main()
