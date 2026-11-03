@@ -267,6 +267,12 @@ class Test64BitLiterals(unittest.TestCase):
 class TestSCCBehavior(unittest.TestCase):
   """Tests for SCC condition code behavior."""
 
+  def test_scc_initial(self):
+    """The shared prologue clears SCC before the test instructions run."""
+    st = run_program([s_cselect_b32(s[0], 1, 0)], n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0)
+    self.assertEqual(st.scc, 0)
+
   def test_scc_from_s_cmp(self):
     """SCC should be set by scalar compare."""
     instructions = [

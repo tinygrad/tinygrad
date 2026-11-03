@@ -177,7 +177,7 @@ def copy_kernel_to_view_store(call:UOp, dst:UOp, src:UOp, r:UOp, off:UOp):
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
-  if dst.device == src.device and not dst.on_disk(): return None
+  if dst.is_virtual or src.is_virtual or (dst.device == src.device and not dst.on_disk()): return None
   from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym

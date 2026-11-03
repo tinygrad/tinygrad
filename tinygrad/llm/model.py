@@ -240,6 +240,8 @@ class SSMConfig:
   # kda layout of a gated deltanet with a decay per head (qwen4exp: its q and k heads repeated for the v heads at load): the decay of a head
   # from ssm_alpha (every channel of it), the output gate attn_gate
   head_decay: bool = False
+  full_rank_gate: bool = False
+  silu_gate: bool = False
 
 @dataclass(frozen=True)
 class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
@@ -2177,7 +2179,7 @@ class GatedDeltaNetBlock(FFNBlock):
       core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store))
 
     # output; undo the padding before the output projection
-    z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
+    z = (self.ssm_norm(core) * (out_gate.silu() if unwrap(self.config.ssm).silu_gate else out_gate.sigmoid())).cast(x.dtype).contiguous()
     if symbolic: z = z[:, :T]
     return _out(self.ssm_out, z.reshape(B, Tq, -1))
 
@@ -3982,7 +3984,7 @@ class Transformer:
     ssm = None
     ssm_layers: tuple[bool, ...] = ()
     if arch in ('qwen35', 'qwen35moe'):
-      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
+      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}, silu_gate=True)
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
     elif arch == 'qwen4exp':
       # (the kda layout: the q and k heads repeated for the v heads at load, see _qwen4exp_entries)

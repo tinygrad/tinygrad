@@ -4,7 +4,7 @@ import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
 from tinygrad.runtime.autogen import libc, pci, vfio
-from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator
+from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
 def filter_visible_devices(devs, device):
@@ -423,6 +423,13 @@ class PCIIfaceBase:
     if getattr(self.pci_dev, "iommu", False): return [(self.pci_dev.bar_iova_map(self.vram_bar, p, sz), sz) for p, sz in paddrs], AddrSpace.SYS
     base = self.pci_dev.bar_info(self.vram_bar)[0]
     return [(p + base, sz) for p, sz in paddrs], AddrSpace.SYS
+
+  def storage(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> BufferStorage:
+    va = MemoryManager.alloc_vaddr(size:=round_up(mem.nbytes, 0x1000), 0x1000)
+    mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
+    return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
+  def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
+    return Buffer(self.dev.device, mem.nbytes, opaque=self.storage(mem, paddrs, snooped))
 
   def map(self, b:Buffer) -> BufferStorage:
     host_key = None

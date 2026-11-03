@@ -116,6 +116,9 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}
 
+  # ops that may have a side effect each time they run
+  Effect = {Ops.STORE, Ops.CUSTOM, Ops.CALL, Ops.BARRIER}
+
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}
 
