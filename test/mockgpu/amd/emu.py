@@ -1893,8 +1893,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   accvgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.uint32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   ctx = _Ctx(wave_size)
-  buffers = {ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
-             ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
+  buffers = {ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0), ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
