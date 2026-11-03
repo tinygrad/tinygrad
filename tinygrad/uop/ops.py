@@ -733,7 +733,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, src=(self,)+srcs) if len(srcs) else self
 
   # little helpers
-  def on_disk(self:UOp): return isinstance(self.device, str) and self.device.startswith("DISK")
+  def on_disk(self:UOp): return isinstance(self.device, str) and is_disk_device(self.device)
   def on_creation_device(self:UOp): return isinstance(self.device, str) and self.device.startswith(("DISK", "NPY", "PYTHON"))
   def needs_storage(self:UOp) -> bool: return not self.is_virtual and (self.storage_base.op is Ops.ALLOC or not self.has_buffer_identity())
 
@@ -1086,8 +1086,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if self.op is Ops.XOR and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
         return 0, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
-      if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
-      if self.op is Ops.CMPEQ: return (s0_vmin == s0_vmax == s1_vmin == s1_vmax, not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
+      # bounds never prove a float compare true since nan compares false
+      if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin and not dtypes.is_float(self.src[0].dtype), s0_vmin<s1_vmax)
+      if self.op is Ops.CMPEQ:
+        return (s0_vmin == s0_vmax == s1_vmin == s1_vmax and not dtypes.is_float(self.src[0].dtype), not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
       if self.op is Ops.OR and self.dtype == dtypes.bool: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
       if self.op is Ops.AND and self.dtype == dtypes.bool: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
     if self.op is Ops.WHERE:
@@ -1106,15 +1108,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.val is not Invalid and not (isinstance(self.val, float) and math.isnan(self.val)): return self.val, self.val
     if self.op is Ops.PAD: return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)  # PAD adds zeros
     if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.COPY, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
-    if self.op is Ops.CAST:
-      # rounding is monotone (truncation toward zero into an int, to-nearest onto the value grid into a float)
-      smin, smax = self.src[0]._min_max
-      trunc = truncate.get(self.dtype) if dtypes.is_float(self.dtype) else math.trunc if dtypes.is_int(self.dtype) else None
-      if trunc is not None: smin, smax = (trunc(v) if math.isfinite(v) else v for v in (smin, smax))
-      if dtypes.is_int(self.dtype) and self.dtype.min <= smin and smax <= self.dtype.max: return smin, smax
-      if dtypes.is_int(self.src[0].dtype) and dtypes.is_int(self.dtype): return self.dtype.min, self.dtype.max
-      # a signed or float destination holds the part of the source that overlaps it: overflow is undefined, a nan bound overlaps nothing
-      if self.dtype in dtypes.floats+dtypes.sints+dtypes.weaks and smin <= self.dtype.max and self.dtype.min <= smax:
+    # a cast rounds monotonically, except an int wraps past an int dtype and an inf a float dtype can't hold becomes nan
+    if self.op is Ops.CAST and dtypes.is_float(self.dtype):
+      smin, smax = (truncate.get(self.dtype, float)(v) for v in self.src[0]._min_max)
+      if not math.isnan(smin) and not math.isnan(smax): return smin, smax
+    if self.op is Ops.CAST and dtypes.is_int(self.dtype):
+      smin, smax = (math.trunc(v) if math.isfinite(v) else v for v in self.src[0]._min_max)
+      if self.dtype.min <= smin and smax <= self.dtype.max: return smin, smax
+      # a float past a signed dtype is undefined
+      if dtypes.is_float(self.src[0].dtype) and not dtypes.is_unsigned(self.dtype) and smin <= self.dtype.max and self.dtype.min <= smax:
         return max(self.dtype.min, smin), min(smax, self.dtype.max)
     return self.dtype.min, self.dtype.max
 
