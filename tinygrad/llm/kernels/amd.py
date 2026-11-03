@@ -1230,8 +1230,12 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # rows of the int8 tensor cores, the extra rows sliced off)
   pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
-  # (RDNA3: more rows than share a decode kernel's weight loads, padded to the tiles of 16 of the tensor cores)
-  if not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
+  # (RDNA3: more rows than share a decode kernel's weight loads (batched decoding's): Q8_0 in the gemm of tiles of 32 rows, the others padded to
+  # the tiles of 16 of the tensor cores)
+  skinny = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and xq is None and not split and 16 < tokens <= 64 and \
+    layer.in_features % 32 == 0 and getenv("SKINNY_GEMM", 1)
+  if not pad and skinny and tokens % 32: pad = round_up(tokens, 32)
+  elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
     pad = round_up(tokens, 16)
   if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device)) and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
@@ -1254,7 +1258,15 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type in (Q8_0, Q6_K) and tokens <= getenv("Q8_I8_ROWS", 64) and _wmma_rdna4(x.device) and not q6_gemm
   # (RDNA3: the int8 tensor cores of many rows, I8_DENSE_RDNA3)
   dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
-  if tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8 or dense_i8):
+  if skinny:
+    # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
+    groups, blocks = in_features // 32, (tokens // 32) * round_up(local_out, 64) // 64
+    ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8)]
+    ksplits = next((s for s in ks if blocks * s >= getenv("SKINNY_WGS", 192)), ks[-1])
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=Q8_0, rdna4=False, block_n=64, k_splits=ksplits)
+    srcs = (x.cast(dtypes.float16).contiguous(),)
+    out_shape = (splits*ksplits*tokens, out_features)
+  elif tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8 or dense_i8):
     # (a few rows: the inputs split over the waves of a workgroup, more of them read the weights)
     kwaves = next((k for k in (getenv("I8_KWAVES", 2), 1) if few_q8 and (in_features // Q8_GROUP_SIZE) % k == 0), 1)
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, kwaves=kwaves, rdna4=_wmma_rdna4(x.device))
@@ -1306,6 +1318,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   if ksplits > 1:
     # (split: every device's rows of the partial outputs of the input splits)
     if split: result = result.reshape(n:=len(cast(tuple, x.device)), ksplits, tokens // n, out_features).sum(1).reshape(tokens, out_features)
+    elif splits > 1: result = result.reshape(splits, ksplits, tokens, out_features).sum(1).reshape(splits*tokens, out_features)
     else: result = result.reshape(ksplits, tokens, out_features).sum(0)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1:
@@ -1645,7 +1658,7 @@ def flag_allreduce(devs:tuple[str, ...], groups:int) -> FlagAllreduce|None:
   return _flag_allreduce(tuple(Device.canonicalize(d) for d in devs), groups)
 @functools.cache
 def _flag_allreduce(devs:tuple[str, ...], groups:int) -> FlagAllreduce|None:
-  if len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
+  if len(devs) < 2 or not amd_custom_kernels_supported(devs) or not getenv("FLAG_AR", 1): return None
   with Context(ALLOW_DEVICE_USAGE=1):
     if any(getattr(Device[d], "target", (0,))[0] != 11 for d in devs): return None
   return FlagAllreduce(devs, groups)
@@ -5253,13 +5266,16 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *, R:in
   active = UOp.range(((tiles - w + WG - 1) // WG).maximum(0), 3, AxisType.LOOP)
   p = (w + active * WG) * TILE + t
   prow = (bases[g].load().cast(dtypes.weakint) // kpool + p).minimum(PT-1)
-  kv = [x for i in range(D // 8) for x in _vec_load(pk[prow, i*8], 8)]
+  # the dots of every (row, head) in registers, 8 dims of the key a round
+  acc = _reg((R*H,), 0, active)
+  dch = UOp.range(D // 8, 4, AxisType.LOOP)
+  kv = _vec_load(pk[prow, dch*8], 8)
+  prev = acc.after(dch)
+  new = [functools.reduce(lambda a, j: a + ql[i*D + dch*8 + j].load() * kv[j], range(8), prev[i].load()) for i in range(R*H)]
+  acc = acc.after(acc.store(UOp.stack(*new)).end(dch))
   stores = []
   for r in range(R):
-    s = UOp.const(0, dtypes.float)
-    for h in range(H):
-      dot = functools.reduce(lambda a, d: a + ql[(r*H + h)*D + d].load() * kv[d], range(1, D), ql[(r*H + h)*D].load() * kv[0])
-      s = s + dot.maximum(0)
+    s = functools.reduce(lambda a, h: a + acc[r*H + h].load().maximum(0), range(1, H), acc[r*H].load().maximum(0))
     stores.append(out[g*R + r, p.valid(p < pools)].store(s * D**-0.5))
   est = Estimates(2*rows*H*D*P, P*D*2*G, rows*P*4)  # (a data dependent count of tiles: an upper bound)
   return UOp.group(*stores).end(active).end(g, w, t).sink(arg=KernelInfo(name="seq_scores", opts_to_apply=(), estimates=est))

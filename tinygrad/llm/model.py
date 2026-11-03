@@ -1,5 +1,5 @@
 from __future__ import annotations
-import array, enum, functools, gc, itertools, math, pathlib, re, time
+import array, enum, functools, gc, itertools, math, pathlib, random, re, time
 from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
@@ -523,7 +523,8 @@ def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   # (murmur3's finalizer: every bit of the sum mixed into every bit)
   for sh, mul in ((16, 0x85EBCA6B), (13, 0xC2B2AE35)): h = (h ^ (h >> sh)) * mul
   h = h ^ (h >> 16)
-  return ((h >> 8).cast(dtypes.float32) + 0.5) * (1.0 / (1 << 24))
+  # (23 bits: (k+0.5)/2**24 rounds to 1.0 in float32 at the top, its noise an infinity)
+  return ((h >> 9).cast(dtypes.float32) + 0.5) * (1.0 / (1 << 23))
 
 def _argmax_rows(x:Tensor, cols:int=256) -> Tensor:
   """
@@ -2420,11 +2421,14 @@ class Transformer:
     logits = self.output(h)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     if temperature is not None:
+      # (a row of temperature 0: the most likely, not scaled or noised)
       tp = temperature.to(logits.device).reshape(-1, temperature.shape[-1])
-      z = logits.float() / tp[:, :1].maximum(1e-12)
+      hot = tp[:, :1] > 0
+      z = hot.where(logits.float() / tp[:, :1].maximum(1e-6), logits.float())
       u = _hash_uniform(noise[0], noise[1], logits) if noise is not None else Tensor.rand_like(logits)
-      logits = z - (u.maximum(1e-12).log().neg()).log()
-      if tp.shape[1] == 2: logits = nucleus(z, self.config.vocab_size, tp[:, 1:]).where(logits, -math.inf)
+      # -log(u) at least 1-u (it is): the device's log of a u a few ulps below 1 is 0, its noise an infinity (a random token sampled)
+      logits = z - hot.where(u.maximum(1e-12).log().neg().maximum(1 - u).log(), 0)
+      if tp.shape[1] == 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:]) | hot.logical_not()).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
     return _argmax_rows(logits.to(device)[:, :self.config.vocab_size])
@@ -3368,7 +3372,7 @@ class Transformer:
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+REGION_ALIGN+1)
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
     self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
-    tmv, self._seq_temp = _host_buffer(devs, 8*m, dtypes.float32)
+    tmv, self._seq_temp = _host_buffer(devs, 8*m + 4, dtypes.float32)
     self._seq_host_temp = tmv.cast('f')
     # (a prefill's temperature and top_p: in host memory, a new value isn't a new tensor (its realize walks every tensor of the model))
     tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
@@ -3504,7 +3508,9 @@ class Transformer:
     def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
     # the hidden states of the last step's tokens: every slot's rows of parity 1-par
     last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(k+1), s*H + (2-p)*(k+1)), None)) for s, p in zip(sl, ps)])
-    seed = (Tensor.rand_like(temps[:1, :1]) * (1 << 24)).cast(dtypes.uint32).reshape(1)
+    # (the step's seed of the noise from the host: a random tensor of the devices is a different one on every device, a sampled token of one
+    # not the others')
+    seed = self._seq_temp[-1:].bitcast(dtypes.uint32)
     Q8_ROWS_I8[0] = bool(getenv("SEQ_I8", 0))
     try:
       # the MTP layer catches up on the k+1 positions from mtp_pos, row j of every sequence drafts
@@ -3564,6 +3570,9 @@ class Transformer:
     seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
     self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in y])
     self._seq_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
+    # (the step's seed, see forward_seqs)
+    self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)) if not getenv("SEQ_SEED") else
+                                          int(getenv("SEQ_SEED")).to_bytes(4, "little"))[0]
     self._seq_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
     jit = self._seq_jit(m)
     if (cap:=getattr(jit, "captured", None)) is not None:
