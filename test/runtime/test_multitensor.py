@@ -1349,5 +1349,17 @@ class TestTensorOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
 
+  @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "no views")
+  @needs_second_gpu
+  def test_bitcast_assign(self):
+    t = Tensor([0, 0, 0, 0], dtype=dtypes.int32).shard(devices_2, axis=0).contiguous().realize()
+    t.bitcast(dtypes.uint32).assign(Tensor([1, 2, 3, 4], dtype=dtypes.uint32).shard(devices_2, axis=0))
+    self.assertEqual(t.tolist(), [1, 2, 3, 4])
+
+  @needs_second_gpu
+  def test_reshape_copy(self):
+    t = Tensor([1, 2, 3, 4]).shard(devices_2, axis=0).contiguous().realize()
+    self.assertEqual(t.reshape(2, 2).to((d3, d4)).realize().tolist(), [[1, 2], [3, 4]])
+
 if __name__ == '__main__':
   unittest.main()
