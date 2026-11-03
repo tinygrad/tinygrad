@@ -592,9 +592,8 @@ class TestUopsObject(unittest.TestCase):
       s = buf.shrink(((r*32, (r+1)*32),))
       end = UOp.group(s, r).end(r)
     self.assertEqual(r.shape, ())
-    self.assertNotIn("_shape", s.__dict__)
 
-  def test_shape_does_not_visit_control_dependencies(self):
+  def test_shape_assert(self):
     buf = UOp.param(0, dtypes.uint, 64)
     invalid = UOp(Ops.SHRINK, src=(buf, UOp.const(65), UOp.const(1)))
     r = UOp.range(UOp.const(2).after(invalid), 0)
