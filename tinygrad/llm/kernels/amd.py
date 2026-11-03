@@ -76,6 +76,9 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 
 # ******** quant linear: q8-activation kernels over packed ggml weights ********
 
+# (the most rows the split-K gemm of tiles of 32 rows takes (batched decoding, the smallest prefill chunk), see q8_linear)
+SKINNY_ROWS = 256
+
 def unwrap_storage_views(u:UOp) -> UOp:
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
   # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
@@ -1228,12 +1231,12 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (the rows of batched decoding that aren't whole tiles of the kernels (80 sequences: 240, 24 sequences: 72) padded to tiles of 64 (else
   # none of the tensor core kernels: the decode kernel, a few times slower), a few more than a decode kernel's (8 sequences: 24 rows) to the 16
   # rows of the int8 tensor cores, the extra rows sliced off)
-  pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 else \
-        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
   # (RDNA3: more rows than share a decode kernel's weight loads (batched decoding's): Q8_0 in the gemm of tiles of 32 rows, the others padded to
   # the tiles of 16 of the tensor cores)
-  skinny = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and xq is None and not split and 16 < tokens <= 64 and \
+  skinny = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and xq is None and not split and 16 < tokens <= SKINNY_ROWS and \
     layer.in_features % 32 == 0 and getenv("SKINNY_GEMM", 1)
+  pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
+        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
   skinny_i8 = skinny and getenv("SKINNY_I8", 0)
   if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
   elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
@@ -1723,8 +1726,9 @@ def _flag_poll(wg:UOp, t:UOp, epoch:UOp, me:UOp, flags_mb:tuple[UOp, ...], N:int
   return UOp.group(word[0].load()).barrier()
 
 @functools.cache
-def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp,
-                     N:int, n:int, T:int, EP:int, scatter:int=0, gather:int=0, gather_half:bool=False, broadcast:bool=False) -> UOp:
+def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, scatter:int=0, gather:int=0, gather_half:bool=False,
+                     broadcast:bool=False, half:bool=False) -> UOp:
+  # half: the broadcast reduced chunk in fp16 pairs (saturating, as the partials are), gathered so (half the bytes of float32)
   vals_mb, flags_mb = mb[:N], mb[N:]
   wg, t, els, epoch, me, spos, vslot, fslot = _flag_ar_common(N, n, T, EP, counter)
   def unh(b:UOp) -> UOp: return b.cast(dtypes.uint16).bitcast(dtypes.half).float()
@@ -1733,7 +1737,7 @@ def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp,
   stores = []
   for e in els:
     v = x[0, e.valid(e < n)].load().bitcast(dtypes.uint32) if gather and not gather_half else \
-      _h2(x, me*n + e if scatter else e, scatter or n, clip=not gather_half)
+      _h2(x, me*n + e if scatter else e, scatter or n, clip=not gather_half or half)
     ps = [me.eq(s).where(v, vals_mb[0].after(arrived)[vslot(s, e)].load()) for s in range(N)]
     if gather:
       if gather_half:
@@ -1748,7 +1752,12 @@ def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp,
       stores += [out[(2*e+j).valid(e < n)].store(v) for j, v in enumerate(values)]
       if broadcast:
         # Send the reduced float32 chunk directly into the next epoch's parity. The gather's execution barrier/L2 writeback precedes its flags.
+        def h(v:UOp) -> UOp: return v.maximum(-65504.0).minimum(65504.0).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
         for k in range(1, N):
+          if half:
+            at = (e//64)*128 + ((epoch+1)&1).cast(dtypes.weakint)*64 + e%64
+            stores.append(vals_mb[k][at.valid(e < n)].store(h(values[0]) | (h(values[1]) << 16)))
+            continue
           for j, v in enumerate(values):
             raw_e = 2*e+j
             at = (raw_e//64)*128 + ((epoch+1)&1).cast(dtypes.weakint)*64 + raw_e%64
@@ -1771,14 +1780,16 @@ def flag_partial_sum(x:Tensor) -> Tensor|None:
     t1, ep1 = unwrap(flag_ar_shape(chunk, groups))
     kw1 = dict(N=N, n=chunk, T=t1, EP=ep1, scatter=n//2)
     sent = Tensor.custom_kernel(*ar.vals[1:], xf, ar.counter, fxn=functools.partial(_flag_send_kernel, **kw1))[:N-1]
+    # (the reduced chunks broadcast in fp16, saturating as the partials are: half the bytes of the second exchange)
+    half = True
     reduced = Tensor.custom_kernel(Tensor.empty(2*chunk, dtype=dtypes.float32, device=x.device), xf, ar.counter, ar.vals[0], *sent, *ar.flags,
-                                   fxn=functools.partial(_flag_sum_kernel, broadcast=True, **kw1))
+                                   fxn=functools.partial(_flag_sum_kernel, broadcast=True, half=half, **kw1))
     xf, counter = reduced[0].reshape(1, 2*chunk), reduced[2]
-    t2, ep2 = unwrap(flag_ar_shape(2*chunk, groups))
-    kw = dict(N=N, n=2*chunk, T=t2, EP=ep2)
+    t2, ep2 = unwrap(flag_ar_shape(chunk if half else 2*chunk, groups))
+    kw = dict(N=N, n=chunk if half else 2*chunk, T=t2, EP=ep2)
     sent = reduced[4:4+N-1]
     return Tensor.custom_kernel(out, xf, counter, ar.vals[0], *sent, *ar.flags,
-                                fxn=functools.partial(_flag_sum_kernel, gather=n, **kw))[0].reshape(x.shape[1:])
+                                fxn=functools.partial(_flag_sum_kernel, gather=n, gather_half=half, half=half, **kw))[0].reshape(x.shape[1:])
   kw = dict(N=N, n=n//2, T=shape[0], EP=shape[1])
   sent = Tensor.custom_kernel(*ar.vals[1:], xf, ar.counter, fxn=functools.partial(_flag_send_kernel, **kw))[:N-1]
   return Tensor.custom_kernel(out, xf, ar.counter, ar.vals[0], *sent, *ar.flags,
@@ -2499,7 +2510,7 @@ def moe_softmax_router(logits:Tensor, k:int, scale:float, table:Tensor|None=None
   sel = Tensor.empty(shape, dtype=dtypes.int32, device=logits.device, axis=axis)
   probs = Tensor.empty(shape, dtype=dtypes.float32, device=logits.device, axis=axis)
   n = int(logits.shape[-1])
-  kernel = _moe_softmax_router_bitonic_kernel if isinstance(rows:=prod(logits.shape[:-1]), int) and 0 < rows <= 8 and \
+  kernel = _moe_softmax_router_bitonic_kernel if isinstance(rows:=prod(logits.shape[:-1]), int) and 0 < rows <= 128 and \
     32 <= n <= 1024 and n & (n-1) == 0 and not _wmma_rdna4(logits.device) else _moe_softmax_router_kernel
   res = Tensor.custom_kernel(sel, probs, logits.contiguous(), *([table] if table is not None else []),
                              fxn=functools.partial(kernel, k=k, scale=scale))
@@ -5009,7 +5020,8 @@ def _qsa_tiles_kernel(out:UOp, mask:UOp, q_start:UOp, valid_end:UOp, kpool:int) 
   tiles, per = P*kpool//BLOCK_N, (P*kpool//BLOCK_N+DECODE_THREADS-1)//DECODE_THREADS
   row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(32, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
   t = wave*32+lane
-  end = (q_start+(row+1)*32).minimum(valid_end)
+  # (the rows of a chunk past its tokens (its padding): no tiles, their attention isn't computed)
+  end = (q_start+(row+1)*32).minimum(valid_end) * (q_start+row*32 < valid_end).cast(dtypes.weakint)
   npc = (end+BLOCK_N*DECODE_THREADS-1)//(BLOCK_N*DECODE_THREADS)
   def key(c:UOp) -> UOp:
     tile = c*DECODE_THREADS+t
@@ -5048,10 +5060,11 @@ def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_e
   mask = Tensor(mask.uop.after(q_start, *([valid_end] if isinstance(valid_end, UOp) else [])))
   tiles = Tensor.custom_kernel(Tensor.empty(T//32, N//32+1, dtype=dtypes.int32, device=q.device), mask,
     fxn=functools.partial(_qsa_tiles_kernel, q_start=cast(UOp, _unbind(q_start)), valid_end=ve, kpool=kpool))[0]
-  # the keys and values apart: the copy of the region's valid keys (the rows past them zeros)
+  # the keys and values apart: the copy of the region's valid keys (the rows past them aren't read: not written, N rows every chunk)
   kv = cache.transpose(0, 1).shrink((None, None, (base, base + valid_end), None))
-  kv = kv.pad_to((kv.shape[0], kv.shape[1], N, kv.shape[3]))
-  kv = Tensor.stack(kv[..., :D], kv[..., D:]).contiguous()
+  tmp = Tensor.empty(2, *kv.shape[:2], N, D, dtype=cache.dtype, device=cache.device, axis=None if cache.uop.axis is None else 2)
+  store = tmp.shrink((None, None, None, (0, valid_end), None)).uop.store(Tensor.stack(kv[..., :D], kv[..., D:]).uop)
+  kv = Tensor(tmp.uop.after(store))
   out = Tensor.empty(B, H, T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
   fxn = functools.partial(_amd_flash_attention, q_start=q_start, valid_kv_len=valid_end, rdna4=_wmma_rdna4(q.device), kpool=kpool)
   return Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, fxn=fxn)[0].reshape(B, H, T, D)

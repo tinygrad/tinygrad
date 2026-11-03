@@ -26,6 +26,16 @@ class Seq:
   y:list[int] = field(default_factory=list)
   temp:tuple[float, float] = (0.0, 1.0)
 
+@dataclass(eq=False)
+class Stashed:
+  """a sequence evicted into the stash (host memory, see Transformer.seq_stash): its tokens in the caches, their chunks and entry, its row"""
+  tokens:list[int]
+  chunks:list[int]
+  entry:int
+  used:float
+  hrow:int
+  ckpt:int
+
 def common_prefix(a:list[int], b:list[int]) -> int:
   n = min(len(a), len(b))
   if a[:n] == b[:n]: return n
@@ -45,6 +55,9 @@ class SeqEngine:
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []
     self.max_active, self.evictions = max(model.SEQ_SIZES), 0
+    # (the stash: the free chunks and entries, the stashed sequences)
+    self.free_chunks, self.free_entries = list(range(getattr(model, "stash_chunks", 0))), list(range(getattr(model, "stash_entries", 0)))
+    self.stashed:list[Stashed] = []
 
   # ** regions and slots
   def _gaps(self, skip:Seq|None=None) -> list[tuple[int, int]]:
@@ -61,8 +74,24 @@ class SeqEngine:
     if not idle: return False
     self.seqs.remove(out:=min(idle, key=lambda s: s.used))
     self.evictions += 1
-    if getenv("SEQ_LOG", 0): print(f"seq slot {out.slot} evicted ({out.n} tokens)", flush=True)
+    stashed = self._stash(out)
+    if getenv("SEQ_LOG", 0): print(f"seq slot {out.slot} evicted ({out.n} tokens{', stashed' if stashed else ''})", flush=True)
     return True
+  def _stash(self, s:Seq) -> bool:
+    """s (evicted) into the stash, the least recently used stashed ones out for it: False if it doesn't fit"""
+    if not self.free_entries and not self.stashed or s.n <= 0: return False
+    n = -(-s.n // self.model.SEQ_MOVE)
+    if n > len(self.free_chunks) + sum(len(x.chunks) for x in self.stashed): return False
+    while len(self.free_chunks) < n or not self.free_entries: self._unstash(min(self.stashed, key=lambda x: x.used))
+    chunks, entry = [self.free_chunks.pop() for _ in range(n)], self.free_entries.pop()
+    self.model.seq_stash(True, s.slot, s.base, chunks, entry, s.n, s.hrow)
+    self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
+    return True
+  def _unstash(self, x:Stashed):
+    """x out of the stash (its chunks and entry free)"""
+    self.stashed.remove(x)
+    self.free_chunks += x.chunks
+    self.free_entries.append(x.entry)
   def _place(self, s:Seq, need:int) -> bool:
     """a free region of need rows for s (not a resident one yet): the regions compacted, the idle sequences evicted, for it"""
     while need <= self.rows:
@@ -127,17 +156,39 @@ class SeqEngine:
       elif s.ckpt and s.ckpt < len(ids) and ids[:s.ckpt] == s.tokens[:s.ckpt]: cand = (s, s.ckpt, True)
       else: continue
       if best is None or cand[1] > best[1]: best = cand
-    if best is not None:
+    # (a stashed one it continues further: back from host memory, prefilled from its end, or its checkpoint)
+    def scont(x:Stashed) -> int:
+      if len(x.tokens) < len(ids) and ids[:len(x.tokens)] == x.tokens: return len(x.tokens)
+      return x.ckpt if 0 < x.ckpt < len(ids) and ids[:x.ckpt] == x.tokens[:x.ckpt] else 0
+    stashed = max((x for x in self.stashed if scont(x)), key=scont, default=None)
+    if best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
       s.active = True  # (not evicted for its own room)
       if self.room(s, len(ids) + room): return best
       s.active = False
       self.seqs.remove(s)
-    if (slot:=self._slot()) is None: return None
-    s = Seq(slot, 0, 0, active=True)
-    if not self._place(s, self._need(len(ids) + min(room, self.ROOM))) and not self._place(s, self._need(len(ids))): return None
-    self.seqs.append(s)
-    return s, 0, False
+    # (the stashed one out of the stash while its slot and region are made: the evictions don't stash over it)
+    start = scont(stashed) if stashed is not None else 0
+    if stashed is not None: self.stashed.remove(stashed)
+    restored = False
+    try:
+      if (slot:=self._slot()) is None: return None
+      s = Seq(slot, 0, 0, active=True)
+      if not self._place(s, self._need(len(ids) + min(room, self.ROOM))) and not self._place(s, self._need(len(ids))): return None
+      self.seqs.append(s)
+      if stashed is None: return s, 0, False
+      n, restored = len(stashed.tokens), True
+      self.model.seq_stash(False, s.slot, s.base, stashed.chunks, stashed.entry, n, stashed.hrow)
+      self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
+      # (as it was: prefilled from its last token's states, or its checkpoint restored)
+      s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
+      if getenv("SEQ_LOG", 0): print(f"seq slot {s.slot} unstashed ({n} tokens, from {start})", flush=True)
+      return s, start, start < n
+    finally:
+      # (back in the stash, then out if it's in the caches now)
+      if stashed is not None:
+        self.stashed.append(stashed)
+        if restored: self._unstash(stashed)
 
   def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> int:
     """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""

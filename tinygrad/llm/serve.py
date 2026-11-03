@@ -700,7 +700,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if not self.keeps() or not getenv("CACHE_LOG", 1): return
     kept = self.kept()
     n, t = max(((common_prefix(t, ids), t) for t in kept if same_start(t, ids)), key=lambda x: x[0], default=(0, []))
-    if n - start < 2000: return
+    # (CACHE_LOG=2: a conversation's own reply not reused too: where the prompt's text and the model's tokens differ)
+    if n - start < 2000 and not (getenv("CACHE_LOG", 1) >= 2 and len(t) - n >= 16 and n < len(ids)): return
     dec = self.tok.decode
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
                        f"vs {dec(ids[max(0,n-30):n+30])!r}\n", "yellow"))
