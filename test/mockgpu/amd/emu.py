@@ -1772,18 +1772,13 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
-  linear = list(UOp.sink(*params.values()).toposort())[:-1]
-  seen: set[UOp] = set()
+  bindings = params
+  calls = []
   for call in instructions:
-    args = [params.get(b, b) for b in call.src[1:]]
-    inputs = UOp.sink(*args)
-    nodes = inputs.toposort(lambda u:u.op is not Ops.PARAM and u not in seen)
-    nodes.pop(inputs)
-    seen.update(nodes)
-    linear.extend(nodes)
-    linear.append(call.replace(src=(call.body, *args)))
-    if _Ctx.sgpr in call.src[1:]: seen.clear()
-  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
+    args = UOp.sink(*call.src[1:]).substitute(bindings, walk=True).src
+    calls.append(call.replace(src=(call.body, *args)))
+    bindings = {b:p.after(calls[-1]) for b,p in params.items()}
+  return UOp.sink(*calls, arg=KernelInfo("asm_block", optimized=True)), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # thread jump-only blocks.
