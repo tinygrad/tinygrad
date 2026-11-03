@@ -1770,16 +1770,18 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
-  sgprs = {params[b] for b in bufs if b in _Ctx.sgpr}
+  sgprs = set(bufs).intersection(_Ctx.sgpr)
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   seen: set[UOp] = set()
-  for call in UOp.sink(*instructions).substitute(params, walk=True).src:
+  for call in instructions:
     inputs = UOp.sink(*call.src[1:])
     nodes = inputs.toposort(lambda u:u.op is not Ops.PARAM and u not in seen)
     nodes.pop(inputs)
     seen.update(nodes)
-    linear.extend(nodes)
-    linear.append(call)
+    for u in nodes:
+      params[u] = u.replace(src=tuple(params[s] for s in u.src))
+      linear.append(params[u])
+    linear.append(call.replace(src=(call.body, *(params[b] for b in call.src[1:]))))
     seen.difference_update(b.index(_c(0)).load() for b in call.src[1:] if b in sgprs)
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
