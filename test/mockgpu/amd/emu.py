@@ -1769,15 +1769,30 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
   if call is not None: call = call.replace(src=(call.body, *(bindings.get(b, b) for b in call.src[1:])))
   return call, cond.substitute(bindings) if cond is not None else None
 
+@functools.cache
+def instruction_effects(body:UOp) -> tuple[set[int], set[int]]:
+  reads, writes = [{u.src[0].buf_uop.arg.slot for u in body.toposort() if u.op is op and u.src[0].buf_uop.op is Ops.PARAM}
+                   for op in (Ops.LOAD, Ops.STORE)]
+  return reads, writes
+
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
-  bindings = params
+  bindings = params.copy()
+  readers:dict[UOp, dict[UOp, None]] = {b:{} for b in bufs}
   calls = []
   for call in instructions:
     args = UOp.sink(*call.src[1:]).substitute(bindings, walk=True).src
+    reads, writes = instruction_effects(call.body)
+    args = tuple(a.after(*readers[b]) if i in writes else a for i,(b,a) in enumerate(zip(call.src[1:], args)))
     calls.append(call.replace(src=(call.body, *args)))
-    bindings = {b:p.after(calls[-1]) for b,p in params.items()}
+    for u in UOp.sink(*call.src[1:]).toposort():
+      if u.op is Ops.LOAD: readers[u.src[0].buf_uop][u.substitute(bindings, walk=True)] = None
+    for i in reads - writes: readers[call.src[i+1]][calls[-1]] = None
+    for i in writes:
+      b = call.src[i+1]
+      bindings[b] = params[b].after(calls[-1])
+      readers[b].clear()
   return UOp.sink(*calls, arg=KernelInfo("asm_block", optimized=True)), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
