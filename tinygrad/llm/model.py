@@ -470,30 +470,49 @@ def _fill_zero(*ts:Tensor):
       else:
         for x in parts: _zero_buffer(x)
 
-# (while not empty: _fill_zero allocates, the buffers are zeroed by _zero_deferred, see seq_warmup)
+# (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
 @contextlib.contextmanager
 def _zero_deferred():
-  """the buffers _fill_zero allocates in the context are zeroed by the function it yields"""
+  """the buffers _fill_zero allocates in the context: not zeroed, the list it yields (see _zero_jit)"""
   _zero_later.append(bufs:=cast(list[Buffer], []))
-  try: yield lambda: [_zero_buffer(x) for x in dedup(bufs)]
+  try: yield bufs
   finally: _zero_later.pop()
+
+def _zero_jit(bufs:list[Buffer]) -> tuple[Any, Callable[[], Any]]:
+  """a jit that zeroes the buffers (a kernel each, in place), and its call"""
+  # (not the views of one zeroed whole: its inputs don't alias)
+  bases = {id(x) for x in bufs if x._base is None}
+  bufs = [x for x in bufs if x._base is None or id(x.base) not in bases]
+  ts = [Tensor(UOp.from_buffer(x, dtypes.uint32 if x.nbytes % 4 == 0 else dtypes.uint8, x.device)) for x in bufs]
+  # (t & 0: in place, an assign of zeros is made in a buffer of its own and copied)
+  jit = TinyJit(lambda: Tensor.realize(*[t.assign(t.bitwise_and(0)) for t in ts]), capture_first=True)
+  return jit, jit
 
 def _zero_buffer(x:Buffer):
   if (n:=x.nbytes) < 4096: return x.copy_from(Buffer("NPY", n, opaque=memoryview(bytearray(n))))
   at = 0
   while at < n:
     C = next(c for c in (64 << 20, 2 << 20, 64 << 10, 4 << 10) if c <= n)
-    if (jit:=_zero_jits.get((x.device, C))) is None: jit = _zero_jits[(x.device, C)] = TinyJit(lambda t: t.assign(t.zeros_like()).realize())
+    if (jit:=_zero_jits.get((x.device, C))) is None: jit = _zero_jits[(x.device, C)] = TinyJit(lambda t: t.assign(t.bitwise_and(0)).realize())
     off = min(at, n - C)
     jit(Tensor(UOp.from_buffer(x.view(C, off).ensure_allocated(), dtypes.uint32, x.device)))
     at = off + C if n - at >= C else n
 
 def _zeros(*shape:int, dtype:DType=dtypes.float32, device:str|tuple[str, ...]|None, axis:int|None=None) -> Tensor:
-  """a tensor of zeros, realized (see _fill_zero): split on axis over the devices, or on every one"""
-  t = Tensor.empty(*shape, dtype=dtype, device=device, axis=axis) if isinstance(device, tuple) and axis is not None else \
-      Tensor.empty(*shape, dtype=dtype, device=device)
-  _fill_zero(t.realize())
+  """
+  a tensor of zeros, realized (see _fill_zero): split on axis over the devices, or on every one. its buffers made as a realize of an empty
+  tensor makes them (not a realize each: it walks every tensor)
+  """
+  devs = to_tuple(device) if device is not None else (Device.canonicalize(Device.DEFAULT),)
+  if not isinstance(device, tuple): axis = None
+  if axis is not None and shape[axis] % len(devs): raise RuntimeError(f"can't split {shape} on axis {axis} over {devs}")
+  shard = tuple(n // len(devs) if i == axis else n for i, n in enumerate(shape))
+  bufs = [Buffer(d, max(prod(shard), 1) * dtype.itemsize) for d in devs]
+  if isinstance(device, tuple): (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = bufs
+  u = UOp.from_buffer(mb if isinstance(device, tuple) else bufs[0], dtype, device if device is not None else devs[0]).reshape(shard)
+  t = Tensor(u.unshard(axis) if axis is not None else u)
+  _fill_zero(t)
   return t
 
 @functools.cache
@@ -2357,31 +2376,42 @@ class Transformer:
   def _ple_dev_init(self, read:bool=True):
     """
     the table in host memory of the devices (the heads' tables views of it: their rows' bytes are 32 bit offsets), read from the file (direct:
-    not kept in the page cache besides, the table is 29GB) or copied from its bytes. read=False: the memory only, read by _ple_dev_read
+    not kept in the page cache besides, the table is 29GB) or copied from its bytes. read=False: its buffers only, the memory made and read by
+    _ple_dev_read (jits that read it can capture before)
     """
     if hasattr(self, "_ple_heads"): return
-    import numpy as np
     ple, devs = unwrap(self.config.ple), to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     self._ple_init()
     rb, table, loc = self._ple_rb, unwrap(self.ple_table), self._ple_file
     # (direct reads: from a block of the file, to an aligned address)
     pre = loc[1] % 4096 if loc is not None else 0
-    host = Buffer(devs[0], size:=round_up(pre + table.nbytes, 4096), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
-    parts = [host] + [Buffer(d, size, opaque=BufferStorage(a:=host.get_buf(d)), options=BufferSpec(external_ptr=a)) for d in devs[1:]]
-    heads = []
+    host = Buffer(devs[0], size:=round_up(pre + table.nbytes, 4096), options=BufferSpec(host=True, cpu_access=True))
+    # (the other devices': the host's mappings on them, made with it)
+    self._ple_parts, heads, views = [host] + [Buffer(d, size) for d in devs[1:]], [], []
     for o, v in zip(ple.offsets, ple.vocab_sizes):
-      views = [x.view(v*rb, pre + o*rb).ensure_allocated() for x in parts]
-      if len(devs) > 1: (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
-      heads.append(Tensor(UOp.from_buffer(mb if len(devs) > 1 else views[0], dtypes.uint8, devs if len(devs) > 1 else devs[0])))
-    self._ple_heads, self._ple_mv, self._ple_pre = heads, host.as_memoryview(allow_zero_copy=True), pre
-    # (the host's reads of the table: the copy, not the file's pages)
-    self._ple_np = np.frombuffer(self._ple_mv, dtype=np.uint8)[pre:pre + table.nbytes].reshape(-1, rb)
+      views += (vs:=[x.view(v*rb, pre + o*rb) for x in self._ple_parts])
+      if len(devs) > 1: (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = vs
+      heads.append(Tensor(UOp.from_buffer(mb if len(devs) > 1 else vs[0], dtypes.uint8, devs if len(devs) > 1 else devs[0])))
+    self._ple_heads, self._ple_views, self._ple_pre = heads, views, pre
     if read: self._ple_dev_read()
+
+  def _ple_dev_alloc(self):
+    """the memory of the table (see _ple_dev_init)"""
+    if hasattr(self, "_ple_mv"): return
+    import numpy as np
+    host, *aliases = self._ple_parts
+    host.ensure_allocated()
+    for x in aliases: x.allocate(opaque=BufferStorage(a:=host.get_buf(x.device)), external_ptr=a)
+    for v in self._ple_views: v.ensure_allocated()
+    self._ple_mv, n = host.as_memoryview(allow_zero_copy=True), unwrap(self.ple_table).nbytes
+    # (the host's reads of the table: the copy, not the file's pages)
+    self._ple_np = np.frombuffer(self._ple_mv, dtype=np.uint8)[self._ple_pre:self._ple_pre + n].reshape(-1, self._ple_rb)
 
   def _ple_dev_read(self, background:bool=False):
     """the table read into its host memory (see _ple_dev_init). background: by threads (joined by _ple_dev_wait)"""
     if not hasattr(self, "_ple_heads"): self._ple_dev_init(read=False)
     if getattr(self, "_ple_read", False): return
+    self._ple_dev_alloc()
     import concurrent.futures
     self._ple_read, table, loc, mv, pre, C = True, unwrap(self.ple_table), self._ple_file, self._ple_mv, self._ple_pre, 64 << 20
     fd = os.open(loc[0], os.O_RDONLY | getattr(os, "O_DIRECT", 0)) if loc is not None else None
@@ -3559,9 +3589,8 @@ class Transformer:
     """the resources the jits share, made before they're captured (or loaded): the random state of the devices, the n-gram tables, the
     collectives' mailboxes, the argmax's counts"""
     devs = cast(tuple[str, ...], self.token_embd.weight.device)
-    for d in devs:
-      key, ctr = Tensor._next_counter(d, 0)
-      Tensor.realize(key, ctr, Tensor._device_rng_counters[d])
+    # (one realize: one walks every tensor)
+    Tensor.realize(*[x for d in devs for x in (*Tensor._next_counter(d, 0), Tensor._device_rng_counters[d])])
     if self.config.ple is not None: self._ple_dev_init(read)
     for g in (4, 16, 64): flag_allreduce(devs, g)
     p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
@@ -3576,19 +3605,23 @@ class Transformer:
     # what's computed from them, the states zeroed, the n-gram table copied
     st = time.perf_counter()
     self._derive_weights()
-    with _zero_deferred() as zero: self._seq_init()
+    with _zero_deferred() as zero_bufs: self._seq_init()
     self._seq_shared(read=False)
+    # (the computations from the weights and the zeroing of the states: jits compiled with the others, run when the weights are read)
+    loads = [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)] + [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
-    def meanwhile():
+    def meanwhile(take:Callable[[Any], bool]):
       # the files' reads (the weights', then the n-gram table's while the values are computed from the weights: not at once, the reads of
       # both are slower than one after the other)
       while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
       if self.config.ple is not None: self._ple_dev_read(background=True)
       if DEBUG >= 1: print(f"seq_warmup: read at {time.perf_counter()-st:.2f}s")
+      for j, call in loads:
+        if j in self._pending_load: self._pending_load.remove(j)
+        take(j)
+        call()
       self._finish_load()
-      if DEBUG >= 1: print(f"seq_warmup: weights at {time.perf_counter()-st:.2f}s")
-      zero()
-      if DEBUG >= 1: print(f"seq_warmup: zeroed at {time.perf_counter()-st:.2f}s")
+      if DEBUG >= 1: print(f"seq_warmup: weights and zeros at {time.perf_counter()-st:.2f}s")
       self._ple_dev_wait()
       if DEBUG >= 1: print(f"seq_warmup: loaded at {time.perf_counter()-st:.2f}s")
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
@@ -3616,8 +3649,15 @@ class Transformer:
         par.append((self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self._seq_chunk, 0, 0, n)))
       if top + c <= self.seq_rows(): par.append((self._prefill_jit(c, False), functools.partial(self._seq_chunk, 0, top, c)))
     for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
+    # (and the copies of the states: their jits alone, not seq_move's write of the token buffer)
+    for sv in (True, False):
+      par += [(self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0)),
+              (self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))]
+    v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
+    par.append((self._seq_move_jit, lambda: self._seq_move_jit(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN))))
+    par += loads
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
-    else: meanwhile()
+    else: meanwhile(lambda j: False)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
       st = time.perf_counter()
@@ -4227,7 +4267,7 @@ class Transformer:
             calls.append((bpf, functools.partial(bpf, *self._bpf_vars([1]*G, [0]*G, [0]*G))))
             bpf.link_later = True
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
-    def meanwhile():
+    def meanwhile(take):
       # (the jits of the computations left run after: they're compiled meanwhile)
       while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
       if self.has_recurrent_block and getenv("CHECKPOINT", 1): self._checkpoint([0], save=True), self._checkpoint([0], save=False)

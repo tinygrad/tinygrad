@@ -282,7 +282,7 @@ class QCOMProgramData:
 
 def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
   image = bytes((data:=QCOMProgramData(dev, prg.to_elf())).image).ljust(round_up(len(data.image), 4), b"\x00")
-  return data, patch(make_program(prg, len(image), devs[0]), [], image)
+  return data, patch(make_program(prg, len(image), devs[0], image=True), [], image)
 
 class QCOMAllocator(Allocator['QCOMDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:

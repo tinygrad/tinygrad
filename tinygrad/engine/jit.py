@@ -1,11 +1,12 @@
-from typing import TypeVar, Generic, Callable, Any, Sequence, overload
+from typing import TypeVar, Generic, Callable, Any, Sequence, overload, cast
 import functools, os, io, pickle, itertools, threading, warnings, time, weakref, sys
 from tinygrad.tensor import Tensor, all_tensors
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup, unwrap
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args, _compile_pickled
+from tinygrad.engine.worker import get_worker_pool
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -282,23 +283,51 @@ def _exit_child(code:int):
   worker.terminate_worker_pool()
   os._exit(code)
 
-def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[], None]|None=None,
+def _recv(f) -> bytes|None:
+  if len(head:=f.read(8)) < 8: return None
+  return f.read(int.from_bytes(head, "little"))
+
+def _remote_compile(qw:int, ar:int, tasks:list[tuple[bytes, bytes]]) -> list[UOp]:
+  # (in a forked process) the kernels compiled by the parent
+  _send(qw, pickle.dumps(tasks))
+  with os.fdopen(os.dup(ar), "rb") as f: ret = pickle.loads(unwrap(_recv(f)))
+  if isinstance(ret, str): raise RuntimeError(f"compile failed in the parent: {ret}")
+  return [pickle.loads(x) for x in ret]
+
+class _Compiles:
+  """the compiles of the forked processes' kernels: one a key (its bytes), on the workers of a pool"""
+  def __init__(self): self.lock, self.results = threading.Lock(), cast(dict[bytes, Any], {})
+  def serve(self, pool, qr:int, aw:int):
+    # (bytes only here: the workers unpickle the kernels and pickle their programs)
+    with os.fdopen(qr, "rb") as f:
+      while (msg:=_recv(f)) is not None:
+        with self.lock:
+          res = [self.results.get(k) or self.results.setdefault(k, pool.apply_async(_compile_pickled, (t,))) for k, t in pickle.loads(msg)]
+        try: _send(aw, pickle.dumps([r.get() for r in res]))
+        except Exception as e: _send(aw, pickle.dumps(f"{type(e).__name__}: {e}"))
+    os.close(aw)
+
+def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[[_TinyJit], bool]], None]|None=None,
                      taken:Callable[[_TinyJit], None]|None=None) -> list[bool]:
   """
   the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
   jit is captured and compiled but nothing runs, the parent takes the compiled jit (linked and run on its first call there). the jits share
   their scratch (the biggest arena of each lane). a jit that can't be captured so is left to capture on its call. returns which were
-  meanwhile: the parent's work while they compile (e.g. the data the jits read, made in the buffers they use). taken: called with every jit
-  taken (in the order they come), the parent's work while the others compile
+  meanwhile: the parent's work while they compile (e.g. the data the jits read, made in the buffers they use), called with a function that
+  takes one of the jits (waits for it: it runs then). taken: called with every jit taken (in the order they come), the parent's work while the
+  others compile
   """
   todo = [k for k, (j, _) in enumerate(calls) if j.cnt == 1 and j.captured is None and j.fxn is not None]
   if not todo or not hasattr(os, "fork"):
-    if meanwhile is not None: meanwhile()
+    if meanwhile is not None: meanwhile(lambda jit: False)
     return [False] * len(calls)
   every, calls = list(calls), [calls[k] for k in todo]
   st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
   children:list[tuple[int, int]] = []
+  # the kernels of all the processes compiled by this one's workers, each once (most are in many jits): a request pipe and a reply pipe each
+  pool, compiles = get_worker_pool(), _Compiles()
   for i, (jit, call) in enumerate(calls):
+    if pool is not None: (qr, qw), (ar, aw) = os.pipe(), os.pipe()
     r, w = os.pipe()
     sys.stdout.flush(), sys.stderr.flush() # (the child doesn't print the parent's buffered output again)
     with warnings.catch_warnings():
@@ -310,8 +339,10 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       from tinygrad.engine import worker
       from tinygrad.helpers import PARALLEL
       device_mod.FORKED_COMPILE, worker.worker_pool = True, None
-      # (behind the parent's work meanwhile, e.g. reading the weights: the compiles take the cores it leaves)
-      os.nice(10)
+      if pool is not None:
+        import tinygrad.engine.realize as realize
+        for fd in (qr, aw): os.close(fd)
+        realize.remote_compile = functools.partial(_remote_compile, qw, ar)
       # (the cores shared by the processes: more compilers than cores slow the parent's work meanwhile)
       PARALLEL.value = max(1, PARALLEL.value // len(calls))
       UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)
@@ -326,6 +357,9 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       _exit_child(1)
     os.close(w)
     children.append((pid, r))
+    if pool is not None:
+      for fd in (qw, ar): os.close(fd)
+      threading.Thread(target=compiles.serve, args=(pool, qr, aw), daemon=True).start()
 
   # read the pipes at once (a child blocks on a full pipe): the arena sizes, then the jit
   msgs:list[list[bytes]] = [[] for _ in children]
@@ -342,33 +376,34 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     put(k, b"") # (the end)
   threads = [threading.Thread(target=read, args=(k,), daemon=True) for k in range(len(children))]
   for t in threads: t.start()
-  if meanwhile is not None: meanwhile()
-  if DEBUG >= 1: print(f"capture_parallel: the work meanwhile done at {time.perf_counter()-st:.2f}s")
+  # the arenas: the biggest of every lane, shared (made before a jit of them is linked)
+  arenas_made = [False]
+  def make_arenas():
+    if arenas_made[0]: return
+    with got: got.wait_for(lambda: all(len(m) >= 1 for m in msgs))
+    sizes:dict[Any, int] = {}
+    for m in msgs:
+      for k, n in (pickle.loads(m[0]).items() if m[0] else []): sizes[k] = max(sizes.get(k, 0), n)
+    for jit, _ in calls:
+      if jit.scratch is None: continue
+      for k, n in sizes.items():
+        if k not in jit.scratch or jit.scratch[k].max_numel() < n: jit.scratch[k] = UOp.new_buffer(k[0], n, dtypes.int8)
+    # (allocated while the processes compile: the links don't)
+    for b in dedup(u.buffer for jit, _ in calls for u in (jit.scratch or {}).values()):
+      for x in (b.bufs if isinstance(b, MultiBuffer) else [b]): x.ensure_allocated()
+    arenas_made[0] = True
 
-  # the arenas: the biggest of every lane, shared (made before any jit is linked)
-  with got: got.wait_for(lambda: all(len(m) >= 1 for m in msgs))
-  sizes:dict[Any, int] = {}
-  for m in msgs:
-    for k, n in (pickle.loads(m[0]).items() if m[0] else []): sizes[k] = max(sizes.get(k, 0), n)
-  for jit, _ in calls:
-    if jit.scratch is None: continue
-    for k, n in sizes.items():
-      if k not in jit.scratch or jit.scratch[k].max_numel() < n: jit.scratch[k] = UOp.new_buffer(k[0], n, dtypes.int8)
-  # (allocated while the processes compile: the links don't)
-  for b in dedup(u.buffer for jit, _ in calls for u in (jit.scratch or {}).values()):
-    for x in (b.bufs if isinstance(b, MultiBuffer) else [b]): x.ensure_allocated()
-
-  # every jit as it comes: taken and linked
   oks, left = [False] * len(children), set(range(len(children)))
-  while left:
-    with got: got.wait_for(lambda: any(len(msgs[k]) >= 2 or msgs[k][-1] == b"" for k in left))
-    # (the first to have come: one done long ago isn't left behind ones that just came)
-    k = min((k for k in left if len(msgs[k]) >= 2 or msgs[k][-1] == b""), key=lambda k: arrived[k][-1] if arrived[k] else 0)
+  def came(k:int) -> bool: return len(msgs[k]) >= 2 or (len(msgs[k]) == 1 and msgs[k][0] == b"")
+  @disable_gc()
+  def take(k:int):
+    # a jit that came: its uops made, linked
     left.discard(k)
     if (status:=os.waitpid(children[k][0], 0)[1]) != 0 or len(msgs[k]) < 2 or not msgs[k][1]:
       if DEBUG >= 1: print(f"capture_parallel: jit {todo[k]} not captured (exit status {status:#x}), captured on its call")
-      continue
-    jit = calls[k][0]
+      return
+    if calls[k][0].scratch is not None: make_arenas()
+    jit, t0 = calls[k][0], time.perf_counter()
     arenas, recs, rest = pickle.loads(msgs[k][1])
     arena_at = {i: (jit.scratch or {})[key] for key, (i, _) in arenas.items()}
     out:list[UOp] = []
@@ -385,9 +420,26 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       if reach[i]:
         for j in recs_srcs[i][1 if out[i].op is Ops.CALL else 0:]: reach[j] = 1
     jit.captured.__dict__["_jit_bufs"] = {out[i] for i in range(lin + 1) if reach[i] and out[i].op is Ops.BUFFER}
+    t1 = time.perf_counter()
     # (a jit whose memory isn't made yet is linked on its first call)
     if not getattr(jit, "link_later", False): jit.captured.linked()
     oks[k] = True
     if taken is not None: taken(jit)
-    if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s")
+    if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s "
+                         f"({len(out)} uops made in {t1-t0:.2f}s, linked in {time.perf_counter()-t1:.2f}s)")
+  def take_jit(jit:_TinyJit) -> bool:
+    # (meanwhile) a jit taken when it comes (waited for): it runs now
+    k = next(k for k, (j, _) in enumerate(calls) if j is jit)
+    if k in left:
+      with got: got.wait_for(lambda: came(k))
+      take(k)
+    return oks[k]
+
+  if meanwhile is not None: meanwhile(take_jit)
+  if DEBUG >= 1: print(f"capture_parallel: the work meanwhile done at {time.perf_counter()-st:.2f}s")
+  # every jit left as it comes: taken and linked
+  while left:
+    with got: got.wait_for(lambda: any(came(k) for k in left))
+    # (the first to have come: one done long ago isn't left behind ones that just came)
+    take(min((k for k in left if came(k)), key=lambda k: arrived[k][-1] if arrived[k] else 0))
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

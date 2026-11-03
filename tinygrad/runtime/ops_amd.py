@@ -536,7 +536,7 @@ class AMDProgramData:
 
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
   data, image = _amd_program_image(prg.src[3].arg, dev.target, dev.iface.props['lds_size_in_kb'])
-  return data, patch(make_program(prg, len(image), devs[0]), [], image)
+  return data, patch(make_program(prg, len(image), devs[0], image=True), [], image)
 
 @functools.lru_cache(maxsize=4096)
 def _amd_program_image(lib:bytes, target:tuple, lds_kb:int) -> tuple[AMDProgramData, bytes]:

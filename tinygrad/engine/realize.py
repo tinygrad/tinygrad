@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import cast, Iterator, Any, Sequence
-import decimal, weakref
+from typing import cast, Iterator, Any, Sequence, Callable
+import decimal, weakref, pickle
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -256,6 +256,10 @@ pm_beam = PatternMatcher([
 
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
   with Context(**x[2]): return x[0], to_program(*x[1])
+def _compile_pickled(task:bytes) -> bytes: return pickle.dumps(_compile_kernel(pickle.loads(task))[1])
+
+# (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs
+remote_compile:Callable[[list[tuple[bytes, bytes]]], list[UOp]]|None = None
 
 def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   ast = c.body
@@ -272,7 +276,12 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   # lower and compile what's not cached, in parallel if there's a worker pool
   keys = {c: to_program_key(*a) for c, a in ar.items()}
   todo = list({keys[c]: a for c, a in ar.items() if keys[c] not in to_program_cache}.items())
-  if len(todo):
+  if len(todo) and remote_compile is not None and not any(getattr(c.body.arg, "beam", 0) for c in ar):
+    ctx = {v.key: v.value for v in to_program_context}
+    if CAPTURE_PROCESS_REPLAY: ctx["PROCESS_REPLAY_LOC"] = get_process_replay_loc()
+    prgs = remote_compile([(pickle.dumps(key), pickle.dumps((0, ast_ren, ctx))) for key, ast_ren in todo])
+    for (key, _), prg in zip(todo, prgs): to_program_cache[key] = prg
+  elif len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
 
     pool = None if len(todo) == 1 or any(getattr(c.body.arg, "beam", 0) for c in ar) else get_worker_pool()
