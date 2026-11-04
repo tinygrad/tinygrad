@@ -48,19 +48,25 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, named {device}_{name}_{queue}. put is the host's copy of the write pointer
   shapes = [("ring", (q.ring.nbytes // 4,), dtypes.uint32, hq.devs[0])] + [(n, (1,), dtypes.uint64, hq.devs[0]) for n in ("write_ptr", "doorbell")]
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
-  return [UOp.alloc(s, dt, 0, device=d, name=to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
+  ret = [UOp.alloc(s, dt, 0, device=d, name=to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
+  # (am: the hdp flush register, see amd_push)
+  if getattr(hq.dev, "hdp_flush_buf", None) is not None: ret.append(UOp.alloc((1,), dtypes.uint32, 0, device=hq.dev.host, name=to_name(hq.dev.device, "hdp_flush")))
+  return ret
 
 @uopfunc
-def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
+def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, hdp:UOp|None=None, unit:int=4, doorbell_lag:int=0) -> UOp:
   rs, n, p = ring.max_numel(), words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
   first = (rs - (tail:=((p * (unit // 4)) % rs).cast(dtypes.int))).minimum(n)
   for dst, src, count in ((tail, 0, first), (0, first, n - first)):
     cmdbuf = ccall(libc.memcpy, ring.after(cmdbuf).index(dst), words.bitcast(dtypes.uint32).index(src), (count * 4).cast(dtypes.uint64))
   w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit).barrier()
+  # am: the host's writes of the vram (the patched cmdbuf and kernargs) go through the hdp, flushed before the doorbell. else a launch right
+  # after the last one's end can read its stale words (and hang)
+  if hdp is not None: w = hdp.after(w).index(0).store(UOp.const(0, dtypes.uint32)).barrier()
   return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag).sink()
 
 @uopfunc
-def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UOp:
+def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, hdp:UOp|None=None) -> UOp:
   # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
   rs, size_dw = ring.max_numel(), cmdbuf.max_numel() // 4
   if size_dw > rs: raise RuntimeError(f"SDMA command buffer ({size_dw*4} bytes) exceeds ring size ({rs*4} bytes)")
@@ -72,6 +78,8 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UO
   copy = ccall(libc.memcpy, ring.after(zero_tail).index(start_dw), cmdbuf.bitcast(dtypes.uint32).index(0), UOp.const(size_dw * 4, dtypes.uint64))
   next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
   w = wptr.after(copy).index(0).store(next_put).barrier()
+  # (am: the hdp flushed before the doorbell, see amd_push)
+  if hdp is not None: w = hdp.after(w).index(0).store(UOp.const(0, dtypes.uint32)).barrier()
   return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put).sink()
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
@@ -894,6 +902,13 @@ class AMDDevice(Compiled):
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
     Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
+    # (am: the hdp flush register as host memory, the host's writes of the vram flushed by a write of it, see amd_push)
+    self.hdp_flush_buf:Buffer|None = None
+    if self.is_am() and not self.iface.dev_impl.is_vf and getenv("AMD_HDP_FLUSH", 1):
+      impl = self.iface.dev_impl
+      addr = impl.mmio.addr + impl.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read()
+      self.hdp_flush_buf = hdp = Buffer(self.host, 4, options=BufferSpec(external_ptr=addr), preallocate=True)
+      Compiled.link_bufs |= {to_name(self.device, "hdp_flush"): lambda b: hdp}
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
