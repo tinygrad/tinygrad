@@ -269,11 +269,16 @@ class GGUFPackedTable:
     return ggml_data_to_tensor(rows, n*int(self.rows.shape[1])*self.width, self.typ).reshape(n, -1)
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
+               shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
+  A tensor in `repeats` is first cut into `len(devices)//repeats` row blocks that are each repeated `repeats` times.
   """
   n, packed, shard_map = len(devices), {}, shard_map or {}
+  for name, r in (repeats or {}).items():
+    data, shape, typ = entries[name]
+    if n % r or shape[0] % (n//r): raise ValueError(f"{name}: can't repeat {shape} {r} times over {n} devices")
+    entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
   for name, (data, shape, typ) in entries.items():
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
     else:
