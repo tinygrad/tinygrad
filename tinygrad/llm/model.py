@@ -543,8 +543,8 @@ def _stash_save_kernel(dst:UOp, src:UOp, dev:UOp, row:UOp, at:UOp, n:int, writer
   D = cast(int, src.shape[-1])
   def flat(t:UOp) -> UOp: return t.reshape(prod(cast(tuple[int, ...], t.shape)))
   s, d = flat(src), flat(dst)
-  # (a thread 8 values next to each other: its loads and stores wide)
-  V = 8 if D % 8 == 0 else 1
+  # (a thread 16 bytes next to each other: a wave's stores whole lines of the host memory (wider ones are split, half lines it writes slowly))
+  V = 16 // src.dtype.itemsize if D % (16 // src.dtype.itemsize) == 0 else 1
   r, w = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(D // V, 1, AxisType.LOCAL)
   code = (UOp.const(writers, dtypes.int64) >> (dev[0].load().cast(dtypes.int64) * 8)) & 0xFF
   part, count = (code & 0xF).cast(dtypes.weakint), (code >> 4).cast(dtypes.weakint)
