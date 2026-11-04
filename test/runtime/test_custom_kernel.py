@@ -306,8 +306,9 @@ class TestCustomKernel(unittest.TestCase):
       k = UOp.range(2, 0, AxisType.LOOP)
       idx = A[k].load().reduce(k, arg=Ops.ADD)
       return C[0].store(B[idx].load()).sink(arg=KernelInfo(opts_to_apply=()))
-    out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([1, 2]), Tensor([10, 20, 30, 40]), fxn=kernel)[0]
-    self.assertEqual(out.item(), 40)
+    with Context(CHECK_OOB=0):
+      out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([1, 2]), Tensor([10, 20, 30, 40]), fxn=kernel)[0]
+      self.assertEqual(out.item(), 40)
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
