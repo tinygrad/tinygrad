@@ -322,7 +322,9 @@ class TestProgressBar(unittest.TestCase):
     self.assertIn("100/100", out)
 
   def test_tqdm_perf(self):
-    # Compare medians of 5 runs to reduce sensitivity to occasional timing spikes.
+    # median of 5 runs to reduce noise,
+    # since orignal test failed some
+    # times in repeated testings.
     tqdm_times = [0.0]*5
     tinytqdm_times = [0.0]*5
     for exp in range(5):
