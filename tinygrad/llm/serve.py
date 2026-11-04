@@ -704,10 +704,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def miss_log(self, ids:list[int], start:int):
     """(CACHE_LOG) a request prefilled from much less than it shares with a kept conversation: where they differ"""
     if not self.keeps() or not getenv("CACHE_LOG", 1): return
-    kept = self.kept()
+    kept, lvl = self.kept(), getenv("CACHE_LOG", 1)
+    # (a miss shares 2000 tokens more than start at least: the others aren't compared (each is copies of its tokens))
+    if lvl < 2: kept = [t for t in kept if len(t) >= start + 2000 <= len(ids) and t[start+1999] == ids[start+1999]]
     n, t = max(((common_prefix(t, ids), t) for t in kept if same_start(t, ids)), key=lambda x: x[0], default=(0, []))
     # (CACHE_LOG=2: a conversation's own reply not reused too: where the prompt's text and the model's tokens differ)
-    if n - start < 2000 and not (getenv("CACHE_LOG", 1) >= 2 and len(t) - n >= 16 and n < len(ids)): return
+    if n - start < 2000 and not (lvl >= 2 and len(t) - n >= 16 and n < len(ids)): return
     dec = self.tok.decode
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
                        f"vs {dec(ids[max(0,n-30):n+30])!r}\n", "yellow"))
@@ -1062,18 +1064,20 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # the waiting requests join (prefilled one at a time, the others wait for it)
         while pending and len(active) < eng.max_active:
           req = pending[0]
+          # (a paused one (see below) goes on from its tokens so far)
+          ids = req.ids + req.generated
           t0 = time.perf_counter()
-          got = eng.take(req.ids, req.max_tokens or 0)
+          got = eng.take(ids, max(0, (req.max_tokens or 0) - len(req.generated)))
           self.stats.add("take", time.perf_counter() - t0)
           for name, t in eng.times.items(): self.stats.add(name, t)
           eng.times.clear()
           if got is None: break
           pending.pop(0)
           s, start, restore = got
-          req.cache_start = start
-          self.miss_log(req.ids, start)
+          if not req.generated: req.cache_start = start
+          self.miss_log(ids, start)
           st = time.perf_counter()
-          try: first = eng.prefill(s, req.ids, start, restore, (req.temperature, req.top_p))
+          try: first = eng.prefill(s, ids, start, restore, (req.temperature, req.top_p))
           except Exception as e:
             traceback.print_exc()
             eng.seqs.remove(s)
@@ -1081,7 +1085,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             continue
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - st
           if getenv("SEQ_LOG", 0):
-            stderr_log(f"seq slot {s.slot} base {s.base} cap {s.cap}: {len(req.ids)-start} of {len(req.ids)} prefilled from {start}"
+            stderr_log(f"seq slot {s.slot} base {s.base} cap {s.cap}: {len(ids)-start} of {len(ids)} prefilled from {start}"
                        f"{' (checkpoint)' if restore else ''} in {time.perf_counter()-st:.3f}s, waited {st-req.st:.3f}s\n")
           if self.emit(req, first): active[s] = req
           else: eng.stop(s, len(s.tokens))
@@ -1093,7 +1097,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if isinstance(stt:=getattr(self.model, "step_times", None), list):
           self.stats.add("launch", stt[0])
           self.stats.add("wait", stt[1])
-          stt[:] = [0.0, 0.0]
+          self.stats.add("seen", stt[2])
+          stt[:] = [0.0, 0.0, 0.0]
         st = time.perf_counter()
         for s, toks in zip(seqs, outs):
           req = active[s]
@@ -1106,10 +1111,17 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               break
           else:
             if not eng.room(s, len(s.tokens) + 2*(k+1)):
-              req.finish_reason = "length"
-              self.finish(req)
-              eng.stop(s, len(s.tokens))
               del active[s]
+              # (the caches full of the decoding ones: it pauses (into the stash), its request goes on when there's room, first. one longer
+              # than the caches ends)
+              if eng.fits(len(s.tokens) + 2*(k+1)):
+                eng.pause(s)
+                pending.insert(0, req)
+                self.stats.add("paused", 1)
+              else:
+                req.finish_reason = "length"
+                self.finish(req)
+                eng.stop(s, len(s.tokens))
         self.stats.add("emit", time.perf_counter() - st)
         self.stats.step(len(active), len(pending))
       except KeyboardInterrupt: raise

@@ -2748,12 +2748,14 @@ class Transformer:
 
   def _wait_host(self, get:Callable[[], Any], what:str) -> Any:
     """the value a step writes to host memory (polled: -1 until then). a step that doesn't come (the devices' errors): an error, not a hang"""
-    st = time.perf_counter()
+    st = last = time.perf_counter()
     while isinstance(v:=get(), int) and v < 0:
-      if time.perf_counter() - st > 10:
+      last = time.perf_counter()
+      if last - st > 10:
         for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
         if isinstance(v:=get(), int) and v < 0: raise RuntimeError(f"{what}: none after the devices finished")
         break
+    self.step_times[2] += time.perf_counter() - last  # (the last poll's: how late it's seen at most)
     return v
 
   def _spec_steps(self, tokens:list[int], temperature:Tensor|None) -> Iterator[int]:
@@ -3944,7 +3946,7 @@ class Transformer:
       UOp.variable(f"seq_mtp{g}", 0, self.max_context-1).bind(mp), UOp.variable(f"seq_j{g}", 0, k).bind(j),
       UOp.variable(f"seq_par{g}", 0, 1).bind(par))]
 
-  step_times = [0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
+  step_times = [0.0, 0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,

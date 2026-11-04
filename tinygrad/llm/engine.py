@@ -41,6 +41,11 @@ class Seq:
   y:list[int] = field(default_factory=list)
   temp:tuple[float, float] = (0.0, 1.0)
 
+def starts(ids:list[int], toks:list[int], n:int) -> bool:
+  """ids[:n] == toks[:n] (a few tokens compared first: another conversation's differ there, not copied)"""
+  if n <= 0 or len(ids) < n or len(toks) < n or ids[n-1] != toks[n-1] or ids[n//2] != toks[n//2]: return n <= 0
+  return ids[:n] == toks[:n]
+
 def common_prefix(a:list[int], b:list[int]) -> int:
   n = min(len(a), len(b))
   if a[:n] == b[:n]: return n
@@ -204,15 +209,15 @@ class SeqEngine:
     best:tuple[Seq, int, bool]|None = None
     for s in self.seqs:
       if s.active: continue
-      if s.n and s.n < len(ids) and ids[:s.n] == s.tokens[:s.n]: cand = (s, s.n, False)
-      elif s.ckpt and s.ckpt < len(ids) and ids[:s.ckpt] == s.tokens[:s.ckpt]: cand = (s, s.ckpt, True)
+      if s.n and s.n < len(ids) and starts(ids, s.tokens, s.n): cand = (s, s.n, False)
+      elif s.ckpt and s.ckpt < len(ids) and starts(ids, s.tokens, s.ckpt): cand = (s, s.ckpt, True)
       else: continue
       if best is None or cand[1] > best[1]: best = cand
     # (a stashed one it continues further: back from host memory, prefilled from its end, or its checkpoint)
     def scont(x:Stashed) -> int:
-      if len(x.tokens) < len(ids) and ids[:len(x.tokens)] == x.tokens: return len(x.tokens)
-      return x.ckpt if 0 < x.ckpt < len(ids) and ids[:x.ckpt] == x.tokens[:x.ckpt] else 0
-    stashed = max((x for x in self.stashed if scont(x)), key=scont, default=None)
+      if len(x.tokens) < len(ids) and starts(ids, x.tokens, len(x.tokens)): return len(x.tokens)
+      return x.ckpt if 0 < x.ckpt < len(ids) and starts(ids, x.tokens, x.ckpt) else 0
+    stashed = max(((n, i, x) for i, x in enumerate(self.stashed) if (n:=scont(x))), default=(0, 0, None))[2]
     if best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
       s.active = True  # (not evicted for its own room)
@@ -266,6 +271,15 @@ class SeqEngine:
       s.n, s.hrow = start + j + 1, (1 - s.par)*(k+1) + j
       ret.append(sampled[:j+1])
     return ret
+
+  def fits(self, length:int) -> bool: return self._need(length) <= self.rows
+  def pause(self, s:Seq):
+    """s (decoding) out of the caches, into the stash if it fits: its slot and region free, a prompt of its tokens goes on from it"""
+    s.active, s.used = False, time.perf_counter()
+    self.seqs.remove(s)
+    self.evictions += 1
+    stashed = self._stash(s)
+    if getenv("SEQ_LOG", 0): print(f"seq slot {s.slot} paused ({s.n} tokens{', stashed' if stashed else ''})", flush=True)
 
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""
