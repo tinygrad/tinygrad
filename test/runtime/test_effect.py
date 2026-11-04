@@ -42,6 +42,20 @@ class TestEffectRetention(unittest.TestCase):
     self.assertEqual((c.tolist(), d.tolist()), ([1]*4, [1]*4))
 
 class TestEffectOrder(unittest.TestCase):
+  def test_snapshot_before_overwrite(self):
+    def kernel(A:UOp) -> UOp:
+      old, r = A[0].load(), UOp.range(2, 0, AxisType.LOOP)
+      return A.after(A.after(old, r)[0].store(9).end(r))[1].store(old).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor([5, 0], dtype=dtypes.int).contiguous().realize().custom_kernel(fxn=kernel)[0].tolist(), [9, 5])
+
+  def test_snapshot_before_loop_bound(self):
+    def kernel(A:UOp) -> UOp:
+      old = A[0].load()
+      l = UOp(Ops.RANGE, src=(UOp(Ops.NOOP).after(old),), arg=(AxisType.WEAK, 0))
+      done = (w:=A.after(l)[0].store(9)).backedge(l, A.after(w)[0].load().ne(9))
+      return A.after(done)[1].store(old).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor([5, 0], dtype=dtypes.int).contiguous().realize().custom_kernel(fxn=kernel)[0].tolist(), [9, 5])
+
   def test_store_value_behind_coalesced_store(self):
     def c(v): return UOp.const(v, dtypes.int)
     for stores, want in ((lambda A: (A[0].store(7), A[1].store(A.after(A[0].store(7))[0]+5)), [7, 12, 5, 0]),

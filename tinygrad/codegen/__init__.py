@@ -191,7 +191,7 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(op, r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
   acc_out = acc_initted.store(acc_initted.alu(op, ret)).end(*r.src[1:])
-  return acc.after(acc_out)
+  return acc.after(acc_out).load()
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
   # fix group for reduce
