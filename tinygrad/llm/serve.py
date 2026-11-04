@@ -457,14 +457,15 @@ class BatchStats:
     self.every, self.st = every, time.perf_counter()
     self.reset()
   def reset(self):
-    self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0.0, 0, 0.0
+    self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time, self.mixed = 0, 0, 0.0, 0, 0.0, 0
     self.times:dict[str, float|int] = {}  # (more of the time: where it went, and counts)
   def add(self, name:str, t:float|int): self.times[name] = self.times.get(name, 0) + t
   def step(self, running:int, waiting:int):
     if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
       sep = colored('--', 'BLACK')
       stderr_log(f"batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  {self.tokens/dt:5.0f} tok/s generated  {sep}  "
-                 f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s)  "
+                 f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s, "
+                 f"{self.mixed} mixed)  "
                  f"{sep}  in the last {dt:.0f}s" + "".join(f"  {sep}  {k} {v:.1f}s" if isinstance(v, float) else f"  {sep}  {k} {v}"
                                                            for k, v in self.times.items()) + "\n")
       self.st = time.perf_counter()
@@ -1064,8 +1065,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
         pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
         self.inflight = len(active) + len(pending)
-        # the waiting requests join (prefilled one at a time, the others wait for it)
-        while pending and len(active) < eng.max_active:
+        # the waiting requests join (prefilled one at a time, the others wait for it). one prompt that a mixed step takes: prefilled with the
+        # next step (SEQ_MIX_SIZES)
+        mix = None
+        while pending and len(active) + (mix is not None) < eng.max_active:
           req = pending[0]
           # (a paused one (see below) goes on from its tokens so far)
           ids = req.ids + req.generated
@@ -1079,6 +1082,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           s, start, restore = got
           if not req.generated: req.cache_start = start
           self.miss_log(ids, start)
+          if mix is None and active and eng.mixable(len(active), ids, start):
+            mix = (req, s, ids, start, restore)
+            continue
           st = time.perf_counter()
           try: first = eng.prefill(s, ids, start, restore, (req.temperature, req.top_p))
           except Exception as e:
@@ -1092,11 +1098,30 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                        f"{' (checkpoint)' if restore else ''} in {time.perf_counter()-st:.3f}s, waited {st-req.st:.3f}s\n")
           if self.emit(req, first): active[s] = req
           else: eng.stop(s, len(s.tokens))
-        if not active: continue
+        if not active and mix is None: continue
         seqs = list(active)
+        prompt = None
+        if mix is not None:
+          mreq, ms, mids, mstart, mrestore = mix
+          if eng.mixable(len(seqs), mids, mstart): prompt = eng.mix_prompt(ms, mids, mstart, mrestore, (mreq.temperature, mreq.top_p))
+          else:
+            # (no mixed step of these: its own prefill, the step after)
+            pending.insert(0, mreq)
+            eng.stop(ms, len(ms.tokens))
+            mix = None
+            if not seqs: continue
         st = time.perf_counter()
-        outs = eng.step(seqs)
+        outs = eng.step(seqs, prompt)
         self.stats.step_time += time.perf_counter() - st
+        if mix is not None:
+          first = typing.cast(int, self.model.prompt_token)
+          eng.mix_done(ms, mids, first, (mreq.temperature, mreq.top_p))
+          self.stats.prefills, self.stats.mixed = self.stats.prefills + 1, self.stats.mixed + 1
+          if getenv("SEQ_LOG", 0):
+            stderr_log(f"seq slot {ms.slot} base {ms.base} cap {ms.cap}: {len(mids)-mstart} of {len(mids)} prefilled from {mstart}"
+                       f"{' (checkpoint)' if mrestore else ''} in a mixed step of {len(seqs)}, waited {st-mreq.st:.3f}s\n")
+          if self.emit(mreq, first): active[ms] = mreq
+          else: eng.stop(ms, len(ms.tokens))
         if isinstance(stt:=getattr(self.model, "step_times", None), list):
           self.stats.add("launch", stt[0])
           self.stats.add("wait", stt[1])

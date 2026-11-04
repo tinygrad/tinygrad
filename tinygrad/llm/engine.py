@@ -261,9 +261,23 @@ class SeqEngine:
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
 
-  def step(self, seqs:list[Seq]) -> list[list[int]]:
+  # ** a mixed step: a prompt prefilled with a step of the others (see Transformer.seq_step)
+  def mixable(self, n:int, ids:list[int], start:int) -> bool:
+    return callable(getattr(self.model, "mix_size", None)) and self.model.mix_size(n, len(ids) - start, start) is not None
+  def mix_prompt(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> tuple:
+    """the prompt of a mixed step: its tokens into the token buffer (its checkpoint restored first)"""
+    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
+    self.model._token_host[s.base+start:s.base+len(ids)+1] = __import__("array").array('i', ids[start:] + [-1])
+    return (s.slot, s.base, start, len(ids) - start, 0 if restore else s.hrow, temp)
+  def mix_done(self, s:Seq, ids:list[int], first:int, temp:tuple[float, float]):
+    """after a mixed step: the prompt's checkpoint, s decodes from the token after it (as prefill)"""
+    self.model.seq_ckpt(True, s.slot, len(ids))
+    s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
+    s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
+
+  def step(self, seqs:list[Seq], prompt:tuple|None=None) -> list[list[int]]:
     """a step of decoding of the sequences: the tokens every one accepted (its caches have the ones before them)"""
-    k, out = self.k, self.model.seq_step([(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs])
+    k, out = self.k, self.model.seq_step([(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs], prompt)
     ret = []
     for s, (sampled, drafts) in zip(seqs, out):
       j = next((i for i in range(k) if drafts[i] != sampled[i]), k)
