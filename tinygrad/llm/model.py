@@ -425,10 +425,10 @@ class Indexer:
     self.idx, self.max_context = (idx:=unwrap(config.indexer)), config.max_context
     self.attn_q_b = Linear(config.q_lora_rank or config.dim, idx.n_heads * idx.head_dim, bias=False)
     self.attn_k = Linear(config.dim, idx.head_dim, bias=False)
-    self.k_norm = (nn.RMSNorm if idx.msa else nn.LayerNorm)(idx.head_dim, eps=idx.norm_eps)
-    if idx.msa: self.q_norm = nn.RMSNorm(idx.head_dim, eps=idx.norm_eps)
+    self.k_norm = (nn.RMSNorm if idx.msa or idx.qsa else nn.LayerNorm)(idx.head_dim, eps=idx.norm_eps)
+    if idx.msa or idx.qsa: self.q_norm = nn.RMSNorm(idx.head_dim, eps=idx.norm_eps)
     else: self.proj = Linear(config.dim, idx.n_heads, bias=False)
-    if idx.kpool > 1 and not idx.msa:
+    if idx.kpool > 1 and not (idx.msa or idx.qsa):
       self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
   def _init_state(self, x:Tensor):
@@ -440,7 +440,7 @@ class Indexer:
   def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor:
     (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
     k, iq = self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x)), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
-    if idx.msa: iq = self.q_norm(iq)
+    if idx.msa or idx.qsa: iq = self.q_norm(iq)
     if idx.rope_dim:
       rot = unwrap(freqs)[start_pos:start_pos+T]
       if not idx.qsa: k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
@@ -463,7 +463,7 @@ class Indexer:
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
-    if idx.msa and not idx.qsa: scores = (Tensor.arange(scores.shape[-1]) == q_pos // idx.kpool).where(math.inf, scores)
+    if idx.msa: scores = (Tensor.arange(scores.shape[-1]) == q_pos // idx.kpool).where(math.inf, scores)
     _, sel = scores.topk(idx.top_k // idx.kpool)
     # selected incomplete pools add only tail/future tokens, handled by the final tail and causal mask
     picked = scores.zeros_like(dtype=dtypes.bool).scatter(-1, sel, True).repeat_interleave(idx.kpool, dim=-1)[..., :S]
@@ -733,8 +733,8 @@ class Transformer:
                             kv.get(f'{arch}.attention.layer_norm_epsilon') or kv[f'{arch}.attention.layer_norm_rms_epsilon']) if kpool else None
     if indexer is not None: state_dict = {k.replace('.indexer_compressor_', '.indexer.compressor_'):v for k,v in state_dict.items()}
     if arch in ('minimax-m3', 'qwen4exp'):
-      indexer = replace(unwrap(indexer), rope_dim=kv[f'{arch}.rope.dimension_count'], rope_interleave=False, msa=True, qsa=arch == 'qwen4exp',
-                        top_k=kv[f'{arch}.attention.indexer.top_k'] * kv.get(f'{arch}.attention.indexer.block_size', 1))
+      indexer = replace(unwrap(indexer), rope_dim=kv[f'{arch}.rope.dimension_count'], rope_interleave=False, msa=arch == 'minimax-m3',
+                        qsa=arch == 'qwen4exp', top_k=kv[f'{arch}.attention.indexer.top_k'] * kv.get(f'{arch}.attention.indexer.block_size', 1))
       state_dict = {k.replace('.indexer.q_proj', '.indexer.attn_q_b').replace('.indexer.k_proj', '.indexer.attn_k'):v for k,v in state_dict.items()}
 
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
