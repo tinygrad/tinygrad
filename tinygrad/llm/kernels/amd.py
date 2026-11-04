@@ -1849,7 +1849,7 @@ def _flag_q8_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, groups:int)
 
 def _flag_partial_sum_q8(x:Tensor, n:int) -> Tensor|None:
   """flag_partial_sum in two exchanges of int8 groups: a reduce scatter of the partials, an all gather of the sums (the same bits everywhere)"""
-  N = len(x.device)
+  N = len(cast(tuple[str, ...], x.device))
   n2 = round_up(n, N*256)
   xf = x.reshape(N, n)
   if n2 != n: xf = xf.pad((None, (0, n2 - n)))
@@ -3408,6 +3408,9 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
     if not row_index: valid_kv_len = index[n_max].load().cast(dtypes.weakint)
   _, _, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   B, H, M, _ = cast(tuple[int, int, int, int], q.shape)
+  # (an int8 cache (kv_q8_pack): a row of D//4 words of the values and D//32 of their groups' scales)
+  q8 = cache_kv.dtype == dtypes.uint32
+  if q8: D = cast(int, q.shape[-1])
   if group is not None: H_KV = H // group
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
   G, CHUNK, DPL, WAVES, PARTIALS = H // H_KV, block_n, D // WARP_SIZE, waves, out.shape[2]
@@ -3451,7 +3454,11 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
     # (the list past the count isn't written: clamped)
     if index is not None: key = index[key.minimum(n_max-1)].load().cast(dtypes.weakint).maximum(0).minimum(N-1)
     row = key if koff is None else (koff + key).minimum(N-1)
-    kfrag = _vec_load(cache_kv[0, cb, 0 if shared else kv_head, row, lane*DPL], DPL)
+    if q8:
+      assert shared and DPL % 4 == 0 and 32 % DPL == 0, "an int8 cache: the latent one, a lane's values in a group"
+      words, sc = _amd_load(cache_kv[0, cb, 0, row, lane*(DPL//4)], DPL//4), cache_kv[0, cb, 0, row, D//4 + lane*DPL//32].load().bitcast(dtypes.float)
+      kfrag = tuple((words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * sc for i in range(DPL))
+    else: kfrag = _vec_load(cache_kv[0, cb, 0 if shared else kv_head, row, lane*DPL], DPL)
     # V is prefetched in the score pass so both streams are in flight together
     vfrags[j] = tuple(valid.where(v, zerof) for v in (kfrag if shared else _vec_load(cache_kv[1, cb, kv_head, row, lane*DPL], DPL)))
     for h in range(G):
@@ -3502,7 +3509,8 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
   q_head = (kv_head*G + hstat).valid(hstat < G) if WAVES*WARP_SIZE > G else kv_head*G + hstat
   final_stores += [stats[b, q_head, block_chunk, 0].store(M), stats[b, q_head, block_chunk, 1].store(L)]
   # indexed: a data dependent count of keys, an upper bound estimate
-  est = None if index is None else Estimates(4*n_max*B*H*D, n_max*B*D*cache_kv.dtype.itemsize, n_max*B*D*cache_kv.dtype.itemsize)
+  rb = D + D//8 if q8 else D*cache_kv.dtype.itemsize  # (a row's bytes)
+  est = None if index is None else Estimates(4*n_max*B*H*D, n_max*B*rb, n_max*B*rb)
   return UOp.group(*final_stores).end(lane, wave, block_chunk, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=(),
                                                                                               estimates=est))
 
@@ -3550,7 +3558,8 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   if isinstance(base, UOp): cache_kv = Tensor(cache_kv.uop.after(base))
   row_index = index is not None and index.ndim == 2
   assert not row_index or bases is not None, "a list a row: the regions of the rows"
-  B, H, D = q.shape[0] if row_index else cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
+  # (an int8 cache (kv_q8_pack): the queries' dims)
+  B, H, D = q.shape[0] if row_index else cache_kv.shape[1], q.shape[1], q.shape[-1] if cache_kv.dtype == dtypes.uint32 else cache_kv.shape[4]
   chunks, axis = min(partials, max_kv_len // block_n), q.uop.axis
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device, axis=axis)
@@ -5095,14 +5104,17 @@ def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_e
   # Compact active 32-key tiles before the tensor-core attention loop.
   B, H, T, D = cast(tuple[int, int, int, int], q.shape)
   N = N or cast(int, cache.shape[-2])
-  assert B == 1 and T % 32 == N % 32 == 0 and 64 <= D <= 256 and D % 32 == 0 and D == cache.shape[-1]//2 and BLOCK_N % kpool == 0
+  assert B == 1 and T % 32 == N % 32 == 0 and 64 <= D <= 256 and D % 32 == 0 and BLOCK_N % kpool == 0
+  assert D == (cache.shape[-1]*32//9 if cache.dtype == dtypes.uint32 else cache.shape[-1])//2
   ve = cast(UOp, _unbind(valid_end)) if isinstance(valid_end, UOp) else UOp.const(valid_end, dtypes.weakint)
   mask = Tensor(mask.uop.after(q_start, *([valid_end] if isinstance(valid_end, UOp) else [])))
   tiles = Tensor.custom_kernel(Tensor.empty(T//32, N//32+1, dtype=dtypes.int32, device=q.device), mask,
     fxn=functools.partial(_qsa_tiles_kernel, q_start=cast(UOp, _unbind(q_start)), valid_end=ve, kpool=kpool))[0]
   # the keys and values apart: the copy of the region's valid keys (the rows past them aren't read: not written, N rows every chunk)
   kv = cache.transpose(0, 1).shrink((None, None, (base, base + valid_end), None))
-  tmp = Tensor.empty(2, *kv.shape[:2], N, D, dtype=cache.dtype, device=cache.device, axis=None if cache.uop.axis is None else 2)
+  # (an int8 cache: its values in half)
+  if cache.dtype == dtypes.uint32: kv = kv_q8_unpack(kv)
+  tmp = Tensor.empty(2, *kv.shape[:2], N, D, dtype=kv.dtype, device=cache.device, axis=None if cache.uop.axis is None else 2)
   store = tmp.shrink((None, None, None, (0, valid_end), None)).uop.store(Tensor.stack(kv[..., :D], kv[..., D:]).uop)
   kv = Tensor(tmp.uop.after(store))
   # (a block's tiles split over parts workgroups: the blocks of a small chunk are few workgroups for the GPU, ~8 a compute unit; combined after)
@@ -5294,6 +5306,26 @@ def _rows_gather_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
   r, blk, lane = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(F // L, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOCAL)
   f, row = blk * L + lane, idx[r].load().cast(dtypes.weakint).maximum(0).minimum(P-1)
   return out[r, f].store(table[row, f].load().cast(out.dtype)).end(r, blk, lane).sink(arg=KernelInfo(name="rows_gather", opts_to_apply=()))
+
+def kv_q8_pack(x:Tensor) -> Tensor:
+  """
+  rows x (..., D) as int8 groups of 32 with their scale (absmax/127), in words (..., D//4 + D//32) uint32: the values' (4 a word, in order), then
+  the groups' float scales (the attention's int8 cache: SEQ_KV_Q8)
+  """
+  D = int(x.shape[-1])
+  g = x.float().reshape(*x.shape[:-1], D//32, 32)
+  sc = g.abs().max(-1, keepdim=True) / 127
+  q = (g / sc.maximum(1e-30)).round().clip(-127, 127).cast(dtypes.int32).reshape(*x.shape[:-1], D//4, 4)
+  b = q.bitwise_and(0xFF).cast(dtypes.uint32)
+  words = b[..., 0] | (b[..., 1] << 8) | (b[..., 2] << 16) | (b[..., 3] << 24)
+  return words.cat(sc.reshape(*x.shape[:-1], D//32).bitcast(dtypes.uint32), dim=-1)
+
+def kv_q8_unpack(w:Tensor, dtype:DType=dtypes.half) -> Tensor:
+  """the rows (..., D) of kv_q8_pack's words (..., D//4 + D//32)"""
+  D = int(w.shape[-1]) * 32 // 9
+  b = (w[..., :D//4].unsqueeze(-1) >> Tensor([0, 8, 16, 24], dtype=dtypes.uint32, device=w.device)).bitwise_and(0xFF).cast(dtypes.int32)
+  v = (b - (b >= 128).where(256, 0)).float().reshape(*w.shape[:-1], D//32, 32)
+  return (v * w[..., D//4:].bitcast(dtypes.float).unsqueeze(-1)).reshape(*w.shape[:-1], D).cast(dtype)
 
 def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None) -> Tensor:
   """the rows idx (n,) int32 of table (P, F): (n, F) (a table split on its rows: every device's of its own)"""

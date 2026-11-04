@@ -14,6 +14,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
+  kv_q8_pack, kv_q8_unpack, \
   flag_allreduce, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -1478,7 +1479,7 @@ class QSABlock(TransformerBlock):
       attn = q.scaled_dot_product_attention(cache[..., :hd], cache[..., hd:], attn_mask=causal if mask is None else causal + mask, enable_gqa=True)
       return self._out_gated(attn, gate)
     k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
-    store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(k_store.cast(self.cache_k.dtype).uop)
+    store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(self._kv_rows(k_store).uop)
     cache = Tensor(self.cache_k.uop.after(store))
     if tile_mask is not None:
       return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool,
@@ -1489,9 +1490,11 @@ class QSABlock(TransformerBlock):
       # cores' flash attention of the GQA heads)
       top = self.indexer.idx.top_k
       kvc = Tensor(cache.uop.after(upd.uop)).shrink((None, None, (b, b+top), None)).transpose(0, 1)  # (B, KV, top, 2*hd)
+      if self._q8: kvc = kv_q8_unpack(kvc)
       kv = Tensor.stack(kvc[..., :hd], kvc[..., hd:]).contiguous()
       if (fa:=flash_attention_rows(q, kv, start_pos, start_pos+T)) is not None: return self._out_gated(fa, gate)
     latent, q, scale = cache.unsqueeze(2), q.cat(q.zeros_like(), dim=-1), hd**-0.5
+    assert not self._q8, "an int8 cache: the sparse prefill, the dense prefill's flash kernel and the steps of sequences only"
     if upd is not None: latent = Tensor(latent.uop.after(upd.uop))
     if picks is not None:
       # (a few queries (the drafts of speculative decoding): every one on the keys of its list, a decode each)
@@ -1523,8 +1526,9 @@ class QSABlock(TransformerBlock):
     cos, sin = (f.reshape(1, 1, rows, -1) for f in freqs.chunk(2, dim=-1))
     q, gate, k, v = self._qkv(x, cos, sin)
     # the keys and values of the rows into their rows of the cache (a device's of its KV head)
-    kv = k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*hd).cast(self.cache_k.dtype)
-    cache = rows_scatter(self.cache_k.reshape(-1, 2*hd), kv, phys).reshape(self.cache_k.shape)
+    W = int(self.cache_k.shape[-1])
+    kv = self._kv_rows(k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*hd))
+    cache = rows_scatter(self.cache_k.reshape(-1, W), kv, phys).reshape(self.cache_k.shape)
     # the indexer: the keys of the rows, then the pools they're in (NP from a sequence's first row's, the ones past its last row's are
     # incomplete: never picked, made again when they are) pooled from the cached keys
     ck = rows_scatter(idx.cache_k, idx._proj(idx.k_proj, x[0]).half(), phys)
@@ -1593,12 +1597,21 @@ class QSABlock(TransformerBlock):
       idx.pool_k = _unallocated(n, ctx, idx.idx.head_dim, dtype=dtypes.half, device=devs)
       idx.pool_pk = _unallocated(n, ctx // idx.idx.kpool, idx.idx.head_dim, dtype=dtypes.half, device=devs)
 
+  @property
+  def _q8(self) -> bool: return self.cache_k.dtype == dtypes.uint32
+  def _kv_rows(self, kv:Tensor) -> Tensor:
+    """rows (..., 2*head_dim) of keys and values as the cache's (in int8 groups: SEQ_KV_Q8)"""
+    return kv_q8_pack(kv) if self._q8 else kv.cast(self.cache_k.dtype)
+
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       # (the rows of every sequence's region, see QSAIndexer._init_state)
       KV, N, D = self.config.n_kv_heads, max(self.config.max_context, self.config.cache_rows) + REGION_ALIGN, 2*self.config.head_dim
-      # (zeroed: the flash kernels read whole tiles past the valid region)
-      self.cache_k = _zeros(KV, 1, N, D, dtype=dtypes.half, device=x.device, axis=0 if isinstance(x.device, tuple) else None)
+      # (zeroed: the flash kernels read whole tiles past the valid region. SEQ_KV_Q8: in int8 groups of 32 and their scales (kv_q8_pack), the
+      # bytes of a row 0.56x: more rows in memory)
+      q8 = bool(getenv("SEQ_KV_Q8", 0)) and D % 32 == 0 and amd_custom_kernels_supported(x.device)
+      self.cache_k = _zeros(KV, 1, N, D//4 + D//32 if q8 else D, dtype=dtypes.uint32 if q8 else dtypes.half, device=x.device,
+                            axis=0 if isinstance(x.device, tuple) else None)
       self.freqs_cis = _freqs(self.config.rope_dim, self.config.max_context, self.config.rope_theta, x.device, self.config.yarn)
     if self.indexer is not None: self.indexer._init_state(x)
 
@@ -2307,7 +2320,7 @@ class QwenMTPBlock(QSABlock):
     Tq = x.shape[1]
     freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
     k, v = self._kv(x, *(f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1)))
-    kv, b = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype), _seq_base[0]
+    kv, b = self._kv_rows(k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)), _seq_base[0]
     deps = [self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(kv.uop)]
     if self.indexer is not None: deps.append(self.indexer.update(x, start_pos, T, self.freqs_cis)[0].uop)
     return Tensor(self.cache_k.uop.after(*deps))
@@ -3574,7 +3587,9 @@ class Transformer:
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1))
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
-    self._seq_move_jits = {m: TinyJit(functools.partial(self._seq_move_copy, m), capture_first=True) for m in self.STASH_CALL}
+    # (the calls' chunk counts that fit the caches: a short max context's are a few chunks)
+    self._move_calls = self._chunk_calls((self.seq_rows() + REGION_ALIGN) // self.SEQ_MOVE - 1)
+    self._seq_move_jits = {m: TinyJit(functools.partial(self._seq_move_copy, m), capture_first=True) for m in self._move_calls}
     self._seq_stash_init()
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
       [t for c in self.seq_ckpt_states for t in c]
@@ -3626,7 +3641,7 @@ class Transformer:
     # (calls of 16, 4 or 1 chunks. up: the last rows first, the source rows a call writes over are moved already)
     calls, at, left = [], 0, -(-n // self.SEQ_MOVE)
     while left:
-      m = next(m for m in self.STASH_CALL if m <= left)
+      m = next(m for m in self._move_calls if m <= left)
       calls.append((at, m))
       at, left = at + m * self.SEQ_MOVE, left - m
     for o, m in (reversed(calls) if dst > src else calls):
@@ -3691,10 +3706,14 @@ class Transformer:
     states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
              [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
     self._stash_state = _host_like([(t, 0, E) for t in states])
+    self._stash_calls = self._chunk_calls(min((self.seq_rows() + REGION_ALIGN) // C - 1, self.stash_chunks))
     self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
-                           for sv in (True, False) for n in self.STASH_CALL}
+                           for sv in (True, False) for n in self._stash_calls}
     self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
   STASH_CALL = (16, 4, 1)  # (the chunks a call of the stash copies: a run is copied by calls of these, the most first)
+  def _chunk_calls(self, most:int) -> tuple[int, ...]:
+    """the STASH_CALL counts of chunks of at most `most` (1 always)"""
+    return tuple(m for m in self.STASH_CALL if m <= max(1, most))
   def _stash_kv_copy(self, save:bool, chunks:int, row:UOp, chunk:UOp):
     """chunks*SEQ_MOVE rows from row of every attention cache into the stash from chunk (save), or back (static sizes: wide loads and stores)"""
     C, pairs, saves = self.SEQ_MOVE, [], []
@@ -3743,7 +3762,7 @@ class Transformer:
     """
     for i, c, n in segs:
       while n:
-        m = next(m for m in self.STASH_CALL if m <= n)
+        m = next(m for m in self._stash_calls if m <= n)
         self._stash_kv_jits[(save, m)](*self._stash_kv_vars(base + i * self.SEQ_MOVE, c))
         i, c, n = i + m, c + m, n - m
     self._stash_state_jits[save](*self._stash_state_vars(slot, entry, pos, hrow))
@@ -3841,7 +3860,7 @@ class Transformer:
     par += [(j, functools.partial(lambda j: j(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN)), j)) for j in self._seq_move_jits.values()]
     if self.stash_entries:
       for sv in (True, False):
-        par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self.STASH_CALL]
+        par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self._stash_calls]
         par.append((self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv])))
     par += loads
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
@@ -4404,7 +4423,8 @@ class Transformer:
     if not (devs:=self.token_embd.weight.device) or not amd_custom_kernels_supported(devs): return
     self._init_states()
     from tinygrad.llm.kernels.amd import host_allreduce, p2p_allreduce
-    # (the device memory the jits use is made here: not in the processes)
+    # (the device memory the jits use is made here: not in the processes. the resources they share too: the n-gram tables, the collectives')
+    if isinstance(devs, tuple): self._seq_shared()
     if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     self._token_prev:list[int]|None = None  # (the captures write the buffer: the next generate writes all of it)

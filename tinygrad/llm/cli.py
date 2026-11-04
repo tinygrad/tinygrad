@@ -213,6 +213,7 @@ def main():
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # warmup the JIT
+  wst = time.perf_counter()
   if args.warmup or args.serve:
     with Context(DEBUG=max(DEBUG.value, 1)):
       # (sequences sharing the caches, served batched: their jits, see Transformer.seq_warmup)
@@ -224,7 +225,9 @@ def main():
   top_p = float(getenv("TOP_P", 0.0) or kv.get("general.sampling.top_p", 1.0))
   # (a chat completion's temperature without one: TEMPERATURE, else greedy)
   temperature = float(getenv("TEMPERATURE", 0.0))
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template, top_p=top_p, temperature=temperature).serve_forever()
+  if args.serve:
+    print(f"ready: model made in {wst-st:.1f}s, warmed up in {time.perf_counter()-wst:.1f}s, serving on port {args.serve}", flush=True)
+    LLMServer(('', args.serve), model, model_name, tok, template, top_p=top_p, temperature=temperature).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
