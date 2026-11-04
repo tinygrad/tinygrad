@@ -589,13 +589,11 @@ class Transformer:
     arch = kv['general.architecture']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
-    shard_map:dict[str, int] = {}
+    shard_map, repeats = {}, {}
     if shard > 1:
       if not kv.get(f'{arch}.attention.kv_lora_rank') and n_kv_heads < shard and shard % n_kv_heads == 0:
         # too few KV heads to split: repeat each one so every device holds one
-        repeats = shard // n_kv_heads
-        entries |= {k: (data.to("CPU").reshape(n_kv_heads, -1).repeat_interleave(repeats, 0).flatten(), (shape[0]*repeats, *shape[1:]), typ)
-                    for k, (data, shape, typ) in entries.items() if k.endswith(('attn_k.weight', 'attn_v.weight', 'attn_k.bias', 'attn_v.bias'))}
+        repeats = {k: shard // n_kv_heads for k in entries if k.endswith(('attn_k.weight', 'attn_v.weight', 'attn_k.bias', 'attn_v.bias'))}
         n_kv_heads = shard
       heads = n_heads if kv.get(f'{arch}.attention.kv_lora_rank') else n_kv_heads
       assert heads % shard == 0, f"tensor parallel needs the attention heads to split over {shard} devices"
@@ -608,7 +606,7 @@ class Transformer:
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
-    state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()})
+    state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()}, repeats)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
