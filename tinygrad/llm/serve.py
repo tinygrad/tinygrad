@@ -307,8 +307,13 @@ class Handler(VizHandler):
         if Handler.client_gone(self):
           req.cancelled = True
           return None
-      try: return req.out.get(timeout=1.0)
-      except queue.Empty: pass
+      if req.rx: return req.rx.pop(0)
+      try: item = req.out.get(timeout=1.0)
+      except queue.Empty: continue
+      # (a step's tokens come at once, see LLMServer.flush)
+      if not isinstance(item, list): return item
+      req.rx = item[1:]
+      return item[0]
 
   def do_POST(self):
     request_st = time.perf_counter()
@@ -429,7 +434,9 @@ class Request:
     self.ids, self.log, self.max_tokens, self.temperature, self.top_p, self.rid = ids, log, max_tokens, temperature, top_p, next(_rids)
     self.cancelled, self.finish_reason, self.checked, self.zeros = False, "stop", 0.0, 0
     self.error: Exception|None = None
-    self.out: queue.Queue[int|None] = queue.Queue()
+    self.out: queue.Queue[int|list[int]|None] = queue.Queue()
+    self.held: list[int] = []  # (the tokens of a step not put in out yet: put at once, one wakeup of its thread a step)
+    self.rx: list[int] = []  # (the handler's: the tokens of a step it got and hasn't returned yet)
     self.generated: list[int] = []
     self.st, self.pt, self.cache_start, self.steps = time.perf_counter(), 0.0, 0, 0
     self.pos, self.done = 0, False  # batched decoding: the position of its last token (the next step's input)
@@ -521,8 +528,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     else: self.schedule()
 
   # ** the requests' tokens and their end
-  def emit(self, req:Request, tok:int) -> bool:
-    """a sampled token of req: sent, or the end. returns whether req goes on"""
+  def flush(self, req:Request):
+    """the tokens of req held (emit's hold) sent"""
+    if req.held: req.out.put(req.held)
+    req.held = []
+  def emit(self, req:Request, tok:int, hold:bool=False) -> bool:
+    """a sampled token of req: sent (hold: held until flush), or the end. returns whether req goes on"""
     if not req.generated and not req.pt:
       req.pt = time.perf_counter()
       stderr_log(req.log + f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
@@ -539,7 +550,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.drop_caches()
       return self.finish(req, RuntimeError("the model's states went wrong (dropped: retry)"))
     req.generated.append(tok)
-    req.out.put(tok)
+    if hold: req.held.append(tok)
+    else: req.out.put(tok)
     self.stats.tokens += 1
     if req.max_tokens is not None and len(req.generated) >= req.max_tokens:
       req.finish_reason = "length"
@@ -559,6 +571,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
                f"prefill:{pre:5.0f} tok/s  {colored('--', 'BLACK')}  gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  "
                f"{colored('--', 'BLACK')}  {spec}out:{n:5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if req.cancelled else total}\n")
+    self.flush(req)
     req.out.put(None)
     return False
 
@@ -1132,12 +1145,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           req = active[s]
           req.steps += 1
           for i, t in enumerate(toks):
-            if not self.emit(req, t):
+            if not self.emit(req, t, hold=True):
               # (its tokens up to this one: the ones after it aren't the conversation's)
               eng.stop(s, len(s.tokens) - (len(toks) - 1 - i))
               del active[s]
               break
           else:
+            self.flush(req)
             if not eng.room(s, len(s.tokens) + 2*(k+1)):
               del active[s]
               # (the caches full of the decoding ones: it pauses (into the stash), its request goes on when there's room, first. one longer
