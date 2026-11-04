@@ -79,9 +79,10 @@ def load_rewrites(data:VizData) -> None:
       # get source and binary from Ops.PROGRAM
       if s.name == "linearize/render": lin_idx = j
       if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= rewrites[lin_idx].depth):
-        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=0))
-        steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=0))
-        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
+        depth = rewrites[lin_idx].depth
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=depth))
+        steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=depth))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=depth))
         lin_idx = None
       if s.name == "View Program": ki = data.trace.uop_fields[data.trace.uop_fields[s.sink][1][0]][2]
     for key in k.keys: data.ref_map[key] = i
