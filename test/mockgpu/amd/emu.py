@@ -1746,7 +1746,11 @@ def lower_body(sink:UOp, name:str) -> UOp:
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp|None, UOp|None, dict[UOp, UOp]]]]] = {}
 
-def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, UOp|None]:
+def instruction_call(inst:Inst, arch:str, renderer:Renderer, operands:dict[UOp, UOp]) -> tuple[UOp|None, UOp|None]:
+  def bind(value:UOp) -> UOp:
+    # Sharing index operands preserves reuse of lifted SGPR loads within the block.
+    if value not in operands: operands[value] = UOp.param(-2-len(operands), value.dtype, addrspace=AddrSpace.ALU)
+    return operands[value]
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
@@ -1763,19 +1767,19 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
     entries.append((base, mask, ret))
   call, cond, reads = ret
   words = {f"inst_w{i}":(bits >> (32*i)) & 0xffffffff for i in range(inst.size()//4)}
-  bindings = {_Ctx.inst_word(i):_c(words[f"inst_w{i}"]) for i in range(inst.size()//4)}
-  bindings.update({p:_Ctx.sgpr.index(_c(index.get_idx().sym_infer(words))).load() if index.get_valid().sym_infer(words) else _c(0)
+  bindings = {_Ctx.inst_word(i):bind(_c(words[f"inst_w{i}"])) for i in range(inst.size()//4)}
+  bindings.update({p:_Ctx.sgpr.index(bind(_c(index.get_idx().sym_infer(words)))).load() if index.get_valid().sym_infer(words) else bind(_c(0))
                    for p,index in reads.items()})
   if call is not None: call = call.replace(src=(call.body, *(bindings.get(b, b) for b in call.src[1:])))
   return call, cond.substitute(bindings) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
+  bufs = sorted({u for call in instructions for b in call.src[1:] for u in b.toposort() if u.op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   seen: set[UOp] = set()
   for call in instructions:
-    args = [params.get(b, b) for b in call.src[1:]]
+    args = [b.substitute(params, walk=True) for b in call.src[1:]]
     inputs = UOp.sink(*args)
     nodes = inputs.toposort(lambda u:u.op is not Ops.PARAM and u not in seen)
     nodes.pop(inputs)
@@ -1931,14 +1935,15 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
     instructions = []
+    operands:dict[UOp, UOp] = {}
     for off in cfg["blocks"][block_pc]:
       inst = insts[off]
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
-      call, branch_cond = instruction_call(inst, arch, renderer)
+      call, branch_cond = instruction_call(inst, arch, renderer, operands)
       if branch_cond is not None: cond = branch_cond
       if call is not None: instructions.append(call)
-    values = {ctx.scratch_stride:_c(scratch_size)}
+    values = {**{param:value for value,param in operands.items()}, ctx.scratch_stride:_c(scratch_size)}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
@@ -1955,7 +1960,6 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     w = UOp.range(n_waves, 0, AxisType.LOOP, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
                                                             1, AxisType.LOOP, dtype=dtypes.int),)
-    #call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*s)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args, name="asm_block"), *gates, w).end(*gates).end(w).sink()
