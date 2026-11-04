@@ -1854,7 +1854,7 @@ def _flag_partial_sum_q8(x:Tensor, n:int) -> Tensor|None:
   xf = x.reshape(N, n)
   if n2 != n: xf = xf.pad((None, (0, n2 - n)))
   if (rs:=flag_reduce_scatter(xf, 0)) is None: return None
-  return all_gather_q8(rs.reshape(1, n2 // 32, 32), 1).reshape(n2)[:n].float().reshape(x.shape[1:])
+  return all_gather_q8(rs.reshape(1, n2 // 256, 256), 1).reshape(n2)[:n].float().reshape(x.shape[1:])
 
 def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   """One P2P exchange: each rank receives its contiguous chunk, summed in float32 from Q8 (or unaligned fp16) partials."""
@@ -3457,7 +3457,8 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *mask, valid_kv
     if q8:
       assert shared and DPL % 4 == 0 and 32 % DPL == 0, "an int8 cache: the latent one, a lane's values in a group"
       words, sc = _amd_load(cache_kv[0, cb, 0, row, lane*(DPL//4)], DPL//4), cache_kv[0, cb, 0, row, D//4 + lane*DPL//32].load().bitcast(dtypes.float)
-      kfrag = tuple((words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * sc for i in range(DPL))
+      # (the bytes are the values + 128: a byte's float is one conversion, v_cvt_f32_ubyte)
+      kfrag = tuple(((words[i//4] >> (8*(i%4))) & 0xFF).cast(dtypes.float) * sc - sc * 128 for i in range(DPL))
     else: kfrag = _vec_load(cache_kv[0, cb, 0 if shared else kv_head, row, lane*DPL], DPL)
     # V is prefetched in the score pass so both streams are in flight together
     vfrags[j] = tuple(valid.where(v, zerof) for v in (kfrag if shared else _vec_load(cache_kv[1, cb, kv_head, row, lane*DPL], DPL)))
@@ -5309,14 +5310,14 @@ def _rows_gather_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
 
 def kv_q8_pack(x:Tensor) -> Tensor:
   """
-  rows x (..., D) as int8 groups of 32 with their scale (absmax/127), in words (..., D//4 + D//32) uint32: the values' (4 a word, in order), then
-  the groups' float scales (the attention's int8 cache: SEQ_KV_Q8)
+  rows x (..., D) as int8 groups of 32 with their scale (absmax/127), in words (..., D//4 + D//32) uint32: the values' (4 a word, in order, each
+  + 128: a byte), then the groups' float scales (the attention's int8 cache: SEQ_KV_Q8)
   """
   D = int(x.shape[-1])
   g = x.float().reshape(*x.shape[:-1], D//32, 32)
   sc = g.abs().max(-1, keepdim=True) / 127
   q = (g / sc.maximum(1e-30)).round().clip(-127, 127).cast(dtypes.int32).reshape(*x.shape[:-1], D//4, 4)
-  b = q.bitwise_and(0xFF).cast(dtypes.uint32)
+  b = (q + 128).cast(dtypes.uint32)
   words = b[..., 0] | (b[..., 1] << 8) | (b[..., 2] << 16) | (b[..., 3] << 24)
   return words.cat(sc.reshape(*x.shape[:-1], D//32).bitcast(dtypes.uint32), dim=-1)
 
@@ -5324,7 +5325,7 @@ def kv_q8_unpack(w:Tensor, dtype:DType=dtypes.half) -> Tensor:
   """the rows (..., D) of kv_q8_pack's words (..., D//4 + D//32)"""
   D = int(w.shape[-1]) * 32 // 9
   b = (w[..., :D//4].unsqueeze(-1) >> Tensor([0, 8, 16, 24], dtype=dtypes.uint32, device=w.device)).bitwise_and(0xFF).cast(dtypes.int32)
-  v = (b - (b >= 128).where(256, 0)).float().reshape(*w.shape[:-1], D//32, 32)
+  v = (b - 128).float().reshape(*w.shape[:-1], D//32, 32)
   return (v * w[..., D//4:].bitcast(dtypes.float).unsqueeze(-1)).reshape(*w.shape[:-1], D).cast(dtype)
 
 def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None) -> Tensor:
