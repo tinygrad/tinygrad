@@ -48,11 +48,11 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   return ggml_type, Tensor(raw).flatten().bitcast(word_dtype).contiguous()
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
-  if cdna: return UOp.custom("__builtin_amdgcn_sdot4({}, {}, {}, false)", a, b, c, dtype=dtypes.int32)  # CDNA has no sudot4 (dot8-insts)
-  return UOp.custom("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", a, b, c, dtype=dtypes.int32)
+  if cdna: return UOp.custom("__builtin_amdgcn_sdot4({}, {}, {}, false)", a, b, c, dtype=dtypes.int32, inline=True)  # CDNA has no sudot4 (dot8-insts)
+  return UOp.custom("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", a, b, c, dtype=dtypes.int32, inline=True)
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return UOp.custom("__builtin_amdgcn_perm({}, {}, {})", *tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), dtype=dtypes.uint32)
+  return UOp.custom("__builtin_amdgcn_perm({}, {}, {})", *tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), dtype=dtypes.uint32, inline=True)
 
 def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize

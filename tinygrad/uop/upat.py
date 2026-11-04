@@ -28,7 +28,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     else: and_clause.append(UOp.custom("{0}.arg == {1}", base, UOp(Ops.PYLITERAL, arg=self.arg)))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp.custom("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len), base))
-  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom(self.name), base)))
+  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom(self.name, inline=True), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
       and_clause.append(UOp.custom("{0}.dtype in {1}", base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype))))
@@ -40,7 +40,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-      it = UOp.custom(f"ituop{depth}")
+      it = UOp.custom(f"ituop{depth}", inline=True)
       match = _get_clause(next(self.src[0]), it, depth+1)
       # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
       stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
@@ -55,7 +55,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.custom("True")
+  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.custom("True", inline=True)
 
 # *** pattern matcher ***
 
@@ -112,20 +112,20 @@ pm_proc = PatternMatcher([(UPat(Ops.AND, name="a"), do_process_and)], compiled=F
 # renderer
 def wrap(ctx, x) -> UOp:
   ctx[ret:=f"a{len(ctx)}"] = x.arg
-  return UOp.custom(ret)
+  return UOp.custom(ret, inline=True)
 
 pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
   # AND/OR of custom inline becomes a single custom inline
   (UPat(Ops.AND, src=UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True), name="x"),
-   lambda x: UOp.custom("(" + ' and '.join(y.body.arg.name for y in x.src) + ")")),
+   lambda x: UOp.custom("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", inline=True)),
   (UPat(Ops.OR, src=UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True), name="x"),
-   lambda x: UOp.custom("(" + ' or '.join(y.body.arg.name for y in x.src) + ")")),
+   lambda x: UOp.custom("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", inline=True)),
   (UPat.call(UPat(Ops.CUSTOM_FUNCTION, name="f"), UPat(), allow_any_len=True, name="x"),
-   lambda f,x: UOp.custom(f.arg.name.format(*[y.body.arg.name for y in x.src[1:]]))),
+   lambda f,x: UOp.custom(f.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), inline=True)),
   (UPat(Ops.INDEX, src=(UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True, name="x"), UPat(Ops.CONST, name="c"))),
-   lambda x,c: UOp.custom(x.body.arg.name + f".src[{c.val}]"))
+   lambda x,c: UOp.custom(x.body.arg.name + f".src[{c.val}]", inline=True))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
@@ -154,7 +154,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
-  ret = _get_clause(self, UOp.custom("uop"))
+  ret = _get_clause(self, UOp.custom("uop", inline=True))
   try:
     # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
     with Context(TRACK_MATCH_STATS=0):

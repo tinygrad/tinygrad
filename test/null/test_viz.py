@@ -464,7 +464,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp.custom("{} + undeclared_name", X[i], dtype=X.dtype)
+      custom_op = UOp.custom("{} + undeclared_name", X[i], dtype=X.dtype, inline=True)
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
     with save_viz() as viz:
