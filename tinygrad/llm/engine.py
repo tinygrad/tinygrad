@@ -265,12 +265,14 @@ class SeqEngine:
   def mixable(self, n:int, ids:list[int], start:int) -> bool:
     return callable(getattr(self.model, "mix_size", None)) and self.model.mix_size(n, len(ids) - start, start) is not None
   def mix_prompt(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> tuple:
-    """the prompt of a mixed step: its tokens into the token buffer (its checkpoint restored first)"""
+    """the prompt of a mixed step: its tokens into the token buffer, its slot's states the model's (its checkpoint's if restore)"""
     if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
     self.model._token_host[s.base+start:s.base+len(ids)+1] = __import__("array").array('i', ids[start:] + [-1])
-    return (s.slot, s.base, start, len(ids) - start, 0 if restore else s.hrow, temp)
+    self.model._seq_copy_call(False, s.slot, start, 0 if restore else s.hrow, keep=start > 0)
+    return (s.slot, s.base, start, len(ids) - start, temp)
   def mix_done(self, s:Seq, ids:list[int], first:int, temp:tuple[float, float]):
-    """after a mixed step: the prompt's checkpoint, s decodes from the token after it (as prefill)"""
+    """after a mixed step: the model's states into the prompt's slot, its checkpoint, s decodes from the token after it (as prefill)"""
+    self.model._seq_copy_call(True, s.slot, len(ids), 0)
     self.model.seq_ckpt(True, s.slot, len(ids))
     s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp

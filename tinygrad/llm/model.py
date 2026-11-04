@@ -1415,6 +1415,7 @@ class QSAIndexer:
     return pool_index_rows(scores, start_pos, pools, self.idx.top_k // self.idx.kpool, self.idx.kpool)
 
 class QSABlock(TransformerBlock):
+  cache_k:Tensor
   """
   qwen sparse attention: gated GQA attention on the keys its indexer picks. the heads split over the devices with one KV head each (repeated at
   load), so a device's cache is the shared row [k|v] of its KV head (2*head_dim) and its queries [q|0]: the MLA flash kernels' latent attention
@@ -1532,12 +1533,14 @@ class QSABlock(TransformerBlock):
     """
     assert self.indexer is not None and self._flash(x), "sequences sharing the caches: the indexer's and the flash kernels"
     if (sp:=_seq_prompt[0]) is not None:
-      # (a mixed step: the decoding rows', then the prompt's as a prefill chunk's in its region)
+      # (a mixed step: the prompt's rows as a prefill chunk's in its region, then the decoding rows' (their writes of the caches after the
+      # prompt's reads, one order of the writes and the reads))
       _seq_prompt[0], base = None, _seq_base[0]
       try:
         dec = self._attention_seqs(x[:, :sp.off], sb)
         _seq_base[0] = sp.base
-        return dec.cat(self._attention_rows(x[:, sp.off:], sp.start, sp.count), dim=1)
+        with self.caches_set(*self._seq_written): pout = self._attention_rows(x[:, sp.off:], sp.start, sp.count)
+        return dec.cat(pout, dim=1)
       finally: _seq_prompt[0], _seq_base[0] = sp, base
     G, R, hd, N = sb.G, sb.R, self.config.head_dim, int(self.cache_k.shape[2])
     rows, idx, ic = G*R, self.indexer, self.indexer.idx
@@ -1561,6 +1564,7 @@ class QSABlock(TransformerBlock):
     pf = rows_gather(self.freqs_cis, (pools * kp).contiguous())
     pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
     pk = rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous())
+    self._seq_written = (cache, ck, pk)
     # every query's scores of its sequence's pools, the lists of the keys it sees
     iq = idx._queries(x[0], *(f.reshape(rows, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (rows, H, D)
     scores = seq_scores(iq, pk, sb.bases, sb.positions, R, kp, self.config.max_context // kp)
@@ -1621,6 +1625,16 @@ class QSABlock(TransformerBlock):
     if (idx:=self.indexer) is not None:
       idx.pool_k = _unallocated(n, ctx, idx.idx.head_dim, dtype=dtypes.half, device=devs)
       idx.pool_pk = _unallocated(n, ctx // idx.idx.kpool, idx.idx.head_dim, dtype=dtypes.half, device=devs)
+
+  _seq_written:tuple[Tensor, Tensor, Tensor]  # (the caches after a step's writes: the attention's, the indexer's keys and pooled keys)
+  @contextlib.contextmanager
+  def caches_set(self, cache:Tensor, ck:Tensor, pk:Tensor):
+    """the attention and indexer caches as these (a step's written ones: a mixed step's prompt's writes and reads after the step's)"""
+    idx = unwrap(self.indexer)
+    saved = (self.cache_k, idx.cache_k, idx.cache_pk)
+    self.cache_k, idx.cache_k, idx.cache_pk = cache, ck, pk
+    try: yield
+    finally: self.cache_k, idx.cache_k, idx.cache_pk = saved
 
   @property
   def _q8(self) -> bool: return self.cache_k.dtype == dtypes.uint32
@@ -2024,14 +2038,11 @@ class GatedDeltaNetBlock(FFNBlock):
       _seq_prompt[0] = None
       try: dec = self._ple(x[:, :sp.off], emb[:, :sp.off], start_pos, T, dep)
       finally: _seq_prompt[0] = sp
-      SC = int(self.slot_conv[0][3].shape[0])
-      pool = self.pool_conv[3].reshape(self.pool_conv[3].shape[0], ple.hist, -1)
-      gp, inp = ple.gated(x[:, sp.off:], emb[:, sp.off:])
-      before = slot_gather(pool, sp.slots, sp.starts, SC, dtypes.float)  # (1, hist, width)
-      window = (sp.starts.reshape(1, 1, 1) > 0).where(before, 0).cat(inp.reshape(1, sp.P, -1).float(), dim=1).contiguous()
-      sp.effects.append(eff:=slot_scatter(pool, window, sp.slots, sp.counts, SC, shift=1, starts=sp.starts))
-      conv = Tensor(ple.conv(window, sp.P).contiguous().uop.after(eff.uop)).reshape(1, sp.P, -1)
-      return dec.cat(gp + conv.unflatten(-1, (ple.count, ple.dim)), dim=1)
+      _seq_prompt[0], _seq_batch[0], groups = None, None, _batch_rows[0]
+      _batch_rows[0] = None
+      try: pp = self._ple(x[:, sp.off:], emb[:, sp.off:], sp.start, sp.count, dep)
+      finally: _seq_prompt[0], _seq_batch[0], _batch_rows[0] = sp, sb, groups
+      return dec.cat(pp, dim=1)
     if (sb:=_seq_batch[0]) is not None:
       # sequences sharing the caches: R rows of every one from its position, its state of the position read from its slot, the ones after
       # every row written (a step's rows past the ones accepted are taken back)
@@ -2146,20 +2157,20 @@ class GatedDeltaNetBlock(FFNBlock):
       # (a mixed step of sequences sharing the caches: the decoding rows' outputs (their kernel reads the first rows of the projections), the
       # prompt's from the rest, its states from its slot's of its start, into the slot after)
       S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), sb.R
-      calls:list[UOp] = []
       zd = kda_decode(self.pool_rec, self.pool_conv[:3], projs, weights, gate, alpha, beta, self._dt_ch, self.ssm_a,
                       unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
-                      positions=sb.positions, groups=sb.G, S=S, SC=SC, slots=sb.slots, calls_out=calls)
-      def part(t:Tensor) -> Tensor: return t[:, sp.off:]
-      pfp = BatchPrefill(sp.P, sp.counts, sp.slots, (sp.count,), (sp.slot,), sp.effects, starts=sp.starts)
-      zp = self._prefill_batch(xin[:, sp.off:], pfp, ([part(p) for p in projs], part(gate), part(alpha), part(beta)), tuple(calls))
-      return self.ssm_out(zd.cat(zp.cast(zd.dtype), dim=1))
+                      positions=sb.positions, groups=sb.G, S=S, SC=SC, slots=sb.slots)
+      # (the prompt's rows as a prefill chunk's: the model's states, its slot's copied to them before the step, back after)
+      _seq_prompt[0], _batch_rows[0], _seq_batch[0] = None, None, None
+      try: zp = self._attention(xin[:, sp.off:], sp.start, sp.count)
+      finally: _seq_prompt[0], _batch_rows[0], _seq_batch[0] = sp, groups, sb
+      return self.ssm_out(zd).cat(zp.cast(dtypes.float), dim=1)
     if pf is not None:
       # (a mixed step: the decoding rows' outputs (their kernel reads the first rows of the projections), the prompts' from the rest)
       o, nd = pf.off, len(groups) - len(pf.count_vars)
       S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), groups[0][1]
       assert len({T for _, T in groups[:nd]}) == 1, "a mixed step: decoding groups of the same rows"
-      calls = []
+      calls:list[UOp] = []
       zd = kda_decode(self.pool_rec, self.pool_conv[:3], projs, weights, gate, alpha, beta, self._dt_ch, self.ssm_a,
                       unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
                       positions=_group_positions(groups[:nd], self.pool_rec.device), groups=nd, S=S, SC=SC, calls_out=calls)
@@ -3893,7 +3904,7 @@ class Transformer:
     for m in sorted(self.SEQ_SIZES, reverse=True):
       add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m))
     # (a mixed step's prompt: of slot 1 in the region after the sequences', a context past top_k)
-    mix_prompt = (1, REGION_ALIGN * (-(-(top + self.SEQ_MIX_ROWS) // REGION_ALIGN)), top, 1, 0, 0.0)
+    mix_prompt = (1, REGION_ALIGN * (-(-(top + self.SEQ_MIX_ROWS) // REGION_ALIGN)), top, 1, 0.0)
     for m in self.SEQ_MIX_SIZES:
       add(f"mixed{m}", self._seq_jit(m, True), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m, mix_prompt))
     for sv in (True, False):
@@ -3908,7 +3919,7 @@ class Transformer:
         par.append((self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self._seq_chunk, 0, 0, n)))
       if top + c <= self.seq_rows(): par.append((self._prefill_jit(c, False), functools.partial(self._seq_chunk, 0, top, c)))
     for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
-    mp_vars = dict(zip(("seqp_slot", "seqp_base", "seqp_start", "seqp_count", "seqp_hrow"), mix_prompt[:5]))
+    mp_vars = dict(zip(("seqp_slot", "seqp_base", "seqp_start", "seqp_count"), mix_prompt[:4]))
     for m in self.SEQ_MIX_SIZES:
       par.append((jit:=self._seq_jit(m, True), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m), *self._prompt_vars(mp_vars)),
                                                                  jit, m)))
@@ -3978,8 +3989,8 @@ class Transformer:
 
   def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, ())
   def forward_seqs_mixed(self, *vs:UOp) -> Tensor:
-    """forward_seqs and a prompt's tokens (a mixed step): the last 5 of vs its slot, base, start, count and hidden state row (see seq_step)"""
-    return self._forward_seqs(vs[:-5], vs[-5:])
+    """forward_seqs and a prompt's tokens (a mixed step): the last 4 of vs its slot, base, start and count (see seq_step)"""
+    return self._forward_seqs(vs[:-4], vs[-4:])
   def _forward_seqs(self, vs:tuple[UOp, ...], pv:tuple[UOp, ...]) -> Tensor:
     """
     a step of speculative decoding of G sequences sharing the caches: vs the slot, the base of the region, mtp_pos, j and par of every one (as
@@ -4026,7 +4037,7 @@ class Transformer:
       ple_rows = self._ple_rows_dev(wins.cat(vt.reshape(G, k+1).to(devs), dim=1))
       if pv:
         # the prompt's rows after the sequences' (its tokens from the token buffer, past its count: not tokens, their rows' outputs not used)
-        psl, pb, pst, pcnt, phr = pv
+        psl, pb, pst, pcnt = pv
         P = self.SEQ_MIX_ROWS
         ptok = self._token_buf.shrink((None, (pb + pst, pb + pst + P))).contiguous().maximum(0)
         x = x.cat(pemb:=self.token_embd(ptok.to(devs)).float(), dim=1)
@@ -4042,27 +4053,32 @@ class Transformer:
         effects += sp.effects
         xp, x = x[:, G*(k+1):], x[:, :G*(k+1)]
         hp = xp.flatten(2).float()
-        # the token after the prompt (at its temperature, the noise of a row of no sequence's)
+        # (its last token's hidden state: the token after it sampled with the sequences' (one sampling: its shared counts written once))
         last = hp[0].shrink(((pcnt - 1, pcnt), None))
-        ptemp = self._seq_temp[2*self._seq_m:2*self._seq_m+2].reshape(1, 2)
-        ptok_out = self._sample(self._hc_out(last.reshape(1, 1, hc.count, -1))[0], ptemp, y.device, (seed, Tensor.arange(1) + 4096))
-        # the MTP layer's caches of the prompt's positions (the hidden state before it the slot's row phr: none at 0), the hidden state of its
-        # last token the slot's row 0 (the next step's)
-        H0 = self.seq_spec_h.shrink(((psl*H, psl*H + 1), None))
-        carry = (Tensor(pst) > 0).where(self.seq_spec_h.shrink(((psl*H + phr, psl*H + phr + 1), None)), 0).unsqueeze(0).contiguous()
+        # the MTP layer's caches of the prompt's positions (as _mtp_prefill: the hidden state before it the model's row 0, its last token's
+        # there after), written after the drafts' writes
+        carry = self._spec_h[0:1].unsqueeze(0).contiguous()
         _seq_base[0] = pb
-        try: mm = mtp.prefill_cache(pemb, carry.cat(hp[:, :-1], dim=1), pst, pcnt)
+        try:
+          with mtp.caches_set(*mtp._seq_written): mm = mtp.prefill_cache(pemb, carry.cat(hp[:, :-1], dim=1), pst, pcnt)
         finally: _seq_base[0] = 0
-        effects += [mm[:, :, :1, :1].contiguous(), H0.assign(Tensor(last.uop.after(carry.uop)))]
+        effects += [mm[:, :, :1, :1].contiguous(), self._spec_h[0:1].assign(last)]
       hsv = x.flatten(2)[0].float()
       hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hsv[g*(k+1):(g+1)*(k+1)])
                         for g, (s, p) in enumerate(zip(sl, ps))])
       tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
-      tok = self._sample(self._hc_out(hs.reshape(1, G*(k+1), hc.count, -1))[0], tt, y.device, (seed, Tensor.arange(G*(k+1))))
+      hrows, keys = hs, Tensor.arange(G*(k+1))
+      if pv:
+        # (the prompt's at its temperature, the noise of a row of no sequence's)
+        hrows, keys = hs.cat(last), Tensor.arange(G*(k+1) + 1)
+        tt = tt.cat(self._seq_temp[2*self._seq_m:2*self._seq_m+2].reshape(1, 2))
+      tok = self._sample(self._hc_out(hrows.reshape(1, -1, hc.count, hrows.shape[-1] // hc.count))[0], tt, y.device, (seed, keys))
     finally: _seq_batch[0], _batch_rows[0], _seq_prompt[0], Q8_ROWS_I8[0] = None, None, None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
+    ptok_out = tok[G*(k+1):] if pv else None
+    tok = tok[:G*(k+1)]
     out = tok.reshape(G, k+1).cat(*[d.reshape(G, 1) for d in drafts], dim=1).reshape(1, G*(2*k+1)).cast(dtypes.int32)
-    if pv: out = out.cat(ptok_out.reshape(1, 1).cast(dtypes.int32), dim=1)
+    if ptok_out is not None: out = out.cat(ptok_out.reshape(1, 1).cast(dtypes.int32), dim=1)
     W = G*(2*k+1) + (1 if pv else 0)
     ret = self._seq_out[:, :W].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
     if effects: Tensor.realize(ret, *effects)
@@ -4089,12 +4105,12 @@ class Transformer:
 
   step_times = [0.0, 0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]],
-               prompt:tuple[int, int, int, int, int, float|tuple[float, float]]|None=None) -> list[tuple[list[int], list[int]]]:
+               prompt:tuple[int, int, int, int, float|tuple[float, float]]|None=None) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
     temperature) of every one (see _spec_steps), their k+1 sampled tokens and k drafts. prompt (a mixed step, see mix_size): (slot, base, start,
-    count, hidden state row, temperature) of a sequence whose count tokens from start (in the token buffer) are prefilled with the step (its
-    states of start in its slot, its hidden state of start-1 its row hrow), the token sampled after them the step's prompt_token
+    count, temperature) of a sequence whose count tokens from start (in the token buffer) are prefilled with the step (on the model's states:
+    the host copies its slot's in before, out after), the token sampled after them the step's prompt_token
     """
     self._seq_init()
     k, n = self.config.spec_drafts, len(seqs)
@@ -4110,9 +4126,9 @@ class Transformer:
     self._seq_host_out[:W] = array.array('i', [-1] * W)
     pvals:dict[str, int] = {}
     if prompt is not None:
-      psl, pb, pst, pcnt, phr, ptemp = prompt
+      psl, pb, pst, pcnt, ptemp = prompt
       self._seq_host_temp[2*self._seq_m:2*self._seq_m+2] = array.array('f', ptemp if isinstance(ptemp, tuple) else (ptemp, 1.0))
-      pvals = {"seqp_slot": psl, "seqp_base": pb, "seqp_start": pst, "seqp_count": pcnt, "seqp_hrow": phr}
+      pvals = {"seqp_slot": psl, "seqp_base": pb, "seqp_start": pst, "seqp_count": pcnt}
     jit, st = self._seq_jit(m, prompt is not None), time.perf_counter()
     if (cap:=getattr(jit, "captured", None)) is not None:
       # (captured: the variables' values as they are, no bound variables made a step)
@@ -4128,9 +4144,8 @@ class Transformer:
   prompt_token:int|None = None  # (the token after a mixed step's prompt)
   def _prompt_vars(self, pv:dict[str, int]) -> list[UOp]:
     if not pv: return []
-    k, rows = self.config.spec_drafts, self.seq_rows()
-    bounds = {"seqp_slot": self.seq_slots(), "seqp_base": rows, "seqp_start": self.max_context-1, "seqp_count": self.SEQ_MIX_ROWS,
-              "seqp_hrow": 2*k+1}
+    rows = self.seq_rows()
+    bounds = {"seqp_slot": self.seq_slots(), "seqp_base": rows, "seqp_start": self.max_context-1, "seqp_count": self.SEQ_MIX_ROWS}
     return [UOp.variable(name, 1 if name == "seqp_count" else 0, bounds[name]).bind(v) for name, v in pv.items()]
 
   def _init_states(self):
