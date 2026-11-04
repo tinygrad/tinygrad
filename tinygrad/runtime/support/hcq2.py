@@ -99,7 +99,6 @@ def copy_submit(s:UOp, keys:dict[int, Any], encode:Callable[[UOp, list[UOp]], li
     if not active:
       out += [lin.src[i] for i in ids]
       continue
-    # Each wave is completion.after(issue), optionally wrapped in END.
     streams:dict[Any, list[UOp]] = defaultdict(list)
     for i in ids: streams[keys[i]].extend(copies[i])
     pending = [(cmds, 0, 0) for cmds in streams.values()]

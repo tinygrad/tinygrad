@@ -117,7 +117,7 @@ def nvme_queue(drive:str, gpu:str, queue:str) -> NVMEQueue:
   Compiled.link_bufs |= {to_name(drive, gpu, queue, n): b for n, b in bufs.items()}
   return q
 
-def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]:
+def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # builds the commands for all reads from one drive on one gpu queue
   drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
   dev, q = cast(NVMEDevice, Device[drive]).nvme, nvme_queue(drive, gpu, qn)
   def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.alloc((size,), dtype, 0, device=drive, name=to_name(gpu, qn, name))
@@ -135,9 +135,9 @@ def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]:
     assert doff % 0x1000 == 0 and (soff | src.nbytes()) % (1 << dev.lba_shift) == 0 and soff + src.nbytes() <= dev.size, \
       f"{drive} reads whole blocks of {1 << dev.lba_shift} bytes into page aligned memory, not {src.nbytes()} bytes at {soff} to {doff}"
     prps, lba0 = dbase.getaddr(drive) + doff // 0x1000 * 16, src.getaddr(drive) >> dev.lba_shift
-    def wave(k:UOp|int, size:int) -> UOp: # drained before the next wave, so cids (slot + 1) are unique
+    def wave(k:UOp|int, size:int) -> UOp: # each wave is drained before the next, so cids (slot + 1) stay unique in flight
       ops = []
-      for j in range(size):
+      for j in range(size): # write the sqe, then copy prp1 and prp2 (the next page or a list) from the table
         c, slot = k * (q.entries - 1) + j, (n + k * (q.entries - 1) + j) % q.entries
         nb = rem if isinstance(c, int) and c == full else dev.max_xfer
         entry, lba, page = sq + slot * SQE, lba0 + c * (dev.max_xfer >> dev.lba_shift), c * (dev.max_xfer // 0x1000)
@@ -150,7 +150,7 @@ def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]:
       issue = UOp(Ops.LINEAR, src=tuple(ops + [ins("write", cqe, 0), ins("write", regs + q.sq_db, end)]))
       complete = UOp(Ops.LINEAR, src=(ins("wait", cqe, 1), ins("write", regs + q.cq_db, end))).after(issue)
       return complete.end(k) if isinstance(k, UOp) else complete
-    waves, last = full // (q.entries - 1), full % (q.entries - 1) + (rem > 0)
+    waves, last = full // (q.entries - 1), full % (q.entries - 1) + (rem > 0) # loop over the full waves, then do the rest
     copies.append(([wave(UOp.range(waves, next(UOp.unique_num), dtype=dtypes.u64), q.entries - 1)] if waves else []) +
                   ([wave(waves, last)] if last else []) + [UOp(Ops.LINEAR, src=(ins("memory_barrier"),))])
   return copies
