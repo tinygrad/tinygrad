@@ -1265,7 +1265,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (RDNA3: a few outputs of a long input (a hyper-connection's down projection) of a few rows a device (a small prefill's): the gemm with the
   # input split over workgroups, the tensor cores' tiles of them are a few workgroups that loop over the whole input)
   few_out_long = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and local_rows % 32 == 0 \
-    and local_rows < 256 and local_out <= 512 and in_features >= 4096 and getenv("Q8_FEW_OUT", 1)
+    and local_rows <= 1024 and local_out <= 512 and in_features >= 4096 and getenv("Q8_FEW_OUT", 1)
   if skinny:
     # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
     tile = (64 if tokens % 64 == 0 else 32 if tokens % 32 == 0 else 16) if skinny_i8 else 32
@@ -2429,7 +2429,7 @@ def skinny_parts(x:Tensor, wt:Tensor) -> Tensor|None:
   split = token_sharded(x)
   if split and (x.uop.axis != x.ndim - 2 or prod(x.shape[:-2]) != 1 or wt.uop.axis is not None): return None
   RL = int(x.uop.shard_shape[-2]) if split else R
-  if not amd_custom_kernels_supported(x.device) or E > 1024 or RL > 512 or not getenv("SKINNY", 1): return None
+  if not amd_custom_kernels_supported(x.device) or E > 1024 or RL > getenv("SKINNY_MAX_ROWS", 1024) or not getenv("SKINNY", 1): return None
   RB = next((r for r in (getenv("ROUTER_RB", 8), 8, 6, 4, 3, 2, 1) if RL % r == 0), 1)
   KS = next((ks for ks in (getenv("ROUTER_KS", 16), 16, 8, 4, 2, 1) if K % ks == 0), 1)
   U = next((u for u in (getenv("ROUTER_U", 8), 8, 4, 2, 1) if (K // KS) % u == 0), 1)

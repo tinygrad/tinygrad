@@ -771,7 +771,8 @@ class GatedResidual:
     ghc_post) instead of a dozen. None: not those rows or weights
     """
     B, T = xs.shape[:2]
-    if isinstance(B, int) and isinstance(T, int) and getenv("GHC_ROWS", 8) < B*T <= 128 and amd_custom_kernels_supported(xs.device) and \
+    if isinstance(B, int) and isinstance(T, int) and getenv("GHC_ROWS", 8) < B*T <= getenv("GHC_BATCH_ROWS", 1024) and \
+       amd_custom_kernels_supported(xs.device) and \
        not _wmma_rdna4(xs.device) and self.down.ggml_type == self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 256 == 0 and \
        getattr(self, "_winj", None) is not None and not token_sharded(xs) and getenv("GHC_BATCH", 1):
       # (the rows of batched decoding: the prefill's kernels on whole tiles of 32 rows (the rows past them padding), not a dozen of generic ones)
