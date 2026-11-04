@@ -1667,10 +1667,13 @@ class FlagAllreduce:
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.uint32, devs))
       for d in devs: Device[d].synchronize()
 
+# (the mailboxes and counters collectives use: lanes of their own (micro batches' collectives are independent, they'd write a lane's state at
+# once), see micro_batch_blocks)
+FLAG_LANE = [0]
 def flag_allreduce(devs:tuple[str, ...], groups:int) -> FlagAllreduce|None:
-  return _flag_allreduce(tuple(Device.canonicalize(d) for d in devs), groups)
+  return _flag_allreduce(tuple(Device.canonicalize(d) for d in devs), groups, FLAG_LANE[0])
 @functools.cache
-def _flag_allreduce(devs:tuple[str, ...], groups:int) -> FlagAllreduce|None:
+def _flag_allreduce(devs:tuple[str, ...], groups:int, lane:int=0) -> FlagAllreduce|None:
   if len(devs) < 2 or not amd_custom_kernels_supported(devs) or not getenv("FLAG_AR", 1): return None
   with Context(ALLOW_DEVICE_USAGE=1):
     if any(getattr(Device[d], "target", (0,))[0] != 11 for d in devs): return None

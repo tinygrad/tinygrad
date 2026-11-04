@@ -14,7 +14,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
-  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, \
+  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
   flag_allreduce, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -355,7 +355,7 @@ def _skinny(lin:Linear, x:Tensor) -> Tensor|None:
   """lin(x) by skinny_matmul (few outputs, few rows) if its weight is stored for it (see Transformer._finish_load), else None"""
   if (wt:=getattr(lin, "weight_t", None)) is None or not isinstance(x.shape[-2], int): return None
   # (rows split over the devices (a prefill's): a few a device)
-  if token_sharded(x) and int(x.uop.shard_shape[-2]) > getenv("SKINNY_SPLIT_ROWS", 128): return None
+  if token_sharded(x) and int(x.uop.shard_shape[-2]) > getenv("SKINNY_SPLIT_ROWS", 512): return None
   return skinny_matmul(x, wt)
 
 def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None else MOE_DECODE_ROWS
@@ -1152,13 +1152,24 @@ def _on_queue(ts:tuple[Tensor, ...], queue:str) -> tuple[Tensor, ...]:
     return u.replace(src=(requeue(u.src[0]), *u.src[1:]))
   return tuple(Tensor(requeue(t.uop)) for t in ts)
 
+def _on_lane(lane:int, fn:Callable, *args):
+  """fn's collectives on a lane of their own (see FLAG_LANE)"""
+  FLAG_LANE[0] = lane
+  try: return fn(*args)
+  finally: FLAG_LANE[0] = 0
+
 def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:Tensor|None=None) -> list[Tensor]:
   """
   the blocks on micro batches of rows (sequence parallel streams, a batch starts at the end of the tokens before it). a sublayer is three
   phases: the coefficients and its normed input (then gathered), its compute (its partial sums then scattered), its output added to the streams.
   a sublayer of a batch runs after the one of the batch before it: it reads the state and the cache it writes (implicit, not graph inputs)
   """
-  def after(x:Tensor, dep:Tensor|None) -> Tensor: return x if dep is None else Tensor(x.uop.after(*dep.uop.src[1:]))
+  # (the order of the batches as a read of the one before's output (a value of it, zero): a call on another queue waits for the calls whose
+  # buffers it reads, the state and cache they write are implicit inputs)
+  def after(x:Tensor, dep:Tensor|None) -> Tensor:
+    if dep is None: return x
+    if getenv("MB_QUEUES", 1): return x + dep[..., :1].cast(x.dtype) * 0
+    return Tensor(x.uop.after(*dep.uop.src[1:]))
   def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]: return _on_queue(outs, f"COMPUTE:{i}") if i and getenv("MB_QUEUES", 1) else outs
   subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
                                                                            (block.hc_ffn, block.ffn_norm, "ffn"))]
@@ -1170,7 +1181,8 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       # (the n-gram embedding's conv runs over the rows in order: on all of them of the batch, every device keeps its rows. a batch's conv
       # state is the one the batch before it wrote: after it)
       n = int(ple.shape[1]) // len(xs)
-      xi = Tensor(xs[i].uop.after(*ple_done[-1].uop.src[1:])) if ple_done else xs[i]
+      xi = xs[i] if not ple_done else (xs[i] + ple_done[-1].flatten()[:1].cast(xs[i].dtype) * 0) if getenv("MB_QUEUES", 1) else \
+        Tensor(xs[i].uop.after(*ple_done[-1].uop.src[1:]))
       full = all_gather(xi, 1)
       p = block._phase_ple(full, ple[:, i*n:(i+1)*n].contiguous(), starts[i], ts[i])
       ple_done.append(p)
@@ -1178,6 +1190,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
     return queued(i, *block._phase_pre(hc, norm, xs[i]))
   done:list[Tensor] = []
   for i in range(len(xs)):
+    FLAG_LANE[0] = i
     for k, (block, hc, norm, sub) in enumerate(subs):
       if k == 0: hn, post, comb = pre(i, 0)
       # (the batch before it ran this sublayer: its output's call, sublayer k of every batch is kept in done)
@@ -1186,6 +1199,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       else: done[k] = out
       xs[i] = queued(i, block._phase_post(hc, out, post, comb, xs[i]))[0]
       if k + 1 < len(subs): hn, post, comb = pre(i, k+1)
+  FLAG_LANE[0] = 0
   return xs
 
 class TransformerBlock(FFNBlock):
@@ -2668,9 +2682,9 @@ class Transformer:
         xs = micro_batch_blocks(self.blk, xs, starts, ts, ple)
         if self.gated:
           # (the streams of all the rows: the MTP layer's input, their last mix the output's)
-          x = Tensor.cat(*[all_gather(xi, 1) for xi in xs], dim=1).float()
+          x = Tensor.cat(*[_on_lane(i, all_gather, xi, 1) for i, xi in enumerate(xs)], dim=1).float()
           if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T)
-        else: x = Tensor.cat(*[all_gather(xi.mean(2), 1) for xi in xs], dim=1)
+        else: x = Tensor.cat(*[_on_lane(i, all_gather, xi.mean(2), 1) for i, xi in enumerate(xs)], dim=1)
       else:
         # (gated hyper-connections split their rows in the phases only: without them every device has all the rows)
         if sp and self.gated: sp = False
@@ -3888,7 +3902,13 @@ class Transformer:
     # (one realize: one walks every tensor)
     Tensor.realize(*[x for d in devs for x in (*Tensor._next_counter(d, 0), Tensor._device_rng_counters[d])])
     if self.config.ple is not None: self._ple_dev_init(read)
-    for g in (4, 16, 64): flag_allreduce(devs, g)
+    # (a lane of the collectives a micro batch, and its compute queue (MB_QUEUES), see micro_batch_blocks)
+    for lane in range(getenv("MICRO_BATCHES", 1)):
+      if lane and getenv("MB_QUEUES", 1):
+        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(lane)
+      FLAG_LANE[0] = lane
+      for g in (4, 16, 64): flag_allreduce(devs, g)
+    FLAG_LANE[0] = 0
     p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
 

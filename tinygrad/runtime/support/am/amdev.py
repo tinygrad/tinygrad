@@ -65,7 +65,7 @@ class AMFirmware:
 
     # PFP, ME, MEC firmware
     # the MEC stack of every pipe that runs (AM_GFX.mec_pipes)
-    mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0) else 1
     for (fw_name, fw_cnt) in ([('PFP', 1), ('ME', 1)] if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else []) + [('MEC', mec_pipes)]:
       blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", versioned_header="struct_gfx_firmware_header")
 
@@ -183,7 +183,7 @@ class AMDev:
     self.init_sw(smi_dev=False)
 
     # the boot's version: the MEC firmware is loaded for a number of pipes (AM_MEC_PIPES), a boot for another number is a full one
-    pipes = getenv("AM_MEC_PIPES", 1) if self.ip_ver[am.GC_HWIP] >= (12,0,0) else 1
+    pipes = getenv("AM_MEC_PIPES", 1) if self.ip_ver[am.GC_HWIP] >= (11,0,0) else 1
     self.boot_version = AMDev.Version ^ ((pipes - 1) << 16)
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == self.boot_version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):

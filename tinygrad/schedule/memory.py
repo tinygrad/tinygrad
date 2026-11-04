@@ -54,6 +54,9 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
   # allocator fragments the arena: its size can be twice the memory live at once). the many small ones are suballocated after them
   start = {b: first_appearance[b] for b in first_appearance}
   end = {b: last_appearance[b] + 1 + buf_hold.get(b, 0) for b in first_appearance}
+  # (a buffer of the calls of more than one queue: its calls' order in the linear isn't their order in time, its memory none's but its own)
+  shared = {b for b in first_appearance if _key(b)[2] == -1}
+  for b in shared: start[b], end[b] = 0, len(linear.src) + 1
   offsets:dict[UOp, int] = {}
   large_peak:dict[LaneKey, int] = defaultdict(int)
   placed:dict[LaneKey, list[tuple[int, int, int, int]]] = defaultdict(list)
@@ -68,7 +71,7 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
   for _, is_open, buf in events:
     if buf in offsets and nbytes[buf] >= LARGE_BUFFER: continue
     if is_open: offsets[buf] = peaks[_key(buf)][1].alloc(nbytes[buf]) + large_peak[_key(buf)]
-    else: peaks[_key(buf)][1].free(offsets[buf] - large_peak[_key(buf)])
+    elif buf not in shared: peaks[_key(buf)][1].free(offsets[buf] - large_peak[_key(buf)])
     peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.max_numel() * buf.dtype.itemsize), peaks[_key(buf)][1])
   arena_sizes = {key: round_up(max(peaks[key][0] if key in peaks else 0, large_peak[key]), block_size)
                  for key in set(large_peak) | set(peaks)}
