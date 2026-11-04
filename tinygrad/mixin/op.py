@@ -908,7 +908,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     axis = self._resolve_dim(axis)
     m = self.eq(self.max(axis=axis, keepdim=True))
     idx = m * type(self).arange(self.shape[axis], 0, -1).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
-    return idx.max(axis=axis, keepdim=keepdim).sub(self.shape[axis], reverse=True).cast(dtypes.int32)
+    return (idx.ufix(self.shape[axis]) - idx.max(axis=axis, keepdim=keepdim)).cast(dtypes.int32)
 
   def argmin(self, axis=None, keepdim=False) -> Self:
     """
