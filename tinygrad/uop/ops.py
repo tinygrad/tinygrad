@@ -348,7 +348,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.CUSTOM_FUNCTION: return None if self.dtype is dtypes.void else ()
+      case Ops.CUSTOM_FUNCTION:
+        if self.dtype is dtypes.void: return None
+        if not self.src: return ()
+        shapes = [s.shape for s in self.src]
+        assert all_same(shapes), f"CUSTOM_FUNCTION source shapes must match: {shapes}"
+        return shapes[0]
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -1204,7 +1209,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def custom(fmt:str, *src:UOp, dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    return UOp.call(UOp.custom_function(fmt, dtype=dtype, fmt=True, inline=inline), *src)
+    params = tuple(UOp.param(i, s.dtype, s.shape, addrspace=unwrap(s.addrspace)) for i,s in enumerate(src))
+    return UOp.call(UOp.custom_function(fmt, *params, dtype=dtype, fmt=True, inline=inline), *src)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
