@@ -945,7 +945,7 @@ class FFNBlock:
         sel, probs = moe_softmax_router(logits, k, scale)
         if rows is not None:
           # One exchange for both outputs: separate independent collectives share the same mutable flag counter.
-          gathered = all_gather(sel.bitcast(dtypes.float32).stack(probs, dim=-1).contiguous(), 1)
+          gathered = _on_lane(FLAG_LANE[0] + SEL_LANE, all_gather, sel.bitcast(dtypes.float32).stack(probs, dim=-1).contiguous(), 1)
           sel, probs = gathered[..., 0].bitcast(dtypes.int32), gathered[..., 1]
         return self._experts(x, h, sel, probs)
       if gating == ExpertGating.SIGMOID and normalize_topk and bias is not None and isinstance(xr.shape[1], int) and \
@@ -1154,9 +1154,10 @@ def _on_queue(ts:tuple[Tensor, ...], queue:str) -> tuple[Tensor, ...]:
 
 def _on_lane(lane:int, fn:Callable, *args):
   """fn's collectives on a lane of their own (see FLAG_LANE)"""
-  FLAG_LANE[0] = lane
+  prev, FLAG_LANE[0] = FLAG_LANE[0], lane
   try: return fn(*args)
-  finally: FLAG_LANE[0] = 0
+  finally: FLAG_LANE[0] = prev
+SEL_LANE = 8  # (the selections' gathers of the experts on lanes of their own: independent of the input's gather, a pool of the same size)
 
 def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:Tensor|None=None) -> list[Tensor]:
   """
@@ -3906,8 +3907,9 @@ class Transformer:
     for lane in range(getenv("MICRO_BATCHES", 1)):
       if lane and getenv("MB_QUEUES", 1):
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(lane)
-      FLAG_LANE[0] = lane
-      for g in (4, 16, 64): flag_allreduce(devs, g)
+      for ln in (lane, lane + SEL_LANE):
+        FLAG_LANE[0] = ln
+        for g in (4, 16, 64): flag_allreduce(devs, g)
     FLAG_LANE[0] = 0
     p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)

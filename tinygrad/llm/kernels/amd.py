@@ -2129,7 +2129,8 @@ def _flag_chunked_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
   got:list[Tensor] = []
   for p in range(parts):
     piece = source[:, p].reshape(N*chunk//parts).contiguous()
-    if got: piece = Tensor(piece.uop.after(got[-1].uop))  # serialize exchanges sharing the counter and mailbox
+    # serialize exchanges sharing the counter and mailbox (after the last one's kernels: an AFTER is of effects)
+    if got: piece = Tensor(piece.uop.after(*[u for u in got[-1].uop.toposort() if u.op is Ops.CALL][-2:]))
     if (y:=flag_all_gather(piece, 0, dtype)) is None: return None
     got.append(y.reshape(N, chunk//parts))
   return got[0].stack(*got[1:], dim=1).reshape(x.shape).contiguous()
@@ -2862,7 +2863,8 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=_wmma_rdna4(x.device))
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
-  rdna3_i8 = not _wmma_rdna4(x.device) and ggml_type in I8_WMMA_QUANTS and getenv("I8_WMMA_RDNA3", 1)
+  rdna3_i8 = not _wmma_rdna4(x.device) and (ggml_type in I8_WMMA_QUANTS or (ggml_type == IQ4_NL and getenv("I8_IQ4NL", 0))) and \
+    getenv("I8_WMMA_RDNA3", 1)
   if _use_i8_wmma(x.device, ggml_type) or rdna3_i8:
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
