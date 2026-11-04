@@ -35,7 +35,7 @@ class TestEffectRetention(unittest.TestCase):
   def test_group_keeps_custom(self):
     r = UOp.range(4, 0, AxisType.LOOP)
     def kernel(C:UOp, D:UOp) -> UOp:
-      inc = UOp(Ops.CUSTOM, src=(C.index(r),), arg=("{0}[0] += 1;", dtypes.void))
+      inc = UOp.custom("{0}[0] += 1;", C.index(r))
       return UOp.group(inc, D[r].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, d)
@@ -152,7 +152,7 @@ class TestEffectFrequency(unittest.TestCase):
     # the CUSTOM sets C[0] to r every iteration, so r keeps its 4 iterations though the D store gates it to r<2
     r = UOp.range(4, 0, AxisType.LOOP)
     def kernel(C:UOp, D:UOp) -> UOp:
-      val = UOp(Ops.CUSTOM, (C[0], r.cast(dtypes.int)), ("({0}[0] = {1})", dtypes.int))
+      val = UOp.custom("({0}[0] = {1})", C[0], r.cast(dtypes.int), dtype=dtypes.int)
       return D[r.valid(r<2)].store(val).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, d)
@@ -163,7 +163,7 @@ class TestEffectFrequency(unittest.TestCase):
     # the CUSTOM increments C[r] every iteration, though the sum only picks r==2
     r = UOp.range(4, 0, AxisType.LOOP)
     def kernel(C:UOp, O:UOp) -> UOp:
-      inc = UOp(Ops.CUSTOM, src=(C.index(r),), arg=("({0}[0] += 1)", dtypes.int))
+      inc = UOp.custom("({0}[0] += 1)", C.index(r), dtype=dtypes.int)
       return O[0].store(UOp.const(2, dtypes.int).eq(r.cast(dtypes.int)).where(inc, 0).reduce(r, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     c, o = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, o)
@@ -186,7 +186,7 @@ class TestEffectFrequency(unittest.TestCase):
   def test_padto_refuses_ungatable(self):
     # a CUSTOM and a STORE to a whole buffer can't be no-ops, so padding r is refused
     r = UOp.range(3, 0, AxisType.LOOP)
-    effects = {"custom": lambda C: UOp(Ops.CUSTOM, src=(C.index(0), r.cast(dtypes.int)), arg=("{0}[0] += {1}+1;", dtypes.void)),
+    effects = {"custom": lambda C: UOp.custom("{0}[0] += {1}+1;", C.index(0), r.cast(dtypes.int)),
                "whole_store": lambda C: C.store((r.cast(dtypes.int)+1).reshape((1,)))}
     for name, effect in effects.items():
       with self.subTest(name):

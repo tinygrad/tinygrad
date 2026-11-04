@@ -48,11 +48,11 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   return ggml_type, Tensor(raw).flatten().bitcast(word_dtype).contiguous()
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
-  if cdna: return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sdot4({}, {}, {}, false)", dtypes.int32))  # CDNA has no sudot4 (dot8-insts)
-  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
+  if cdna: return UOp.custom("__builtin_amdgcn_sdot4({}, {}, {}, false)", a, b, c, dtype=dtypes.int32)  # CDNA has no sudot4 (dot8-insts)
+  return UOp.custom("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", a, b, c, dtype=dtypes.int32)
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
+  return UOp.custom("__builtin_amdgcn_perm({}, {}, {})", *tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), dtype=dtypes.uint32)
 
 def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
@@ -100,12 +100,12 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_featur
   value = x.reshape(tokens, groups, 32)[token, group, lane].load().float()
   # Quantize each input once, then pack four neighboring lanes into one word.
   # Keep divisions intact: reciprocal multiplication can move half-precision inputs across rounding ties.
-  d = UOp(Ops.CUSTOM, src=(warp_reduce(value.abs(), maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  rounded = UOp(Ops.CUSTOM, src=(value, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float))
+  d = UOp.custom("({0}/127.0f)", warp_reduce(value.abs(), maximum=True, full_wave=True), dtype=dtypes.float).maximum(1e-8)
+  rounded = UOp.custom("__builtin_nearbyintf({0}/{1})", value, d, dtype=dtypes.float)
   quant = rounded.clip(-127, 127).cast(dtypes.int8)
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
   for offset in (1, 2):
-    word |= UOp(Ops.CUSTOM, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | offset<<10})", dtypes.uint32))
+    word |= UOp.custom(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | offset<<10})", word, dtype=dtypes.uint32)
   stores = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
             scale[token, group.valid(lane.eq(0))].store(d),
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
