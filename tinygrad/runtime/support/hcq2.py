@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import cast, Any, Sequence
+from typing import cast, Any, Sequence, Callable
 import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
-from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, DEBUG, VIZ, ALL2ALL, PROFILE
+from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop
@@ -86,6 +86,34 @@ def announce(slots:dict[str, UOp], num_queues:dict[str, int], dep:UOp) -> list[U
   return bumped + [buf.after(dep).index(2 * num_queues[dev]).store(timeline_value(dev) + 1) for dev, buf in slots.items()]
 
 def ins(name:str, *src:UOp|int) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
+
+def copy_submit(s:UOp, keys:dict[int, Any], encode:Callable[[UOp, list[UOp]], list[list[UOp]]]) -> UOp|None:
+  if not keys: return None
+  lin, queue = s.without_after.body, s.without_after.src[1]
+  groups:dict[Any, list[int]] = defaultdict(list)
+  for i, key in keys.items(): groups[key].append(i)
+  copies = {i: cmds for ids in groups.values() for i, cmds in zip(ids, encode(queue, [lin.src[i] for i in ids]))}
+
+  out:list[UOp] = []
+  for active, ids in itertools.groupby(range(len(lin.src)), lambda i: i in keys):
+    if not active:
+      out += [lin.src[i] for i in ids]
+      continue
+    # Each wave is completion.after(issue), optionally wrapped in END.
+    streams:dict[Any, list[UOp]] = defaultdict(list)
+    for i in ids: streams[keys[i]].extend(copies[i])
+    pending = [(cmds, 0, 0) for cmds in streams.values()]
+    while pending := [(cmds, pos, off) for cmds, pos, off in pending if pos < len(cmds)]:
+      ranges = [cmds[pos].src[1] if cmds[pos].op is Ops.END else None for cmds, pos, _ in pending]
+      counts = [(r.src[0].val if r is not None else 1) - off for r, (_, _, off) in zip(ranges, pending)]
+      n = min(counts)
+      k = UOp.range(n, next(UOp.unique_num), dtype=dtypes.u64) if n > 1 else UOp.const(0, dtypes.u64)
+      bodies = [cmds[pos].src[0].substitute({r: k + off}) if r is not None else cmds[pos] for (cmds, pos, off), r in zip(pending, ranges)]
+      issue = flatten(dep.src for u in bodies if u.op is Ops.AFTER for dep in u.src[1:])
+      complete = flatten(u.without_after.src for u in bodies)
+      out += [UOp(Ops.LINEAR, src=tuple(issue + complete)).end(k)] if n > 1 else issue + complete
+      pending = [(cmds, pos + 1, 0) if count == n else (cmds, pos, off + n) for (cmds, pos, off), count in zip(pending, counts)]
+  return s.without_after.replace(src=(lin.replace(src=tuple(out)), queue)).after(*s.src[1:])
 
 # **** patchers
 

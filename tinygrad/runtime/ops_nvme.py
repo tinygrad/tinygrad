@@ -1,12 +1,12 @@
 from __future__ import annotations
-import functools, os, glob, pathlib, struct
-from typing import Callable, cast
+import functools, os, glob, pathlib, struct, itertools
+from typing import cast
 from tinygrad.device import Allocator, Buffer, BufferSpec, BufferStorage, Compiled, Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import ceildiv, round_up, to_tuple, flatten, wait_cond
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import nvme, pci
-from tinygrad.runtime.support.hcq2 import to_name, ins, unwrap_view
+from tinygrad.runtime.support.hcq2 import to_name, ins, unwrap_view, copy_submit
 from tinygrad.runtime.support.memory import AddrSpace, MemoryManager, MMIOInterface
 from tinygrad.runtime.support.system import PCIDevice, PCIIfaceBase, System, filter_visible_devices
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
@@ -117,10 +117,7 @@ def nvme_queue(drive:str, gpu:str, queue:str) -> NVMEQueue:
   Compiled.link_bufs |= {to_name(drive, gpu, queue, n): b for n, b in bufs.items()}
   return q
 
-def loop(n:int, body:Callable[[UOp], list[UOp]]) -> list[UOp]: # loops in the cmdbuf, so the host program doesn't grow with the read size
-  return [UOp(Ops.LINEAR, src=tuple(body(r:=UOp.range(n, next(UOp.unique_num), dtype=dtypes.uint64)))).end(r)] if n else []
-
-def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # builds the commands for all reads from one drive on one gpu queue
+def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]:
   drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
   dev, q = cast(NVMEDevice, Device[drive]).nvme, nvme_queue(drive, gpu, qn)
   def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.alloc((size,), dtype, 0, device=drive, name=to_name(gpu, qn, name))
@@ -128,18 +125,19 @@ def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # builds the com
 
   # where this submit starts in the queue, bumped once for all its commands
   cmds = [ceildiv(get_call_arg_uops(c)[1].nbytes(), dev.max_xfer) for c in calls]
-  n = (seq:=mem("seq", 1, dtypes.uint64)).after(seq.index(0).store(seq.index(0).load() + sum(cmds))).index(0).load() - sum(cmds)
+  start = (seq:=mem("seq", 1, dtypes.uint64)).after(seq.index(0).store(seq.index(0).load() + sum(cmds))).index(0).load() - sum(cmds)
 
   copies = []
-  for call, ncmds in zip(calls, cmds):
+  for call, off in zip(calls, itertools.accumulate(cmds, initial=0)):
+    n = start + off
     (dst, src), (full, rem) = get_call_arg_uops(call), divmod(get_call_arg_uops(call)[1].nbytes(), dev.max_xfer)
     (dbase, doff), soff = unwrap_view(dst), unwrap_view(src)[1]
     assert doff % 0x1000 == 0 and (soff | src.nbytes()) % (1 << dev.lba_shift) == 0 and soff + src.nbytes() <= dev.size, \
       f"{drive} reads whole blocks of {1 << dev.lba_shift} bytes into page aligned memory, not {src.nbytes()} bytes at {soff} to {doff}"
     prps, lba0 = dbase.getaddr(drive) + doff // 0x1000 * 16, src.getaddr(drive) >> dev.lba_shift
-    def wave(k:UOp|int, size:int) -> list[UOp]: # each wave is drained before the next, so cids (slot + 1) stay unique in flight
+    def wave(k:UOp|int, size:int) -> UOp: # drained before the next wave, so cids (slot + 1) are unique
       ops = []
-      for j in range(size): # write the sqe, then copy prp1 and prp2 (the next page or a list) from the table
+      for j in range(size):
         c, slot = k * (q.entries - 1) + j, (n + k * (q.entries - 1) + j) % q.entries
         nb = rem if isinstance(c, int) and c == full else dev.max_xfer
         entry, lba, page = sq + slot * SQE, lba0 + c * (dev.max_xfer >> dev.lba_shift), c * (dev.max_xfer // 0x1000)
@@ -149,19 +147,16 @@ def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # builds the com
                ([ins("copy", entry + 32, prps + (page + 1) * 16, 8)] if ceildiv(nb, 0x1000) == 2 else [])
       cqe = cq + ((n + k * (q.entries - 1) + size - 1) % q.entries) * CQE + 12 # the wave's last cqe, cleared before ringing the doorbell
       end = ((n + k * (q.entries - 1) + size) % q.entries).cast(dtypes.uint32)
-      return ops + [ins("write", cqe, 0), ins("write", regs + q.sq_db, end), ins("wait", cqe, 1), ins("write", regs + q.cq_db, end)]
-    waves, last = full // (q.entries - 1), full % (q.entries - 1) + (rem > 0) # loop over the full waves, then do the rest
-    copies.append(loop(waves, lambda k: wave(k, q.entries - 1)) + (wave(waves, last) if last else []) + [ins("memory_barrier")])
-    n = n + ncmds
+      issue = UOp(Ops.LINEAR, src=tuple(ops + [ins("write", cqe, 0), ins("write", regs + q.sq_db, end)]))
+      complete = UOp(Ops.LINEAR, src=(ins("wait", cqe, 1), ins("write", regs + q.cq_db, end))).after(issue)
+      return complete.end(k) if isinstance(k, UOp) else complete
+    waves, last = full // (q.entries - 1), full % (q.entries - 1) + (rem > 0)
+    copies.append(([wave(UOp.range(waves, next(UOp.unique_num), dtype=dtypes.u64), q.entries - 1)] if waves else []) +
+                  ([wave(waves, last)] if last else []) + [UOp(Ops.LINEAR, src=(ins("memory_barrier"),))])
   return copies
 
 def nvme_submit(s:UOp) -> UOp|None:
-  lin, queue = s.without_after.body, s.without_after.src[1]
-  if not (drives:={i: d for i, u in enumerate(lin.src) if u.op is Ops.CALL and u.src[0].op is Ops.STORE and
-                   (d:=to_tuple(get_call_arg_uops(u)[1].device)[0]).startswith("NVME")}): return None
-  ops = [[u] for u in lin.src]
-  for d in dict.fromkeys(drives.values()):
-    positions = [i for i in drives if drives[i] == d]
-    for i, copy_ops in zip(positions, nvme_copies(queue, [lin.src[i] for i in positions])): ops[i] = copy_ops
-  return s.without_after.replace(src=(lin.replace(src=tuple(flatten(ops))), queue)).after(*s.src[1:])
+  drives = {i: d for i, u in enumerate(s.without_after.body.src) if u.op is Ops.CALL and u.src[0].op is Ops.STORE and
+            (d:=to_tuple(get_call_arg_uops(u)[1].device)[0]).startswith("NVME")}
+  return copy_submit(s, drives, nvme_copies)
 Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"), nvme_submit)]) + Compiled.pm_encode
