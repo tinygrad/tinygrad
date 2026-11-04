@@ -130,7 +130,7 @@ pm_renderer = PatternMatcher([
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   # if the whole clause collapsed to a single predicate (no binds), rewrap it
-  if x.op is Ops.CALL: x = UOp(Ops.AND, (x,))
+  if x.op is Ops.CALL and x.body.arg.inline: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
   and_pieces, store_pieces = [], []
   or_pieces: list[str] = []
@@ -139,9 +139,9 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
-      assert s.src[0].op is Ops.CALL and s.src[1].op is Ops.CALL
+      assert s.src[0].body.arg.inline and s.src[1].body.arg.inline
       store_pieces.append(f"{s.src[0].body.arg.name}={s.src[1].body.arg.name}")
-    elif s.op is Ops.CALL: and_pieces.append(s.body.arg.name)
+    elif s.op is Ops.CALL and s.body.arg.inline: and_pieces.append(s.body.arg.name)
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
