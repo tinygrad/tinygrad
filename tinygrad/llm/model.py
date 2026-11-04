@@ -338,8 +338,11 @@ _partial_out = [False]
 _sp_rows:list[Tensor|None] = [None]
 # the tokens of a prefill chunk (its rows past them are padding): the experts don't take the padding rows
 _ffn_rows:list[UOp|int|None] = [None]
+# (a mixed step's parts: their sublayers' outputs before the projection, projected at once (one allreduce of all the rows))
+_out_defer:list[bool] = [False]
 def _out(layer:Linear, x:Tensor) -> Tensor:
   """a sublayer's output projection: its partial sums if they are kept (_partial_out), in half (they're sent so)"""
+  if _out_defer[0]: return x
   return layer.partial(x, half=True) if _partial_out[0] else layer(x)
 
 def _identity(x:Tensor) -> Tensor: return x
@@ -1535,13 +1538,14 @@ class QSABlock(TransformerBlock):
     if (sp:=_seq_prompt[0]) is not None:
       # (a mixed step: the prompt's rows as a prefill chunk's in its region, then the decoding rows' (their writes of the caches after the
       # prompt's reads, one order of the writes and the reads))
-      _seq_prompt[0], base = None, _seq_base[0]
+      _seq_prompt[0], base, _out_defer[0] = None, _seq_base[0], True
       try:
         dec = self._attention_seqs(x[:, :sp.off], sb)
         _seq_base[0] = sp.base
         with self.caches_set(*self._seq_written): pout = self._attention_rows(x[:, sp.off:], sp.start, sp.count)
-        return dec.cat(pout, dim=1)
-      finally: _seq_prompt[0], _seq_base[0] = sp, base
+      finally: _seq_prompt[0], _seq_base[0], _out_defer[0] = sp, base, False
+      # (one output projection: one allreduce, the parts' independent ones would be the collectives' state written twice)
+      return _out(self.attn_output, dec.cat(pout.cast(dec.dtype), dim=1))
     G, R, hd, N = sb.G, sb.R, self.config.head_dim, int(self.cache_k.shape[2])
     rows, idx, ic = G*R, self.indexer, self.indexer.idx
     kp = ic.kpool
@@ -2161,10 +2165,11 @@ class GatedDeltaNetBlock(FFNBlock):
                       unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
                       positions=sb.positions, groups=sb.G, S=S, SC=SC, slots=sb.slots)
       # (the prompt's rows as a prefill chunk's: the model's states, its slot's copied to them before the step, back after)
-      _seq_prompt[0], _batch_rows[0], _seq_batch[0] = None, None, None
+      _seq_prompt[0], _batch_rows[0], _seq_batch[0], _out_defer[0] = None, None, None, True
       try: zp = self._attention(xin[:, sp.off:], sp.start, sp.count)
-      finally: _seq_prompt[0], _batch_rows[0], _seq_batch[0] = sp, groups, sb
-      return self.ssm_out(zd).cat(zp.cast(dtypes.float), dim=1)
+      finally: _seq_prompt[0], _batch_rows[0], _seq_batch[0], _out_defer[0] = sp, groups, sb, False
+      # (one output projection: one allreduce)
+      return self.ssm_out(zd.cat(zp.cast(zd.dtype), dim=1))
     if pf is not None:
       # (a mixed step: the decoding rows' outputs (their kernel reads the first rows of the projections), the prompts' from the rest)
       o, nd = pf.off, len(groups) - len(pf.count_vars)
