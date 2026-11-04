@@ -141,7 +141,7 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
         if s in included or s in replaces or s.op in GroupOp.Defines|{Ops.CONST}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
-    sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
+    sink = graph_rewrite(collapse_fxn, pm_flatten_range+pm, name="reduce_collapse")
     if not no_range(sink): return None
     u = sink.substitute({v:k for k,v in replaces.items()})
   return u

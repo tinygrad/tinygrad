@@ -296,6 +296,20 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(A[r2].reduce(r1, arg=Ops.ADD).reduce(r0, r1, r2, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(1), Tensor.ones(4).contiguous(), fxn=kernel)[0].item(), 256)
 
+  def test_reduce_over_singleton_range(self):
+    def kernel(C:UOp, A:UOp) -> UOp:
+      return C[0].store(A[1].reduce(UOp.range(1, 0, AxisType.LOOP), arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).contiguous(), fxn=kernel)[0].item(), 3)
+
+  def test_reduce_as_index(self):
+    def kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+      k = UOp.range(2, 0, AxisType.LOOP)
+      idx = A[k].load().reduce(k, arg=Ops.ADD)
+      return C[0].store(B[idx].load()).sink(arg=KernelInfo(opts_to_apply=()))
+    with Context(CHECK_OOB=0):
+      out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([1, 2]), Tensor([10, 20, 30, 40]), fxn=kernel)[0]
+      self.assertEqual(out.item(), 40)
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
     # j%2 splits j into two ranges, both are still LOCAL
