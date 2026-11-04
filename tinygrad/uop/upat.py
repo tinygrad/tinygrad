@@ -119,13 +119,14 @@ pm_renderer = PatternMatcher([
 
   # AND/OR of custom inline becomes a single custom inline
   (UPat(Ops.AND, src=UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True), name="x"),
-   lambda x: UOp.custom("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", inline=True)),
+   lambda x: UOp.custom("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", inline=True) if all(y.body.arg.inline for y in x.src) else None),
   (UPat(Ops.OR, src=UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True), name="x"),
-   lambda x: UOp.custom("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", inline=True)),
+   lambda x: UOp.custom("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", inline=True) if all(y.body.arg.inline for y in x.src) else None),
   (UPat.call(UPat(Ops.CUSTOM_FUNCTION, name="f"), UPat(), allow_any_len=True, name="x"),
-   lambda f,x: UOp.custom(f.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), inline=True)),
+   lambda f,x: UOp.custom(f.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), inline=True) \
+       if not f.arg.inline and all(y.body.arg.inline for y in x.src[1:]) else None),
   (UPat(Ops.INDEX, src=(UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True, name="x"), UPat(Ops.CONST, name="c"))),
-   lambda x,c: UOp.custom(x.body.arg.name + f".src[{c.val}]", inline=True))
+   lambda x,c: UOp.custom(x.body.arg.name + f".src[{c.val}]", inline=True) if x.body.arg.inline else None)
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
