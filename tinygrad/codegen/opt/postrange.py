@@ -1,7 +1,7 @@
 from __future__ import annotations
 import itertools
 from typing import cast
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
+from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
 from tinygrad.uop.ops import axis_colors
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
@@ -134,8 +134,15 @@ class Scheduler:
       replaced_rng = rng.replace(src=(rng.src[0].const_like(new_sz),))
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
+      def gate(b:UOp) -> UOp: return b.replace(src=(b.src[0], b.src[1].get_idx().valid(valid&b.src[1].get_valid())))
       for b in self.bufs:
-        if rng in (i:=b.src[1]).ranges: replaces[b] = b.replace(src=(b.src[0], i.get_idx().valid(valid&i.get_valid())))
+        if rng in b.src[1].ranges: replaces[b] = gate(b)
+      # the padded iterations are no-ops: their INDEXes, indexed STOREs and BACKEDGEs are gated and their REDUCEs add the identity
+      for u in self.ast.backward_slice:
+        if u.op in GroupOp.Effect|{Ops.BACKEDGE} and rng in u.ranges:
+          if u.op is Ops.STORE and u.src[0].op is Ops.INDEX: replaces[u] = u.replace(src=(gate(u.src[0]),)+u.src[1:])
+          elif u.op is Ops.BACKEDGE: replaces[u] = u.replace(src=u.src[:2]+(valid&u.src[2],))
+          else: check(u.op is Ops.BARRIER, f"cannot gate {u.op} in a padded range")
       for r in self.reduceops:
         if rng in r.src[1:]:
           replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])

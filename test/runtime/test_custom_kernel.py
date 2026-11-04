@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
-from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -295,6 +295,20 @@ class TestCustomKernel(unittest.TestCase):
       r0, r1, r2 = [UOp.range(4, n, AxisType.UPCAST) for n in range(3)]
       return C[0].store(A[r2].reduce(r1, arg=Ops.ADD).reduce(r0, r1, r2, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(1), Tensor.ones(4).contiguous(), fxn=kernel)[0].item(), 256)
+
+  def test_reduce_over_singleton_range(self):
+    def kernel(C:UOp, A:UOp) -> UOp:
+      return C[0].store(A[1].reduce(UOp.range(1, 0, AxisType.LOOP), arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).contiguous(), fxn=kernel)[0].item(), 3)
+
+  def test_reduce_as_index(self):
+    def kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+      k = UOp.range(2, 0, AxisType.LOOP)
+      idx = A[k].load().reduce(k, arg=Ops.ADD)
+      return C[0].store(B[idx].load()).sink(arg=KernelInfo(opts_to_apply=()))
+    with Context(CHECK_OOB=0):
+      out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([1, 2]), Tensor([10, 20, 30, 40]), fxn=kernel)[0]
+      self.assertEqual(out.item(), 40)
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
@@ -741,7 +755,6 @@ class TestCallInKernel(unittest.TestCase):
   @unittest.expectedFailure
   def test_call_loop_split(self): self.test_call_loop_mini((Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),))
 
-  @unittest.expectedFailure
   def test_call_loop_pad(self):
     @uopfunc
     def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
@@ -752,8 +765,8 @@ class TestCallInKernel(unittest.TestCase):
       return call.end(i).sink(arg=KernelInfo(name="call_loop_padto", opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
-    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
-    self.assertEqual(out.tolist(), [1, 2, 3, 0])
+    # the CALL body can't be gated, so padding i is refused
+    with self.assertRaises(KernelOptError): Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0].realize()
 
   def test_uopfunc(self):
     @uopfunc
