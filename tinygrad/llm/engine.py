@@ -69,7 +69,7 @@ class SeqEngine:
     # (the stash: the free chunks (in order) and entries, the evicted sequences in it)
     self.free_chunks, self.free_entries = list(range(getattr(model, "stash_chunks", 0))), list(range(getattr(model, "stash_entries", 0)))
     self.stashed:list[Stashed] = []
-    self.times:dict[str, float] = {}  # (the time of the moves, stashes and restores: see the server's status line)
+    self.times:dict[str, float|int] = {}  # (the time of the moves, stashes and restores: see the server's status line)
 
   # ** regions and slots
   def _gaps(self, skip:Seq|None=None) -> list[tuple[int, int]]:
@@ -108,6 +108,7 @@ class SeqEngine:
     st = time.perf_counter()
     self.model.seq_stash(True, s.slot, s.base, self._segs(chunks, keep, n), entry, s.n, s.hrow)
     self._time("stash", st)
+    self.times["stashed"] = self.times.get("stashed", 0) + n - keep
     self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
     return True
   def _drop_one(self) -> Stashed|None:
@@ -161,7 +162,9 @@ class SeqEngine:
   def _time(self, name:str, st:float): self.times[name] = self.times.get(name, 0.0) + time.perf_counter() - st
   def _move(self, s:Seq, base:int):
     st = time.perf_counter()
-    if base != s.base: self.model.seq_move(s.base, base, s.n)
+    if base != s.base:
+      self.model.seq_move(s.base, base, s.n)
+      self.times["moved"] = self.times.get("moved", 0) + -(-s.n // self.align)  # (the chunks: see the status line)
     s.base = base
     self._time("move", st)
   def _compact(self) -> list[Seq]:
@@ -237,6 +240,7 @@ class SeqEngine:
       n, restored, st = len(stashed.tokens), True, time.perf_counter()
       self.model.seq_stash(False, s.slot, s.base, self._segs(stashed.chunks, 0, len(stashed.chunks)), stashed.entry, n, stashed.hrow)
       self._time("restore", st)
+      self.times["restored"] = self.times.get("restored", 0) + len(stashed.chunks)
       s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
       self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
       # (as it was: prefilled from its last token's states, or its checkpoint restored)

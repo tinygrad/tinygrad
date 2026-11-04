@@ -456,14 +456,15 @@ class BatchStats:
     self.reset()
   def reset(self):
     self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0.0, 0, 0.0
-    self.times:dict[str, float] = {}  # (more of the time: where it went)
-  def add(self, name:str, t:float): self.times[name] = self.times.get(name, 0.0) + t
+    self.times:dict[str, float|int] = {}  # (more of the time: where it went, and counts)
+  def add(self, name:str, t:float|int): self.times[name] = self.times.get(name, 0) + t
   def step(self, running:int, waiting:int):
     if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
       sep = colored('--', 'BLACK')
       stderr_log(f"batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  {self.tokens/dt:5.0f} tok/s generated  {sep}  "
                  f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s)  "
-                 f"{sep}  in the last {dt:.0f}s" + "".join(f"  {sep}  {k} {v:.1f}s" for k, v in self.times.items()) + "\n")
+                 f"{sep}  in the last {dt:.0f}s" + "".join(f"  {sep}  {k} {v:.1f}s" if isinstance(v, float) else f"  {sep}  {k} {v}"
+                                                           for k, v in self.times.items()) + "\n")
       self.st = time.perf_counter()
       self.reset()
     self.steps += 1
