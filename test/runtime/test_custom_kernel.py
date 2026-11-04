@@ -378,6 +378,16 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
 
+  def test_explicit_stage_scalar_index(self):
+    for direct, want in ((True, [2]), (False, [30])):
+      def kernel(out, direct=direct):
+        r = UOp.range(4, 0, AxisType.LOOP, dtype=dtypes.int32)
+        v = r.bufferize(r, arg=BufferizeOpts(out.device, removable=False)).index(2).load()
+        values = UOp.stack(*[UOp.const(x, dtypes.int32) for x in (10, 20, 30, 40)])
+        return out.index(0).store(v if direct else values.index(v)).sink()
+      with self.subTest(direct=direct):
+        self.assertEqual(Tensor.empty(1, dtype=dtypes.int32).custom_kernel(fxn=kernel)[0].tolist(), want)
+
   def test_split_range_id_free_of_loop(self):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
     def kernel(C:UOp, A:UOp) -> UOp:
