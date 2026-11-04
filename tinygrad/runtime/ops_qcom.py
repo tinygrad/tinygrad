@@ -23,8 +23,7 @@ def dcache_flush():
   buf, n = UOp.param(0, dtypes.uint8, 1), UOp.param(1, dtypes.int, shape=(), name="n", addrspace=AddrSpace.ALU)
   i = UOp.range(n, 0, dtype=dtypes.int)
   flush = UOp.custom('__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");', buf.index(i * 64))
-  sink = UOp.sink(flush.end(i), UOp.custom('__asm__ volatile("dsb sy" ::: "memory");'),
-                  arg=KernelInfo(name="dcache_flush", opts_to_apply=()))
+  sink = UOp.sink(flush.end(i), UOp.custom('__asm__ volatile("dsb sy" ::: "memory");'), arg=KernelInfo(name="dcache_flush", opts_to_apply=()))
   prg = to_program(sink, Device["CPU"].renderer)
   return Device["CPU"].runtime(prg.to_elf())
 
