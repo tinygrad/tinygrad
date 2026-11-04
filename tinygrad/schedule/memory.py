@@ -1,5 +1,5 @@
 from collections import defaultdict
-from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up, to_tuple
+from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up, to_tuple, getenv
 from tinygrad.uop.ops import UOp, Ops, CallInfo
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
@@ -54,8 +54,10 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
   # allocator fragments the arena: its size can be twice the memory live at once). the many small ones are suballocated after them
   start = {b: first_appearance[b] for b in first_appearance}
   end = {b: last_appearance[b] + 1 + buf_hold.get(b, 0) for b in first_appearance}
-  # (a buffer of the calls of more than one queue: its calls' order in the linear isn't their order in time, its memory none's but its own)
-  shared = {b for b in first_appearance if _key(b)[2] == -1}
+  # (a buffer of the calls of more than one queue: in a lane of its own. MEM_SHARED_HOLD: its memory none's but its own (its calls' order in the
+  # linear isn't their order in time). else reused as the others: a call that writes its memory waits for the calls before it that read it
+  # (the queues' waits, see DepsTracker), a wait of a later call for an earlier one)
+  shared = {b for b in first_appearance if _key(b)[2] == -1} if getenv("MEM_SHARED_HOLD", 1) else set()
   for b in shared: start[b], end[b] = 0, len(linear.src) + 1
   offsets:dict[UOp, int] = {}
   large_peak:dict[LaneKey, int] = defaultdict(int)

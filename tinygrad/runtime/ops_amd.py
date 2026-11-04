@@ -50,7 +50,8 @@ def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, named 
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
   ret = [UOp.alloc(s, dt, 0, device=d, name=to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
   # (am: the hdp flush register, see amd_push)
-  if getattr(hq.dev, "hdp_flush_buf", None) is not None: ret.append(UOp.alloc((1,), dtypes.uint32, 0, device=hq.dev.host, name=to_name(hq.dev.device, "hdp_flush")))
+  if getattr(hq.dev, "hdp_flush_buf", None) is not None:
+    ret.append(UOp.alloc((1,), dtypes.uint32, 0, device=hq.dev.host, name=to_name(hq.dev.device, "hdp_flush")))
   return ret
 
 @uopfunc
@@ -400,7 +401,10 @@ class AMDComputeQueue(HWQueue):
 
   def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
-    scratch_addr = UOp.alloc((data.private_segment_size,), dtypes.uint8, 0, device=self.devs[0], name="scratch").getaddr(self.devs)
+    # (a compute queue's own scratch past the first: kernels of two queues run at once, one ring would have both's spills)
+    qi = int(self.queue.split(":")[1]) if self.queue.startswith("COMPUTE:") else 0
+    scratch_addr = UOp.alloc((data.private_segment_size,), dtypes.uint8, 0, device=self.devs[0],
+                             name=to_name("scratch", self.queue) if qi else "scratch").getaddr(self.devs)
 
     user_regs:list = []
     if data.enable_private_segment_sgpr: user_regs = [scratch_addr | (1 << 63), 0xffffffff, 0x20c14000]
@@ -412,7 +416,11 @@ class AMDComputeQueue(HWQueue):
     if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
     # Peer sends must finish and reach memory before the next kernel publishes their completion flags.
     flag_ar = prg.src[0].arg.name.startswith("flag_allreduce_push")
-    if flag_ar: self.exec_barrier()
+    # a ring collective (it spins on its peers, with many waves) runs alone on the queue: the kernels before it done, the one after it waits for
+    # it (two spinning at once: each one's waves can keep the other's waiting ones from starting, on two devices: a cycle)
+    ring = prg.src[0].arg.name.startswith("ring_")
+    if flag_ar or ring or getattr(self, "_after_ring", False): self.exec_barrier()
+    self._after_ring = ring
     self.acquire_mem(gli=0, gl2=0, gl2_wb=int(flag_ar))
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
@@ -902,6 +910,9 @@ class AMDDevice(Compiled):
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
     Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
+    Compiled.link_bufs |= {to_name(self.device, "scratch", f"compute:{i}"): lambda b, i=i: self.scratch_buffer(b.max_numel(), i)
+                           for i in range(1, 4)}
+    self.queue_scratch:dict[int, Buffer] = {}
     # (am: the hdp flush register as host memory, the host's writes of the vram flushed by a write of it, see amd_push)
     self.hdp_flush_buf:Buffer|None = None
     if self.is_am() and not self.iface.dev_impl.is_vf and getenv("AMD_HDP_FLUSH", 1):
@@ -1017,14 +1028,20 @@ class AMDDevice(Compiled):
     tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] != 9 else ""}_bitfields')
     return int.from_bytes(tmpring_t(WAVES=min(num_waves, max_scratch_waves), WAVESIZE=wave_scratch), 'little')
 
-  def scratch_buffer(self, private_segment_size):
-    AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
+  def scratch_buffer(self, private_segment_size, queue:int=0):
+    # (the first queue's the largest of every device's kernels, the others' the largest of theirs)
+    if queue: private_segment_size = max(private_segment_size, 128)
+    else: AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
+    lanes_per_wave = 64 # wave64
+    mem_alignment_size = 256 if self.target[0] != 9 else 1024
+    size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
+    nbytes = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt * self.xccs
+    if queue:
+      if (qb:=self.queue_scratch.get(queue)) is None or qb.nbytes < nbytes:
+        qb = self.queue_scratch[queue] = Buffer(self.device, nbytes, options=BufferSpec(nolru=True), preallocate=True)
+      return qb
     if self.max_private_segment_size < private_segment_size:
-      lanes_per_wave = 64 # wave64
-      mem_alignment_size = 256 if self.target[0] != 9 else 1024
-      size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
-      size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt
-      self.scratch = Buffer(self.device, size_per_xcc * self.xccs, options=BufferSpec(nolru=True), preallocate=True)
+      self.scratch = Buffer(self.device, nbytes, options=BufferSpec(nolru=True), preallocate=True)
       self.max_private_segment_size = private_segment_size
       if hasattr(self, 'aql_desc'): self.aql_scratch()
     return self.scratch
