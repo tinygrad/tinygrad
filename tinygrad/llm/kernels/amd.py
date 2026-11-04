@@ -1262,6 +1262,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type in (Q8_0, Q6_K) and tokens <= getenv("Q8_I8_ROWS", 64) and _wmma_rdna4(x.device) and not q6_gemm
   # (RDNA3: the int8 tensor cores of many rows, I8_DENSE_RDNA3)
   dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
+  # (RDNA3: a few outputs of a long input (a hyper-connection's down projection) of a few rows a device (a small prefill's): the gemm with the
+  # input split over workgroups, the tensor cores' tiles of them are a few workgroups that loop over the whole input)
+  few_out_long = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and local_rows % 32 == 0 \
+    and local_rows < 256 and local_out <= 512 and in_features >= 4096 and getenv("Q8_FEW_OUT", 1)
   if skinny:
     # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
     tile = (64 if tokens % 64 == 0 else 32 if tokens % 32 == 0 else 16) if skinny_i8 else 32
@@ -1287,8 +1291,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, splits=ksplits)
     srcs = (*xq[:3], *extra)
     out_shape = (ksplits*tokens, out_features)
-  elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm) and in_features % 32 == 0 and \
-       (_wmma_rdna4(x.device) or local_rows >= 256) and \
+  elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
+       in_features % 32 == 0 and (_wmma_rdna4(x.device) or local_rows >= 256 or few_out_long) and \
        (tt:=next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else (64, 32)) if local_rows % t == 0), 0)) and \
        getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
@@ -2397,7 +2401,8 @@ def skinny_matmul(x:Tensor, wt:Tensor) -> Tensor|None:
   """x (B, T, K) @ wt (K, E) in float, few outputs of few rows (see skinny_parts), the parts summed. None: not those shapes"""
   if (part:=skinny_parts(x, wt)) is None: return None
   KS, R, E = cast(tuple[int, int, int], part.shape)
-  logits = Tensor.empty(R*E, dtype=dtypes.float32, device=x.device)
+  # (x's rows split over the devices (a prefill's, sequence parallel): every device its rows)
+  logits = Tensor.empty(R*E, dtype=dtypes.float32, device=x.device, axis=None if part.uop.axis is None else 0)
   return Tensor.custom_kernel(logits, part.reshape(KS, R*E), fxn=_sum_parts_kernel)[0].reshape(*x.shape[:-1], E)
 
 def skinny_parts(x:Tensor, wt:Tensor) -> Tensor|None:
@@ -2408,11 +2413,15 @@ def skinny_parts(x:Tensor, wt:Tensor) -> Tensor|None:
   """
   K, E = cast(tuple[int, int], wt.shape)
   R = int(prod(x.shape[:-1]))
-  if not amd_custom_kernels_supported(x.device) or E > 1024 or R > 512 or not getenv("SKINNY", 1): return None
-  RB = next((r for r in (getenv("ROUTER_RB", 8), 8, 6, 4, 3, 2, 1) if R % r == 0), 1)
+  # (rows split over the devices: x (1, R, K) on its rows, the kernel of every device's)
+  split = token_sharded(x)
+  if split and (x.uop.axis != x.ndim - 2 or prod(x.shape[:-2]) != 1 or wt.uop.axis is not None): return None
+  RL = int(x.uop.shard_shape[-2]) if split else R
+  if not amd_custom_kernels_supported(x.device) or E > 1024 or RL > 512 or not getenv("SKINNY", 1): return None
+  RB = next((r for r in (getenv("ROUTER_RB", 8), 8, 6, 4, 3, 2, 1) if RL % r == 0), 1)
   KS = next((ks for ks in (getenv("ROUTER_KS", 16), 16, 8, 4, 2, 1) if K % ks == 0), 1)
   U = next((u for u in (getenv("ROUTER_U", 8), 8, 4, 2, 1) if (K // KS) % u == 0), 1)
-  out = Tensor.empty(KS, R, E, dtype=dtypes.float32, device=x.device)
+  out = Tensor.empty(KS, R, E, dtype=dtypes.float32, device=x.device, axis=1 if split else None)
   fxn = functools.partial(_skinny_kernel, RB=RB, KC=K // KS, U=U)
   return Tensor.custom_kernel(out, x.float().reshape(R, K).contiguous(), wt, fxn=fxn)[0]
 

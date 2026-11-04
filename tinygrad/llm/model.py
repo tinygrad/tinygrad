@@ -349,7 +349,9 @@ MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 96)
 MOE_BATCH_ROWS = getenv("MOE_BATCH_ROWS", 512)
 def _skinny(lin:Linear, x:Tensor) -> Tensor|None:
   """lin(x) by skinny_matmul (few outputs, few rows) if its weight is stored for it (see Transformer._finish_load), else None"""
-  if (wt:=getattr(lin, "weight_t", None)) is None or not isinstance(x.shape[-2], int) or token_sharded(x): return None
+  if (wt:=getattr(lin, "weight_t", None)) is None or not isinstance(x.shape[-2], int): return None
+  # (rows split over the devices (a prefill's): a few a device)
+  if token_sharded(x) and int(x.uop.shard_shape[-2]) > getenv("SKINNY_SPLIT_ROWS", 128): return None
   return skinny_matmul(x, wt)
 
 def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None else MOE_DECODE_ROWS
@@ -532,14 +534,17 @@ def _shared_host(owner:str, devs:tuple[str, ...], nbytes:int) -> list[Buffer]:
 
 @functools.cache
 def _stash_save_kernel(dst:UOp, src:UOp, dev:UOp, row:UOp, at:UOp, n:int, writers:int) -> UOp:
-  # rows row..row+n of a cache (a device's: (.., rows, D)) into rows at.. of its copy in host memory, on the devices in writers (a bit each)
+  # rows row..row+n of a cache (a device's: (.., rows, D)) into rows at.. of its copy in host memory, by the devices of writers (8 bits a device:
+  # its part and the count of the devices that write the copy (0: none), a row of every count of them by each)
   D = cast(int, src.shape[-1])
   def flat(t:UOp) -> UOp: return t.reshape(prod(cast(tuple[int, ...], t.shape)))
   s, d = flat(src), flat(dst)
   # (a thread 8 values next to each other: its loads and stores wide)
   V = 8 if D % 8 == 0 else 1
   r, w = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(D // V, 1, AxisType.LOCAL)
-  ok = ((UOp.const(writers, dtypes.int32) >> dev[0].load()) & 1).ne(0)
+  code = (UOp.const(writers, dtypes.int64) >> (dev[0].load().cast(dtypes.int64) * 8)) & 0xFF
+  part, count = (code & 0xF).cast(dtypes.weakint), (code >> 4).cast(dtypes.weakint)
+  ok = count.ne(0) & ((r % count.maximum(1)).eq(part))
   stores = [d[((at + r) * D + w * V + j).valid(ok)].store(s[(row + r) * D + w * V + j].load()) for j in range(V)]
   return UOp.group(*stores).end(r, w).sink(arg=KernelInfo(name="stash_save", opts_to_apply=()))
 
@@ -917,11 +922,12 @@ class FFNBlock:
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
       exps = self.ffn_gate_exps
       exps.set_quantized()
-      if rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
-      elif router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
-         xr.shape[1] > 32:
-        # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
-        logits = xr.half().contiguous().matmul(router.weight.T, dtype=dtypes.float).contiguous()
+      if (lg:=_skinny(router, xr)) is not None: logits = lg
+      elif router.ggml_type is None and router.weight.dtype in (dtypes.half, dtypes.float) and router.bias is None and \
+         isinstance(xr.shape[1], int) and int(xr.uop.shard_shape[1]) >= 32 and (router.weight.dtype == dtypes.half or rows is not None) and \
+         amd_custom_kernels_supported(x.device):
+        # many tokens: half copies of the input and the output, a float accumulator: the tensor cores (a float weight's half copy made)
+        logits = xr.half().contiguous().matmul(router.weight.T.half().contiguous(), dtype=dtypes.float).contiguous()
       elif isinstance(T:=xr.shape[1], int) and 16 < T < 128 and T % 16 and getenv("ROUTER_PAD", 1):
         # (the rows of batched decoding (3 a sequence): padded to whole tiles of 16, the matmul's kernel of 60 rows is several times slower)
         logits = router(xr.pad((None, (0, round_up(T, 16) - T), None)))[:, :T]
@@ -3652,7 +3658,14 @@ class Transformer:
     # the devices are the same, the indexers' caches are on every device)
     devs, kvr = cast(tuple[str, ...], self.token_embd.weight.device), self._kv_real
     head = [d * kvr // len(devs) for d in range(len(devs))]
-    self._stash_writers = sum(1 << d for d in range(len(devs)) if d == 0 or head[d] != head[d-1]), 1
+    # (the devices of a copy write their part of its rows: SEQ_STASH_SPLIT of them at most)
+    def code(group:list[list[int]]) -> int:
+      ret = 0
+      for g in group:
+        g = g[:max(1, getenv("SEQ_STASH_SPLIT", 3))]
+        for i, d in enumerate(g): ret |= (i | (len(g) << 4)) << (8*d)
+      return ret
+    self._stash_writers = code([[d for d in range(len(devs)) if head[d] == h] for h in range(kvr)]), code([list(range(len(devs)))])
     self._stash_kv = []
     kv_specs = [[(b.cache_k, H)] + ([(b.indexer.cache_k, H), (b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else [])
                 for b in qsa]
@@ -3931,6 +3944,7 @@ class Transformer:
       UOp.variable(f"seq_mtp{g}", 0, self.max_context-1).bind(mp), UOp.variable(f"seq_j{g}", 0, k).bind(j),
       UOp.variable(f"seq_par{g}", 0, 1).bind(par))]
 
+  step_times = [0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
@@ -3947,13 +3961,16 @@ class Transformer:
     self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)) if not getenv("SEQ_SEED") else
                                           int(getenv("SEQ_SEED")).to_bytes(4, "little"))[0]
     self._seq_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
-    jit = self._seq_jit(m)
+    jit, st = self._seq_jit(m), time.perf_counter()
     if (cap:=getattr(jit, "captured", None)) is not None:
       # (captured: the variables' values as they are, no bound variables made a step)
       cap([], {name: v for g, (sl, b, mp, j, par, _, _) in enumerate(seqs)
                for name, v in ((f"seq_slot{g}", sl), (f"seq_base{g}", b), (f"seq_mtp{g}", mp), (f"seq_j{g}", j), (f"seq_par{g}", par))})
     else: jit(*self._seq_vars([(sl, b, mp, j, par) for sl, b, mp, j, par, _, _ in seqs]))
+    launched = time.perf_counter()
     out = self._wait_host(lambda: min(o:=self._seq_host_out[:m*(2*k+1)].tolist()) >= 0 and o or -1, f"a step of {m} sequences")
+    self.step_times[0] += launched - st
+    self.step_times[1] += time.perf_counter() - launched
     return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)]
 
   def _init_states(self):

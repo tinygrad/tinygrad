@@ -1090,6 +1090,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         st = time.perf_counter()
         outs = eng.step(seqs)
         self.stats.step_time += time.perf_counter() - st
+        if isinstance(stt:=getattr(self.model, "step_times", None), list):
+          self.stats.add("launch", stt[0])
+          self.stats.add("wait", stt[1])
+          stt[:] = [0.0, 0.0]
         st = time.perf_counter()
         for s, toks in zip(seqs, outs):
           req = active[s]
