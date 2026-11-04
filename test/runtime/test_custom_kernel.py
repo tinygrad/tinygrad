@@ -623,6 +623,17 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
+  @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage)), "requires cstyle")
+  def test_custom_uop(self):
+    N = 4
+    def kernel(C:UOp) -> UOp:
+      x = UOp.alloc((N,), dtypes.int, addrspace=AddrSpace.REG)
+      x = x.after(x.store(1))
+      x = UOp.custom("{} + 2", x, dtype=x.dtype)
+      return C.store(x).sink(arg=KernelInfo("kernel"))
+    out = Tensor.custom_kernel(Tensor.empty(N, dtype=dtypes.int), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [3] * N)
+
 @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
                      or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
                      "calls in kernel not implemented in this renderer")
