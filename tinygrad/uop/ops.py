@@ -1209,7 +1209,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def custom(fmt:str, *src:UOp, dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    params = tuple(UOp.param(i, s.dtype, s.shape, addrspace=unwrap(s.addrspace)) for i,s in enumerate(src))
+    params = tuple(UOp.param(i, s.dtype, s.shape, addrspace=unwrap(s.addrspace)) for i,s in enumerate(src)) if dtype != dtypes.void else ()
     return UOp.call(UOp.custom_function(fmt, *params, dtype=dtype, fmt=True, inline=inline), *src)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
