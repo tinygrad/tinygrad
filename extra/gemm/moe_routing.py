@@ -99,7 +99,7 @@ def _ggather_bwd(gradient:UOp, kernel:UOp) -> tuple:
     row = idx.index(g, m).cast(dtypes.weakint)
     val = gout.index(g, m, j).load().cast(dtypes.float32)
     atomic = UOp.custom(atomic_str, gtab.index(g, row, j), val)
-    return atomic.end(g, m, jo, ji).sink(arg=KernelInfo(name=f"ggather_bwd_{M}_{Dk}", opts_to_apply=()))
+    return gtab.flatten().after(atomic.end(g, m, jo, ji)).sink(arg=KernelInfo(name=f"ggather_bwd_{M}_{Dk}", opts_to_apply=()))
   grad_table = Tensor.custom_kernel(gt, go, Tensor(idx_u, device=dev), fxn=_bwd_kernel)[0]
   return (None, grad_table.cast(table_u.dtype).uop, None)
 
