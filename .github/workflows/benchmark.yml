@@ -433,7 +433,7 @@ jobs:
             timing: 12
       fail-fast: false
     name: openpilot ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, comma4]
+    runs-on: comma
     timeout-minutes: 5
     defaults:
       run:
@@ -473,7 +473,7 @@ jobs:
 
   testqualcommdsp:
     name: DSP Benchmark
-    runs-on: [self-hosted, Linux, comma4]
+    runs-on: comma
     timeout-minutes: 5
     defaults:
       run:
