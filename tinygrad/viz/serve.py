@@ -77,8 +77,8 @@ def load_rewrites(data:VizData) -> None:
                                trace=k.tb if j==0 else None, depth=s.depth))
       if s.name == "View Base AST": data.ref_map[canonicalize_ast(_reconstruct(data, s.sink))] = i
       # get source and binary from Ops.PROGRAM
-      if s.name == "linearize/render": lin_idx = j
-      if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= (depth:=rewrites[lin_idx].depth)):
+      if s.name == "linearize/render": lin_idx, depth = j, s.depth
+      if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= depth):
         steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=depth))
         steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=depth))
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=depth))
