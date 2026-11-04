@@ -1260,6 +1260,8 @@ _qsa_dense:list[bool] = [False]
 # the first row of the sequence's region of the qwen sparse attention's caches (shared by sequences, see Transformer.regions) while its call is
 # traced: a bound variable (or 0), a multiple of REGION_ALIGN
 _seq_base:list[UOp|int] = [0]
+# (a prefill chunk's time is about that of this many rows more than its padded ones: its kernels' fixed time, see Transformer._chunk_plan)
+CHUNK_FIXED_ROWS = getenv("CHUNK_FIXED_ROWS", 256)
 REGION_ALIGN = 2048
 
 @dataclass(frozen=True)
@@ -3886,11 +3888,28 @@ class Transformer:
     self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
     self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
     pos = start
-    while pos < L:
-      self._seq_chunk(base, pos, n:=min(self.prefill_chunks()[-1], L - pos))
+    for n in self._chunk_plan(L - start):
+      self._seq_chunk(base, pos, n)
       pos += n
     self._seq_copy_call(True, slot, L, 0)
     return self._wait_host(lambda: self._token_host[base + L], "the token after a prefill")
+
+  def _chunk_plan(self, n:int) -> list[int]:
+    """
+    the chunks of n tokens of a prefill: the biggest size while more than twice it is left, the rest in the sizes of the least time (a chunk's
+    time about a fixed part and its padded rows': 700 tokens are 576+192, not 2112)
+    """
+    sizes, ret = self.prefill_chunks(), []
+    while n > 2*sizes[-1]:
+      ret.append(sizes[-1])
+      n -= sizes[-1]
+    def cost(s:int) -> float: return CHUNK_FIXED_ROWS + s
+    best:list[tuple[float, int]] = [(0.0, 0)] + [(math.inf, 0)] * n
+    for i in range(1, n+1): best[i] = min((cost(s) + best[max(0, i - s)][0], s) for s in sizes)
+    while n > 0:
+      ret.append(min(best[n][1], n))
+      n -= ret[-1]
+    return ret
 
   def _seq_chunk(self, base:int, pos:int, n:int):
     """a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more)"""
