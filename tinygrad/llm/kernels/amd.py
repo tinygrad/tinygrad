@@ -1773,6 +1773,9 @@ def flag_partial_sum(x:Tensor) -> Tensor|None:
   """the sum over the leading device axis of x (devices, ...) on every device, peer to peer (FlagAllreduce). None: not supported"""
   if not isinstance(x.device, tuple) or x.uop.axis != 0 or x.shape[0] != len(x.device) or x.dtype not in (dtypes.half, dtypes.float32): return None
   if not isinstance(n:=prod(x.shape[1:]), int) or n % 2 or n == 0: return None
+  # (many rows (batched decoding): the bytes are the time. the partials sent as int8 groups of 32 with their scale, the sums gathered so (the
+  # values the quantized layers' kernels would make of them, a prefill's exchanges are of them too))
+  if n >= getenv("AR_Q8_MIN", 65536) and getenv("AR_Q8", 1) and (r:=_flag_partial_sum_q8(x, n)) is not None: return r
   N, groups = len(x.device), flag_ar_groups(n//2)
   scatter = n >= 8192
   chunk = round_up((n//2 + N-1)//N, 64)
@@ -1843,6 +1846,15 @@ def _flag_q8_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, groups:int)
       stores.append(out.reshape(-1)[at.valid(group < groups)].store(val))
   done = counter.after(UOp.group(*stores))[wg.valid(t.eq(0))].store(epoch)
   return UOp.group(*stores, done).end(wg, warp, lane).sink(arg=KernelInfo(name="flag_allreduce_push_q8", opts_to_apply=()))
+
+def _flag_partial_sum_q8(x:Tensor, n:int) -> Tensor|None:
+  """flag_partial_sum in two exchanges of int8 groups: a reduce scatter of the partials, an all gather of the sums (the same bits everywhere)"""
+  N = len(x.device)
+  n2 = round_up(n, N*256)
+  xf = x.reshape(N, n)
+  if n2 != n: xf = xf.pad((None, (0, n2 - n)))
+  if (rs:=flag_reduce_scatter(xf, 0)) is None: return None
+  return all_gather_q8(rs.reshape(1, n2 // 32, 32), 1).reshape(n2)[:n].float().reshape(x.shape[1:])
 
 def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   """One P2P exchange: each rank receives its contiguous chunk, summed in float32 from Q8 (or unaligned fp16) partials."""
