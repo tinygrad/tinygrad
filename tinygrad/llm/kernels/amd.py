@@ -3545,6 +3545,104 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
   return UOp.group(*[o[b, h, 0, d].store(acc[i].load() * inv) for i, d in enumerate(dims)]) \
     .end(lane, block_dt, block_bh).sink(arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
+@functools.cache
+def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, W:int) -> UOp:
+  # the partials (B, H, P, DV) and their (max, sum) (B, H, P, 2) of every row b's heads (q (B, H, DK): the GQA group of a KV head) on the keys
+  # of its list index[b] (B, n+1, the count last), the rows of the cache (.., N, row) from bases[b]: a row's first DK dims the key, the next DV
+  # the value (half, or kv_q8_pack's words). a workgroup (b, part) of W waves, a wave a tile of 32 keys a round: a lane a key, its scores of
+  # all the heads (the queries in LDS: no reduction over the lanes a key), then the tile's values into the lanes' dims of the output
+  B, H, P, DV = cast(tuple[int, int, int, int], out.shape)
+  DK = cast(int, q.shape[-1])
+  q8, N, n_max = cache.dtype == dtypes.uint32, cast(int, cache.shape[-2]), cast(int, index.shape[1]) - 1
+  W4, DPL = (DK + DV) // 4, DV // WARP_SIZE
+  assert DK % 32 == 0 and DV % (WARP_SIZE * 8) == 0 and DPL == 8
+  cache = cache.reshape(N, cast(int, cache.shape[-1]))
+  b, part = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(P, 1, AxisType.GLOBAL)
+  wave, lane = UOp.range(W, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  tid, T = wave * WARP_SIZE + lane, W * WARP_SIZE
+  # the queries in LDS
+  n = H * DK
+  ql = UOp.alloc((n,), dtypes.float, addrspace=AddrSpace.LOCAL)
+  qf = q.reshape(B * n)
+  ld = [ql[(tid + i*T).valid(tid + i*T < n)].store(qf[b*n + (tid + i*T).minimum(n-1)].load().float()) for i in range((n + T - 1) // T)]
+  ql = ql.after(UOp.group(*ld).barrier())
+  count, koff = index[b, n_max].load().cast(dtypes.weakint).minimum(n_max), bases[b].load().cast(dtypes.weakint)
+  tiles = (count + T - 1) // T
+  rnd = UOp.range(((tiles - part + P - 1) // P).maximum(0), 3, AxisType.LOOP)
+  i = (part + rnd * P) * T + wave * WARP_SIZE + lane
+  valid = i < count
+  row = (koff + index[b, i.minimum(n_max - 1)].load().cast(dtypes.weakint).maximum(0)).minimum(N - 1)
+  def vals(r:UOp, d0:UOp|int, m:int) -> list[UOp]:
+    # m values from dim d0 of row r (int8: the bytes are the values + 128, a group of 32 a scale)
+    if not q8: return list(_vec_load(cache[r, d0], m))
+    words, sc = _amd_load(cache[r, d0 // 4], m // 4), cache[r, W4 + d0 // 32].load().bitcast(dtypes.float)
+    return [((words[j//4] >> (8*(j%4))) & 0xFF).cast(dtypes.float) * sc - sc * 128 for j in range(m)]
+  # the scores of the lane's key: 8 dims a step
+  acc = _reg((H,), 0, rnd)
+  dch = UOp.range(DK // 8, 4, AxisType.LOOP)
+  kv, prev = vals(row, dch * 8, 8), acc.after(dch)
+  new = [functools.reduce(lambda a, j: a + ql[h*DK + dch*8 + j].load() * kv[j], range(8), prev[h].load()) for h in range(H)]
+  acc = acc.after(acc.store(UOp.stack(*new)).end(dch))
+  sc_ = [valid.where(acc[h].load() * scale, UOp.const(-1e30, dtypes.float)) for h in range(H)]
+  # the online softmax of the wave's keys
+  m_reg, l_reg, o_reg = _reg((H,), -1e30), _reg((H,), 0), _reg((H, DPL), 0)
+  pm, plr, po = m_reg.after(rnd), l_reg.after(rnd), o_reg.after(rnd)
+  m_new = [pm[h].load().maximum(warp_reduce(sc_[h], maximum=True, full_wave=True)) for h in range(H)]
+  pr = [valid.where(((sc_[h] - m_new[h]) * LOG2E).exp2(), UOp.const(0.0, dtypes.float)) for h in range(H)]
+  alpha = [((pm[h].load() - m_new[h]) * LOG2E).exp2() for h in range(H)]
+  l_new = [alpha[h] * plr[h].load() + warp_reduce(pr[h], full_wave=True) for h in range(H)]
+  # the tile's weights and rows to every lane (LDS), then its values into the lane's DPL dims
+  pl = UOp.alloc((W, H, WARP_SIZE), dtypes.float, addrspace=AddrSpace.LOCAL)
+  rl = UOp.alloc((W, WARP_SIZE), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  st = [pl[wave, h, lane].store(pr[h]) for h in range(H)] + [rl[wave, lane].store(row.cast(dtypes.int32))]
+  barrier = UOp.group(*st).barrier()
+  pl, rl = pl.after(barrier), rl.after(barrier)
+  o = [[alpha[h] * po[h, d].load() for d in range(DPL)] for h in range(H)]
+  for j in range(WARP_SIZE):
+    v = vals(rl[wave, j].load().cast(dtypes.weakint), DK + lane * DPL, DPL)
+    for h in range(H):
+      p = pl[wave, h, j].load()
+      o[h] = [o[h][d] + p * v[d] for d in range(DPL)]
+  update = UOp.group(m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new)),
+                     o_reg.store(UOp.stack(*[x for oh in o for x in oh]).reshape(H, DPL))).end(rnd)
+  m_reg, l_reg, o_reg = m_reg.after(update), l_reg.after(update), o_reg.after(update)
+  # the waves combined through LDS
+  ml = UOp.alloc((W, H, 2), dtypes.float, addrspace=AddrSpace.LOCAL)
+  ol = UOp.alloc((W, H, DV), dtypes.float, addrspace=AddrSpace.LOCAL)
+  st = [ol[wave, h, lane * DPL + d].store(o_reg[h, d].load()) for h in range(H) for d in range(DPL)]
+  st += [ml[wave, h, k].store(x) for h in range(H) for k, x in enumerate((m_reg[h].load(), l_reg[h].load()))]
+  barrier = UOp.group(*st).barrier()
+  ml, ol = ml.after(barrier), ol.after(barrier)
+  final = []
+  for k in range((H * DV + T - 1) // T):
+    flat = tid + k * T
+    h, d = (flat // DV).minimum(H - 1), flat % DV
+    M = functools.reduce(UOp.maximum, (ml[w_, h, 0].load() for w_ in range(W)))
+    val = functools.reduce(lambda a, w_: a + ((ml[w_, h, 0].load() - M) * LOG2E).exp2() * ol[w_, h, d].load(), range(W), UOp.const(0.0, dtypes.float))
+    final.append(out[b, h.valid(flat < H * DV), part, d].store(val))
+  hs = tid.minimum(H - 1)
+  M = functools.reduce(UOp.maximum, (ml[w_, hs, 0].load() for w_ in range(W)))
+  L = functools.reduce(lambda a, w_: a + ((ml[w_, hs, 0].load() - M) * LOG2E).exp2() * ml[w_, hs, 1].load(), range(W), UOp.const(0.0, dtypes.float))
+  final += [stats[b, hs.valid(tid < H), part, 0].store(M), stats[b, hs.valid(tid < H), part, 1].store(L)]
+  rb = (DK + DV) + (DK + DV) // 8 if q8 else (DK + DV) * 2
+  est = Estimates(4 * n_max * B * H * (DK + DV), n_max * B * rb, n_max * B * rb)
+  return UOp.group(*final).end(lane, wave, part, b).sink(arg=KernelInfo(name="qsa_decode", opts_to_apply=(), estimates=est))
+
+def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=8, waves:int=4) -> Tensor:
+  """
+  q (B, H, DK) every row's heads (a KV head's group: H on a device) on the keys of its list index (B, n+1) of the cache's rows (.., N, row) from
+  bases (B,): a row's first DK dims its key, the next DV its value (half, or kv_q8_pack's). returns (B, H, 1, DV)
+  """
+  B, H, DK = cast(tuple[int, int, int], q.shape)
+  DV = (int(cache.shape[-1]) * 32 // 9 if cache.dtype == dtypes.uint32 else int(cache.shape[-1])) - DK
+  axis = q.uop.axis
+  partial = Tensor.empty(B, H, parts, DV, dtype=dtypes.float32, device=q.device, axis=axis)
+  stats = Tensor.empty(B, H, parts, 2, dtype=dtypes.float32, device=q.device, axis=axis)
+  partial, stats = Tensor.custom_kernel(partial, stats, q.half().contiguous(), cache, index, bases,
+                                        fxn=functools.partial(_qsa_decode_kernel, scale=scale, W=waves))[:2]
+  out = Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis)
+  return Tensor.custom_kernel(out, partial, stats, fxn=functools.partial(_amd_flash_decode_combine, live=parts))[0]
+
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int, shared:bool=False, scale:float|None=None,
                                mask:Tensor|None=None, causal_rows:int=0, group:int=1, partials:int=48, block_n:int=64,
                                q_start:int|UOp|None=None, index:Tensor|None=None, base:int|UOp=0, bases:Tensor|None=None) -> Tensor:

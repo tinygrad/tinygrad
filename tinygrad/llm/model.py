@@ -14,7 +14,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
-  kv_q8_pack, kv_q8_unpack, \
+  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, \
   flag_allreduce, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -1549,6 +1549,10 @@ class QSABlock(TransformerBlock):
     # every row its own list of the keys of its region: [q|0] on the latent [k|v] rows (the second half of the output is the attention's)
     qr = q.permute(2, 1, 0, 3)  # (rows, H, 1, hd)
     latent = Tensor(cache.uop.after(pk.uop)).unsqueeze(2)
+    if getenv("QSA_DECODE", 1):
+      # (a lane a key: its scores of the heads without reductions over the lanes, the value half only of the rows read for the output)
+      attn = qsa_decode_attention(qr[:, :, 0], latent, picks, sb.row_bases, hd**-0.5, parts=getenv("QSA_PARTS", 8), waves=getenv("QSA_WAVES", 4))
+      return self._out_gated(attn.permute(2, 1, 0, 3), gate)
     attn = flash_attention_decode(qr.cat(qr.zeros_like(), dim=-1).half(), latent, N, N, shared=True, scale=hd**-0.5, index=picks,
                                   bases=sb.row_bases)
     return self._out_gated(attn[..., hd:].permute(2, 1, 0, 3), gate)
