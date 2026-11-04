@@ -629,8 +629,8 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(C:UOp) -> UOp:
       x = UOp.alloc((N,), dtypes.int, addrspace=AddrSpace.REG)
       x = x.after(x.store(1))
-      x = UOp.custom("{} + 2", x, dtype=x.dtype)
-      self.assertEqual(x.shape, (N,))
+      x = UOp.custom("{} + 2", x.shrink(((0, 1),)).load(), dtype=x.dtype)
+      self.assertEqual(x.shape, (1,))
       return C.store(x).sink(arg=KernelInfo("kernel"))
     out = Tensor.custom_kernel(Tensor.empty(N, dtype=dtypes.int), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3] * N)
