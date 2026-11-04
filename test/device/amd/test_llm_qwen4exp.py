@@ -45,12 +45,12 @@ class TestQwen4Exp(unittest.TestCase):
     # Exercise a partial final indexer pool and a table view, as produced by loading a Tensor-backed GGUF on CPU.
     model = load_tiny_qwen4exp(max_context=31)
     ple = model.blk[1].ple
-    ple.table = ple.table.pad((7, 11)).contiguous().realize()[7:-11]
+    ple.table.data = ple.table.data.pad((7, 11)).contiguous().realize()[7:-11]
     gen = model.generate(list(PROMPT), chunk_size=8)
     out = [next(gen) for _ in range(6)]
     # the host buffer holds every position's n-gram table rows: t0*m0 ^ t1*m1 for the bigram head, ^ t2*m2 for the trigram head,
     # predecessors before the start or an EOS are EOS
-    toks, table, rows = PROMPT + out, ple.table.numpy().reshape(-1, 18), ple.rows.numpy()[0]
+    toks, table, rows = PROMPT + out, ple.table.data.numpy().reshape(-1, 18), ple.table.rows.numpy()
     for p in range(len(toks)-1):
       ctx = [EOS if p < i or EOS in toks[p-i:p] else toks[p-i] for i in range(3)]
       bi = ctx[0]*MULS[0] ^ ctx[1]*MULS[1]

@@ -4,8 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
-from tinygrad.llm.kernels.amd_gguf import IQ4_NL
-from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_packed_table, _GGML_QUANT
+from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT
 from tinygrad.llm.hf import hf_load
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import unwrap, round_up, get_child
@@ -377,10 +376,7 @@ class TransformerBlock(FFNBlock):
 
 class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their normed key-query score, plus a causal conv dilated by the n-gram size
   def __init__(self, config:TransformerConfig):
-    # the packed n-grams in host RAM, set by from_gguf
-    self.table: Tensor
-    self.row_bytes: int
-    self.decode: Callable[[Tensor, int], Tensor]
+    self.table: GGUFPackedTable  # the packed n-grams in host RAM, set by from_gguf
     self.ple, self.count, self.dim, self.norm_eps = unwrap(config.ple), unwrap(config.hc).count, config.dim, config.norm_eps
     self.max_context, self.hist, width = config.max_context, (self.ple.conv_kernel - 1) * len(self.ple.multipliers), self.count * config.dim
     self.key, self.value = Linear(config.dim, width, bias=False), Linear(config.dim, config.dim, bias=False)
@@ -395,22 +391,18 @@ class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their no
 
   def write_rows(self, tokens:list[int], start_pos:int, n_toks:int, chunk_size:int):
     # hash the n-grams ending at these tokens (t0*m0 ^ t1*m1 for the bigram heads, then ^ t2*m2 for the trigram heads, predecessors before the
-    # start or an EOS are EOS) and copy their packed table rows to host RAM without creating a tensor. rows are never written while being read
-    ple, row_bytes, n, heads = self.ple, self.row_bytes, len(self.ple.multipliers), len(self.ple.vocab_sizes)
-    if not hasattr(self, "rows"):
-      self.rows = Tensor.empty(1, self.max_context+chunk_size, heads, row_bytes, dtype=dtypes.uint8, device="CPU").realize()
-    table, rows = self.table._buffer().as_memoryview(allow_zero_copy=True), self.rows._buffer().as_memoryview(allow_zero_copy=True)
+    # start or an EOS are EOS) and copy their packed table rows to host RAM
+    ple, n, heads, ids = self.ple, len(self.ple.multipliers), len(self.ple.vocab_sizes), []
     for p in range(start_pos, start_pos+n_toks):
       ctx = [ple.eos if p < i or ple.eos in tokens[p-i:p] else tokens[p-i] for i in range(n)]
       hashes = list(itertools.accumulate((c*m for c,m in zip(ctx, ple.multipliers)), lambda a,b: a^b))[1:]
-      ids = [hashes[j*(n-1)//heads] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))]
-      rows[p*heads*row_bytes:(p+1)*heads*row_bytes] = b"".join(table[i*row_bytes:(i+1)*row_bytes] for i in ids)
+      ids.append([hashes[j*(n-1)//heads] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))])
+    self.table.write(start_pos, ids, self.max_context+chunk_size)
 
   def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     (B, T), T_pad, n = x.shape[:2], x.max_shape[1], len(self.ple.multipliers)
-    # this call's packed rows, decoded on device
-    rows = self.rows[:, start_pos:start_pos+T_pad].to(x.device).flatten()
-    emb = self.decode(rows, T_pad*len(self.ple.vocab_sizes)*self.ple.head_dim).reshape(B, T_pad, -1)[:, :T].float()
+    # this call's table rows, decoded on device
+    emb = self.table.read(start_pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
     s = (self._norm(self.key(emb), self.norm_key) * self._norm(x.flatten(2), self.norm_query)).sum(-1, keepdim=True) * self.dim**-0.5
     gated = self.value(emb).unsqueeze(2) * (s.sign() * s.abs().clamp(min_=1e-6).sqrt()).sigmoid()
     window = Tensor(start_pos).eq(0).where(0, self.conv_state).cat(self._norm(gated.flatten(2), self.norm_conv).flatten(2), dim=1)
@@ -690,7 +682,6 @@ class Transformer:
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
     ple_entry = entries.pop('per_layer_token_embd.weight', None)  # the n-gram table stays in CPU RAM
-    assert ple_entry is None or ple_entry[2] == IQ4_NL, "PLE table must use IQ4_NL encoding"
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     shard_map:dict[str, int] = {}
@@ -818,9 +809,7 @@ class Transformer:
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
-    if config.ple is not None:
-      ple = model.blk[config.ple.layer].ple
-      ple.table, ple.row_bytes, ple.decode = gguf_packed_table(unwrap(ple_entry))
+    if config.ple is not None: model.blk[config.ple.layer].ple.table = GGUFPackedTable(unwrap(ple_entry))
     return model, kv
 
   @staticmethod

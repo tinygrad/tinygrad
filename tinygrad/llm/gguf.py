@@ -6,6 +6,7 @@ from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
+from tinygrad.uop.ops import UOp
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
@@ -248,14 +249,24 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
-def gguf_packed_table(entry:tuple[Tensor, tuple[int, ...], int]) -> tuple[Tensor, int, Callable[[Tensor, int], Tensor]]:
+class GGUFPackedTable:
   """
-  Keeps a 2D quantized tensor packed in host RAM, returning its bytes, the bytes per row and the decoder of n elements of packed rows.
+  A 2D quantized tensor kept packed in host RAM: write copies packed rows to slots of a host buffer without creating a tensor, read decodes
+  the rows of slots on device. slots are never written while being read.
   """
-  data, (_, width), typ = entry
-  block, size = _GGML_QUANT[typ]
-  assert width % block == 0, f"rows of {width} don't split into blocks of {block}"
-  return data.to("CPU").realize(), width // block * size, lambda rows, n: ggml_data_to_tensor(rows, n, typ)
+  def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
+    data, (_, self.width), self.typ = entry
+    block, size = _GGML_QUANT[self.typ]
+    assert self.width % block == 0, f"rows of {self.width} don't split into blocks of {block}"
+    self.data, self.row_bytes = data.to("CPU").realize(), self.width // block * size
+  def write(self, start:int, ids:list[list[int]], slots:int):
+    if not hasattr(self, "rows"): self.rows = Tensor.empty(slots, len(ids[0]), self.row_bytes, dtype=dtypes.uint8, device="CPU").realize()
+    table, rows, rb = self.data._buffer().as_memoryview(allow_zero_copy=True), self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
+    rows[start*len(ids[0])*rb:(start+len(ids))*len(ids[0])*rb] = b"".join(table[i*rb:(i+1)*rb] for slot in ids for i in slot)
+  def read(self, start:int|UOp, n:int, device:str|tuple[str, ...]|None) -> Tensor:
+    # the rows of the slots start..start+n, decoded on device: (n, rows per slot * width)
+    rows = self.rows[start:start+n].to(device).flatten()
+    return ggml_data_to_tensor(rows, n*int(self.rows.shape[1])*self.width, self.typ).reshape(n, -1)
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
