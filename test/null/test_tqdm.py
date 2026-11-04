@@ -322,15 +322,26 @@ class TestProgressBar(unittest.TestCase):
     self.assertIn("100/100", out)
 
   def test_tqdm_perf(self):
-    st = time.perf_counter()
-    for _ in tqdm(range(100)): pass
-    tqdm_time = time.perf_counter() - st
+    # Compare medians of 5 runs to reduce sensitivity to occasional timing spikes.
+    tqdm_times = [0.0]*5
+    tinytqdm_times = [0.0]*5
+    for exp in range(5):
+      st = time.perf_counter()
+      for _ in tqdm(range(100)): pass
+      tqdm_time = time.perf_counter() - st
+      tqdm_times[exp] = tqdm_time
 
-    st = time.perf_counter()
-    for _ in tinytqdm(range(100)): pass
-    tinytqdm_time = time.perf_counter() - st
+      st = time.perf_counter()
+      for _ in tinytqdm(range(100)): pass
+      tinytqdm_time = time.perf_counter() - st
+      tinytqdm_times[exp] = tinytqdm_time
 
-    assert tinytqdm_time < 5 * tqdm_time
+    tqdm_times.sort()
+    tinytqdm_times.sort()
+    tqdm_med_time = tqdm_times[2]
+    tinytqdm_med_time = tinytqdm_times[2]
+
+    assert tinytqdm_med_time < 5 * tqdm_med_time
 
   def test_tqdm_perf_high_iter(self):
     st = time.perf_counter()
