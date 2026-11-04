@@ -1412,6 +1412,22 @@ class QSAIndexer:
     scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
     return qsa_prefill_mask(scores, start_pos, pools, idx.top_k//idx.kpool, idx.kpool)
 
+  def prefill_picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
+    """
+    the lists (Tq, top+kpool+1) of the keys every query of a prefill chunk sees (as picks): the scores and the lists of disjoint rows on the
+    devices, then gathered
+    """
+    idx, Tq = self.idx, cast(int, x.shape[1])
+    pk, pools = self.update(x, start_pos, T, freqs)
+    qf = freqs.shrink(((start_pos, start_pos+T), None)).pad_to((Tq, freqs.shape[-1])).reshape(Tq, 1, -1)
+    xx, split = x[0], isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0
+    if split: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
+    q = self._queries(xx, *qf.chunk(2, dim=-1))
+    sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
+    scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
+    lists = pool_index_rows(scores, start_pos, pools, idx.top_k // idx.kpool, idx.kpool)
+    return all_gather(lists, 0) if split else lists
+
   def picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
     """the lists (Tq, top+kpool+1) of the keys every query sees (its top pools, its tail, the count last): one kernel picks them"""
     scores, pools = self.scores(x, start_pos, T, freqs)
@@ -1475,13 +1491,17 @@ class QSABlock(TransformerBlock):
     cos, sin = (f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1))
     q, gate, k, v = self._qkv(x, cos, sin)
     # (decoding with the indexer: the lists of the keys a query sees, the attention reads only them)
-    picks = mask = tile_mask = None
+    picks = mask = tile_mask = row_picks = None
     upd:Tensor|None = None
     if self.indexer is not None and self._flash(x) and _qsa_dense[0]:
       # (a context the top_k covers: every key is seen, causal attention. the indexer's caches kept for a longer one)
       upd = self.indexer.update(x, start_pos, T, self.freqs_cis)[0]
     elif self.sparse and self.indexer is not None:
-      if B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and N % 128 == 0 and 64 <= hd <= 256 and hd % 32 == 0 and \
+      if B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and isinstance(start_pos, UOp) and self._flash(x) and self.indexer.idx.kpool == 4 and \
+         2*hd == (self.cache_k.shape[-1]*32//9 if self._q8 else self.cache_k.shape[-1]) and hd == 256 and getenv("QSA_ROW_ATTN", 1):
+        # (every query on the keys of its list (qsa_decode's kernel): its keys alone are read, not the tiles of every key of its block's)
+        row_picks = self.indexer.prefill_picks(x, start_pos, T, self.freqs_cis)
+      elif B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and N % 128 == 0 and 64 <= hd <= 256 and hd % 32 == 0 and \
          isinstance(start_pos, UOp) and self._flash(x) and not _wmma_rdna4(x.device) and self.indexer.idx.kpool == 4:
         tile_mask = self.indexer.prefill_mask(x, start_pos, T, self.freqs_cis)
       elif isinstance(Tq, int) and Tq <= getenv("QSA_PICKS_ROWS", 8) and self._flash(x) and isinstance(start_pos, UOp) and getenv("QSA_PICKS", 1):
@@ -1499,6 +1519,10 @@ class QSABlock(TransformerBlock):
     k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
     store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(self._kv_rows(k_store).uop)
     cache = Tensor(self.cache_k.uop.after(store))
+    if row_picks is not None:
+      bases = (Tensor.zeros(Tq, dtype=dtypes.int32, device=x.device) + (Tensor(b).cast(dtypes.int32) if isinstance(b, UOp) else b)).contiguous()
+      attn = qsa_decode_attention(q[0].transpose(0, 1), cache.unsqueeze(2), row_picks, bases, hd**-0.5)  # (Tq, H, 1, hd)
+      return self._out_gated(attn.permute(2, 1, 0, 3), gate)
     if tile_mask is not None:
       return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool,
                                                 base=b, N=N), gate)

@@ -5028,7 +5028,7 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
   return (pools > k).where(prefix, UOp.const(0, dtypes.uint32)).maximum(1)
 
 @functools.cache
-def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0) -> UOp:
+def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, dev_rows:int=0) -> UOp:
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
   # of every chunk c of THREADS pools. the
   # key of the k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in
@@ -5040,6 +5040,9 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
   assert W == WARP_SIZE, "a scan of a chunk's waves is a wave"
   row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   t, q, index = wave * WARP_SIZE + lane, q_start + row, index.shrink(((row0, row0 + rows), None))
+  if dev_rows:
+    # (the rows split over the devices: this one's are dev_rows from its index's, the device's index the source)
+    q, grouped = q + grouped[0][0].load().cast(dtypes.weakint) * dev_rows, ()
   if grouped:
     # (positions): the rows of G sequences (rows//G each, the first at positions[g])
     Tg = rows // cast(int, grouped[0].shape[0])
@@ -5346,11 +5349,14 @@ def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:in
   out: the lists of more rows, the ones of the scores are rows row0.. of it (the others kept)
   """
   rows = int(scores.shape[0])
-  if out is None: out = Tensor.empty(rows, top*kpool + kpool + 1, dtype=dtypes.int32, device=scores.device)
+  # (scores split on their rows over the devices: every device the lists of its rows, split so)
+  split = isinstance(scores.device, tuple) and scores.uop.axis == 0
+  if out is None: out = Tensor.empty(rows, top*kpool + kpool + 1, dtype=dtypes.int32, device=scores.device, axis=0 if split else None)
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
   sc = Tensor(scores.uop.after(q_start, *([pools] if isinstance(pools, UOp) else [])))
-  fxn = functools.partial(_pool_index_kernel, q_start=_unbind(q_start) + row0, pools=pu, k=top, kpool=kpool, row0=row0)
-  return Tensor.custom_kernel(out, sc, fxn=fxn)[0]
+  dev_rows = rows // len(cast(tuple, scores.device)) if split else 0
+  fxn = functools.partial(_pool_index_kernel, q_start=_unbind(q_start) + row0, pools=pu, k=top, kpool=kpool, row0=row0, dev_rows=dev_rows)
+  return Tensor.custom_kernel(out, sc, *([_device_index(cast(tuple[str, ...], scores.device))] if split else []), fxn=fxn)[0]
 
 def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
   """
