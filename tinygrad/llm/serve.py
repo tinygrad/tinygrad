@@ -374,8 +374,10 @@ class Handler(VizHandler):
   def render(self, messages:list[dict], tools:list[dict]|None, body:dict) -> str:
     # (a reasoning effort asked for is the template's, else its default)
     effort = body.get("reasoning_effort") or (body.get("output_config") or {}).get("effort")
-    return self.server.template.render(messages=messages, tools=tools, add_generation_prompt=True, preserve_thinking=True,
-                                       **({"reasoning_effort": effort} if effort else {}))
+    # (the template's own arguments a request asks for, e.g. enable_thinking: chat_template_kwargs as vLLM's)
+    extra = {k: v for k, v in (body.get("chat_template_kwargs") or {}).items() if k not in ("messages", "tools", "add_generation_prompt")}
+    return self.server.template.render(**{"messages": messages, "tools": tools, "add_generation_prompt": True, "preserve_thinking": True,
+                                          **({"reasoning_effort": effort} if effort else {}), **extra})
 
   def anthropic(self, path:str, body:dict, log:str, request_st:float):
     """the Anthropic Messages API: the request as chat completions' messages, the reply's chunks as its content blocks (and stream events)"""
