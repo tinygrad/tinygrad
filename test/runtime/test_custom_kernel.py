@@ -301,6 +301,13 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(A[1].reduce(UOp.range(1, 0, AxisType.LOOP), arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).contiguous(), fxn=kernel)[0].item(), 3)
 
+  def test_reduce_axis_and_range(self):
+    def kernel(C:UOp, A:UOp) -> UOp: return C[0].store(A.reduce(UOp.range(3, 0), arg=(Ops.ADD, 1))).sink()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]), fxn=kernel)[0].item(), 15)
+
+  def test_reduce_singleton_axis_and_range(self):
+    assert Tensor(Tensor([[2], [3]]).uop.reduce(UOp.range(3, 0), arg=(Ops.ADD, 2))).item() == 15
+
   def test_reduce_as_index(self):
     def kernel(C:UOp, A:UOp, B:UOp) -> UOp:
       k = UOp.range(2, 0, AxisType.LOOP)
@@ -377,6 +384,32 @@ class TestCustomKernel(unittest.TestCase):
       return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
+
+  def test_explicit_stage_padded_slice(self):
+    def kernel(out):
+      r = UOp.range(2, 0, AxisType.LOOP)
+      return out.store(r.expand(2).pad((1, 1)).bufferize(r, arg=BufferizeOpts(out.device, removable=False))).sink()
+    self.assertEqual(Tensor.empty(2, 4, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [[0, 0, 0, 0], [0, 1, 1, 0]])
+
+  def _test_explicit_stage_free_range(self, space:AddrSpace):
+    def kernel(out):
+      i, j = UOp.range(3, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+      v = (i*10+j).cast(dtypes.int).bufferize(j, arg=BufferizeOpts(None, space, removable=False))
+      return out[i].store(v.index(2)).end(i).sink()
+    self.assertEqual(Tensor.empty(3, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [2, 12, 22])
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
+  def test_explicit_stage_free_range_reg(self): self._test_explicit_stage_free_range(AddrSpace.REG)
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
+  def test_explicit_stage_free_range_local(self): self._test_explicit_stage_free_range(AddrSpace.LOCAL)
+
+  def _test_explicit_stage_no_range(self, space:AddrSpace):
+    def kernel(out):
+      i = UOp.range(3, 0, AxisType.LOOP)
+      return out[i].store((i*10).cast(dtypes.int).bufferize(arg=BufferizeOpts(None, space, removable=False))+1).end(i).sink()
+    self.assertEqual(Tensor.empty(3, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [1, 11, 21])
+  def test_explicit_stage_no_range_reg(self): self._test_explicit_stage_no_range(AddrSpace.REG)
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
+  def test_explicit_stage_no_range_local(self): self._test_explicit_stage_no_range(AddrSpace.LOCAL)
 
   def test_explicit_stage_scalar_index(self):
     for direct, want in ((True, [2]), (False, [30])):
