@@ -3188,8 +3188,9 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   x_div = slots or (-1 if sorted_out else 0)  # sorted_out: x and the output have a row per sorted row
   out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
   # (IQ4_XS too: as fast as its f16 kernel for the experts' down rows, which read their activations exactly)
-  if ggml_type in (IQ3_S,) + ((IQ4_XS,) if getenv("IQ4_K256") else ()) and in_features % 256 == 0 and out_features % 256 == 0 and \
-     (_wmma_rdna4(x.device) or ggml_type == IQ3_S):
+  # (RDNA3 IQ4_XS: K256 too, its f16 kernel ~4x the time of an IQ3_S layer's)
+  if ggml_type in (IQ3_S,) + ((IQ4_XS,) if getenv("IQ4_K256", 0 if _wmma_rdna4(x.device) else 1) else ()) and in_features % 256 == 0 and \
+     out_features % 256 == 0:
     # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     xq, xd = q8k_quantize(x.contiguous(), int(x_rows), in_features)
@@ -3197,7 +3198,8 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=_wmma_rdna4(x.device))
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
-  rdna3_i8 = not _wmma_rdna4(x.device) and (ggml_type in I8_WMMA_QUANTS or (ggml_type == IQ4_NL and getenv("I8_IQ4NL", 0))) and \
+  rdna3_i8 = not _wmma_rdna4(x.device) and (ggml_type in I8_WMMA_QUANTS or (ggml_type == IQ4_NL and getenv("I8_IQ4NL", 0)) or
+                                            (ggml_type == IQ4_XS and getenv("I8_IQ4XS", 0)) or (ggml_type == Q8_0 and getenv("I8_Q80", 0))) and \
     getenv("I8_WMMA_RDNA3", 1)
   if _use_i8_wmma(x.device, ggml_type) or rdna3_i8:
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
@@ -5201,18 +5203,32 @@ def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alp
   lds_a = UOp.alloc((TC, alpha_dim), dtypes.float32, addrspace=AddrSpace.LOCAL)
   lds_v = UOp.alloc((TC, RW), dtypes.float32, addrspace=AddrSpace.LOCAL)
   lds_s = UOp.alloc((TC, 2), dtypes.float32, addrspace=AddrSpace.LOCAL)  # beta, kq
-  threads, st = W*32, []
-  for src, lds, width in ((k, lds_k, key_dim), (q, lds_q, key_dim), (alpha, lds_a, alpha_dim)):
-    for e0 in range(0, TC*width, threads):
+  threads = W*32
+  def stage(c:UOp) -> list[tuple[UOp, tuple[UOp, UOp], UOp]]:
+    # the operands of chunk c: (LDS buffer, index, value loaded)
+    out = []
+    for src, lds, width in ((k, lds_k, key_dim), (q, lds_q, key_dim), (alpha, lds_a, alpha_dim)):
+      for e0 in range(0, TC*width, threads):
+        e = tid + e0
+        out.append((lds, ((e//width).valid(e < TC*width), e % width), src[bh, c*TC + (e//width).minimum(TC-1), e % width].load()))
+    for e0 in range(0, TC*RW, threads):
       e = tid + e0
-      st.append(lds[(e//width).valid(e < TC*width), e % width].store(src[bh, chunk*TC + (e//width).minimum(TC-1), e % width].load()))
-  for e0 in range(0, TC*RW, threads):
-    e = tid + e0
-    st.append(lds_v[(e//RW).valid(e < TC*RW), e % RW].store(v[bh, chunk*TC + (e//RW).minimum(TC-1), blk_row + e % RW].load()))
-  st += [lds_s[tid.valid(tid < TC), 0].store(beta[bh, chunk*TC + tid.minimum(TC-1)].load()),
-         lds_s[tid.valid(tid < TC), 1].store(kq[bh, chunk*TC + tid.minimum(TC-1)].load())]
-  staged = UOp.group(*st).barrier()
-  lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(staged) for x in (lds_k, lds_q, lds_a, lds_v, lds_s))
+      out.append((lds_v, ((e//RW).valid(e < TC*RW), e % RW), v[bh, c*TC + (e//RW).minimum(TC-1), blk_row + e % RW].load()))
+    out += [(lds_s, (tid.valid(tid < TC), UOp.const(0, dtypes.weakint)), beta[bh, c*TC + tid.minimum(TC-1)].load()),
+            (lds_s, (tid.valid(tid < TC), UOp.const(1, dtypes.weakint)), kq[bh, c*TC + tid.minimum(TC-1)].load())]
+    return out
+  # GD_PREFETCH: the next chunk's operands loaded into registers before this chunk's tokens, stored after them (no faster: the scan is bound by
+  # its arithmetic on the compute units its workgroups have, not the loads)
+  prefetch = bool(getenv("GD_PREFETCH", 0))
+  bufs = (lds_k, lds_q, lds_a, lds_v, lds_s)
+  if prefetch:
+    # (the first chunk's operands before the loop: the reads of a chunk are after them, or after the stores of the chunk before it, in order)
+    first = UOp.group(*[l[i].store(val) for l, i, val in stage(UOp.const(0, dtypes.weakint))]).barrier()
+    nxt = stage((chunk + 1).minimum(tokens//TC - 1))
+    lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(first, chunk) for x in bufs)
+  else:
+    staged = UOp.group(*[l[i].store(val) for l, i, val in stage(chunk)]).barrier()
+    lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(staged) for x in bufs)
   t = UOp.range(TC, 3, AxisType.LOOP)
   token = chunk*TC + t
   keys = tuple(lds_k[t, col].load() for col in cols)
@@ -5230,7 +5246,10 @@ def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alp
     delta = (lds_v[t, wrow + row_idx].load() - state_k) * bv
     updates += [x + delta*y for x,y in zip(decayed, keys)]
     stores.append(core[bh, token, row.valid(kl.eq(0))].store(state_q + delta*lds_s[t, 1].load()))
-  step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier().end(chunk)
+  if prefetch:
+    done = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier()
+    step = UOp.group(*[l.after(done)[i].store(val) for l, i, val in nxt]).barrier().end(chunk)
+  else: step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier().end(chunk)
   state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*per+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, wave, bh_blk).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
@@ -6330,7 +6349,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   # many tokens: the waves of a head share the operands of 16 of them through LDS
   W = getenv("GD_LDS", 4)
   if W and tokens % 16 == 0 and value_dim % (32*W) == 0 and key_dim % 32 == 0:
-    tc = 32 if key_dim == 128 and value_dim == 128 and tokens % 32 == 0 else 16
+    tc = getenv("GD_TC", 32 if key_dim == 128 and value_dim == 128 and tokens % 32 == 0 else 16)
     call = _gated_delta_prefill_lds_kernel(*params, sp, end, W=W, TC=tc).call(*contig)
   else: call = _gated_delta_prefill_kernel(*params, sp, end).call(*contig)
   return Tensor(contig[0].after(call))

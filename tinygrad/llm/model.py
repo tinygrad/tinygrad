@@ -1421,6 +1421,8 @@ class QSAIndexer:
     rows = max(self.max_context, self.cache_rows) + REGION_ALIGN
     self.cache_k = _zeros(rows, self.idx.head_dim, dtype=dtypes.half, device=x.device)
     self.cache_pk = _zeros(rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device)
+    if getenv("QSA_DUMP"):
+      self._dump = _zeros(getenv("PREFILL_CHUNK", 4608), self.idx.top_k // self.idx.kpool + 2, dtype=dtypes.int32, device=x.device)
 
   def _pooled(self, keys:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
     """keys (..., pools, kpool, D): the pooled keys (..., pools, D), roped with cos and sin (pools, rope/2) of the pools' first positions"""
@@ -1515,7 +1517,11 @@ class QSAIndexer:
       scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
     # (compact (the pools, not their keys): a quarter of the bytes gathered)
     lists = pool_index_rows(scores, start_pos, pools, idx.top_k // idx.kpool, idx.kpool, compact=bool(getenv("PICKS_COMPACT", 1)))
-    return all_gather(lists, 0) if split else lists
+    out = all_gather(lists, 0) if split else lists
+    # (QSA_DUMP: debugging, the lists of a chunk kept in a buffer of the layer (the last chunk's))
+    if getenv("QSA_DUMP") and Tq == self._dump.shape[0]:
+      out = Tensor(self._dump.uop.after(self._dump.uop.store(out.contiguous().uop)))
+    return out
 
   def picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
     """the lists (Tq, top+kpool+1) of the keys every query sees (its top pools, its tail, the count last): one kernel picks them"""
