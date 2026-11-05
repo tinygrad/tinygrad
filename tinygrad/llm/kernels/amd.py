@@ -1298,7 +1298,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (_wmma_rdna4(x.device) or local_rows >= 256 or few_out_long) and \
        (tt:=next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else
-                              (getenv("Q8_TT_RDNA3", 128) if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32)) if local_rows % t == 0), 0)) and \
+                              (getenv("Q8_TT_RDNA3", 128) if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32))
+                   if local_rows % t == 0), 0)) and \
        getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and \
