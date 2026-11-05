@@ -184,15 +184,19 @@ class HyperConnection:
     out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
 
+class StreamNorm:  # rmsnorm of each stream (..., count, dim), the weight is (count*dim,)
+  def __init__(self, count:int, dim:int, eps:float): self.weight, self.eps = Tensor.zeros(count*dim), eps
+  def __call__(self, x:Tensor) -> Tensor: return x.rmsnorm(eps=self.eps) * self.weight.reshape(x.shape[-2:])
+
 class GatedResidual(HyperConnection):
   def __init__(self, config:TransformerConfig, inject:bool=True):
-    self.count, self.dim, self.norm_eps, low_rank = (hc:=unwrap(config.hc)).count, config.dim, config.norm_eps, hc.low_rank
-    self.norm = {"weight": Tensor.zeros(self.count*self.dim)}
+    self.count, self.dim, low_rank = (hc:=unwrap(config.hc)).count, config.dim, hc.low_rank
+    self.norm = StreamNorm(self.count, self.dim, config.norm_eps)
     self.down, self.up = Linear(self.count*self.dim, low_rank, bias=False), Linear(low_rank, self.count*self.dim, bias=False)
     if inject: self.inject = Linear(self.count*self.dim, self.count, bias=False)
 
   def mix(self, xs:Tensor) -> tuple[Tensor, Tensor]:
-    xn = (xs.rmsnorm(eps=self.norm_eps) * self.norm["weight"].reshape(self.count, self.dim)).flatten(2)
+    xn = self.norm(xs).flatten(2)
     return (self.up((self.down(xn) / self.count).silu()).sigmoid() * xn).unflatten(-1, (self.count, self.dim)).mean(2), xn
 
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
@@ -377,14 +381,11 @@ class TransformerBlock(FFNBlock):
 class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their normed key-query score, plus a causal conv dilated by the n-gram size
   def __init__(self, config:TransformerConfig):
     self.table: GGUFPackedTable  # the packed n-grams in host RAM, set by from_gguf
-    self.ple, self.count, self.dim, self.norm_eps = unwrap(config.ple), unwrap(config.hc).count, config.dim, config.norm_eps
+    self.ple, self.count, self.dim = unwrap(config.ple), unwrap(config.hc).count, config.dim
     self.max_context, self.hist, width = config.max_context, (self.ple.conv_kernel - 1) * len(self.ple.multipliers), self.count * config.dim
     self.key, self.value = Linear(config.dim, width, bias=False), Linear(config.dim, config.dim, bias=False)
-    self.norm_key, self.norm_query, self.norm_conv = ({"weight": Tensor.zeros(width)} for _ in range(3))
+    self.norm_key, self.norm_query, self.norm_conv = (StreamNorm(self.count, self.dim, config.norm_eps) for _ in range(3))
     self.conv1d = {"weight": Tensor.zeros(width, self.ple.conv_kernel)}
-
-  def _norm(self, x:Tensor, norm:dict[str, Tensor]) -> Tensor:  # rmsnorm per stream: (B, T, count*dim) -> (B, T, count, dim)
-    return x.unflatten(-1, (self.count, self.dim)).rmsnorm(eps=self.norm_eps) * norm["weight"].reshape(self.count, self.dim)
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "conv_state"): self.conv_state = Tensor.zeros(x.shape[0], self.hist, self.count*self.dim, device=x.device).clone()
@@ -403,9 +404,9 @@ class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their no
     (B, T), T_pad, n = x.shape[:2], x.max_shape[1], len(self.ple.multipliers)
     # this call's table rows, decoded on device
     emb = self.table.read(start_pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
-    s = (self._norm(self.key(emb), self.norm_key) * self._norm(x.flatten(2), self.norm_query)).sum(-1, keepdim=True) * self.dim**-0.5
+    s = (self.norm_key(self.key(emb).unflatten(-1, (self.count, self.dim))) * self.norm_query(x)).sum(-1, keepdim=True) * self.dim**-0.5
     gated = self.value(emb).unsqueeze(2) * (s.sign() * s.abs().clamp(min_=1e-6).sqrt()).sigmoid()
-    window = Tensor(start_pos).eq(0).where(0, self.conv_state).cat(self._norm(gated.flatten(2), self.norm_conv).flatten(2), dim=1)
+    window = Tensor(start_pos).eq(0).where(0, self.conv_state).cat(self.norm_conv(gated).flatten(2), dim=1)
     window = window.pad_to((B, self.hist + T_pad, self.count*self.dim)).contiguous()
     store = self.conv_state.uop.store(window[:, T:T+self.hist].uop)
     w = self.conv1d["weight"]
