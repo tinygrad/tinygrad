@@ -656,16 +656,6 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     else: s0 = ctx.rsgpr_dyn(sdst_off)
     srcs: dict[str, UOp|int] = {'S0': s0, 'S1': simm16_sext, 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
-    # S_GETREG_B32: extract bits from HW register. Handle as special case since HW_REGISTERS is not a normal variable.
-    # HW register values are stored at SGPR[SGPR_COUNT-16 + hwRegId] by init_wave.
-    if 'GETREG' in op_name:
-      hw_reg_id = simm16.cast(dtypes.uint32) & _c(0x3F)
-      offset = (simm16.cast(dtypes.uint32) >> _c(6)) & _c(0x1F)
-      size = ((simm16.cast(dtypes.uint32) >> _c(11)) & _c(0x1F)) + _c(1)
-      hw_val = ctx.rsgpr_dyn(_c(SGPR_COUNT - 16) + hw_reg_id)
-      mask = (_c(1) << size) - _c(1)
-      result = (hw_val >> offset) & mask
-      return UOp.sink(ctx.wsgpr_dyn(sdst_off, result))
   elif isinstance(inst, (ir3.SOP1, ir4.SOP1, irc.SOP1)):
     # S_BARRIER_SIGNAL: no-op in emulator, barrier sync handled by execution loop
     if isinstance(inst, ir4.SOP1) and inst.op in _BARRIER_SOP1_OPS: return UOp.sink()
