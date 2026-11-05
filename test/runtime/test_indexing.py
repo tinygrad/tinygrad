@@ -618,6 +618,9 @@ class TestIndexing(unittest.TestCase):
     v = Variable("v", 0, 2).bind(1)
     numpy_testing_assert_equal_helper(t[v, Tensor([0, 1, 2])], t[1, Tensor([0, 1, 2])])
 
+  def test_variable_negative_index(self):
+    self.assertEqual([Tensor([9, 8, 7])[Variable("i", -1, 1).bind(i)].item() for i in (-1, 0, 1)], [7, 9, 8])
+
   def test_ellipsis_tensor(self):
     x = Tensor.arange(0, 9).reshape(3, 3)
     idx = Tensor([0, 2])
