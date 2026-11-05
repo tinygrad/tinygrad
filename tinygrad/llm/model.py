@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue_of, mb_queue, few_out_rows, index_scores, after_kernel, \
+  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -1223,6 +1223,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   # the batches' sublayers in a skewed order: batch i's sublayer k in step k + i*MB_SKEW (the first batch's next sublayer before the last's
   # this one: with the collectives of the batches on one queue (RING_QUEUE_LANES=0) in that order, a batch's exchanges run while the other
   # computes and none runs ahead of the others: the queue's order keeps them together. a batch only waits for the batch before it)
+  RING_QUEUE_ON[0] = True
   done:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   deps:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   phases:list[tuple[Tensor, ...]] = [() for _ in xs]
@@ -1249,7 +1250,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       if k + 1 < len(subs):
         phases[i] = pre(i, k+1)
         if getenv("MB_DEP", "sub") == "pre": deps[i][k] = phases[i][0]
-  FLAG_LANE[0] = 0
+  FLAG_LANE[0], RING_QUEUE_ON[0] = 0, False
   return xs
 
 class TransformerBlock(FFNBlock):
@@ -3973,8 +3974,8 @@ class Transformer:
     FLAG_LANE[0] = 0
     # (the ring collectives' queue of their own, see ring_queue)
     for lane in range(getenv("MICRO_BATCHES", 1)):
-      if ring_queue_of(lane):
-        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue_of(lane))
+      if ring_queue_of(lane, any_time=True):
+        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue_of(lane, any_time=True))
     p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
 

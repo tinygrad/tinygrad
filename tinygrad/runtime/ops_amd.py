@@ -390,7 +390,8 @@ class AMDComputeQueue(HWQueue):
     if self.dev.prof_enabled or self.dev.sqtt_enabled or getenv("AMD_SERIAL_KERNELS"):
       return self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], args_addr)
     # the packets of a launch are the program's on the device, but the kernargs address: made once, with a placeholder for it
-    if (tmpl:=self.dev.exec_templates.get(key:=(prg, self.devs))) is None:
+    # (the template has the queue's scratch and the barrier after a ring kernel: one a queue and that)
+    if (tmpl:=self.dev.exec_templates.get(key:=(prg, self.devs, self.queue, getattr(self, "_after_ring", False)))) is None:
       start, pstart = len(self.blob), len(self.patches)
       self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], ph:=UOp.variable("_kernargs_addr", 0, 2**62, dtypes.uint64))
       words = [(cast(int, o) - start, w, ph in w.toposort()) for o, w in self.patches[pstart:]]
@@ -401,6 +402,7 @@ class AMDComputeQueue(HWQueue):
     self.blob += blob
     def sub(w:UOp) -> UOp: return args_addr if w is ph else w.replace(src=tuple(sub(x) for x in w.src)) if ph in w.backward_slice else w
     self.patches += [(start + o, sub(w) if has else w) for o, w, has in words]
+    self._after_ring = prg.src[0].arg.name.startswith("ring_")  # (as _exec)
 
   def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
@@ -416,6 +418,8 @@ class AMDComputeQueue(HWQueue):
 
     dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
       **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
+    if data.private_segment_size and getenv("SPILL_LOG"):
+      with open("/tmp/spill_log.txt", "a") as f: f.write(f"{prg.src[0].arg.name} {data.private_segment_size} {self.queue}\n")
     if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
     # Peer sends must finish and reach memory before the next kernel publishes their completion flags.
     flag_ar = prg.src[0].arg.name.startswith("flag_allreduce_push")
@@ -434,7 +438,7 @@ class AMDComputeQueue(HWQueue):
       if getattr(self, "_cu_mask", None) != mask:
         for i in range(self.dev.se_cnt): self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
         self._cu_mask = mask
-    self.acquire_mem(gli=0, gl2=0, gl2_wb=int(flag_ar))
+    self.acquire_mem(gli=0, gl2=getenv("AMD_EXEC_GL2", 0), gl2_wb=int(flag_ar) or getenv("AMD_EXEC_GL2", 0))
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
@@ -948,7 +952,7 @@ class AMDDevice(Compiled):
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, PROFILE > 0 and (PMC > 0 or SQTT > 0)
-    self.exec_templates:dict[tuple[UOp, tuple[str, ...]], tuple[bytes, list[tuple[int, UOp, bool]], UOp]] = {} # AMDComputeQueue.exec
+    self.exec_templates:dict[tuple[UOp, tuple[str, ...], str, bool], tuple[bytes, list[tuple[int, UOp, bool]], UOp]] = {} # AMDComputeQueue.exec
     if self.prof_enabled:
       self.iface.require_profile_mode()
       self.prof_slots, self.prof_read = getenv("PROF_SLOTS", 32), 0

@@ -1308,7 +1308,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
                             block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
-                                                                        and ksplits == 1 else 64), k_splits=ksplits)
+                                                                        and ksplits == 1 and tt == 128 else 64), k_splits=ksplits)
     srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and \
        not (tokens <= DECODE_MULTI and in_features >= getenv("DECODE_MIN_K", 1024) and not _wmma_rdna4(x.device)):
@@ -2124,8 +2124,10 @@ def _queue_list(name:str) -> list[int]: return [int(v) for v in str(getenv(name,
 def mb_queue(i:int) -> int:
   """the compute queue of micro batch i (MB_QUEUE_OF: a list, else i)"""
   return qs[i] if i < len(qs:=_queue_list("MB_QUEUE_OF")) else i
-def ring_queue_of(lane:int) -> int:
+RING_QUEUE_ON = [False]  # (the collectives on queues of their own only in the micro batches' prefill: a step's on its queue)
+def ring_queue_of(lane:int, any_time:bool=False) -> int:
   """the queue of a lane's collectives (RING_QUEUES: a list a micro batch, else RING_QUEUE (+ the lane, RING_QUEUE_LANES)), 0: the calls' own"""
+  if not (any_time or RING_QUEUE_ON[0]): return 0
   if (qs:=_queue_list("RING_QUEUES")): return qs[lane % len(qs)]
   return ring_queue() + (lane if ring_queue() and getenv("RING_QUEUE_LANES", 1) else 0)
 
@@ -4064,13 +4066,16 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   est = Estimates(4 * n_max * B * H * (DK + DV), n_max * B * rb, n_max * B * rb)
   return UOp.group(*final).end(lane, wave, part, b).sink(arg=KernelInfo(name="qsa_decode", opts_to_apply=(), estimates=est))
 
-def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=8, waves:int=4, kpool:int=0) -> Tensor:
+def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=0, waves:int=0, kpool:int=0) -> Tensor:
   """
   q (B, H, DK) every row's heads (a KV head's group: H on a device) on the keys of its list index (B, n+1) of the cache's rows (.., N, row) from
   bases (B,): a row's first DK dims its key, the next DV its value (half, or kv_q8_pack's). returns (B, H, 1, DV)
   """
   B, H, DK = cast(tuple[int, int, int], q.shape)
   DV = (int(cache.shape[-1]) * 32 // 9 if cache.dtype == dtypes.uint32 else int(cache.shape[-1])) - DK
+  # (many rows (a prefill's): fewer parts a row, a workgroup more of its keys (its queries loaded once))
+  parts = parts or (getenv("QSA_PARTS_ROWS", 8) if B > 64 else 8)
+  waves = waves or getenv("QSA_WAVES", 4)
   axis = q.uop.axis
   partial = Tensor.empty(B, H, parts, DV, dtype=dtypes.float32, device=q.device, axis=axis)
   stats = Tensor.empty(B, H, parts, 2, dtype=dtypes.float32, device=q.device, axis=axis)

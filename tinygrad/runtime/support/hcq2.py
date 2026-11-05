@@ -338,6 +338,17 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
       barriers.add(tag)
       last_barrier[queue] = tag
 
+  # (debugging races: HCQ_ALL_BARRIERS a barrier before every call, HCQ_ALL_WAITS every call waits for the last call of its device's other queues)
+  if getenv("HCQ_ALL_BARRIERS"): barriers = set(range(len(queue_of)))
+  if getenv("HCQ_ALL_WAITS"):
+    # (HCQ_WAIT_CONS / HCQ_WAIT_PROD: only consumers / producers with these in their names)
+    names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
+    cons, prod = [x for x in getenv("HCQ_WAIT_CONS", "").split(",") if x], [x for x in getenv("HCQ_WAIT_PROD", "").split(",") if x]
+    last:dict[tuple[str, str], int] = {}
+    for tag, q in enumerate(queue_of):
+      if not cons or any(x in names[tag] for x in cons):
+        dep_tags[tag] = sorted(set(dep_tags[tag]) | {t for qq, t in last.items() if qq[0] == q[0] and qq != q})
+      if not prod or any(x in names[tag] for x in prod): last[q] = tag
   # keep only latest tags to wait for each queue
   call_waits = [{queue_of[t]: t for t in sorted(deps) if queue_of[t] != queue_of[tag]} for tag, deps in enumerate(dep_tags)]
 
