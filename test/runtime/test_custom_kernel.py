@@ -378,6 +378,16 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
 
+  def test_explicit_stage_scalar_index(self):
+    for direct, want in ((True, [2]), (False, [30])):
+      def kernel(out, direct=direct):
+        r = UOp.range(4, 0, AxisType.LOOP, dtype=dtypes.int32)
+        v = r.bufferize(r, arg=BufferizeOpts(out.device, removable=False)).index(2).load()
+        values = UOp.stack(*[UOp.const(x, dtypes.int32) for x in (10, 20, 30, 40)])
+        return out.index(0).store(v if direct else values.index(v)).sink()
+      with self.subTest(direct=direct):
+        self.assertEqual(Tensor.empty(1, dtype=dtypes.int32).custom_kernel(fxn=kernel)[0].tolist(), want)
+
   def test_split_range_id_free_of_loop(self):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
     def kernel(C:UOp, A:UOp) -> UOp:
@@ -622,6 +632,16 @@ class TestCustomKernel(unittest.TestCase):
   def test_one_lane_stack_runtime_index(self):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
+
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "custom renders in cstyle")
+  def test_custom_uop(self):
+    N = 4
+    def kernel(x:UOp) -> UOp:
+      y = UOp.custom("__builtin_shufflevector({0}, {0}, 3, 2, 1, 0)", UOp.stack([x[i].load() for i in range(N)]), dtype=x.dtype)
+      self.assertEqual(y.shape, (N,))
+      return x.store(y).sink(arg=KernelInfo("kernel"))
+    out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [3, 2, 1, 0])
 
 @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
                      or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
