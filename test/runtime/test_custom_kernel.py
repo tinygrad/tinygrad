@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.helpers import getenv
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
-from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -296,6 +296,20 @@ class TestCustomKernel(unittest.TestCase):
       return C[0].store(A[r2].reduce(r1, arg=Ops.ADD).reduce(r0, r1, r2, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(1), Tensor.ones(4).contiguous(), fxn=kernel)[0].item(), 256)
 
+  def test_reduce_over_singleton_range(self):
+    def kernel(C:UOp, A:UOp) -> UOp:
+      return C[0].store(A[1].reduce(UOp.range(1, 0, AxisType.LOOP), arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).contiguous(), fxn=kernel)[0].item(), 3)
+
+  def test_reduce_as_index(self):
+    def kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+      k = UOp.range(2, 0, AxisType.LOOP)
+      idx = A[k].load().reduce(k, arg=Ops.ADD)
+      return C[0].store(B[idx].load()).sink(arg=KernelInfo(opts_to_apply=()))
+    with Context(CHECK_OOB=0):
+      out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([1, 2]), Tensor([10, 20, 30, 40]), fxn=kernel)[0]
+      self.assertEqual(out.item(), 40)
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_group_reduce_split_range(self):
     # j%2 splits j into two ranges, both are still LOCAL
@@ -363,6 +377,16 @@ class TestCustomKernel(unittest.TestCase):
       return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
+
+  def test_explicit_stage_scalar_index(self):
+    for direct, want in ((True, [2]), (False, [30])):
+      def kernel(out, direct=direct):
+        r = UOp.range(4, 0, AxisType.LOOP, dtype=dtypes.int32)
+        v = r.bufferize(r, arg=BufferizeOpts(out.device, removable=False)).index(2).load()
+        values = UOp.stack(*[UOp.const(x, dtypes.int32) for x in (10, 20, 30, 40)])
+        return out.index(0).store(v if direct else values.index(v)).sink()
+      with self.subTest(direct=direct):
+        self.assertEqual(Tensor.empty(1, dtype=dtypes.int32).custom_kernel(fxn=kernel)[0].tolist(), want)
 
   def test_split_range_id_free_of_loop(self):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
@@ -609,6 +633,17 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "custom renders in cstyle")
+  def test_custom_uop(self):
+    N = 4
+    def kernel(x:UOp) -> UOp:
+      shuffle_fn = UOp.custom_function("__builtin_shufflevector({0}, {0}, 3, 2, 1, 0)", shape=(N,), dtype=x.dtype, fmt=True)
+      y = shuffle_fn.call(UOp.stack([x[i].load() for i in range(N)]))
+      self.assertEqual(y.shape, (N,))
+      return x.store(y).sink(arg=KernelInfo("kernel"))
+    out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [3, 2, 1, 0])
+
 @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
                      or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
                      "calls in kernel not implemented in this renderer")
@@ -741,7 +776,6 @@ class TestCallInKernel(unittest.TestCase):
   @unittest.expectedFailure
   def test_call_loop_split(self): self.test_call_loop_mini((Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),))
 
-  @unittest.expectedFailure
   def test_call_loop_pad(self):
     @uopfunc
     def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
@@ -752,8 +786,8 @@ class TestCallInKernel(unittest.TestCase):
       return call.end(i).sink(arg=KernelInfo(name="call_loop_padto", opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
-    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
-    self.assertEqual(out.tolist(), [1, 2, 3, 0])
+    # the CALL body can't be gated, so padding i is refused
+    with self.assertRaises(KernelOptError): Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0].realize()
 
   def test_uopfunc(self):
     @uopfunc

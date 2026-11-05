@@ -38,16 +38,18 @@ def merge_ranges(u:UOp) -> UOp|None:
     if not any(v in ret.backward_slice for v in sub.values()): return ret
   return None
 
-def mark_gated(ctx, idx, store=None):
-  if len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
+def mark_gated(ctx, u:UOp):
+  # a STORE is the only effect with an index of its own
+  idx = u.src[0] if u.op is Ops.STORE else u
+  if idx.op is Ops.INDEX and len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
     x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
     # get all ranges r with guards "r < c" for some const c
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
   else: x, guards = idx, {}
   # ensure that we choose max(c_i) for all i where r < c_i
   ctx |= {r:c.minimum(r.src[0]) for r,c in guards.items() if (r not in ctx or ctx[r].vmax < c.val)}
-  # but if a range is ever ungated, we cannot shrink it, and a STORE runs every iteration of a range its index doesn't gate
-  ctx |= {r:r.src[0] for r in (x if store is None else store).ranges if r not in guards}
+  # but if a range is ever ungated, we cannot shrink it, and an effect runs every iteration of a range its index doesn't gate
+  ctx |= {r:r.src[0] for r in (x if u.op is Ops.INDEX else u).ranges if r not in guards}
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
@@ -57,8 +59,7 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
 
 pm_simplify_ranges = PatternMatcher([
   (UPat(Ops.SINK, name="u"), merge_ranges),
-  (UPat(Ops.INDEX, name="idx"), mark_gated),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="idx"), UPat()), name="store"), mark_gated),
+  (UPat({Ops.INDEX}|GroupOp.Effect, name="u"), mark_gated),
   # reduce ranges can't be shrunk
   (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
@@ -133,14 +134,14 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
     included = u.toposort(gate=lambda x: r in x.ranges)
-    if any(x.op in {Ops.STORE, Ops.CUSTOM, Ops.REDUCE} for x in included): return None
+    if any(x.op in GroupOp.Effect|{Ops.REDUCE} for x in included): return None
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
         if s in included or s in replaces or s.op in GroupOp.Defines|{Ops.CONST}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
-    sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
+    sink = graph_rewrite(collapse_fxn, pm_flatten_range+pm, name="reduce_collapse")
     if not no_range(sink): return None
     u = sink.substitute({v:k for k,v in replaces.items()})
   return u

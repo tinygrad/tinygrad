@@ -1,10 +1,11 @@
 import unittest
 import pickle
-from tinygrad.helpers import diskcache_get, diskcache_put, diskcache, diskcache_clear
+from tinygrad.helpers import diskcache_get, diskcache_put, diskcache, diskcache_clear, CACHELEVEL
 
 def remote_get(table,q,k): q.put(diskcache_get(table, k))
 def remote_put(table,k,v): diskcache_put(table, k, v)
 
+@unittest.skipIf(CACHELEVEL < 1, "disk cache is off")
 class DiskCache(unittest.TestCase):
   def test_putget(self):
     table = "test_putget"

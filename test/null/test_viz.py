@@ -464,7 +464,8 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg=("{} + undeclared_name", X.dtype))
+      custom_op = UOp.custom_function("{0} + undeclared_name;", shape=X[i].shape, inline=True, dtype=X.dtype, fmt=True).call(X[i])
+      self.assertEqual(custom_op.shape, ())
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
     with save_viz() as viz:
@@ -480,7 +481,7 @@ class TestVizIntegration(unittest.TestCase):
     # Ops.LINEAR renders
     lin_render = ansistrip(get_render(viz.data, steps[lin_idx]["query"])["src"])
     self.assertIn("sink", lin_render)
-    self.assertIn("customi", lin_render)
+    self.assertIn("custom_function", lin_render)
     # Ops.SOURCE renders
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertIn("undeclared_name", src_render)

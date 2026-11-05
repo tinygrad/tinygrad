@@ -3,7 +3,7 @@ import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV, CACHELEVEL
 from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
@@ -174,6 +174,7 @@ class MockCompiler(Compiler):
   def compile(self, src) -> bytes: return src.encode()
 
 class TestCompiler(unittest.TestCase):
+  @unittest.skipIf(CACHELEVEL < 1, "disk cache is off")
   def test_compile_cached(self):
     diskcache_put("key", "123", None) # clear cache
     getenv.cache_clear()
