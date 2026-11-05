@@ -197,6 +197,7 @@ class TestViz(unittest.TestCase):
     u = x[i+1, 2]
     self.assertIn("\n[i+1][2]", uop_to_json(VizData(), u)[id(u)]["label"])
 
+  @Context(SPEC=1)
   def test_dtype_label(self):
     u = UOp(Ops.ADD, src=(UOp.custom_function("fn"), UOp.const(1)))
     node = uop_to_json(VizData(), u)[id(u)]
