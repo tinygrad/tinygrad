@@ -633,17 +633,15 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
-  @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage)), "requires cstyle")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "custom renders in cstyle")
   def test_custom_uop(self):
     N = 4
-    def kernel(C:UOp) -> UOp:
-      x = UOp.alloc((N,), dtypes.int, addrspace=AddrSpace.REG)
-      x = x.after(x.store(1))
-      x = UOp.custom("{} + 2", x.shrink(((0, 1),)).load(), dtype=x.dtype)
-      self.assertEqual(x.shape, (1,))
-      return C.store(x).sink(arg=KernelInfo("kernel"))
-    out = Tensor.custom_kernel(Tensor.empty(N, dtype=dtypes.int), fxn=kernel)[0]
-    self.assertEqual(out.tolist(), [3] * N)
+    def kernel(x:UOp) -> UOp:
+      y = UOp.custom("__builtin_shufflevector({0}, {0}, 3, 2, 1, 0)", UOp.stack([x[i].load() for i in range(N)]), dtype=x.dtype)
+      self.assertEqual(y.shape, (N,))
+      return x.store(y).sink(arg=KernelInfo("kernel"))
+    out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [3, 2, 1, 0])
 
 @unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
                      or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
