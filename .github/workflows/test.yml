@@ -33,6 +33,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
+        key: docs
         deps: "docs testing_minimal"
     - name: Build wheel and show size
       run: |
