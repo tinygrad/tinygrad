@@ -219,6 +219,7 @@ class _UOpTuple(tuple):
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.rand import RandMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -570,7 +571,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # for use after movement ops have been removed
     return UOp.const(b, self.dtype).broadcast(self.max_numel())
   def ufix(self, x):
-    if isinstance(x, UOp): return x
+    # only a python const becomes a UOp, a Tensor passes through so _broadcasted lifts self into a Tensor
+    if isinstance(x, ElementwiseMixin): return x
     return UOp.const(x)
   def broadcast(self, count:int):
     if count == 1: return self
