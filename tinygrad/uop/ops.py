@@ -349,8 +349,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
       case Ops.CUSTOM_FUNCTION:
-        if self.dtype is dtypes.void: return None
-        return self.src[0].as_shape if self.src else ()
+        return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -1201,13 +1200,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, *src:UOp, dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
-    return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=CustomFunction(name, dtype, fmt, inline))
-
-  @staticmethod
-  def custom(fmt:str, *src:UOp, dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    shape = (shape_to_shape_arg(src[0].shape),) if dtype != dtypes.void and src else ()
-    return UOp.call(UOp.custom_function(fmt, *shape, dtype=dtype, fmt=True, inline=inline), *src)
+  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
+    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
+    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt, inline))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
