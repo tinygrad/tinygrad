@@ -1297,7 +1297,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     out_shape = (ksplits*tokens, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (_wmma_rdna4(x.device) or local_rows >= 256 or few_out_long) and \
-       (tt:=next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else (64, 32)) if local_rows % t == 0), 0)) and \
+       (tt:=next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else (getenv("Q8_TT_RDNA3", 128), 64, 32)) if local_rows % t == 0), 0)) and \
        getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and \
@@ -1305,7 +1305,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       ksplits = next(s for s in (16, 8, 4, 2, 1) if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
-                            block_n=128 if _wmma_rdna4(x.device) else 64, k_splits=ksplits)
+                            block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
+                                                                        and ksplits == 1 else 64), k_splits=ksplits)
     srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and \
        not (tokens <= DECODE_MULTI and in_features >= getenv("DECODE_MIN_K", 1024) and not _wmma_rdna4(x.device)):
