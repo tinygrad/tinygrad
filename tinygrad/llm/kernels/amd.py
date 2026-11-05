@@ -3254,7 +3254,9 @@ def moe_route(sel:Tensor, first:Tensor, experts:int, tile:int=MOE_TILE) -> tuple
 
 @functools.cache
 def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by_selection:bool=False, row0:int=0,
-                        add_rows:tuple[int, ...]=()) -> UOp:
+                        add_rows:tuple[int, ...]=(), add_scale:bool=False) -> UOp:
+  # (add_scale: the last src the scale (T,) of the first add's rows (a gated shared expert's))
+  scale_src, add = (add[-1], add[:-1]) if add_scale else (None, add)
   # y[t] = the sum over the slots j of token t of probs[t, j] * down[pos[t, j]] (the sorted rows): a workgroup per token, a thread its columns.
   # the slots of other devices' experts (pos -1) are skipped by the whole workgroup. the tokens from row0 (of the inputs), each add from its row
   T, D = cast(tuple[int, int], y.shape)
@@ -3273,13 +3275,15 @@ def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by
     step = UOp.group(step, *prefetch)
   accs = accs.after(step.end(j))
   def plus(c:int) -> UOp:
-    return functools.reduce(lambda a, b: a + b, [a[t + (add_rows[i] if add_rows else 0), th * per + c].load().float() for i, a in enumerate(add)],
-                            UOp.const(0, dtypes.float))
+    def term(i:int, a:UOp) -> UOp:
+      v = a[t + (add_rows[i] if add_rows else 0), th * per + c].load().float()
+      return v * scale_src.reshape(-1)[t + row0].load().float() if scale_src is not None and i == 0 else v
+    return functools.reduce(lambda a, b: a + b, [term(i, a) for i, a in enumerate(add)], UOp.const(0, dtypes.float))
   return UOp.group(*[y[t, th * per + c].store((accs[c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
     arg=KernelInfo(name="moe_combine", opts_to_apply=()))
 
 def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None, out_dtype=dtypes.float32,
-                by_selection:bool=False) -> Tensor:
+                by_selection:bool=False, add_scale:Tensor|None=None) -> Tensor:
   """
   down (..., R, D) the outputs of the sorted rows, pos (..., tokens*k) the row of every selection (-1: none), probs (tokens*k) their weights:
   (..., tokens, D) the weighted sums of every token's rows (plus add, of that shape), summed in float. a leading device axis (split) is kept
@@ -3287,9 +3291,11 @@ def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Te
   devices = len(down.device) if isinstance(down.device, tuple) and down.uop.axis == 0 else 1
   D = int(down.shape[-1])
   y = Tensor.empty(devices*tokens, D, dtype=out_dtype, device=down.device, axis=0 if devices > 1 else None)
-  extra = (add.reshape(-1, D).contiguous(),) if add is not None else ()
+  extra:tuple[Tensor, ...] = (add.reshape(-1, D).contiguous(),) if add is not None else ()
+  if add is not None and add_scale is not None: extra += (add_scale.float().reshape(-1).contiguous(),)
   y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
-                           fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection))[0]
+                           fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection,
+                                                 add_scale=add is not None and add_scale is not None))[0]
   return y.reshape(devices, tokens, D) if devices > 1 else y
 
 def _lanes(t:Tensor) -> list[UOp]:

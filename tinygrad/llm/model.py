@@ -990,14 +990,17 @@ class FFNBlock:
     # many tokens: grouped by expert (prefill), a few (the drafts of speculative decoding) as decoding
     grouped = (not isinstance(x.shape[1], int) or x.shape[1] > _decode_rows()) and all(e.ggml_type is not None for e in exps)
     shexp:Tensor|None = None
-    if grouped and hasattr(self, 'ffn_gate_shexp') and not hasattr(self, 'ffn_gate_inp_shexp') and self.ffn_gate_exps.expert_parallel and \
-       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1:
-      # the shared expert's partial sums are added by the kernel summing the experts' rows of every token
+    shexp_gate:Tensor|None = None
+    if grouped and hasattr(self, 'ffn_gate_shexp') and self.ffn_gate_exps.expert_parallel and \
+       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1 and (not hasattr(self, 'ffn_gate_inp_shexp') or getenv("SHEXP_FUSED", 1)):
+      # the shared expert's partial sums are added by the kernel summing the experts' rows of every token (its gate: a scale of a row)
       shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
       shexp = self.ffn_down_shexp.partial(shexp_act)
+      if hasattr(self, 'ffn_gate_inp_shexp'): shexp_gate = (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1).sigmoid().float()
     if grouped:
       # the partial sums kept (sequence parallel) are sent in half: stored so if nothing is added after
-      out = self._grouped_experts(x, sel, probs, add=shexp, half=_partial_out[0] and (shexp is not None or not hasattr(self, 'ffn_gate_shexp')))
+      out = self._grouped_experts(x, sel, probs, add=shexp, half=_partial_out[0] and (shexp is not None or not hasattr(self, 'ffn_gate_shexp')),
+                                  add_scale=shexp_gate)
     else:
       if self.ffn_gate_exps.fused:  # one kernel for the gate and up rows, interleaved by 16
         gu = self.ffn_gate_exps(sel, h)
@@ -1029,7 +1032,7 @@ class FFNBlock:
     elif partial and not keep: out = partial_sum(out)
     return out
 
-  def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor, add:Tensor|None=None, half:bool=False) -> Tensor:
+  def _grouped_experts(self, x:Tensor, sel:Tensor, probs:Tensor, add:Tensor|None=None, half:bool=False, add_scale:Tensor|None=None) -> Tensor:
     """prefill: the selections sorted by expert, every expert reads its weights once for all its tokens. (devices, B, T, D) partials if split"""
     B, T, D = x.shape
     # a symbolic token count runs padded to the max size, the garbage tokens are sliced off
@@ -1060,8 +1063,9 @@ class FFNBlock:
     if not self.gated and half and gate_exps.expert_parallel and _sp_rows[0] is not None and isinstance(T, int) and \
        tokens % len(cast(tuple, x.device)) == 0 and \
        tokens == T and getenv("MOE_SCATTER", 1):
-      return moe_combine_scatter(down, pos, probs, tokens, k, add, by_selection=not sorted_down)
-    y = moe_combine(down, pos, probs, tokens, k, add, out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32,
+      if add_scale is None: return moe_combine_scatter(down, pos, probs, tokens, k, add, by_selection=not sorted_down)
+    y = moe_combine(down, pos, probs, tokens, k, add, add_scale=add_scale,
+                    out_dtype=dtypes.half if half and gate_exps.expert_parallel else dtypes.float32,
                     by_selection=not sorted_down)
     y = y.reshape(-1, *sel_shape[:-1], D)[:, :, :x.shape[1] if isinstance(T, int) else T]
     return y if gate_exps.expert_parallel else y[0]
