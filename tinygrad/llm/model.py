@@ -15,7 +15,8 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue, few_out_rows, index_scores, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
+  flag_allreduce, ring_mailbox, ring_queue_of, mb_queue, few_out_rows, index_scores, \
+  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -1167,7 +1168,8 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   """
   # (the order of the batches as a read of the one before's output (a value of it, zero): a call on another queue waits for the calls whose
   # buffers it reads, the state and cache they write are implicit inputs)
-  def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]: return _on_queue(outs, f"COMPUTE:{i}") if i and getenv("MB_QUEUES", 1) else outs
+  def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]:
+    return _on_queue(outs, f"COMPUTE:{q}") if (q:=mb_queue(i)) and getenv("MB_QUEUES", 1) else outs
   lane_calls = getenv("MB_LANE_CALLS", 0)  # (a batch's ordering reads and its n-gram embedding calls on its queue, else the first's)
   def after(i:int, x:Tensor, dep:Tensor|None, rows:bool=True) -> Tensor:
     if dep is None: return x
@@ -1474,7 +1476,8 @@ class QSAIndexer:
     if (scores:=index_scores(q.reshape(Tq, idx.n_heads, idx.head_dim), self._static(pk), pools, idx.head_dim**-0.5)) is None:
       sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
       scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
-    lists = pool_index_rows(scores, start_pos, pools, idx.top_k // idx.kpool, idx.kpool)
+    # (compact (the pools, not their keys): a quarter of the bytes gathered)
+    lists = pool_index_rows(scores, start_pos, pools, idx.top_k // idx.kpool, idx.kpool, compact=bool(getenv("PICKS_COMPACT", 1)))
     return all_gather(lists, 0) if split else lists
 
   def picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
@@ -1570,7 +1573,8 @@ class QSABlock(TransformerBlock):
     cache = Tensor(self.cache_k.uop.after(store))
     if row_picks is not None:
       bases = (Tensor.zeros(Tq, dtype=dtypes.int32, device=x.device) + (Tensor(b).cast(dtypes.int32) if isinstance(b, UOp) else b)).contiguous()
-      attn = qsa_decode_attention(q[0].transpose(0, 1), cache.unsqueeze(2), row_picks, bases, hd**-0.5)  # (Tq, H, 1, hd)
+      attn = qsa_decode_attention(q[0].transpose(0, 1), cache.unsqueeze(2), row_picks, bases, hd**-0.5,
+                                  kpool=self.indexer.idx.kpool if self.indexer is not None and getenv("PICKS_COMPACT", 1) else 0)  # (Tq, H, 1, hd)
       return self._out_gated(attn.permute(2, 1, 0, 3), gate)
     if tile_mask is not None:
       return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool,
@@ -3944,8 +3948,8 @@ class Transformer:
     if self.config.ple is not None: self._ple_dev_init(read)
     # (a lane of the collectives a micro batch, and its compute queue (MB_QUEUES), see micro_batch_blocks)
     for lane in range(getenv("MICRO_BATCHES", 1)):
-      if lane and getenv("MB_QUEUES", 1):
-        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(lane)
+      if mb_queue(lane) and getenv("MB_QUEUES", 1):
+        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(mb_queue(lane))
       for ln in (lane, lane + SEL_LANE):
         FLAG_LANE[0] = ln
         for g in (4, 16, 64): flag_allreduce(devs, g)
@@ -3953,9 +3957,9 @@ class Transformer:
         ring_mailbox(devs)
     FLAG_LANE[0] = 0
     # (the ring collectives' queue of their own, see ring_queue)
-    if ring_queue():
-      for lane in range(getenv("MICRO_BATCHES", 1)):
-        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue() + lane)
+    for lane in range(getenv("MICRO_BATCHES", 1)):
+      if ring_queue_of(lane):
+        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue_of(lane))
     p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
 

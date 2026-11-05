@@ -34,6 +34,8 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
     # (MEM_LANES: the queues of a lane (queue % lanes) run its calls in order: e.g. a micro batch's compute queue and its collectives' queue. a
     # buffer of one lane is reused as the others, its queues wait for each other)
     if (nl:=getenv("MEM_LANES", 0)): q %= nl
+    # (MEM_LANE_OF: the lane of every queue, a list)
+    if (lane_of:=[int(v) for v in str(getenv("MEM_LANE_OF", "")).split(",") if v != ""]) and q < len(lane_of): q = lane_of[q]
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
