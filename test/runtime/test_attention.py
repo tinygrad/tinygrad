@@ -4,7 +4,7 @@ from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
   HyperConnection, HCConfig, AttentionResidual,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv,
 )
 from test.helpers import slow
 
@@ -369,6 +369,17 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     restarted = self._run_attention(block, x[:, :2], 0)
     fresh = self._run_attention(self._make_block(config), x[:, :2], 0)
     np.testing.assert_allclose(restarted, fresh, rtol=1e-3, atol=1e-3)
+
+  def test_short_conv(self):
+    # the window is [state 1, 2 | x 3, 4], tap i of output t reads row t + i*dilation, x becomes the state
+    for weight, dilation, initial, expected in (([[1., 0., 10.]], 1, False, [31, 42]), ([[1., 0., 10.]], 1, True, [30, 40]),
+                                                ([[1., 10.]], 2, False, [31, 42])):
+      with self.subTest(dilation=dilation, initial=initial):
+        state = Tensor([[[1.], [2.]]]).contiguous().realize()
+        out, store = short_conv(state, Tensor([[[3.], [4.]]]), Tensor(weight), Tensor(initial), dilation)
+        np.testing.assert_allclose(out.numpy().flatten(), expected, rtol=1e-6)
+        Tensor(state.uop.after(store)).realize()
+        np.testing.assert_array_equal(state.numpy().flatten(), [3, 4])
 
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):
