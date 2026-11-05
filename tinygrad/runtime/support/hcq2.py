@@ -87,31 +87,33 @@ def announce(slots:dict[str, UOp], num_queues:dict[str, int], dep:UOp) -> list[U
 
 def ins(name:str, *src:UOp|int) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
 
-def copy_submit(s:UOp, keys:dict[int, Any], encode:Callable[[UOp, list[UOp]], list[list[UOp]]]) -> UOp|None:
+def lockstep(streams:list[list[tuple]]) -> list[UOp]: # a step issues the next (issue, complete, range) command of each stream, then completes all
+  # the trip each command starts at, a command without a range is one trip
+  starts = [list(itertools.accumulate((r.src[0].val if r is not None else 1 for _, _, r in st), initial=0)) for st in streams]
+  out:list[UOp] = []
+  # a step runs to the next command boundary of any stream, so the loops of the streams merge
+  for a, b in itertools.pairwise(sorted(set(flatten(starts)))):
+    k = UOp.range(b - a, next(UOp.unique_num), dtype=dtypes.u64) if b - a > 1 else UOp.const(0, dtypes.u64)
+    heads = [(*cmd, a - t) for st, ts in zip(streams, starts) for cmd, t, e in zip(st, ts, ts[1:]) if t <= a < e]
+    ops = flatten(issue for issue, _, _, _ in heads) + flatten(complete for _, complete, _, _ in heads)
+    step = UOp.sink(*ops).substitute({r: k + off for _, _, r, off in heads if r is not None}).src
+    out += [UOp(Ops.LINEAR, src=step).end(k)] if b - a > 1 else list(step)
+  return out
+
+def copy_submit(s:UOp, keys:dict[int, Any], encode:Callable[[UOp, list[UOp]], list[list[tuple]]]) -> UOp|None:
   if not keys: return None
   lin, queue = s.without_after.body, s.without_after.src[1]
-  groups:dict[Any, list[int]] = defaultdict(list)
-  for i, key in keys.items(): groups[key].append(i)
-  copies = {i: cmds for ids in groups.values() for i, cmds in zip(ids, encode(queue, [lin.src[i] for i in ids]))}
-
+  # a stream (a drive, a qp) encodes all its copies of the submit at once, they share its slots
+  ids = {key: [i for i in keys if keys[i] == key] for key in keys.values()}
+  copies = {i: cmds for idx in ids.values() for i, cmds in zip(idx, encode(queue, [lin.src[i] for i in idx]))}
+  # copies next to each other in the linear overlap, anything between them (a barrier, a wait, a stamp) keeps them apart
   out:list[UOp] = []
-  for active, ids in itertools.groupby(range(len(lin.src)), lambda i: i in keys):
-    if not active:
-      out += [lin.src[i] for i in ids]
-      continue
-    streams:dict[Any, list[UOp]] = defaultdict(list)
-    for i in ids: streams[keys[i]].extend(copies[i])
-    pending = [(cmds, 0, 0) for cmds in streams.values()]
-    while pending := [(cmds, pos, off) for cmds, pos, off in pending if pos < len(cmds)]:
-      ranges = [cmds[pos].src[1] if cmds[pos].op is Ops.END else None for cmds, pos, _ in pending]
-      counts = [(r.src[0].val if r is not None else 1) - off for r, (_, _, off) in zip(ranges, pending)]
-      n = min(counts)
-      k = UOp.range(n, next(UOp.unique_num), dtype=dtypes.u64) if n > 1 else UOp.const(0, dtypes.u64)
-      bodies = [cmds[pos].src[0].substitute({r: k + off}) if r is not None else cmds[pos] for (cmds, pos, off), r in zip(pending, ranges)]
-      issue = flatten(dep.src for u in bodies if u.op is Ops.AFTER for dep in u.src[1:])
-      complete = flatten(u.without_after.src for u in bodies)
-      out += [UOp(Ops.LINEAR, src=tuple(issue + complete)).end(k)] if n > 1 else issue + complete
-      pending = [(cmds, pos + 1, 0) if count == n else (cmds, pos, off + n) for (cmds, pos, off), count in zip(pending, counts)]
+  for active, run in itertools.groupby(range(len(lin.src)), lambda i: i in keys):
+    if not active: out += [lin.src[i] for i in run]
+    else:
+      streams:dict[Any, list[tuple]] = {}
+      for i in run: streams.setdefault(keys[i], []).extend(copies[i])
+      out += lockstep(list(streams.values()))
   return s.without_after.replace(src=(lin.replace(src=tuple(out)), queue)).after(*s.src[1:])
 
 # **** patchers
