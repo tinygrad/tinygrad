@@ -197,6 +197,14 @@ class TestViz(unittest.TestCase):
     u = x[i+1, 2]
     self.assertIn("\n[i+1][2]", uop_to_json(VizData(), u)[id(u)]["label"])
 
+  @Context(SPEC=1)
+  def test_dtype_label(self):
+    u = UOp(Ops.ADD, src=(UOp.custom_function("fn"), UOp.const(1)))
+    node = uop_to_json(VizData(), u)[id(u)]
+    self.assertTrue(node["label"].startswith("ADD"))
+    self.assertIn("ISSUE GETTING DTYPE", node["label"])
+    self.assertEqual(node["src"], [(i, id(s)) for i,s in enumerate(u.src)])
+
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
@@ -464,7 +472,8 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg=("{} + undeclared_name", X.dtype))
+      custom_op = UOp.custom_function("{0} + undeclared_name;", shape=X[i].shape, inline=True, dtype=X.dtype, fmt=True).call(X[i])
+      self.assertEqual(custom_op.shape, ())
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
     with save_viz() as viz:
@@ -480,7 +489,7 @@ class TestVizIntegration(unittest.TestCase):
     # Ops.LINEAR renders
     lin_render = ansistrip(get_render(viz.data, steps[lin_idx]["query"])["src"])
     self.assertIn("sink", lin_render)
-    self.assertIn("customi", lin_render)
+    self.assertIn("custom_function", lin_render)
     # Ops.SOURCE renders
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertIn("undeclared_name", src_render)

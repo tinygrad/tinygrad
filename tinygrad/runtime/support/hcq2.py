@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import cast, Any, Sequence
+from typing import cast, Any, Sequence, Callable
 import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
-from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, DEBUG, VIZ, ALL2ALL, PROFILE
+from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop
@@ -86,6 +86,35 @@ def announce(slots:dict[str, UOp], num_queues:dict[str, int], dep:UOp) -> list[U
   return bumped + [buf.after(dep).index(2 * num_queues[dev]).store(timeline_value(dev) + 1) for dev, buf in slots.items()]
 
 def ins(name:str, *src:UOp|int) -> UOp: return UOp.custom_function(name).call(*[UOp.const(s, dtypes.u32) if isinstance(s, int) else s for s in src])
+
+def lockstep(streams:list[list[tuple]]) -> list[UOp]: # a step issues the next (issue, complete, range) command of each stream, then completes all
+  # the trip each command starts at, a command without a range is one trip
+  starts = [list(itertools.accumulate((r.src[0].val if r is not None else 1 for _, _, r in st), initial=0)) for st in streams]
+  out:list[UOp] = []
+  # a step runs to the next command boundary of any stream, so the loops of the streams merge
+  for a, b in itertools.pairwise(sorted(set(flatten(starts)))):
+    k = UOp.range(b - a, next(UOp.unique_num), dtype=dtypes.u64) if b - a > 1 else UOp.const(0, dtypes.u64)
+    heads = [(*cmd, a - t) for st, ts in zip(streams, starts) for cmd, t, e in zip(st, ts, ts[1:]) if t <= a < e]
+    ops = flatten(issue for issue, _, _, _ in heads) + flatten(complete for _, complete, _, _ in heads)
+    step = UOp.sink(*ops).substitute({r: k + off for _, _, r, off in heads if r is not None}).src
+    out += [UOp(Ops.LINEAR, src=step).end(k)] if b - a > 1 else list(step)
+  return out
+
+def copy_submit(s:UOp, keys:dict[int, Any], encode:Callable[[UOp, list[UOp]], list[list[tuple]]]) -> UOp|None:
+  if not keys: return None
+  lin, queue = s.without_after.body, s.without_after.src[1]
+  # a stream (a drive, a qp) encodes all its copies of the submit at once, they share its slots
+  ids = {key: [i for i in keys if keys[i] == key] for key in keys.values()}
+  copies = {i: cmds for idx in ids.values() for i, cmds in zip(idx, encode(queue, [lin.src[i] for i in idx]))}
+  # copies next to each other in the linear overlap, anything between them (a barrier, a wait, a stamp) keeps them apart
+  out:list[UOp] = []
+  for active, run in itertools.groupby(range(len(lin.src)), lambda i: i in keys):
+    if not active: out += [lin.src[i] for i in run]
+    else:
+      streams:dict[Any, list[tuple]] = {}
+      for i in run: streams.setdefault(keys[i], []).extend(copies[i])
+      out += lockstep(list(streams.values()))
+  return s.without_after.replace(src=(lin.replace(src=tuple(out)), queue)).after(*s.src[1:])
 
 # **** patchers
 
@@ -277,11 +306,11 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
-  def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
-    barrier = [ins("exec_barrier")] if tag in barriers else []
+  def ins_for_call(tag:int) -> tuple[list[UOp], list[UOp]]: # the commands before and after a call
+    (_, dev, queue), barrier = ctx.batch[tag], [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    return barrier + _wait_ins(ctx, call_waits[tag]) + [ins("memory_barrier")] * bool(call_waits[tag]) + stamps[:1] + [call] + stamps[1:] + signal
+    return barrier + _wait_ins(ctx, call_waits[tag]) + [ins("memory_barrier")] * bool(call_waits[tag]) + stamps[:1], stamps[1:] + signal
 
   # closers advance device timelines
   close_cmds = {dev: _wait_ins(ctx, close_waits[dev]) + [ins("store", timeline(dev), timeline_value(dev) + 1)] for dev in ctx.queues}
@@ -290,7 +319,8 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   order = dedup(queue_of + list(closers.values()))
   open_cmds = {queue: _start_ins(ctx, *queue) if queue in ctx.calls or not ctx.queues[queue[0]] else [] for queue in order}
 
-  programs = {queue: [cmd for tag in ctx.calls.get(queue, []) for cmd in call_cmds(tag, *ctx.batch[tag])] for queue in order}
+  programs = {queue: [cmd for tag in ctx.calls.get(queue, []) for pre, post in [ins_for_call(tag)] for cmd in pre + [ctx.batch[tag][0]] + post]
+              for queue in order}
   closings = {queue: [cmd for dev in ctx.queues if closers[dev] == queue for cmd in close_cmds[dev]] for queue in order}
   return {queue: open_cmds[queue] + programs[queue] + closings[queue] for queue in order}
 
