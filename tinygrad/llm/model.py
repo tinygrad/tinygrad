@@ -102,7 +102,7 @@ class IndexerConfig:  # select top_k tokens by scoring individual keys or pools 
   rope_dim: int = 0
   rope_interleave: bool = True
   msa: bool = False
-  qsa: bool = False  # qwen4exp: a pool's key is the mean of its keys, normed and roped at the pool's first position, the head scores sum unweighted
+  qsa: bool = False
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -184,7 +184,7 @@ class HyperConnection:
     out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
 
-class GatedResidual(HyperConnection):  # qwen4exp: the sublayer sees a sigmoid gated low-rank mix of the normed streams, added to each by a 2*sigmoid
+class GatedResidual(HyperConnection):
   def __init__(self, config:TransformerConfig, inject:bool=True):
     self.count, self.dim, self.norm_eps, low_rank = (hc:=unwrap(config.hc)).count, config.dim, config.norm_eps, hc.low_rank
     self.norm = {"weight": Tensor.zeros(self.count*self.dim)}
@@ -206,7 +206,7 @@ class FFNBlock:
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm: Callable[[Tensor], Tensor] = nn.RMSNorm(config.dim, config.norm_eps)
-    self.ffn_norm: Callable[[Tensor], Tensor]  = nn.RMSNorm(config.dim, config.norm_eps)
+    self.ffn_norm:  Callable[[Tensor], Tensor] = nn.RMSNorm(config.dim, config.norm_eps)
     if config.hc is not None:
       hc = GatedResidual if config.hc.low_rank else HyperConnection
       self.hc_attn, self.hc_ffn = hc(config), hc(config)
@@ -258,7 +258,7 @@ class FFNBlock:
       probs = probs * self.config.routed_scaling_factor
       gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       x_down = self.ffn_down_exps(sel, gated_activation(gate, up, self.config).contiguous())  # ([ndev,] B, T, k, D)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=-2).contiguous()  # ([ndev,] B, T, D), reduced over k before the device sum
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # ([ndev,] B, T, D)
       if out.ndim == x.ndim + 1: out = out.sum(0)
       if self.config.expert_latent_dim: out = self.ffn_routed_up(self.ffn_routed_norm(out))
       if hasattr(self, 'ffn_gate_shexp'):
@@ -449,8 +449,8 @@ class Indexer:
       rot = unwrap(freqs)[:self.max_context:idx.kpool]
       k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
     scores = iq @ k.transpose(-1, -2).unsqueeze(1)
-    if idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
-    elif idx.msa: scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
+    if idx.msa: scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
+    elif idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
     else: scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
@@ -703,9 +703,8 @@ class Transformer:
     ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
     state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()}, repeats)
 
-    # all state items should be float16, not float32. unquantized weights are cast once here instead of on every call
+    # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
-    Tensor.realize(*[state_dict[k].replace(state_dict[k].contiguous()) for k,(_,_,typ) in entries.items() if typ not in _GGML_QUANT])
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -716,7 +715,7 @@ class Transformer:
     else: hc = None
 
     kpool = kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool')
-    if arch == 'qwen4exp': kpool = max(kv[f'{arch}.attention.compress_ratios'])  # QSA has no kpool, its indexer pools compress_ratio keys
+    if arch == 'qwen4exp': kpool = max(kv[f'{arch}.attention.compress_ratios'])
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
                             kv[f'{arch}.attention.indexer.top_k'], kpool,
                             kv.get(f'{arch}.attention.layer_norm_epsilon') or kv[f'{arch}.attention.layer_norm_rms_epsilon']) if kpool else None
