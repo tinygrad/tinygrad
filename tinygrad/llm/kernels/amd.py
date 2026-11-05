@@ -1262,6 +1262,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type in (Q8_0, Q6_K) and tokens <= getenv("Q8_I8_ROWS", 64) and _wmma_rdna4(x.device) and not q6_gemm
   # (RDNA3: the int8 tensor cores of many rows, I8_DENSE_RDNA3)
   dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
+  # (RDNA3: the hyper-connections' projections of a device's rows (few outputs of a long input, or a short input): the int8 tensor cores
+  # read the weights as they are, the f16 ones dequantize them for every 64 rows)
+  if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and split and local_rows % 64 == 0 and layer.shard_axis is None and \
+     ((local_out <= 512 and in_features >= 4096) or in_features <= 512) and getenv("I8_HC", 0): dense_i8 = True
   # (RDNA3: a few outputs of a long input (a hyper-connection's down projection) of a few rows a device (a small prefill's): the gemm with the
   # input split over workgroups, the tensor cores' tiles of them are a few workgroups that loop over the whole input)
   few_out_long = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and local_rows % 32 == 0 \
@@ -1283,7 +1287,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     # (a few rows: the inputs split over the waves of a workgroup, more of them read the weights)
     kwaves = next((k for k in (getenv("I8_KWAVES", 2), 1) if few_q8 and (in_features // Q8_GROUP_SIZE) % k == 0), 1)
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, kwaves=kwaves, rdna4=_wmma_rdna4(x.device))
-    srcs = (*q8_quantize(x, tokens, in_features)[:3], *extra)
+    srcs = (*q8_quantize(x, tokens, in_features, split=split)[:3], *extra)
   elif tokens >= 64 and tokens % 16 == 0 and xq is not None and layer.ggml_type in GROUP_SCALE_QUANTS and layer.shard_axis is None and \
        _wmma_rdna4(x.device) and (not split or (isinstance(x.device, tuple) and (tokens // len(x.device)) % 16 == 0 and getenv("I8_SPLIT", 1))):
     # many tokens already quantized (a few outputs, e.g. a hyper-connection's): the int8 tensor cores, the inputs split over workgroups
