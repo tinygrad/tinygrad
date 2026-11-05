@@ -1746,7 +1746,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp|None, 
     sink = _get_handler(inst)(inst, ctx)
     base, mask = ctx.canonical_mask(inst_bytes)
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
-    call = lower_body(sink, name) if sink.src else None
+    call = lower_body(sink, name)
     used = UOp.sink(call, ctx.branch_cond).toposort()
     ret = call, ctx.branch_cond, {p:index for index,p in ctx.sgpr_reads.items() if p in used}
     entries.append((base, mask, ret))
