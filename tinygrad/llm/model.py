@@ -63,6 +63,14 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   sel = x.const_like(0).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+def short_conv(state:Tensor, x:Tensor, weight:Tensor, initial:Tensor, dilation:int=1) -> tuple[Tensor, UOp]:
+  # assemble the conv window in a static-size buffer: [state | x rows | zero-pad], state is zeroed when initial
+  T, T_pad = x.shape[1], x.max_shape[1]
+  window = initial.where(0, state).cat(x.cast(state.dtype), dim=1).pad_to((x.shape[0], state.shape[1] + T_pad, x.shape[-1])).contiguous()
+  # the last state.shape[1] rows of the window become the next state
+  store = state.uop.store(window[:, T:T+state.shape[1]].cast(state.dtype).uop)
+  return functools.reduce(lambda a,b: a+b, (window[:, i*dilation:i*dilation+T_pad] * weight[:, i] for i in range(weight.shape[1]))).silu(), store
+
 @dataclass(frozen=True)
 class SSMConfig:
   conv_kernel: int
@@ -391,27 +399,22 @@ class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their no
     if not hasattr(self, "conv_state"): self.conv_state = Tensor.zeros(x.shape[0], self.hist, self.count*self.dim, device=x.device).clone()
 
   def write_rows(self, tokens:list[int], start_pos:int, n_toks:int, chunk_size:int):
-    # hash the n-grams ending at these tokens (t0*m0 ^ t1*m1 for the bigram heads, then ^ t2*m2 for the trigram heads, predecessors before the
-    # start or an EOS are EOS) and copy their packed table rows to host RAM
-    ple, n, heads, ids = self.ple, len(self.ple.multipliers), len(self.ple.vocab_sizes), []
+    # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., EOS before the start or an EOS) and copy their table rows to host RAM
+    ple, n, ids = self.ple, len(self.ple.multipliers), []
+    per_gram = len(ple.vocab_sizes) // (n-1)  # the bigram heads, then the trigram heads
     for p in range(start_pos, start_pos+n_toks):
       ctx = [ple.eos if p < i or ple.eos in tokens[p-i:p] else tokens[p-i] for i in range(n)]
       hashes = list(itertools.accumulate((c*m for c,m in zip(ctx, ple.multipliers)), lambda a,b: a^b))[1:]
-      ids.append([hashes[j*(n-1)//heads] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))])
+      ids.append([hashes[j//per_gram] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))])
     self.table.write(start_pos, ids, self.max_context+chunk_size)
 
   def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     (B, T), T_pad, n = x.shape[:2], x.max_shape[1], len(self.ple.multipliers)
-    # this call's table rows, decoded on device
     emb = self.table.read(start_pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
     s = (self.norm_key(self.key(emb).unflatten(-1, (self.count, self.dim))) * self.norm_query(x)).sum(-1, keepdim=True) * self.dim**-0.5
     gated = self.value(emb).unsqueeze(2) * (s.sign() * s.abs().clamp(min_=1e-6).sqrt()).sigmoid()
-    window = Tensor(start_pos).eq(0).where(0, self.conv_state).cat(self.norm_conv(gated).flatten(2), dim=1)
-    window = window.pad_to((B, self.hist + T_pad, self.count*self.dim)).contiguous()
-    store = self.conv_state.uop.store(window[:, T:T+self.hist].uop)
-    w = self.conv1d["weight"]
-    conv = functools.reduce(lambda a,b: a+b, (w[:, i] * window[:, i*n:i*n+T_pad] for i in range(self.ple.conv_kernel))).silu()[:, :T]
-    return Tensor((gated + conv.unflatten(-1, (self.count, self.dim))).contiguous().uop.after(store))
+    conv, store = short_conv(self.conv_state, self.norm_conv(gated).flatten(2), self.conv1d["weight"], Tensor(start_pos).eq(0), n)
+    return Tensor((gated + conv[:, :T].unflatten(-1, (self.count, self.dim))).contiguous().uop.after(store))
 
 class Indexer:
   def __init__(self, config:TransformerConfig):
@@ -575,18 +578,11 @@ class GatedDeltaNetBlock(FFNBlock):
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
-    def conv(conv_state:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
-      # assemble the conv window in a static-size buffer: [conv_state | proj rows | zero-pad].
-      # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
-      conv_window = initial.where(0, conv_state).cat(proj.cast(conv_state.dtype), dim=1)
-      conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
-      # the last conv_kernel-1 columns of the window become the next conv state
-      store = conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(conv_state.dtype).uop)
-      return functools.reduce(lambda a,b: a+b, (conv_window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
+    # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
     projs = (self.attn_q, self.attn_k, self.attn_v) if is_kda else (self.attn_qkv,)
     convs = (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v) if is_kda else (self.ssm_conv1d,)
     states = self.conv_states if is_kda else [self.conv_state]
-    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"].flatten(1)) for s, proj, w in zip(states, projs, convs)))
+    conv_outs, conv_state_stores = zip(*(short_conv(s, proj(x), w["weight"].flatten(1), initial) for s, proj, w in zip(states, projs, convs)))
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
