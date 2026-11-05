@@ -238,7 +238,7 @@ class CStyleLanguage(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op is Ops.PARAM:
-        r[u] = (u.arg.name.replace(":", "_")+"_" if u.arg.name is not None else "data") + str(u.arg.slot)
+        r[u] = (u.arg.name.replace(":", "_")+"_" if u.arg.name is not None else "data") + str(len(bufs))
         bufs[u] = (r[u], (u, u in writable_params))
         continue
 

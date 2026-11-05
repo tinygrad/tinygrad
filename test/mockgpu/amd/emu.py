@@ -1781,8 +1781,7 @@ def instruction_block(instructions:list[UOp], sgpr_ptrs:UOp, sgpr_slots:dict[UOp
       linear.append(params[u])
     linear.append(call.replace(src=(call.body, *(params[b] for b in call.src[1:]))))
     seen.difference_update(b.index(_c(0)).load() for b in call.src[1:] if b in sgprs)
-  sink = UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
+  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("asm_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # thread jump-only blocks.
@@ -1895,7 +1894,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   sgpr_slots = {b:i for i,b in enumerate(sorted(used_sgprs, key=lambda b:b.arg.slot))}
   sgpr = {b.arg.slot-SGPR_COUNT:UOp.alloc((n_waves,), dtypes.uint32, b.arg.slot, AddrSpace.REG) for b in sgpr_slots}
   sgpr_ptrs = UOp.alloc((len(sgpr),), dtypes.uint64, 8, AddrSpace.REG)
-  init_ptrs = sgpr_ptrs.store(UOp.stack(*(s.getaddr() for s in sgpr.values()))) if sgpr else UOp.group()
+  init_ptrs = UOp.group(*(sgpr_ptrs.index(_c(slot, dtypes.int)).store(sgpr[b.arg.slot-SGPR_COUNT].getaddr()) for b,slot in sgpr_slots.items()))
   sgpr_param = UOp.param(0, dtypes.uint64, len(sgpr), name="sgpr_ptrs")
   vgpr = UOp.alloc((n_waves*256*wave_size,), dtypes.uint32, 1, AddrSpace.REG)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT)*512
@@ -1932,9 +1931,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   tid = wave*wave_size+lane
   init_vgpr = vgpr.after(wg).index((wave*256*wave_size+lane).valid(tid<total_threads)).store(
     (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
+  init = UOp.group(init_vgpr, *(sgpr[i].after(wg).index(wave).store(_c(v)) for i,v in dict(runtime_sgprs).items() if i in sgpr))
   # construct CALL graph
-  initial_sgprs = dict(runtime_sgprs)
-  init = UOp.group(init_vgpr, *(s.after(wg).index(wave).store(_c(initial_sgprs[i])) for i,s in sgpr.items() if i in initial_sgprs))
   initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
