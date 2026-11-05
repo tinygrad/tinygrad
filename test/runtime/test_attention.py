@@ -3,9 +3,10 @@ import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
-  HyperConnection, HCConfig, AttentionResidual,
+  HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
+from tinygrad.llm.gguf import GGUFPackedTable
 from test.helpers import slow
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -91,6 +92,14 @@ class TestAttention(unittest.TestCase):
       actual, _ = res(Tensor([[[[1.], [-3.]]]]), lambda x: (x.square(), None))
       np.testing.assert_allclose(actual.numpy().flatten(), expected, rtol=1e-5)
 
+  def test_gated_residual(self):
+    res = GatedResidual(self._make_config(dim=1, hc=HCConfig(count=2, sinkhorn_iters=0, eps=0.0, low_rank=1)))
+    res.norm.weight, res.down.weight, res.up.weight = Tensor([2., 4.]), Tensor([[np.log(3)/3, np.log(3)/3]]), Tensor([[0.], [4/3]])
+    res.inject.weight = Tensor([[0., 0.], [0., np.log(3)/2]])
+    # norm [2, 4], gate [1/2, 3/4] mixes to 2, squared to 4, inject gates [1, 3/2] add [4, 6]
+    actual, _ = res(Tensor([[[[1.], [1.]]]]), lambda x: (x.square(), None))
+    np.testing.assert_allclose(actual.numpy().flatten(), [5, 7], rtol=1e-4)
+
   def test_indexer(self):
     indexer = Indexer(self._make_config(dim=2, q_lora_rank=2, indexer=IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)))
     indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
@@ -131,6 +140,19 @@ class TestAttention(unittest.TestCase):
     allowed[0, 4:, 2:4] = allowed[1, 4:, 0:2] = 0
     np.testing.assert_array_equal(indexer(x, Tensor.ones(1, 6, 2), 0).numpy(), np.where(allowed, 0., -np.inf)[None])
 
+  def test_indexer_qsa(self):
+    # qwen4exp: a pool's key is its normed mean key, roped at the pool start
+    idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6, rope_dim=2, qsa=True)
+    indexer = Indexer(self._make_config(dim=2, max_context=6, indexer=idx))
+    indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
+    x = Tensor([[[2., 0.], [0., 0.], [-4., -4.], [0., 0.], [-1., 0.], [-1., 0.]]])
+    q = Tensor([[[1., 0.], [1., 0.], [1., 0.], [-1., 1.], [1., 0.], [0., 1.]]])
+    indexer._init_state(x)
+    # a quarter turn per position: the pools face 0, 45, 180 degrees, queries 3, 4, 5 face 45, 0, 180
+    freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.], [1., 0.], [0., 1.]])
+    allowed = [[1, 0, 0, 0, 0, 0], [1, 1, 0, 0, 0, 0], [1, 1, 1, 0, 0, 0], [0, 0, 1, 1, 0, 0], [1, 1, 0, 0, 1, 0], [0, 0, 0, 0, 1, 1]]
+    np.testing.assert_array_equal(indexer(x, q, 0, freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
+
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
     block = MLATransformerBlock(self._make_config(dim=2, kv_lora_rank=2, q_lora_rank=2, max_context=5, indexer=idx))
@@ -142,6 +164,16 @@ class TestAttention(unittest.TestCase):
     # every query prefers the first pool, and incomplete pools contribute only their visible tail
     expected = np.where([[1, 0, 0, 0, 0], [1, 1, 0, 0, 0], [1, 1, 1, 0, 0], [1, 1, 0, 0, 0], [1, 1, 0, 0, 1]], 0., -np.inf)
     np.testing.assert_array_equal(block._indexer_mask(x, 0, None).numpy(), expected[None, None])
+
+  def test_ple_rows(self):
+    # qwen4exp: a bigram and a trigram head, EOS (7) before the start or an EOS
+    ple = PLELayer(self._make_config(hc=HCConfig(2, 0, 0.0), ple=PLEConfig(0, 32, (1, 2, 4), (13, 17), (0, 13), 7, 2)))
+    table = np.random.default_rng(0).integers(0, 256, (30, 18), dtype=np.uint8)
+    # a table view, as loaded on CPU
+    ple.table = GGUFPackedTable((Tensor(table.flatten()).pad((7, 11)).contiguous().realize()[7:-11], (30, 32), 20))
+    for start_pos in (0, 2): ple.write_rows([3, 7, 5, 9], start_pos, 2, 2)
+    # t0 ^ 2*t1 % 13, t0 ^ 2*t1 ^ 4*t2 % 17 + 13
+    np.testing.assert_array_equal(ple.table.rows.numpy()[:4], table[[[0, 13], [1, 25], [11, 19], [3, 27]]])
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
