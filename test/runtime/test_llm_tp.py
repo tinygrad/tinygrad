@@ -40,6 +40,16 @@ class TestGGUFShard(unittest.TestCase):
           self.assertEqual((out[name].device, out[name].uop.axis), (DEVICES, axis))
           np.testing.assert_array_equal(out[name].to(Device.DEFAULT).numpy(), full[name].numpy())
 
+  def test_repeat(self):
+    # two row blocks (KV heads) over four devices: device i holds block i//2, the blocks must divide the rows and the devices
+    if Device.DEFAULT != "CPU" and Device[Device.DEFAULT].count() < 4: self.skipTest("needs 4 devices")
+    devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(4))
+    entry = (Tensor(random_data((8, 512), Q.Q4_K).reshape(-1), device='CPU'), (8, 512), Q.Q4_K)
+    full, out = gguf_shard({'w': entry}, (Device.DEFAULT,))['w'].numpy(), gguf_shard({'w': entry}, devices, {'w': 0}, {'w': 2})['w']
+    self.assertEqual((out.device, out.uop.axis), (devices, 0))
+    np.testing.assert_array_equal(out.to(Device.DEFAULT).numpy(), full.reshape(2, 4, 512).repeat(2, 0).reshape(16, 512))
+    with self.assertRaises(ValueError): gguf_shard({'w': entry}, devices, {'w': 0}, {'w': 3})
+
   def test_split_quantization_block(self):
     # two devices would each get one and a half Q4_K blocks of every row
     data = Tensor(random_data((8, 768), Q.Q4_K).reshape(-1), device='CPU')

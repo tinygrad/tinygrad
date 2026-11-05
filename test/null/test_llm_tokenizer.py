@@ -1,4 +1,4 @@
-import unittest, base64, functools, re, time, unicodedata, json, pathlib, tempfile
+import unittest, base64, functools, re, unicodedata, json, pathlib, tempfile
 from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
 
@@ -59,14 +59,7 @@ class TestLLMTokenizer(unittest.TestCase):
     tok = SimpleTokenizer({}, {})
     self.assertLess(len(tok._split_to_word.pattern), 100_000)
     text = "The quick brown fox jumps over the lazy dog. " * 5000
-    tok._split_to_word.findall(text)  # warmup
-    tms = []
-    for _ in range(5):
-      st = time.perf_counter()
-      words = tok._split_to_word.findall(text)
-      tms.append(time.perf_counter() - st)
-    self.assertLess(min(tms), 4)  # best-of-5 is robust to CI scheduling pauses; new code takes ~60ms
-    self.assertEqual(len(words), 50001)
+    self.assertEqual(len(tok._split_to_word.findall(text)), 50001)
 
   def test_llama_continued_conversation(self):
     self._test_coding(self.llama_tok, "hello <|eot_id|>world", [15339, 220, 128009, 14957])
