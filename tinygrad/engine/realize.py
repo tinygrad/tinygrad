@@ -173,7 +173,8 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
   Device["CPU"].synchronize(ctx.timeout)
-  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
+  call, sink = call.replace(src=(call.body, *call.src[2:])), call.src[1]
+  exec_kernel(ctx, call, prg:=to_program(sink, Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
   pos = [k for k, s in enumerate(call.src[1:]) if not s.is_variable]
   for lane, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = dict(zip(pos, lane[:len(lane)//2])), dict(zip(pos, lane[len(lane)//2:]))
@@ -213,7 +214,7 @@ def _validate(call:UOp, sink:UOp) -> UOp:
   shadows = tuple(p if p.is_bound_var else
                   UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
   copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if not p.is_bound_var)
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *call.src[1:])))
+  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate").call(sink, *shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value

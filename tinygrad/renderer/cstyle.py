@@ -65,7 +65,7 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
-  # call an external function by symbol: the CUSTOM_FUNCTION body names the callee, the srcs are the args and set the types
+  # call an external function by symbol: the CUSTOM_FUNCTION body names the callee, the CALL srcs are the args and set the types
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
    f.arg.name.format(*[ctx[y] for y in x.src[1:]]) if f.arg.fmt else
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
