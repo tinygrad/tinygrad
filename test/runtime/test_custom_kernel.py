@@ -666,6 +666,13 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
+  def test_identity_shrink_keeps_offset_effect(self):
+    def kernel(A:UOp, B:UOp):
+      s = UOp.const(0, dtypes.weakint).after(A[0].store(7))
+      return B[0].store(A.shrink(((s, s+1),))[0].load()).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([7], [7]))
+
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "custom renders in cstyle")
   def test_custom_uop(self):
     N = 4
