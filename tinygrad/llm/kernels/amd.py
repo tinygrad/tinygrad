@@ -2709,12 +2709,14 @@ def _few_out_rows_kernel(out:UOp, x:UOp, w:UOp, *, RW:int, W:int) -> UOp:
 
 @functools.cache
 def _after_kernel(out:UOp, x:UOp, dep:UOp) -> UOp:
+  # (workgroups of 256 threads, 8 values a thread: a range alone is a workgroup a value, ~0.5 ms for a chunk's rows)
   n = int(prod(out.shape))
-  i = UOp.range(n, 0, AxisType.GLOBAL)
+  g, t = UOp.range((n + 2047) // 2048, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
   d = dep.reshape(-1)[0].load().float() * 0
   z = d.ne(d).where(UOp.const(0.0, dtypes.float), d)  # (zero: also from a NaN or inf)
-  return out.reshape(-1)[i].store((x.reshape(-1)[i].load().float() + z).cast(out.dtype)).end(i).sink(
-    arg=KernelInfo(name="after_read", opts_to_apply=()))
+  idx = [g * 2048 + j * 256 + t for j in range(8)]
+  return UOp.group(*[out.reshape(-1)[i.valid(i < n)].store((x.reshape(-1)[i.minimum(n-1)].load().float() + z).cast(out.dtype)) for i in idx]).end(
+    g, t).sink(arg=KernelInfo(name="after_read", opts_to_apply=()))
 
 def _state_token_kernel(out:UOp, *deps:UOp) -> UOp:
   z = functools.reduce(lambda a, d: a + d.reshape(-1)[0].load().float() * 0, deps, UOp.const(0.0, dtypes.float))
