@@ -349,7 +349,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
       case Ops.CUSTOM_FUNCTION:
-        return self.src[0].as_shape
+        return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -1205,7 +1205,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def custom(fmt:str, *src:UOp, dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    return UOp.call(UOp.custom_function(fmt, shape=src[0].shape if src else (), dtype=dtype, fmt=True, inline=inline), *src)
+    shape = src[0].shape if src and src[0].dtype != dtypes.void else ()
+    return UOp.call(UOp.custom_function(fmt, shape=shape, dtype=dtype, fmt=True, inline=inline), *src)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
