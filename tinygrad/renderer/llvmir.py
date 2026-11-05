@@ -113,6 +113,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
   (UPat(Ops.REFPARAM, name="x"), lambda ctx,x: f"  {ctx[x]} = inttoptr i64 {ctx[x.src[1]]} to {ldt(x.dtype, ptr=True)}"),
+  (UPat(Ops.GETADDR, name="x"), lambda ctx,x: f"  {ctx[x]} = ptrtoint {ldt(x.src[0].dtype, ptr=True)} {ctx[x.src[0]]} to i64"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
