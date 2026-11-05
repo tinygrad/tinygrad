@@ -9,8 +9,8 @@ def flatands(x:UOp) -> list[UOp]: return [x] if x.op is not Ops.AND else [y for 
 
 # **** UPat compiled ****
 # This file builds an IR of match predicates and compiles them to Python source.
-# Ops used: CALL(CUSTOM_FUNCTION) (format-string predicate over operands),
-#           STORE (bind a matched UOp to a name), PYLITERAL (Python literal for custom operands),
+# Ops used: CUSTOM (format-string predicate over operands), CUSTOMI (inline string fragment),
+#           STORE (bind a matched UOp to a name), PYLITERAL (Python literal for CUSTOM operands),
 #           AND/OR (clause combininers).
 
 def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
@@ -117,15 +117,15 @@ def wrap(ctx, x) -> UOp:
 pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
-  # AND/OR of custom inline becomes a single custom inline
-  (UPat(Ops.AND, src=UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True), name="x"),
-   lambda x: UOp.custom("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", inline=True) if all(y.body.arg.inline for y in x.src) else None),
-  (UPat(Ops.OR, src=UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True), name="x"),
-   lambda x: UOp.custom("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", inline=True) if all(y.body.arg.inline for y in x.src) else None),
-  (UPat.call(UPat(Ops.CUSTOM_FUNCTION, name="f"), UPat(), allow_any_len=True, name="x"),
-   lambda f,x: UOp.custom(f.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), inline=True) \
-       if not f.arg.inline and all(y.body.arg.inline for y in x.src[1:]) else None),
-  (UPat(Ops.INDEX, src=(UPat.call(UPat(Ops.CUSTOM_FUNCTION), allow_any_len=True, name="x"), UPat(Ops.CONST, name="c"))),
+  # AND/OR of CUSTOMI fragments becomes a single CUSTOMI
+  (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
+   UOp.custom("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", inline=True) if all(y.body.arg.inline for y in x.src) else None),
+  (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
+   UOp.custom("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", inline=True) if all(y.body.arg.inline for y in x.src) else None),
+
+  (UPat(Ops.CALL, name="x"), lambda x: UOp.custom(x.body.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), inline=True)
+   if not x.body.arg.inline and all(y.op is Ops.CALL and y.body.arg.inline for y in x.src[1:]) else None),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CALL, name="x"), UPat(Ops.CONST, name="c"))),
    lambda x,c: UOp.custom(x.body.arg.name + f".src[{c.val}]", inline=True) if x.body.arg.inline else None)
 ], compiled=False)
 
@@ -140,7 +140,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
-      assert s.src[0].body.arg.inline and s.src[1].body.arg.inline
+      assert all(y.op is Ops.CALL and y.body.arg.inline for y in s.src)
       store_pieces.append(f"{s.src[0].body.arg.name}={s.src[1].body.arg.name}")
     elif s.op is Ops.CALL and s.body.arg.inline: and_pieces.append(s.body.arg.name)
     else: raise UPatCompileError(f"can't compile this {s}")
