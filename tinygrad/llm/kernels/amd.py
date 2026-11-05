@@ -5628,6 +5628,67 @@ def _reg_u32() -> UOp:
   ret = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
   return ret.after(ret.store(ret.const_like(0)))
 
+@functools.cache
+def _index_scores_kernel(out:UOp, q:UOp, pk:UOp, *, H:int, scale:float, pools:UOp) -> UOp:
+  # out (R, P) = the sum over the H heads of relu(q[r, h] . pk[p]) * scale for the pools below `pools` (the others not written), q (R*H, D),
+  # pk (P, D) half on the RDNA3 tensor cores: a workgroup 64 (row, head) rows (16 rows) and 128 pools, four waves (2 along each), a K stage
+  # of 64 in LDS. the heads of a row are 4 consecutive rows of a 16 row tile: a lane's two of them and its other half's (lanes ^16)
+  R, P = cast(tuple[int, int], out.shape)
+  D = cast(int, q.shape[-1])
+  assert H == 4 and D % 64 == 0 and (R*H) % 64 == 0 and P % 128 == 0
+  MT, NT, TT, OT = 64, 128, 2, 4
+  mb, nb = UOp.range(R*H // MT, 0, AxisType.GLOBAL), UOp.range(P // NT, 1, AxisType.GLOBAL)
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(4, 3, axis_type=AxisType.LOCAL)
+  col, half, wt, wo, tid = lane % 16, lane // 16, wave // 2, wave % 2, wave * 32 + lane
+  # (the pools of the block: none past `pools`, a loop of one or none)
+  live = UOp.range((nb * NT < pools).where(1, 0), 5, AxisType.LOOP)
+  q, pk = q.reshape(R*H, D), pk.reshape(P, D)
+  accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
+  accs = [[acc.after(acc.after(live).store(acc.const_like(0))) for acc in row] for row in accs]
+  ks = UOp.range(D // 64, 4, AxisType.LOOP)
+  lds_a = UOp.alloc((MT, 64 + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  lds_b = UOp.alloc((NT, 64 + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  st = []
+  for k in range(MT * 8 // 128):  # (8 halves a thread a load)
+    e = tid + k * 128
+    st += [lds_a[e // 8, (e % 8) * 8 + i].store(q[mb * MT + e // 8, ks * 64 + (e % 8) * 8 + i].load()) for i in range(8)]
+  for k in range(NT * 8 // 128):
+    e = tid + k * 128
+    st += [lds_b[e // 8, (e % 8) * 8 + i].store(pk[nb * NT + e // 8, ks * 64 + (e % 8) * 8 + i].load()) for i in range(8)]
+  staged = UOp.group(*st).barrier()
+  lds_a, lds_b = lds_a.after(staged), lds_b.after(staged)
+  cur = [[accs[o][t].after(ks) for t in range(TT)] for o in range(OT)]
+  for kh in range(4):
+    afr = [UOp.stack(*(lds_a[wt * TT * 16 + t * 16 + col, kh * 16 + i].load() for i in range(16))) for t in range(TT)]
+    bfr = [UOp.stack(*(lds_b[wo * OT * 16 + o * 16 + col, kh * 16 + i].load() for i in range(16))) for o in range(OT)]
+    cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
+  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier().end(ks)
+  stores = []
+  for o, t in itertools.product(range(OT), range(TT)):
+    a = accs[o][t].after(update)
+    pool = nb * NT + wo * OT * 16 + o * 16 + col
+    for j in range(4):
+      # (rows 2i+half of the tile: row j's heads half and 2+half in this lane, the other two in lane ^16)
+      sj = a[2*j].load().maximum(0.0) + a[2*j+1].load().maximum(0.0)
+      # (the other half's lane by bpermute: permlanex16's selection isn't lane ^ 16)
+      other = _bpermute(sj.bitcast(dtypes.int32), lane ^ 16).bitcast(dtypes.float32)
+      tot = (sj + other) * scale
+      row = (mb * MT + wt * TT * 16 + t * 16) // H + j
+      stores.append(out[row.valid(half.eq(0)), pool].store(tot))
+  return UOp.group(*stores).end(live).end(mb, nb, lane, wave).sink(arg=KernelInfo(name="index_scores", opts_to_apply=()))
+
+def index_scores(q:Tensor, pk:Tensor, pools:int|UOp, scale:float) -> Tensor|None:
+  """(R, P) float: the sum over the heads of relu(q (R, H, D) . pk (P, D)) * scale for the pools below `pools` (the others not written)"""
+  R, H, D = cast(tuple[int, int, int], q.shape)
+  P = int(pk.shape[0])
+  if H != 4 or D % 64 or P % 128 or (int(q.uop.shard_shape[0]) if isinstance(q.device, tuple) and q.uop.axis == 0 else R) % 16 or \
+     not amd_custom_kernels_supported(q.device) or _wmma_rdna4(q.device) or not getenv("INDEX_SCORES", 1): return None
+  pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
+  out = Tensor.empty(R, P, dtype=dtypes.float32, device=q.device, axis=0 if isinstance(q.device, tuple) and q.uop.axis == 0 else None)
+  qh = q.reshape(R*H, D).half().contiguous()
+  if isinstance(pools, UOp): qh = Tensor(qh.uop.after(pools))
+  return Tensor.custom_kernel(out, qh, pk.half(), fxn=functools.partial(_index_scores_kernel, H=H, scale=scale, pools=pu))[0]
+
 def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int, row0:int=0, out:Tensor|None=None) -> Tensor:
   """
   (rows, top*kpool+kpool+1) int32: for every query row (at q_start+r) the list of the keys it sees (its top pools, its tail), the count last.

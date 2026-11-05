@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue, few_out_rows, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
+  flag_allreduce, ring_mailbox, ring_queue, few_out_rows, index_scores, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -1470,8 +1470,10 @@ class QSAIndexer:
     xx, split = x[0], isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0
     if split: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
     q = self._queries(xx, *qf.chunk(2, dim=-1))
-    sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
-    scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
+    # (the scores of the pools so far only, the heads' relu summed in the kernel: index_scores)
+    if (scores:=index_scores(q.reshape(Tq, idx.n_heads, idx.head_dim), self._static(pk), pools, idx.head_dim**-0.5)) is None:
+      sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
+      scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
     lists = pool_index_rows(scores, start_pos, pools, idx.top_k // idx.kpool, idx.kpool)
     return all_gather(lists, 0) if split else lists
 
