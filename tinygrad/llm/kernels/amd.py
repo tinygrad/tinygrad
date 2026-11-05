@@ -1313,8 +1313,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
        getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and \
-       local_rows <= 512 and local_out <= 512 and in_features >= 4096:
-      ksplits = next(s for s in (16, 8, 4, 2, 1) if in_features % (32*s) == 0)
+       local_rows <= getenv("Q8_KSPLIT_ROWS", 2048) and local_out <= 512 and in_features >= 4096:
+      # (a few outputs of a long input: its parts on workgroups of their own, summed. 768 rows of 320 outputs are 60 tiles: 152 -> 99 us)
+      ksplits = next(s for s in (getenv("Q8_KSPLITS", 16 if local_rows <= 512 else 8), 8, 4, 2, 1) if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
                             block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
