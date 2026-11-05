@@ -2660,6 +2660,39 @@ def _sum_parts_kernel(out:UOp, part:UOp) -> UOp:
   return UOp.group(*[out[(i4 * 4 + j).valid(i4 * 4 < n)].store(v) for j, v in enumerate(vals)]).end(g, t).sink(
     arg=KernelInfo(name="sum_parts", opts_to_apply=()))
 
+@functools.cache
+def _few_out_rows_kernel(out:UOp, x:UOp, w:UOp, *, RW:int, W:int) -> UOp:
+  # out (R, E) = x (R, K) @ w (E, K)^T in float: a wave RW rows, its lanes 8 inputs of every 256 (a chunk), the weights of a chunk loaded once
+  # for the wave's rows, a wave's sums reduced over its lanes
+  R, E = cast(tuple[int, int], out.shape)
+  K = cast(int, x.shape[-1])
+  x, w = x.reshape(R, K), w.reshape(E, K)
+  wg, wave, lane = UOp.range(R // (W*RW), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  rows = [(wg*W + wave)*RW + r for r in range(RW)]
+  acc = [[UOp.const(0.0, dtypes.float)]*E for _ in range(RW)]
+  for c in range(K // 256):
+    k0 = c*256 + lane*8
+    wv = [[w[e, k0 + j].load().float() for j in range(8)] for e in range(E)]
+    for r, row in enumerate(rows):
+      xv = [x[row, k0 + j].load().float() for j in range(8)]
+      acc[r] = [functools.reduce(lambda a, j: a + xv[j]*wv[e][j], range(8), acc[r][e]) for e in range(E)]
+  stores = [out[row, UOp.const(e, dtypes.weakint).valid(lane.eq(0))].store(warp_reduce(acc[r][e], full_wave=True))
+            for r, row in enumerate(rows) for e in range(E)]
+  return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="few_out_rows", opts_to_apply=()))
+
+def few_out_rows(x:Tensor, w:Tensor) -> Tensor|None:
+  """
+  x (..., K) @ w (E, K)^T in float: few outputs (a gated deltanet's alpha and beta, a device its heads') of the many rows of a prefill on every
+  device (the generic kernel is a few workgroups of 32 threads: ~20x slower). None: not those shapes
+  """
+  R, K = int(prod(x.shape[:-1])), int(x.shape[-1])
+  E = int(w.uop.shard_shape[0]) if isinstance(w.device, tuple) and w.uop.axis == 0 else int(w.shape[0])
+  if not amd_custom_kernels_supported(x.device) or K % 256 or E > 16 or R % 32 or R < 256 or not getenv("FEW_OUT_ROWS", 1): return None
+  if isinstance(x.device, tuple) and (x.uop.axis is not None or w.uop.axis not in (0, None)): return None
+  out = Tensor.empty(R, int(w.shape[0]), dtype=dtypes.float32, device=x.device, axis=1 if isinstance(w.device, tuple) and w.uop.axis == 0 else None)
+  out = Tensor.custom_kernel(out, x.reshape(R, K).half().contiguous(), w, fxn=functools.partial(_few_out_rows_kernel, RW=4, W=8))[0]
+  return out.reshape(*x.shape[:-1], int(w.shape[0]))
+
 def skinny_matmul(x:Tensor, wt:Tensor) -> Tensor|None:
   """x (B, T, K) @ wt (K, E) in float, few outputs of few rows (see skinny_parts), the parts summed. None: not those shapes"""
   if (part:=skinny_parts(x, wt)) is None: return None

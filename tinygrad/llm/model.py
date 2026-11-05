@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
+  flag_allreduce, ring_mailbox, ring_queue, few_out_rows, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -2311,8 +2311,13 @@ class GatedDeltaNetBlock(FFNBlock):
       return self.ssm_out(z)
     out_gate = self._gate(x)
     out_gate = out_gate.reshape(B, Tq, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x).sigmoid().reshape(B, Tq, self.num_v_heads)
-    alpha = self._alpha(x) if is_kda else self.ssm_alpha(x)
+    # (a prefill's many rows: few outputs a device, their kernel)
+    def few(layer) -> Tensor:
+      return r if layer.bias is None and layer.ggml_type is None and (r:=few_out_rows(x, layer.weight)) is not None else layer(x)
+    beta = few(self.ssm_beta).sigmoid().reshape(B, Tq, self.num_v_heads)
+    if is_kda and hasattr(self, "ssm_alpha"):
+      alpha = (few(self.ssm_alpha).float() + self.ssm_dt["bias"]).unsqueeze(-1).expand(B, Tq, self.num_v_heads, self.head_k_dim).flatten(-2)
+    else: alpha = self._alpha(x) if is_kda else few(self.ssm_alpha)
     g, a = (alpha.float() + (self._dt_ch if is_kda else self.ssm_dt["bias"])).reshape(B, Tq, self.num_v_heads, -1), \
       self.ssm_a.reshape(self.num_v_heads, -1)
     # the decay: log_alpha = softplus(g) * A, or bounded by gate_lower_bound: sigmoid(g * -A) * lb
