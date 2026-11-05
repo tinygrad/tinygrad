@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, few_out_rows, index_scores, after_kernel, \
+  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -339,6 +339,12 @@ _partial_out = [False]
 _sp_rows:list[Tensor|None] = [None]
 # the tokens of a prefill chunk (its rows past them are padding): the experts don't take the padding rows
 _ffn_rows:list[UOp|int|None] = [None]
+# (MB_DEP=state: the states and caches a micro batch's sublayer writes (the tensors after their writes), the next batch's sublayer waits for
+# a kernel reading a value of each: not for the sublayer's output (its collectives))
+_state_writes:list[list[Tensor]|None] = [None]
+_mb_active = [False]
+def _state_written(*ts:Tensor):
+  if _state_writes[0] is not None: _state_writes[0].extend(ts)
 # (a mixed step's parts: their sublayers' outputs before the projection, projected at once (one allreduce of all the rows))
 _out_defer:list[bool] = [False]
 def _out(layer:Linear, x:Tensor) -> Tensor:
@@ -1120,7 +1126,7 @@ class FFNBlock:
     return _pre(xs)
   def _phase_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     @function(precompile=True, allow_implicit=True)
-    def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Any:
       # (AG_Q8: sent as int8 groups of 32, as the quantized layers would make them)
       x = all_gather_q8(hn, 1) if getenv("AG_Q8", 1) and hn.shape[-1] % 256 == 0 else all_gather(hn, 1, dtypes.half)
       # Route each device's own rows; gather the small selections/probabilities rather than repeat the router projection everywhere.
@@ -1128,13 +1134,22 @@ class FFNBlock:
       # (in half: the layers' kernels read it so, a cast to float and back is two copies)
       xin = x if getenv("SUB_HALF_IN", 1) else x.float()
       if sub != "attn": _ffn_rows[0] = T
+      if state: _state_writes[0] = []
       try: out = self._attention(xin, start_pos, T) if sub == "attn" else self._feed_forward(xin)
       finally: _partial_out[0], _sp_rows[0], _ffn_rows[0] = False, None, None
+      writes, _state_writes[0] = _state_writes[0], None
       # partial sums, or the whole output
       # (summed and split already: moe_combine_scatter)
       done = out.ndim == hn.ndim and token_sharded(out)
-      return (out if done else reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
-    return _sub(hn, start_pos, T)
+      # (MB_DEP=compute: the token after the sublayer's compute (a value of its output before its collective))
+      if state and getenv("MB_DEP", "sub") == "compute": writes = [out.contiguous() if done else out]
+      out = (out if done else reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
+      return (out, state_token(hn, writes or [])) if state else out
+    state = (getenv("MB_DEP", "sub") == "compute" or (getenv("MB_DEP", "sub") == "state" and sub == "attn")) and _mb_active[0]
+    if not state: return _sub(hn, start_pos, T)
+    out, token = _sub(hn, start_pos, T)
+    self._token:Tensor|None = token
+    return out
   def _phase_ple(self, x:Tensor, emb:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     """the n-gram embedding of all the rows x of a micro batch (a function: its conv state's write is the call's, the next batch's after it)"""
     @function(precompile=True, allow_implicit=True)
@@ -1177,6 +1192,8 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   lane_calls = getenv("MB_LANE_CALLS", 0)  # (1: a batch's ordering reads, 2: its n-gram embedding calls on its queue, else the first's)
   def after(i:int, x:Tensor, dep:Tensor|None, rows:bool=True) -> Tensor:
     if dep is None: return x
+    # (MB_DEP_EFFECT: in the schedule's order only, the queues wait for what the kernels' buffers share: the states and caches, not the output)
+    if getenv("MB_DEP_EFFECT", 0) and rows: return Tensor(x.uop.after(*[u for u in dep.uop.toposort() if u.op is Ops.CALL][-1:]))
     if getenv("MB_QUEUES", 1) and (not lane_calls & 1 or (i == 0 and getenv("MB_AFTER0_INLINE", 0))):
       z = (dep[..., :1] if rows else dep.flatten()[:1]).cast(x.dtype) * 0
       while rows and z.ndim < x.ndim: z = z.unsqueeze(-1)
@@ -1223,7 +1240,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   # the batches' sublayers in a skewed order: batch i's sublayer k in step k + i*MB_SKEW (the first batch's next sublayer before the last's
   # this one: with the collectives of the batches on one queue (RING_QUEUE_LANES=0) in that order, a batch's exchanges run while the other
   # computes and none runs ahead of the others: the queue's order keeps them together. a batch only waits for the batch before it)
-  RING_QUEUE_ON[0] = True
+  RING_QUEUE_ON[0] = _mb_active[0] = True
   done:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   deps:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   phases:list[tuple[Tensor, ...]] = [() for _ in xs]
@@ -1243,14 +1260,17 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       # (MB_DEP: what of the batch before a batch's sublayer waits for: its sublayer's output (sub), its streams after it (post), its next
       # sublayer's coefficients (pre))
       dep = deps[i-1][k] if i else done[-1][k-lag] if lag and k >= lag and len(xs) > 1 else None
+      block._token = None
       out = queued(i, block._phase_sub(sub, after(i, hn, dep), starts[i], ts[i]))[0]
       done[i][k] = deps[i][k] = out
+      # (MB_DEP=state: the next batch waits for the states this one wrote (none: a feed forward's), not its output)
+      if getenv("MB_DEP", "sub") in ("state", "compute"): deps[i][k] = queued(i, block._token)[0] if block._token is not None else None
       xs[i] = queued(i, block._phase_post(hc, out, post, comb, xs[i]))[0]
       if getenv("MB_DEP", "sub") == "post": deps[i][k] = xs[i]
       if k + 1 < len(subs):
         phases[i] = pre(i, k+1)
         if getenv("MB_DEP", "sub") == "pre": deps[i][k] = phases[i][0]
-  FLAG_LANE[0], RING_QUEUE_ON[0] = 0, False
+  FLAG_LANE[0], RING_QUEUE_ON[0], _mb_active[0] = 0, False, False
   return xs
 
 class TransformerBlock(FFNBlock):
@@ -1455,6 +1475,7 @@ class QSAIndexer:
     pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].shrink(((first, first + new), None))
     pk_new = self._pooled(cache.reshape(-1, kp, idx.head_dim).shrink(((pb + first, pb + first + new), None, None)), *pf.chunk(2, dim=-1))
     pk = Tensor(self.cache_pk.uop.after(self.cache_pk.shrink(((pb + first, pb + first + new), None)).uop.store(pk_new.half().uop)))
+    _state_written(cache, pk)
     pools = (S + kp - 1) // kp
     return pk.shrink(((pb, pb + pools), None)), pools
 
@@ -1587,6 +1608,7 @@ class QSABlock(TransformerBlock):
     k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
     store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(self._kv_rows(k_store).uop)
     cache = Tensor(self.cache_k.uop.after(store))
+    _state_written(cache)
     if row_picks is not None:
       bases = (Tensor.zeros(Tq, dtype=dtypes.int32, device=x.device) + (Tensor(b).cast(dtypes.int32) if isinstance(b, UOp) else b)).contiguous()
       attn = qsa_decode_attention(q[0].transpose(0, 1), cache.unsqueeze(2), row_picks, bases, hd**-0.5,
@@ -2397,7 +2419,10 @@ class GatedDeltaNetBlock(FFNBlock):
     state = Tensor(self.recurrent_state.uop.after(*conv_state_stores))  # carry the conv write into this graph
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
-      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos), end_pos=start_pos + T, kq=kq).transpose(1, 2)
+      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos), end_pos=start_pos + T, kq=kq)
+      # (the conv states' writes are before it on its queue: its signal is after them)
+      _state_written(core)
+      core = core.transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)

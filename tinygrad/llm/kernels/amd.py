@@ -2716,6 +2716,16 @@ def _after_kernel(out:UOp, x:UOp, dep:UOp) -> UOp:
   return out.reshape(-1)[i].store((x.reshape(-1)[i].load().float() + z).cast(out.dtype)).end(i).sink(
     arg=KernelInfo(name="after_read", opts_to_apply=()))
 
+def _state_token_kernel(out:UOp, *deps:UOp) -> UOp:
+  z = functools.reduce(lambda a, d: a + d.reshape(-1)[0].load().float() * 0, deps, UOp.const(0.0, dtypes.float))
+  return out.reshape(-1)[0].store(z.ne(z).where(UOp.const(0.0, dtypes.float), z)).sink(arg=KernelInfo(name="state_token", opts_to_apply=()))
+
+def state_token(like:Tensor, deps:list[Tensor]) -> Tensor:
+  """a zero on every device of like after reading a value of each of deps (on every device its part): a kernel after their writes"""
+  devs = like.device
+  out = Tensor.empty(len(devs), dtype=dtypes.float32, device=devs, axis=0) if isinstance(devs, tuple) else Tensor.empty(1, dtype=dtypes.float32)
+  return Tensor.custom_kernel(out, *deps, fxn=_state_token_kernel)[0]
+
 def after_kernel(x:Tensor, dep:Tensor) -> Tensor:
   """x, after the call of dep (a kernel that reads a value of it): a micro batch's order on another queue (see micro_batch_blocks)"""
   out = Tensor.empty(*x.shape, dtype=x.dtype, device=x.device, axis=x.uop.axis)
