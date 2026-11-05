@@ -1201,12 +1201,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, shape:tuple[sint, ...]|None=None, dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
-    return UOp(Ops.CUSTOM_FUNCTION, src=(shape_to_shape_arg(shape),) if shape is not None else (), arg=CustomFunction(name, dtype, fmt, inline))
+  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
+    return UOp(Ops.CUSTOM_FUNCTION, src=(shape_to_shape_arg(shape),)+src, arg=CustomFunction(name, dtype, fmt, inline))
 
   @staticmethod
   def custom(fmt:str, *src:UOp, dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    return UOp.call(UOp.custom_function(fmt, src[0].shape if src and dtype != dtypes.void else None, dtype=dtype, fmt=True, inline=inline), *src)
+    shape = (src[0]._shape or ()) if src else ()
+    return UOp.call(UOp.custom_function(fmt, shape=shape, dtype=dtype, fmt=True, inline=inline), *src)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:

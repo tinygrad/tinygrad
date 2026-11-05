@@ -203,8 +203,7 @@ class NVEncDecQueue(NVQueue):
     assert all(unwrap_view(b)[1] % 0x100 == 0 for b in get_call_arg_uops(call)), "all buffers must be 0x100 aligned"
     # decoder offsets are in 256-byte units
     bufout, bufin, desc, *hist = [(b.getaddr(self.devs) >> 8).cast(dtypes.uint32) for b in get_call_arg_uops(call)]
-    h, w = 2 * int(call.src[1].shape[0]) // 3, int(call.src[1].shape[1])
-    frame_pos = call.src[-1].unbound().cast(dtypes.int32)
+    h, w, frame_pos = 2 * ast.src[2].val // 3, ast.src[3].val, ast.src[1].replace(op=Ops.PARAM).cast(dtypes.int32)
     self.dev._ensure_has_vid_hw(w, h)
     coloc, filt, stat = [(UOp.from_buffer(b, dtypes.uint8).getaddr(self.devs) >> 8).cast(dtypes.uint32)
                          for b in (self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.vid_stat_buf)]
