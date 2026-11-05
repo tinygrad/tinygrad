@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue_of, mb_queue, few_out_rows, index_scores, \
+  flag_allreduce, ring_mailbox, ring_queue_of, mb_queue, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -1170,13 +1170,16 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   # buffers it reads, the state and cache they write are implicit inputs)
   def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]:
     return _on_queue(outs, f"COMPUTE:{q}") if (q:=mb_queue(i)) and getenv("MB_QUEUES", 1) else outs
-  lane_calls = getenv("MB_LANE_CALLS", 0)  # (a batch's ordering reads and its n-gram embedding calls on its queue, else the first's)
+  lane_calls = getenv("MB_LANE_CALLS", 0)  # (1: a batch's ordering reads, 2: its n-gram embedding calls on its queue, else the first's)
   def after(i:int, x:Tensor, dep:Tensor|None, rows:bool=True) -> Tensor:
     if dep is None: return x
-    if getenv("MB_QUEUES", 1) and not lane_calls:
+    if getenv("MB_QUEUES", 1) and (not lane_calls & 1 or (i == 0 and getenv("MB_AFTER0_INLINE", 0))):
       z = (dep[..., :1] if rows else dep.flatten()[:1]).cast(x.dtype) * 0
       while rows and z.ndim < x.ndim: z = z.unsqueeze(-1)
       return x + (z != z).where(0, z)
+    if getenv("MB_QUEUES", 1) and getenv("MB_AFTER_KERNEL", 1):
+      # (a kernel of its own on the batch's queue: x and a value of dep (zero, also from a NaN or inf), every device its part)
+      return queued(i, after_kernel(x, dep))[0]
     if getenv("MB_QUEUES", 1):
       # (a call of its own on the batch's queue (precompiled: a function that isn't is inlined, its kernel on the first queue). rows: dep is
       # split on its rows as x, a value of every row read)
@@ -1199,7 +1202,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       # state is the one the batch before it wrote: after it)
       n = int(ple.shape[1]) // len(xs)
       xi = after(i, xs[i], ple_done[-1] if ple_done else None, rows=False)
-      if lane_calls:
+      if lane_calls & 2:
         # (the gather, the embedding and its add: calls on the batch's queue)
         @function(precompile=True, allow_implicit=True)
         def _gather(x:Tensor) -> Tensor: return all_gather(x, 1).contiguous()
@@ -1217,6 +1220,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   # this one: with the collectives of the batches on one queue (RING_QUEUE_LANES=0) in that order, a batch's exchanges run while the other
   # computes and none runs ahead of the others: the queue's order keeps them together. a batch only waits for the batch before it)
   done:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
+  deps:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   phases:list[tuple[Tensor, ...]] = [() for _ in xs]
   skew = getenv("MB_SKEW", -1)
   if skew < 0: skew = len(subs)  # (a batch's sublayers all before the next batch's)
@@ -1228,12 +1232,19 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       if k == 0: phases[i] = pre(i, 0)
       hn, post, comb = phases[i]
       # (the batch before it ran this sublayer: its output's call)
-      # (TODO: the first batch's sublayer k after the last's k-2 keeps the batches together (the collectives of one while the other computes,
-      # 461 vs 523 ms a 4608 chunk with AM_MEC_PIPES=4): its results are wrong, a dependency unseen)
-      out = queued(i, block._phase_sub(sub, after(i, hn, done[i-1][k] if i else None), starts[i], ts[i]))[0]
-      done[i][k] = out
+      # (MB_LAG: the first batch's sublayer k after the last's k-MB_LAG (with MB_SKEW=0): the batches stay together, the collectives of one
+      # run while the other computes, not a first batch ahead and the last alone at the end)
+      lag = getenv("MB_LAG", 0)
+      # (MB_DEP: what of the batch before a batch's sublayer waits for: its sublayer's output (sub), its streams after it (post), its next
+      # sublayer's coefficients (pre))
+      dep = deps[i-1][k] if i else done[-1][k-lag] if lag and k >= lag and len(xs) > 1 else None
+      out = queued(i, block._phase_sub(sub, after(i, hn, dep), starts[i], ts[i]))[0]
+      done[i][k] = deps[i][k] = out
       xs[i] = queued(i, block._phase_post(hc, out, post, comb, xs[i]))[0]
-      if k + 1 < len(subs): phases[i] = pre(i, k+1)
+      if getenv("MB_DEP", "sub") == "post": deps[i][k] = xs[i]
+      if k + 1 < len(subs):
+        phases[i] = pre(i, k+1)
+        if getenv("MB_DEP", "sub") == "pre": deps[i][k] = phases[i][0]
   FLAG_LANE[0] = 0
   return xs
 

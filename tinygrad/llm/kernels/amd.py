@@ -2688,6 +2688,20 @@ def _few_out_rows_kernel(out:UOp, x:UOp, w:UOp, *, RW:int, W:int) -> UOp:
             for r, row in enumerate(rows) for e in range(E)]
   return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="few_out_rows", opts_to_apply=()))
 
+@functools.cache
+def _after_kernel(out:UOp, x:UOp, dep:UOp) -> UOp:
+  n = int(prod(out.shape))
+  i = UOp.range(n, 0, AxisType.GLOBAL)
+  d = dep.reshape(-1)[0].load().float() * 0
+  z = d.ne(d).where(UOp.const(0.0, dtypes.float), d)  # (zero: also from a NaN or inf)
+  return out.reshape(-1)[i].store((x.reshape(-1)[i].load().float() + z).cast(out.dtype)).end(i).sink(
+    arg=KernelInfo(name="after_read", opts_to_apply=()))
+
+def after_kernel(x:Tensor, dep:Tensor) -> Tensor:
+  """x, after the call of dep (a kernel that reads a value of it): a micro batch's order on another queue (see micro_batch_blocks)"""
+  out = Tensor.empty(*x.shape, dtype=x.dtype, device=x.device, axis=x.uop.axis)
+  return Tensor.custom_kernel(out, x.contiguous(), dep, fxn=_after_kernel)[0]
+
 def few_out_rows(x:Tensor, w:Tensor) -> Tensor|None:
   """
   x (..., K) @ w (E, K)^T in float: few outputs (a gated deltanet's alpha and beta, a device its heads') of the many rows of a prefill on every
