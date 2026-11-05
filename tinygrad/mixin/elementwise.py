@@ -23,7 +23,7 @@ class ElementwiseMixin(CreationMixin):
 
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
-    x, y = (self, y) if not reverse else (y, self)
+    x, y = (y.ufix(self), y) if not reverse else (y, y.ufix(self))
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     # keep weak CONST weak, might lift weakint -> weakfloat
     def promote(t):
@@ -433,7 +433,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     x, y = self.ufix(x)._broadcasted(y)
-    return self.alu(Ops.WHERE, x, y)
+    return x.ufix(self).alu(Ops.WHERE, x, y)
 
   def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
     """
