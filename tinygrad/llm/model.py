@@ -63,6 +63,15 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   sel = x.const_like(0).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+def short_conv(state:Tensor, x:Tensor, weight:Tensor, initial:Tensor, dilation:int=1) -> tuple[Tensor, UOp]:
+  assert state.shape[1] == (weight.shape[1]-1)*dilation, f"state has {state.shape[1]} rows, expected {(weight.shape[1]-1)*dilation}"
+  # assemble the conv window in a static-size buffer: [state | x rows | zero-pad], state is zeroed when initial
+  T, T_pad = x.shape[1], x.max_shape[1]
+  window = initial.where(0, state).cat(x.cast(state.dtype), dim=1).pad_to((x.shape[0], state.shape[1] + T_pad, x.shape[-1])).contiguous()
+  # the last state.shape[1] rows before the padding become the next state
+  store = state.uop.store(window[:, T:T+state.shape[1]].uop)
+  return functools.reduce(lambda a,b: a+b, (window[:, i*dilation:i*dilation+T_pad] * weight[:, i] for i in range(weight.shape[1]))).silu(), store
+
 @dataclass(frozen=True)
 class SSMConfig:
   conv_kernel: int
@@ -495,18 +504,11 @@ class GatedDeltaNetBlock(FFNBlock):
     log_alpha = g.softplus() * a if (lb:=unwrap(self.config.ssm).gate_lower_bound) is None else (g * -a).sigmoid() * lb
 
     # qkv conv, conv_state is reset when starting from position 0
-    def conv(conv_state:Tensor, proj:Tensor, weight:Tensor) -> tuple[Tensor, UOp]:
-      # assemble the conv window in a static-size buffer: [conv_state | proj rows | zero-pad].
-      # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
-      conv_window = initial.where(0, conv_state).cat(proj.cast(conv_state.dtype), dim=1)
-      conv_window = conv_window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1])).contiguous()
-      # the last conv_kernel-1 columns of the window become the next conv state
-      store = conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(conv_state.dtype).uop)
-      return functools.reduce(lambda a,b: a+b, (conv_window[:, i:i+T_pad] * weight[:, i] for i in range(self.ssm_conv_kernel))).silu(), store
     projs = (self.attn_q, self.attn_k, self.attn_v) if is_kda else (self.attn_qkv,)
     convs = (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v) if is_kda else (self.ssm_conv1d,)
     states = self.conv_states if is_kda else [self.conv_state]
-    conv_outs, conv_state_stores = zip(*(conv(s, proj(x), w["weight"].flatten(1)) for s, proj, w in zip(states, projs, convs)))
+    conv_outs, conv_state_stores = zip(*(short_conv(s, proj(x), w["weight"].flatten(1), initial) for s, proj, w in zip(states, projs, convs)))
+    # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
