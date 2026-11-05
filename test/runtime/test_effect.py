@@ -24,6 +24,11 @@ class TestEffectRetention(unittest.TestCase):
       out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int).contiguous().realize(), fxn=functools.partial(kernel, loop=loop))[0]
       self.assertEqual(out.tolist(), [7, 9])
 
+  def test_store_before_empty_loop(self):
+    r = UOp.range(0, 0, AxisType.LOOP)
+    self.assertEqual(Tensor.ones(1).contiguous().custom_kernel(Tensor.empty(1),
+      fxn=lambda p,q: q.after(p[0].store(8.), r)[0].store(64.).end(r).sink(arg=KernelInfo(opts_to_apply=())))[0].tolist(), [8.])
+
   def test_deleted_store_keeps_deps(self):
     for f in (lambda a, s: s[1].store(s[1].load()), lambda a, s: s[UOp.invalid()].store(5),
               lambda a, s: s[1].store(UOp.invalid()), lambda a, s: a[UOp.invalid()].store(s[1].load())):
