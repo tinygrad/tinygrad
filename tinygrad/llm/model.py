@@ -4317,7 +4317,7 @@ class Transformer:
       exp_hidden, exp_count = kv.get(f'{arch}.expert_feed_forward_length', 0), kv.get(f'{arch}.expert_count', 0)
       down_block = max([_GGML_QUANT.get(t, (1,))[0] for k,(_,_,t) in entries.items() if k.endswith('ffn_down_exps.weight')], default=1)
       # tinyr9: five 128-wide slices per Qwen expert reduce routing and down-projection intermediates.
-      if arch == 'qwen4exp' and shard == 6:
+      if arch == 'qwen4exp' and shard in (4, 6):
         down_block = math.lcm(down_block, 128)
         assert exp_hidden % down_block == 0
       exp_names = ('ffn_gate_exps.weight', 'ffn_up_exps.weight', 'ffn_down_exps.weight')
