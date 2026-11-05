@@ -306,11 +306,11 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
-  def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
-    barrier = [ins("exec_barrier")] if tag in barriers else []
+  def ins_for_call(tag:int) -> tuple[list[UOp], list[UOp]]: # the commands before and after a call
+    (_, dev, queue), barrier = ctx.batch[tag], [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    return barrier + _wait_ins(ctx, call_waits[tag]) + [ins("memory_barrier")] * bool(call_waits[tag]) + stamps[:1] + [call] + stamps[1:] + signal
+    return barrier + _wait_ins(ctx, call_waits[tag]) + [ins("memory_barrier")] * bool(call_waits[tag]) + stamps[:1], stamps[1:] + signal
 
   # closers advance device timelines
   close_cmds = {dev: _wait_ins(ctx, close_waits[dev]) + [ins("store", timeline(dev), timeline_value(dev) + 1)] for dev in ctx.queues}
@@ -319,7 +319,8 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   order = dedup(queue_of + list(closers.values()))
   open_cmds = {queue: _start_ins(ctx, *queue) if queue in ctx.calls or not ctx.queues[queue[0]] else [] for queue in order}
 
-  programs = {queue: [cmd for tag in ctx.calls.get(queue, []) for cmd in call_cmds(tag, *ctx.batch[tag])] for queue in order}
+  programs = {queue: [cmd for tag in ctx.calls.get(queue, []) for pre, post in [ins_for_call(tag)] for cmd in pre + [ctx.batch[tag][0]] + post]
+              for queue in order}
   closings = {queue: [cmd for dev in ctx.queues if closers[dev] == queue for cmd in close_cmds[dev]] for queue in order}
   return {queue: open_cmds[queue] + programs[queue] + closings[queue] for queue in order}
 
