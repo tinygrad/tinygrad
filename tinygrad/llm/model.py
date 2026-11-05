@@ -606,7 +606,8 @@ class Transformer:
     if shard > 1:
       if not kv.get(f'{arch}.attention.kv_lora_rank') and n_kv_heads < shard and shard % n_kv_heads == 0:
         # too few KV heads to split: repeat each one so every device holds one
-        repeats, n_kv_heads = {k: shard // n_kv_heads for k in entries if k.split('.')[-2] in ('attn_k', 'attn_v')}, shard
+        repeats = {k: shard // n_kv_heads for k in entries if k.split('.', 2)[-1] in ('attn_k.weight', 'attn_v.weight', 'attn_k.bias', 'attn_v.bias')}
+        n_kv_heads = shard
       heads = n_heads if kv.get(f'{arch}.attention.kv_lora_rank') else n_kv_heads
       assert heads % shard == 0, f"tensor parallel needs the attention heads to split over {shard} devices"
       # shard MLA heads and routed experts while replicating latent projections, KV cache and shared experts
