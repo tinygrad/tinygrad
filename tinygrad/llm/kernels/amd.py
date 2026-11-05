@@ -174,6 +174,16 @@ class Linear(nn.Linear):
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
 
+def _amd_sudot4u(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of a's 4 signed bytes with b's 4 unsigned ones
+  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, false, {}, {}, false)", dtypes.int32))
+
+_H2 = "_Float16 __attribute__((ext_vector_type(2)))"
+def _amd_pkrtz(a:UOp, b:UOp) -> UOp:  # two floats to a half2 (its bits)
+  return UOp(Ops.CUSTOMI, src=(a, b), arg=("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({}, {}))", dtypes.uint32))
+def _amd_fdot2_less1152(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of the half2s a - 1152 and b (in float)
+  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({_H2}, {{0}}) - ({_H2})((_Float16)1152.0f), "
+                                             f"__builtin_bit_cast({_H2}, {{1}}), {{2}}, false)", dtypes.float))
+
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
 
@@ -3989,10 +3999,27 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   tid, T = wave * WARP_SIZE + lane, W * WARP_SIZE
   # the queries in LDS
   n = H * DK
-  ql = UOp.alloc((n,), dtypes.float, addrspace=AddrSpace.LOCAL)
   qf = q.reshape(B * n)
-  ld = [ql[(tid + i*T).valid(tid + i*T < n)].store(qf[b*n + (tid + i*T).minimum(n-1)].load().float()) for i in range((n + T - 1) // T)]
-  ql = ql.after(UOp.group(*ld).barrier())
+  # QSA_DOT (an int8 cache): the queries int8 a (head, group of 32 dims) with its scale and sum (the integer dots of sudot4)
+  dot = q8 and DK % 32 == 0 and H * (DK // 32) <= W * WARP_SIZE and bool(getenv("QSA_DOT", 1))
+  if dot:
+    G = DK // 32
+    qw = UOp.alloc((H*G*8,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+    qsc, qsm = UOp.alloc((H*G,), dtypes.float, addrspace=AddrSpace.LOCAL), UOp.alloc((H*G,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+    t_, mine = tid.minimum(H*G - 1), tid < H*G
+    qv = [qf[b*n + (t_ // G)*DK + (t_ % G)*32 + j].load().float() for j in range(32)]
+    mx = functools.reduce(UOp.maximum, [x.maximum(-x) for x in qv])
+    inv = (mx > 0).where(127.0 / mx.maximum(1e-30), UOp.const(0.0, dtypes.float))
+    qi = [_sys("__builtin_rintf({0})", dtypes.float, x * inv).cast(dtypes.int32) for x in qv]
+    words = [functools.reduce(lambda a, k: a | ((qi[4*w + k] & 255) << (8*k)), range(4), UOp.const(0, dtypes.int32)) for w in range(8)]
+    st = [qw[(t_*8 + w).valid(mine)].store(words[w]) for w in range(8)]
+    st += [qsc[t_.valid(mine)].store(mx / 127.0), qsm[t_.valid(mine)].store(functools.reduce(lambda a, x: a + x, qi))]
+    barrier_q = UOp.group(*st).barrier()
+    qw, qsc, qsm = qw.after(barrier_q), qsc.after(barrier_q), qsm.after(barrier_q)
+  else:
+    ql = UOp.alloc((n,), dtypes.float, addrspace=AddrSpace.LOCAL)
+    ld = [ql[(tid + i*T).valid(tid + i*T < n)].store(qf[b*n + (tid + i*T).minimum(n-1)].load().float()) for i in range((n + T - 1) // T)]
+    ql = ql.after(UOp.group(*ld).barrier())
   if kpool:
     kp = cast(int, index.shape[1]) - 2
     npk, qpos = index[b, kp].load().cast(dtypes.weakint), index[b, kp + 1].load().cast(dtypes.weakint)
@@ -4015,13 +4042,27 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
     if not q8: return list(_vec_load(cache[r, d0], m))
     words, sc = _amd_load(cache[r, d0 // 4], m // 4), cache[r, W4 + d0 // 32].load().bitcast(dtypes.float)
     return [((words[j//4] >> (8*(j%4))) & 0xFF).cast(dtypes.float) * sc - sc * 128 for j in range(m)]
-  # the scores of the lane's key: 8 dims a step
-  acc = _reg((H,), 0, rnd)
-  dch = UOp.range(DK // 8, 4, AxisType.LOOP)
-  kv, prev = vals(row, dch * 8, 8), acc.after(dch)
-  new = [functools.reduce(lambda a, j: a + ql[h*DK + dch*8 + j].load() * kv[j], range(8), prev[h].load()) for h in range(H)]
-  acc = acc.after(acc.store(UOp.stack(*new)).end(dch))
-  sc_ = [valid.where(acc[h].load() * scale, UOp.const(-1e30, dtypes.float)) for h in range(H)]
+  if dot:
+    # the scores of the lane's key: its bytes (the values + 128) dotted with the int8 queries 4 a step, less 128 the queries' sum, times scales
+    # (a loop over the groups: unrolled, the queries' loads would be hoisted out of the keys' loop, 256 registers)
+    sacc = _reg((H,), 0, rnd)
+    g = UOp.range(G, 4, AxisType.LOOP)
+    kw, ks, prev_s = _amd_load(cache[row, g * 8], 8), cache[row, W4 + g].load().bitcast(dtypes.float), sacc.after(g)
+    new_s = []
+    for h in range(H):
+      acc_i = functools.reduce(lambda a, w: _amd_sudot4u(qw[(h*G + g)*8 + w].load(), kw[w].bitcast(dtypes.int32), a), range(8),
+                               UOp.const(0, dtypes.int32))
+      new_s.append(prev_s[h].load() + (acc_i - qsm[h*G + g].load() * 128).cast(dtypes.float) * (qsc[h*G + g].load() * ks))
+    sacc = sacc.after(sacc.store(UOp.stack(*new_s)).end(g))
+    sc_ = [valid.where(sacc[h].load() * scale, UOp.const(-1e30, dtypes.float)) for h in range(H)]
+  else:
+    # the scores of the lane's key: 8 dims a step
+    acc = _reg((H,), 0, rnd)
+    dch = UOp.range(DK // 8, 4, AxisType.LOOP)
+    kv, prev = vals(row, dch * 8, 8), acc.after(dch)
+    new = [functools.reduce(lambda a, j: a + ql[h*DK + dch*8 + j].load() * kv[j], range(8), prev[h].load()) for h in range(H)]
+    acc = acc.after(acc.store(UOp.stack(*new)).end(dch))
+    sc_ = [valid.where(acc[h].load() * scale, UOp.const(-1e30, dtypes.float)) for h in range(H)]
   # the online softmax of the wave's keys
   m_reg, l_reg, o_reg = _reg((H,), -1e30), _reg((H,), 0), _reg((H, DPL), 0)
   pm, plr, po = m_reg.after(rnd), l_reg.after(rnd), o_reg.after(rnd)
@@ -4036,11 +4077,34 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   barrier = UOp.group(*st).barrier()
   pl, rl = pl.after(barrier), rl.after(barrier)
   o = [[alpha[h] * po[h, d].load() for d in range(DPL)] for h in range(H)]
-  for j in range(WARP_SIZE):
-    v = vals(rl[wave, j].load().cast(dtypes.weakint), DK + lane * DPL, DPL)
-    for h in range(H):
-      p = pl[wave, h, j].load()
-      o[h] = [o[h][d] + p * v[d] for d in range(DPL)]
+  if dot:
+    # two keys at once: a dim's two bytes the half2 (1024+u1, 1024+u2) (a perm), less 1152 their values, dotted with the two keys' weights
+    # times their scales (of the lane's group of 32 dims) by v_dot2_f32_f16
+    # (a loop over the pairs, QSA_PV_UNROLL of them a step: unrolled, their loads all at once spill)
+    vg, U = W4 + DK // 32 + lane * DPL // 32, getenv("QSA_PV_UNROLL", 2)
+    oacc = _reg((H, DPL), 0, rnd)
+    oacc = oacc.after(oacc.store(UOp.stack(*[x for oh in o for x in oh]).reshape(H, DPL)))
+    jr = UOp.range(WARP_SIZE // (2*U), 5, AxisType.LOOP)
+    prev_o = oacc.after(jr)
+    o = [[prev_o[h, d].load() for d in range(DPL)] for h in range(H)]
+    for u in range(U):
+      jj = jr * U + u
+      r1, r2 = (rl[wave, 2*jj + k].load().cast(dtypes.weakint) for k in (0, 1))
+      w1, w2 = (_amd_load(cache[r, (DK + lane * DPL) // 4], DPL // 4) for r in (r1, r2))
+      s1, s2 = (cache[r, vg].load().bitcast(dtypes.float) for r in (r1, r2))
+      pp = [_amd_pkrtz(pl[wave, h, 2*jj].load() * s1, pl[wave, h, 2*jj + 1].load() * s2) for h in range(H)]
+      for d in range(DPL):
+        sel = (d % 4) | 0x0c00 | ((4 + d % 4) << 16) | 0x0c000000
+        pair = _amd_byte_perm(w2[d // 4], w1[d // 4], UOp.const(sel, dtypes.uint32)) | 0x64006400
+        for h in range(H): o[h][d] = _amd_fdot2_less1152(pair, pp[h], o[h][d])
+    oacc = oacc.after(oacc.store(UOp.stack(*[x for oh in o for x in oh]).reshape(H, DPL)).end(jr))
+    o = [[oacc[h, d].load() for d in range(DPL)] for h in range(H)]
+  else:
+    for j in range(WARP_SIZE):
+      v = vals(rl[wave, j].load().cast(dtypes.weakint), DK + lane * DPL, DPL)
+      for h in range(H):
+        p = pl[wave, h, j].load()
+        o[h] = [o[h][d] + p * v[d] for d in range(DPL)]
   update = UOp.group(m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new)),
                      o_reg.store(UOp.stack(*[x for oh in o for x in oh]).reshape(H, DPL))).end(rnd)
   m_reg, l_reg, o_reg = m_reg.after(update), l_reg.after(update), o_reg.after(update)
@@ -4073,9 +4137,9 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   """
   B, H, DK = cast(tuple[int, int, int], q.shape)
   DV = (int(cache.shape[-1]) * 32 // 9 if cache.dtype == dtypes.uint32 else int(cache.shape[-1])) - DK
-  # (many rows (a prefill's): fewer parts a row, a workgroup more of its keys (its queries loaded once))
-  parts = parts or (getenv("QSA_PARTS_ROWS", 8) if B > 64 else 8)
-  waves = waves or getenv("QSA_WAVES", 4)
+  # (many rows (a prefill's): a workgroup of a wave a row, all its keys (enough workgroups, its queries loaded once, no combining))
+  parts = parts or (getenv("QSA_PARTS_ROWS", 1) if B > 64 else 8)
+  waves = waves or (getenv("QSA_WAVES_ROWS", 1) if B > 64 else 4)
   axis = q.uop.axis
   partial = Tensor.empty(B, H, parts, DV, dtype=dtypes.float32, device=q.device, axis=axis)
   stats = Tensor.empty(B, H, parts, 2, dtype=dtypes.float32, device=q.device, axis=axis)
