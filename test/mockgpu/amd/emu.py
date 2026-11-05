@@ -1933,7 +1933,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
       values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
                     else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
-      instructions.append(lower_body(route[0].store(target).sink(), "asm_branch"))
+      instructions.append(lower_body(route[0].store(target).sink(), "emu_branch"))
     if not instructions: return end
     body, bufs = instruction_block(instructions)
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
