@@ -206,7 +206,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-    if ctx is not None and (c.op is Ops.STORE or buf not in ctx.written): ctx.views.add(view)
+    if ctx is not None and (c.op not in {Ops.COPY, Ops.STAGE} or buf not in ctx.written): ctx.views.add(view)
     view = view.reshape(c.shape)
   else: return None
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
