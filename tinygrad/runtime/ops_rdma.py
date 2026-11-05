@@ -96,7 +96,7 @@ def queue_of(call:UOp) -> tuple[tuple[str, str], bool]:
   gpu, peer = to_tuple((dst if wire is src else src).device)[0], wire.base.arg.name
   return (min(gpu, peer), max(gpu, peer)), wire is src
 
-def rdma_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # the ops of each copy of a submit on one queue
+def rdma_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # the commands of each copy of a submit on one queue
   devs = (queue.device,)
   (pair, is_recv), nic = queue_of(calls[0]), cast(RDMADevice, Device[unwrap(rdma_wire(calls[0])).device])
   qp = rdma_qp(pair)[nic.device]
@@ -119,7 +119,7 @@ def rdma_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # the ops of eac
 
   copies, wqe, packet = [], 0, 0
   for buf in bufs:
-    commands:list[UOp] = []
+    commands:list[tuple] = []
     for off in range(0, buf.nbytes(), RDMA_CHUNK): # a wqe per chunk, each completed
       n, p = seq_start + wqe, psn_start + packet
       size = min(RDMA_CHUNK, buf.nbytes() - off)
@@ -138,11 +138,11 @@ def rdma_copies(queue:UOp, calls:list[UOp]) -> list[list[UOp]]: # the ops of eac
       # waits for the cqe, acks the cq
       complete = [ins("wait_eq", cq_addr + (n % CQ_ENTRIES) * 32 + 24, (n // CQ_ENTRIES & 1 ^ 1 | (2 if is_recv else 0)).cast(dtypes.uint16)),
                   ins("write", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
-      commands.append(UOp(Ops.LINEAR, src=tuple(complete)).after(UOp(Ops.LINEAR, src=tuple(issue))))
+      commands.append((issue, complete, None))
       wqe, packet = wqe + 1, packet + ceildiv(size, MTU)
 
     # and invalidate the gpu caches on recv
-    copies.append(commands + ([UOp(Ops.LINEAR, src=(ins("memory_barrier"),))] if is_recv else []))
+    copies.append(commands + ([([], [ins("memory_barrier")], None)] if is_recv else []))
   return copies
 
 # *****************
