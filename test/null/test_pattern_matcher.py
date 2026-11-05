@@ -179,6 +179,14 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c3), c3.sink())
     self.assertEqual(matcher.rewrite(c4), None)
 
+  def test_src_repeat_first_mismatch(self):
+    matcher = PatternMatcher([(UPat(Ops.STACK, name="s", src=UPat.var("x").index(UPat(Ops.CONST))), lambda s, x: True)])
+    c1 = UOp.param(slot=0, dtype=dtypes.float, shape=10)
+    c2 = UOp(Ops.STACK, src=tuple(c1.index(UOp.const(i)) for i in range(c1.max_numel())))
+    c3 = UOp(Ops.STACK, src=(UOp.invalid(), *(c1.index(UOp.const(i)) for i in range(1, c1.max_numel()))))
+    self.assertTrue(matcher.rewrite(c2))
+    self.assertIsNone(matcher.rewrite(c3))
+
   def test_allow_len(self):
     matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])
     c1 = UOp.const(1.0)
