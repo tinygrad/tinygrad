@@ -41,7 +41,7 @@ class TestEffectRetention(unittest.TestCase):
     r = UOp.range(4, 0, AxisType.LOOP)
     def kernel(C:UOp, D:UOp) -> UOp:
       inc = UOp.custom("{0}[0] += 1;", C.index(r))
-      return UOp.group(C.after(inc), D[r].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+      return UOp.group(inc, D[r].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, d)
     self.assertEqual((c.tolist(), d.tolist()), ([1]*4, [1]*4))
@@ -191,11 +191,11 @@ class TestEffectFrequency(unittest.TestCase):
   def test_padto_refuses_ungatable(self):
     # a CUSTOM and a STORE to a whole buffer can't be no-ops, so padding r is refused
     r = UOp.range(3, 0, AxisType.LOOP)
-    effects = {"custom": lambda C: C.after(UOp.custom("{0}[0] += {1}+1;", C.index(0), r.cast(dtypes.int)).end(r)),
+    effects = {"custom": lambda C: UOp.custom("{0}[0] += {1}+1;", C.index(0), r.cast(dtypes.int)).end(r),
                "whole_store": lambda C: C.store((r.cast(dtypes.int)+1).reshape((1,))).end(r)}
     for name, effect in effects.items():
       with self.subTest(name):
-        def kernel(C:UOp, effect=effect) -> UOp: return effect(C).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
+        def kernel(C:UOp, effect=effect) -> UOp: return effect(C).end(r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
         with self.assertRaises(KernelOptError): Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].realize()
 
 if __name__ == '__main__':
