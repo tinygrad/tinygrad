@@ -173,7 +173,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
   Device["CPU"].synchronize(ctx.timeout)
-  exec_kernel(ctx, call, prg:=to_program(ast.src[1], Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
+  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
   pos = [k for k, s in enumerate(call.src[1:]) if not s.is_variable]
   for lane, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = dict(zip(pos, lane[:len(lane)//2])), dict(zip(pos, lane[len(lane)//2:]))

@@ -1201,11 +1201,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
-    return UOp(Ops.CUSTOM_FUNCTION, src=(shape_to_shape_arg(shape),)+src, arg=CustomFunction(name, dtype, fmt, inline))
+    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
+    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt, inline))
 
   @staticmethod
   def custom(fmt:str, *src:UOp, dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    shape = src[0].shape if src and src[0].dtype != dtypes.void else ()
+    shape = src[0].shape if src and dtype != dtypes.void else ()
     return UOp.call(UOp.custom_function(fmt, shape=shape, dtype=dtype, fmt=True, inline=inline), *src)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
