@@ -55,7 +55,6 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
-from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import Context, DEV, to_mv, ContextVar
 from tinygrad.runtime.autogen import hsa
@@ -1896,7 +1895,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   sgpr_slots = {b:i for i,b in enumerate(sorted(used_sgprs, key=lambda b:b.arg.slot))}
   sgpr = {b.arg.slot-SGPR_COUNT:UOp.alloc((n_waves,), dtypes.uint32, b.arg.slot, AddrSpace.REG) for b in sgpr_slots}
   sgpr_ptrs = UOp.alloc((len(sgpr),), dtypes.uint64, 8, AddrSpace.REG)
-  init_ptrs = UOp.group(*(sgpr_ptrs.index(slot).store(sgpr[b.arg.slot-SGPR_COUNT].getaddr()) for b,slot in sgpr_slots.items()))
+  init_ptrs = sgpr_ptrs.store(UOp.stack(*(s.getaddr() for s in sgpr.values()))) if sgpr else UOp.group()
   sgpr_param = UOp.param(0, dtypes.uint64, len(sgpr), name="sgpr_ptrs")
   vgpr = UOp.alloc((n_waves*256*wave_size,), dtypes.uint32, 1, AddrSpace.REG)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT)*512
@@ -1934,7 +1933,9 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   init_vgpr = vgpr.after(wg).index((wave*256*wave_size+lane).valid(tid<total_threads)).store(
     (((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
   # construct CALL graph
-  initialized = (routes.after(init_vgpr).index(wave).store(0) if routed else UOp.group(init_vgpr, wave)).end(wave)
+  initial_sgprs = dict(runtime_sgprs)
+  init = UOp.group(init_vgpr, *(s.after(wg).index(wave).store(_c(initial_sgprs[i])) for i,s in sgpr.items() if i in initial_sgprs))
+  initialized = (routes.after(init).index(wave).store(0) if routed else UOp.group(init, wave)).end(wave)
   def emit_block(block_pc:int, end:UOp, scopes:tuple[UOp, ...]) -> UOp:
     cond = UOp.const(True)
     instructions = []
@@ -1964,8 +1965,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
                                                             1, AxisType.LOOP, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).index(w*_c(s, dtypes.int))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
-    block = UOp.group(body.call(*call_args, w, name="asm_block"), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("asm_waves", optimized=True))
-    return UOp(Ops.PROGRAM, src=(block, UOp(Ops.LINEAR, src=tuple(linearize(block))))).call(*args, name="asm_waves")
+    block = UOp.group(body.call(*call_args, w, name="asm_block"), *gates, w).end(*gates).end(w).sink()
+    return block.call(*args, name="asm_waves")
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:
@@ -1979,10 +1980,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         end = emit_block(pc, end, scopes)
     return end
 
-  end = emit_dispatch(regions, (wg,), initialized)
-  initial_sgprs = dict(runtime_sgprs)
-  init = UOp.group(init_vgpr, *(s.after(wg).index(wave).store(_c(initial_sgprs[i])) for i,s in sgpr.items() if i in initial_sgprs))
-  return end.substitute({init_vgpr:init}, walk=True).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
+  return emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
 
 dispatch_cache:dict[tuple, UOp] = {}
 

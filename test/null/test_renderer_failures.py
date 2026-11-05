@@ -39,7 +39,7 @@ class TestWGSLFailures(unittest.TestCase):
     word = b.index(UOp.const(0).cast(dtypes.int)).cast(dtypes.uint32)
     store = word.store(word.load() & UOp.const(0xffffff00).cast(dtypes.uint32))
     src = WGSLRenderer(Target("WEBGPU")).render(list(UOp.sink(store, arg=KernelInfo()).toposort()))
-    self.assertIn("atomicAnd(&data0_4[0],4294967040u);", src)
+    self.assertIn("atomicAnd(&data0[0],4294967040u);", src)
     self.assertNotIn("atomicAdd", src)
 
 if __name__ == '__main__':
