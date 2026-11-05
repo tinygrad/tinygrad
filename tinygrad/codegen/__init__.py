@@ -184,6 +184,8 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   # horizontal: int, how many leading axes of inp are reduced in place, the rest of the reduce is over the ranges in src[1:]
   inp, (op, horizontal) = r.src[0], r.arg
   vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(horizontal)])] if horizontal else [inp]
+  # an empty horizontal axis empties the whole reduce
+  if not vals: return r.const_like(identity_element(op, r.dtype))
   ret = functools.reduce(lambda x,y: x.alu(op, y), vals)
   if len(r.src) == 1: return ret
   acc = UOp.alloc_like(r, next(ctx), AddrSpace.REG)

@@ -65,6 +65,10 @@ class TestTensorVariable(unittest.TestCase):
     if CHECK_OOB: self.assertRaises(RuntimeError, t.sum().item)
     else: t.sum().item()  # silent OOB: reads 2 elements past the buffer, result depends on the allocator
 
+  def test_shrink_maybe_negative_size(self):
+    m = Variable("m", 1, 8)
+    with self.assertRaises(ValueError): Tensor.ones(8)[:m.bind(5)].shrink(((3, m.bind(5)),))
+
   def test_symbolic_contiguous_flip(self):
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int32).realize()
     for n in (1, 2, 4):

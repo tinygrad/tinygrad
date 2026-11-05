@@ -262,6 +262,10 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
     self.assertEqual(b.item(), 15)
 
+  def test_sum_empty(self):
+    a, b = Tensor([5]).realize(), Tensor([1,2]).realize()
+    assert Tensor.custom_kernel(a, b, fxn=lambda o,a: o.index(0).store(a.shrink(((2,2),)).sum()).sink(arg=KernelInfo()))[0].item() == 0
+
   def test_sum_outside(self):
     a = Tensor([1.0, 2, 3, 4, 5])+1
     tst = Tensor.empty(1)
