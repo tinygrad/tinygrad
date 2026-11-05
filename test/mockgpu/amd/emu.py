@@ -1954,7 +1954,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # waves that exited keep their route while the remaining waves repeat the loop.
-        check = loop_active(routes.after(end, *scopes, loop), active, _c(pc, dtypes.int), _c(n_waves, dtypes.int))
+        check = emu_loop_active(routes.after(end, *scopes, loop), active, _c(pc, dtypes.int), _c(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # complete the block for every participating wave before entering its successors, including barrier successors.
