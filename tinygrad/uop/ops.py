@@ -246,6 +246,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
     return self.src[0].val
   @property
+  def is_const(self) -> bool: return self.op is Ops.CONST or (self.op is Ops.CAST and self.src[0].op is Ops.CONST)
+  @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
   def key(self) -> bytes:
@@ -1007,21 +1009,23 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def const_factor(self) -> int:
     """largest known int that divides self"""
-    # TODO: for negatives it's not the largest
-    if self.op is Ops.CONST: return self.val
+    if self.is_const: return abs(self.val) if type(self.val) is int and self.val != 0 else 1
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-    if self.op is Ops.MUL: return self.src[0].val if self.src[0].op is Ops.CONST else self.src[1].val if self.src[1].op is Ops.CONST else 1
+    if self.op is Ops.MUL: return self.src[0].const_factor() * self.src[1].const_factor()
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
-    if self.op is Ops.CONST: return self.const_like(self.val//v) if self.val%v == 0 else None
+    if self.is_const: return self.const_like(self.val//v) if type(self.val) is int and self.val%v == 0 else None
     if self.op is Ops.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
     if self.op is Ops.MUL:
-      if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
-      if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
+      if (d0:=self.src[0].divides(v)) is not None: return self.src[1] if d0.is_const and d0.val == 1 else d0 * self.src[1]
+      if (d1:=self.src[1].divides(v)) is not None: return self.src[0] if d1.is_const and d1.val == 1 else self.src[0] * d1
+      if (g:=math.gcd(self.src[1].const_factor(), v)) > 1:
+        if (d1:=self.src[1].divides(g)) is not None and (d0:=self.src[0].divides(v//g)) is not None:
+          return d0 if d1.is_const and d1.val == 1 else d1 if d0.is_const and d0.val == 1 else d0 * d1
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
-    return (self.src[0], self.src[1].val) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
+    return (self.src[0], self.src[1].val) if self.op is op and self.src[1].is_const else (self, identity_element(op, self.dtype))
   @staticmethod
   def gcd(*uops: UOp) -> UOp:
     # Strip explicit coefficients so symbolic factors stay recognizable by divide_exact.
@@ -1031,7 +1035,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return math.prod(count.elements(), start=uops[0].const_like(math.gcd(*factors)))
   def divide_exact(self, v:UOp) -> UOp|None:
     if self is v: return self.const_like(1)
-    if v.op is Ops.CONST: return self.divides(v.val)
+    if v.is_const: return self.divides(v.val)
     if self.op is Ops.ADD: return None if (s0:=self.src[0].divide_exact(v)) is None or (s1:=self.src[1].divide_exact(v)) is None else s0+s1
     if self.op is Ops.MUL:
       (fac, const), (div_fac, div_const) = self.pop_const(Ops.MUL), v.pop_const(Ops.MUL)
